@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Tachyon DOM keyed</title>
+    <link href="/css/currentStyle.css" rel="stylesheet" />
+    <script type="module" src="./src/main.ts"></script>
+  </head>
+  <body>
+    <div id="main">
+      <div class="container">
+        <div class="jumbotron">
+          <div class="row">
+            <div class="col-md-6">
+              <h1 id="title"></h1>
+            </div>
+            <div class="col-md-6">
+              <div class="row">
+                <div class="col-sm-6 smallpad">
+                  <button type="button" class="btn btn-primary btn-block" id="run"></button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button type="button" class="btn btn-primary btn-block" id="runlots"></button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button type="button" class="btn btn-primary btn-block" id="add"></button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button type="button" class="btn btn-primary btn-block" id="update"></button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button type="button" class="btn btn-primary btn-block" id="clear"></button>
+                </div>
+                <div class="col-sm-6 smallpad">
+                  <button type="button" class="btn btn-primary btn-block" id="swaprows"></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <table class="table table-hover table-striped test-data">
+          <tbody id="tbody"></tbody>
+        </table>
+        <template id="row-template">
+          <tr>
+            <td class="col-md-1"></td>
+            <td class="col-md-4"><a> </a></td>
+            <td class="col-md-1">
+              <a><span class="glyphicon glyphicon-remove" aria-hidden="true"></span></a>
+            </td>
+            <td class="col-md-6"></td>
+          </tr>
+        </template>
+        <span class="preloadicon glyphicon glyphicon-remove" aria-hidden="true"></span>
+      </div>
+    </div>
+  </body>
+</html>
