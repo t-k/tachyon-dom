@@ -3,4 +3,4 @@ dist/
 coverage/
 .vite/
 docs.local/
-
+benchmark/local-compare/results/

@@ -14,6 +14,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json",
+    "bench:local": "tsx benchmark/local-compare/run-local-compare.ts",
     "test": "vitest run",
     "lint": "oxlint .",
     "format": "oxfmt --write ."
@@ -26,7 +27,10 @@
     "jsdom": "^26.1.0",
     "oxfmt": "^0.55.0",
     "oxlint": "^1.70.0",
+    "playwright": "^1.61.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.8.3",
+    "vite": "^8.0.16",
     "vitest": "^4.1.9"
   }
 }

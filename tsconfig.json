@@ -9,5 +9,5 @@
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true
   },
-  "include": ["src", "benchmark/js-framework-benchmark/src", "tests"]
+  "include": ["src", "benchmark/js-framework-benchmark/src", "benchmark/local-compare", "tests"]
 }
