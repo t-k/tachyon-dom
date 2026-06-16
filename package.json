@@ -26,6 +26,10 @@
     "./runtime/event": {
       "types": "./dist/runtime/event.d.ts",
       "import": "./dist/runtime/event.js"
+    },
+    "./runtime/list": {
+      "types": "./dist/runtime/list.d.ts",
+      "import": "./dist/runtime/list.js"
     }
   },
   "scripts": {

@@ -44,7 +44,17 @@ export type EventBinding = {
   handler: string;
 };
 
-export type ClientBinding = TextBinding | ClassBinding | EventBinding;
+export type ListBinding = {
+  kind: "list";
+  path: number[];
+  each: string;
+  itemName: string;
+  key: string;
+  templateHtml: string;
+  bindings: ClientBinding[];
+};
+
+export type ClientBinding = TextBinding | ClassBinding | EventBinding | ListBinding;
 
 export type CompiledTemplate = {
   source: string;
@@ -133,6 +143,18 @@ const readExpressionAttribute = (value: string | true): string | undefined => {
     return undefined;
   }
   return trimmed.slice(1, -1).trim();
+};
+
+const attrExpression = (node: ElementNode, name: string): string | undefined => {
+  const attr = node.attrs.find((candidate) => candidate.name === name);
+  return attr ? readExpressionAttribute(attr.value) : undefined;
+};
+
+const isForNode = (node: TemplateNode): node is ElementNode => node.type === "element" && node.tagName === "for";
+
+const itemNameFromKey = (key: string): string => {
+  const [itemName] = key.split(".");
+  return itemName && identifierPattern.test(itemName) ? itemName : "item";
 };
 
 const parseAttributes = (parser: Parser): Result<Attribute[], CompilerError> => {
@@ -280,9 +302,12 @@ const lowerTextNode = (node: TextNode, path: number[], bindings: ClientBinding[]
 };
 
 const lowerElement = (node: ElementNode, path: number[], bindings: ClientBinding[]): string => {
+  if (node.tagName === "for") {
+    return "";
+  }
+
   const attrs: string[] = [];
   const staticClassNames: string[] = [];
-  const dynamicClassAttrs: Attribute[] = [];
 
   for (const attr of node.attrs) {
     if (attr.name.startsWith("on:")) {
@@ -293,7 +318,6 @@ const lowerElement = (node: ElementNode, path: number[], bindings: ClientBinding
       continue;
     }
     if (attr.name.startsWith("class:")) {
-      dynamicClassAttrs.push(attr);
       const expression = readExpressionAttribute(attr.value);
       if (expression) {
         bindings.push({ kind: "class", path: [...path], className: attr.name.slice(6), expression });
@@ -315,8 +339,40 @@ const lowerElement = (node: ElementNode, path: number[], bindings: ClientBinding
     attrs.unshift(` class="${staticClassNames.join(" ")}"`);
   }
 
-  const children = node.children.map((child, index) => lowerNode(child, [...path, index], bindings)).join("");
+  let children = "";
+  let domIndex = 0;
+  for (const child of node.children) {
+    if (isForNode(child)) {
+      bindings.push(lowerList(child, path));
+      continue;
+    }
+    children += lowerNode(child, [...path, domIndex], bindings);
+    domIndex++;
+  }
   return `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
+};
+
+const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
+  const key = attrExpression(node, "key") ?? "item";
+  const childBindings: ClientBinding[] = [];
+  const renderableChildren = node.children.filter((child) => child.type !== "text" || child.value.length > 0);
+  const templateHtml = renderableChildren
+    .map((child, index) => lowerNode(child, renderableChildren.length === 1 ? [] : [index], childBindings))
+    .join("");
+  for (const child of node.children.filter(isForNode)) {
+    if (isForNode(child)) {
+      childBindings.push(lowerList(child, []));
+    }
+  }
+  return {
+    kind: "list",
+    path: [...containerPath],
+    each: attrExpression(node, "each") ?? "[]",
+    itemName: itemNameFromKey(key),
+    key,
+    templateHtml,
+    bindings: childBindings,
+  };
 };
 
 const lowerNode = (node: TemplateNode, path: number[], bindings: ClientBinding[]): string => {
@@ -357,6 +413,10 @@ const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
 };
 
 const renderElement = (node: ElementNode, scope: Record<string, unknown>): string => {
+  if (node.tagName === "for") {
+    return renderFor(node, scope);
+  }
+
   const attrs: string[] = [];
   const classes: string[] = [];
   for (const attr of node.attrs) {
@@ -391,6 +451,22 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
   return `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
 };
 
+const renderFor = (node: ElementNode, scope: Record<string, unknown>): string => {
+  const each = attrExpression(node, "each");
+  const key = attrExpression(node, "key") ?? "item";
+  const itemName = itemNameFromKey(key);
+  const items = each ? readPath(scope, each) : undefined;
+  if (!Array.isArray(items)) {
+    return "";
+  }
+  return items
+    .map((item) => {
+      const childScope = { ...scope, [itemName]: item };
+      return node.children.map((child) => renderNode(child, childScope)).join("");
+    })
+    .join("");
+};
+
 const renderNode = (node: TemplateNode, scope: Record<string, unknown>): string => {
   if (node.type === "text") {
     return renderText(node, scope);
@@ -413,6 +489,7 @@ export const generateClientModule = (template: CompiledTemplate): string => {
   const needsText = bindings.some((binding) => binding.kind === "text");
   const needsClass = bindings.some((binding) => binding.kind === "class");
   const needsEvent = bindings.some((binding) => binding.kind === "event");
+  const needsList = bindings.some((binding) => binding.kind === "list");
   const lines: string[] = [];
   if (needsText) {
     lines.push(`import { setText, textAt } from "@local/tachyon-dom/runtime/text";`);
@@ -422,6 +499,9 @@ export const generateClientModule = (template: CompiledTemplate): string => {
   }
   if (needsEvent) {
     lines.push(`import { delegate } from "@local/tachyon-dom/runtime/event";`);
+  }
+  if (needsList) {
+    lines.push(`import { mountKeyedList } from "@local/tachyon-dom/runtime/list";`);
   }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const bind = (root, scope) => {`);
@@ -434,9 +514,21 @@ export const generateClientModule = (template: CompiledTemplate): string => {
       lines.push(
         `  setClassPresence(root, ${JSON.stringify(binding.className)}, ${expressionToScopeAccess(binding.expression)});`,
       );
-    } else {
+    } else if (binding.kind === "event") {
       lines.push(
         `  delegate(root, ${JSON.stringify(binding.eventName)}, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.handler)});`,
+      );
+    } else {
+      const listOptions = [
+        `{`,
+        `    key: ${JSON.stringify(binding.key)},`,
+        `    itemName: ${JSON.stringify(binding.itemName)},`,
+        `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
+        `    bindings: ${JSON.stringify(binding.bindings)},`,
+        `  }`,
+      ].join("\n");
+      lines.push(
+        `  mountKeyedList(root, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.each)}, ${listOptions});`,
       );
     }
   }
@@ -466,6 +558,10 @@ const renderTextExpression = (node: TextNode): string => {
 };
 
 const renderElementExpression = (node: ElementNode): string => {
+  if (node.tagName === "for") {
+    return renderForExpression(node);
+  }
+
   const parts: string[] = [jsString(`<${node.tagName}`)];
   const staticClasses: string[] = [];
   const dynamicClasses: string[] = [];
@@ -512,6 +608,14 @@ const renderNodeExpression = (node: TemplateNode): string => {
     return renderTextExpression(node);
   }
   return renderElementExpression(node);
+};
+
+const renderForExpression = (node: ElementNode): string => {
+  const each = attrExpression(node, "each") ?? "[]";
+  const key = attrExpression(node, "key") ?? "item";
+  const itemName = itemNameFromKey(key);
+  const childExpression = node.children.map(renderNodeExpression).join(" + ");
+  return `(Array.isArray(${expressionToScopeAccess(each)}) ? ${expressionToScopeAccess(each)}.map((${itemName}) => ${childExpression || `""`}).join("") : "")`;
 };
 
 export const generateServerModule = (template: CompiledTemplate): string => {

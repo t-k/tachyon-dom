@@ -24,6 +24,7 @@ The framework direction is HTML-first syntax with Solid-style fine-grained react
 - extract `{expr}` text bindings
 - extract `class:name={expr}` class bindings
 - extract `on:event={handler}` event bindings
+- extract `<for each={items} key={item.id}>` keyed list boundaries
 - render an escaped server string for the same template
 - generate client code that imports only the runtime helper modules it needs
 

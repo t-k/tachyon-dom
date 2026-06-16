@@ -78,4 +78,61 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`" class=`);
     expect(code).not.toContain(`@local/tachyon-dom/runtime`);
   });
+
+  it("extracts keyed list boundaries for client code", () => {
+    const result = compileTemplate(
+      `<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td><td>{row.label}</td></tr></for></tbody>`,
+    );
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.templateHtml).toBe("<tbody></tbody>");
+    expect(result.value.client.bindings).toEqual([
+      {
+        kind: "list",
+        path: [],
+        each: "rows",
+        itemName: "row",
+        key: "row.id",
+        templateHtml: "<tr><td> </td><td> </td></tr>",
+        bindings: [
+          { kind: "text", path: [0, 0], expression: "row.id" },
+          { kind: "text", path: [1, 0], expression: "row.label" },
+        ],
+      },
+    ]);
+  });
+
+  it("renders keyed lists on the server", () => {
+    const result = compileTemplate(
+      `<tbody><for each={rows} key={row.id}><tr class:danger={row.selected}><td>{row.id}</td><td>{row.label}</td></tr></for></tbody>`,
+    );
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    expect(
+      renderServerTemplate(result.value, {
+        rows: [
+          { id: 1, label: "One", selected: false },
+          { id: 2, label: "<Two>", selected: true },
+        ],
+      }),
+    ).toBe(`<tbody><tr><td>1</td><td>One</td></tr><tr class="danger"><td>2</td><td>&lt;Two&gt;</td></tr></tbody>`);
+  });
+
+  it("keeps list runtime imports modular", () => {
+    const result = compileTemplate(`<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td></tr></for></tbody>`);
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateClientModule(result.value);
+
+    expect(code).toContain(`from "@local/tachyon-dom/runtime/list"`);
+    expect(code).toContain(`mountKeyedList(root, [], scope.rows`);
+    expect(code).toContain(`key: "row.id"`);
+    expect(code).toContain(`itemName: "row"`);
+  });
 });
