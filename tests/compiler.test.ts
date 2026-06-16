@@ -237,6 +237,31 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`yield "<!--tachyon-hydrate:" + escapeMarker(scope.islandId) + ":end-->";`);
   });
 
+  it("renders outlet and named slots on server targets", () => {
+    const result = compileTemplate(`<main><header><slot name="header"></slot></header><outlet></outlet></main>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.templateHtml).toBe(
+      `<main><header><!--tachyon-slot:header--></header><!--tachyon-outlet--></main>`,
+    );
+    expect(
+      renderServerTemplate(result.value, {
+        outlet: `<section>Child</section>`,
+        slots: { header: `<h1>Title</h1>` },
+      }),
+    ).toBe(`<main><header><h1>Title</h1></header><section>Child</section></main>`);
+
+    const serverCode = generateServerModule(result.value);
+    expect(serverCode).toContain(`String(scope.slots?.header ?? "")`);
+    expect(serverCode).toContain(`String(scope.outlet ?? "")`);
+
+    const streamCode = generateServerStreamModule(result.value);
+    expect(streamCode).toContain(`yield String(scope.slots?.header ?? "");`);
+    expect(streamCode).toContain(`yield String(scope.outlet ?? "");`);
+  });
+
   it("extracts keyed list boundaries for client code", () => {
     const result = compileTemplate(
       `<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td><td>{row.label}</td></tr></for></tbody>`,

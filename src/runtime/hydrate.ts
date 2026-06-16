@@ -14,7 +14,18 @@ export type LocatedHydrationBoundary = {
 export type HydrationBoundaryHandle = {
   hydrate: () => void;
   hydrated: () => boolean;
+  element: () => Element;
   dispose: () => void;
+};
+
+export type HydrationStrategy = "load" | "idle" | "visible" | "media" | "interaction";
+
+export type HydrationScheduleOptions = {
+  strategy: HydrationStrategy;
+  media?: string;
+  interaction?: keyof HTMLElementEventMap | string;
+  rootMargin?: string;
+  matchMedia?: (query: string) => MediaQueryList;
 };
 
 type HydrationCleanup = void | (() => void);
@@ -89,6 +100,7 @@ export const createHydrationBoundary = (
   return ok({
     hydrate,
     hydrated: () => isHydrated,
+    element: () => located.value.element,
     dispose: () => {
       if (typeof cleanup === "function") {
         cleanup();
@@ -113,4 +125,58 @@ export const readHydrationState = <T>(root: ParentNode, id: string): Result<T, H
   } catch {
     return err({ message: `Invalid hydration state for ${id}.` });
   }
+};
+
+export const scheduleHydration = (
+  handle: HydrationBoundaryHandle,
+  options: HydrationScheduleOptions = { strategy: "load" },
+): (() => void) => {
+  if (options.strategy === "load") {
+    handle.hydrate();
+    return () => undefined;
+  }
+  if (options.strategy === "idle") {
+    const requestIdle =
+      globalThis.requestIdleCallback ??
+      ((callback: IdleRequestCallback) => setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 }), 0));
+    const cancelIdle = globalThis.cancelIdleCallback ?? clearTimeout;
+    const id = requestIdle(() => handle.hydrate());
+    return () => cancelIdle(id);
+  }
+  if (options.strategy === "media") {
+    const query = options.media;
+    if (!query) {
+      return () => undefined;
+    }
+    const matcher = options.matchMedia ?? globalThis.matchMedia;
+    const media = matcher(query);
+    const listener = (): void => {
+      if (media.matches) {
+        handle.hydrate();
+      }
+    };
+    media.addEventListener("change", listener);
+    listener();
+    return () => media.removeEventListener("change", listener);
+  }
+  if (options.strategy === "visible") {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          handle.hydrate();
+          observer.disconnect();
+        }
+      },
+      options.rootMargin === undefined ? {} : { rootMargin: options.rootMargin },
+    );
+    observer.observe(handle.element());
+    return () => observer.disconnect();
+  }
+  const eventName = options.interaction ?? "click";
+  const listener = (): void => {
+    handle.hydrate();
+    document.removeEventListener(eventName, listener, true);
+  };
+  document.addEventListener(eventName, listener, true);
+  return () => document.removeEventListener(eventName, listener, true);
 };

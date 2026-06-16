@@ -76,6 +76,22 @@ Components may be nested, and nested component props are resolved against the pa
 
 `runtime/hydrate` locates marker pairs and hydrates the existing element without replacing SSR DOM. `serializeHydrationState(id, state)` and `readHydrationState(root, id)` provide the first state handoff path.
 
+Hydration can be scheduled by runtime strategy:
+
+- `load`
+- `idle`
+- `visible`
+- `media`
+- `interaction`
+
+## Outlet and Slot
+
+`<outlet></outlet>` injects `scope.outlet` in server and stream targets. The client target leaves a marker comment.
+
+`<slot name="header"></slot>` injects `scope.slots.header` in server and stream targets. The client target leaves a marker comment.
+
+These are intended for route layouts and transparent component composition.
+
 ## Await Streaming
 
 `<await value={promise} then="name">...</await>` creates an async streaming fragment. The stream target awaits `value`, binds the resolved value to `then`, and yields the child HTML as soon as it is ready.

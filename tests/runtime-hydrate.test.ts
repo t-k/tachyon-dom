@@ -3,6 +3,7 @@ import {
   createHydrationBoundary,
   locateHydrationBoundary,
   readHydrationState,
+  scheduleHydration,
   serializeHydrationState,
 } from "../src/runtime/hydrate";
 
@@ -75,5 +76,45 @@ describe("hydrate boundary runtime", () => {
     }
     expect(result.value).toEqual({ count: 7, rows: ["a", "<b>"] });
     expect(main.querySelector("section")?.outerHTML).toBe(boundaryBefore);
+  });
+
+  it("schedules idle, media, and interaction hydration strategies", () => {
+    document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--><section><button>Open</button></section><!--tachyon-hydrate:panel:end--></main>`;
+    const main = document.querySelector("main");
+    if (!main) {
+      throw new Error("Missing main.");
+    }
+    const handleResult = createHydrationBoundary(main, "panel", vi.fn());
+    expect(handleResult.ok).toBe(true);
+    if (!handleResult.ok) {
+      throw new Error(handleResult.error.message);
+    }
+    const handle = handleResult.value;
+
+    const idleCleanup = scheduleHydration(handle, { strategy: "idle" });
+    idleCleanup();
+    expect(handle.hydrated()).toBe(false);
+
+    const mediaCleanup = scheduleHydration(handle, {
+      strategy: "media",
+      media: "(min-width: 1px)",
+      matchMedia: () =>
+        ({
+          matches: true,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }) as unknown as MediaQueryList,
+    });
+    mediaCleanup();
+    expect(handle.hydrated()).toBe(true);
+
+    const secondResult = createHydrationBoundary(main, "panel", vi.fn());
+    if (!secondResult.ok) {
+      throw new Error(secondResult.error.message);
+    }
+    const cleanup = scheduleHydration(secondResult.value, { strategy: "interaction", interaction: "click" });
+    main.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(secondResult.value.hydrated()).toBe(true);
+    cleanup();
   });
 });

@@ -48,6 +48,12 @@ const renderForYieldStatements = (node: ElementNode, locals: ReadonlySet<string>
 };
 
 const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<string>, indent: string): string[] => {
+  if (node.tagName === "outlet") {
+    return [`${indent}yield String(scope.outlet ?? "");`];
+  }
+  if (node.tagName === "slot") {
+    return [`${indent}yield String(scope.slots?.${attrString(node, "name") ?? "default"} ?? "");`];
+  }
   if (node.tagName === "for") {
     return renderForYieldStatements(node, locals, indent);
   }

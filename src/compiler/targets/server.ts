@@ -72,6 +72,14 @@ const renderFor = (node: ElementNode, scope: Record<string, unknown>): string =>
 };
 
 const renderElement = (node: ElementNode, scope: Record<string, unknown>): string => {
+  if (node.tagName === "outlet") {
+    return String(scope.outlet ?? "");
+  }
+  if (node.tagName === "slot") {
+    const slots = scope.slots;
+    const name = attrString(node, "name") ?? "default";
+    return slots && typeof slots === "object" ? String((slots as Record<string, unknown>)[name] ?? "") : "";
+  }
   if (node.tagName === "for") {
     return renderFor(node, scope);
   }
@@ -264,6 +272,13 @@ const renderForExpression = (node: ElementNode, locals: ReadonlySet<string>): st
 };
 
 const renderElementExpression = (node: ElementNode, locals: ReadonlySet<string> = new Set()): string => {
+  if (node.tagName === "outlet") {
+    return `String(scope.outlet ?? "")`;
+  }
+  if (node.tagName === "slot") {
+    const name = attrString(node, "name") ?? "default";
+    return `String(scope.slots?.${name} ?? "")`;
+  }
   if (node.tagName === "for") {
     return renderForExpression(node, locals);
   }

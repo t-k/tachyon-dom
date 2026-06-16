@@ -1,6 +1,7 @@
 import type { Plugin } from "vite";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index";
 import { diagnoseTemplate, formatDiagnostic } from "./diagnostics";
+import { createFileRouteManifest } from "./router";
 import { appendInlineSourceMap, createSourceMap } from "./source-map";
 
 export type TachyonDomViteOptions = {
@@ -16,7 +17,9 @@ export type TachyonDomRouteModule = {
 };
 
 export type TachyonDomRoutesViteOptions = {
-  routes: readonly TachyonDomRouteModule[];
+  routes?: readonly TachyonDomRouteModule[];
+  files?: readonly string[];
+  rootDir?: string;
   virtualId?: string;
 };
 
@@ -60,7 +63,17 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
 export const tachyonDomRoutes = (options: TachyonDomRoutesViteOptions): Plugin => {
   const virtualId = options.virtualId ?? "virtual:tachyon-dom/routes";
   const resolvedVirtualId = `\0${virtualId}`;
-  const routeModules = new Set(options.routes.map((route) => route.module));
+  const routes = (): TachyonDomRouteModule[] => [
+    ...(options.routes ?? []),
+    ...(options.files && options.rootDir
+      ? createFileRouteManifest(options.files, { rootDir: options.rootDir }).map((route) => ({
+          id: route.id,
+          path: route.path,
+          module: route.file,
+        }))
+      : []),
+  ];
+  const routeModules = (): Set<string> => new Set(routes().map((route) => route.module));
   return {
     name: "tachyon-dom-routes",
     resolveId(id) {
@@ -70,16 +83,16 @@ export const tachyonDomRoutes = (options: TachyonDomRoutesViteOptions): Plugin =
       if (id !== resolvedVirtualId) {
         return null;
       }
-      const routes = options.routes
+      const modules = routes()
         .map(
           (route) =>
             `{ id: ${JSON.stringify(route.id)}, path: ${JSON.stringify(route.path)}, module: () => import(${JSON.stringify(route.module)}) }`,
         )
         .join(", ");
-      return `export const routes = [${routes}];\nexport const manifest = routes.map(({ id, path }) => ({ id, path }));\n`;
+      return `export const routes = [${modules}];\nexport const manifest = routes.map(({ id, path }) => ({ id, path }));\n`;
     },
     handleHotUpdate(context) {
-      if (!routeModules.has(context.file)) {
+      if (!routeModules().has(context.file)) {
         return;
       }
       const module = context.server.moduleGraph.getModuleById(resolvedVirtualId);

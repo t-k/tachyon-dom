@@ -26,6 +26,10 @@
       "types": "./dist/typed.d.ts",
       "import": "./dist/typed.js"
     },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
     "./vite": {
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.js"

@@ -1,0 +1,29 @@
+# Runtime Modules
+
+Tachyon DOM runtime modules are split so compiler output imports only what it uses.
+
+- `runtime/text`: text node lookup and updates.
+- `runtime/class`: element lookup and class toggles.
+- `runtime/attr`: dynamic attributes, styles, and refs.
+- `runtime/form`: `bind:value` and `bind:checked` helpers.
+- `runtime/event`: delegated event binding.
+- `runtime/list`: keyed list mounting, reuse, move, and multi-root item support.
+- `runtime/conditional`: conditional DOM mounting.
+- `runtime/hydrate`: SSR boundary location, state handoff, and hydration scheduling.
+- `runtime/router`: client-side navigation with link interception, History API, abortable loaders, scroll hooks, and focus restoration.
+- `runtime/fragment`: wrapper-free fragment mounting.
+- `runtime/portal`: external target mounting.
+- `runtime/store` and `runtime/signal`: fine-grained store/signal helpers.
+- `runtime/stream-client`: browser stream chunk reading.
+
+## Hydration Strategies
+
+`scheduleHydration(handle, options)` supports:
+
+- `load`
+- `idle`
+- `visible`
+- `media`
+- `interaction`
+
+The compiler records hydration boundaries with `hydrate:id={id}`. Runtime scheduling chooses when to call `handle.hydrate()`.

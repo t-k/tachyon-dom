@@ -36,6 +36,8 @@ The framework direction is HTML-first syntax with Solid-style fine-grained react
 
 The fixed syntax surface is documented in [`docs/syntax-spec.md`](docs/syntax-spec.md).
 
+Routing is documented in [`docs/routing.md`](docs/routing.md), and runtime modules are summarized in [`docs/runtime.md`](docs/runtime.md).
+
 The compiler output is intentionally close to the current direct DOM runtime: static markup stays static, dynamic text/class/event slots are recorded as explicit paths, and generated client code can import subpath helpers such as `tachyon-dom/runtime/text`.
 
 The first server streaming adapter, `tachyon-dom/server/stream`, accepts sync or async HTML chunks and adapts them to `ReadableStream<Uint8Array>` or `Response` without building a single full HTML string first.

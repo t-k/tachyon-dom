@@ -98,6 +98,8 @@ describe("DX helpers", () => {
         { id: "home", path: "/", module: "/src/routes/index.tachyon.html" },
         { id: "user", path: "/users/:id", module: "/src/routes/users/[id].tachyon.html" },
       ],
+      files: ["/src/routes/about.tachyon.html"],
+      rootDir: "/src/routes",
     });
     if (typeof plugin.resolveId !== "function" || typeof plugin.load !== "function") {
       throw new Error("Missing virtual module hooks.");
@@ -109,5 +111,6 @@ describe("DX helpers", () => {
     expect(resolved).toBe("\0virtual:tachyon-dom/routes");
     expect(code).toContain(`export const manifest = routes.map`);
     expect(code).toContain(`module: () => import("/src/routes/users/[id].tachyon.html")`);
+    expect(code).toContain(`path: "/about"`);
   });
 });

@@ -140,6 +140,12 @@ const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
 };
 
 const lowerElement = (node: ElementNode, path: number[], context: LoweringContext): string => {
+  if (node.tagName === "outlet") {
+    return "<!--tachyon-outlet-->";
+  }
+  if (node.tagName === "slot") {
+    return `<!--tachyon-slot:${attrString(node, "name") ?? "default"}-->`;
+  }
   if (node.tagName === "for") {
     return "";
   }
