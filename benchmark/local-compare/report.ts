@@ -52,6 +52,18 @@ export type AuxiliaryMetricMatrixRow = {
   candidateRatioToBest: number;
 };
 
+export type BenchmarkRegressionGateOptions = {
+  maxGeomeanRatio?: number;
+  maxMemoryRatio?: number;
+};
+
+export type BenchmarkRegressionGateResult = {
+  ok: boolean;
+  geomeanRatio: number;
+  maxMemoryRatio: number;
+  failures: string[];
+};
+
 export const mean = (values: readonly number[]): number => {
   if (values.length === 0) {
     return Number.NaN;
@@ -261,4 +273,42 @@ export const formatAuxiliaryMetricTable = (
     );
   }
   return lines.join("\n");
+};
+
+export const evaluateBenchmarkRegressionGate = (
+  operationRows: readonly ComparisonRow[],
+  auxiliaryRows: readonly AuxiliaryMetricMatrixRow[],
+  options: BenchmarkRegressionGateOptions,
+): BenchmarkRegressionGateResult => {
+  const finiteRatios = operationRows.map((row) => row.ratio).filter((ratio) => Number.isFinite(ratio) && ratio > 0);
+  const geomeanRatio =
+    finiteRatios.length === 0
+      ? Number.NaN
+      : Math.exp(finiteRatios.reduce((total, ratio) => total + Math.log(ratio), 0) / finiteRatios.length);
+  const memoryRatios = auxiliaryRows
+    .filter((row) => row.unit === "mb")
+    .map((row) => row.candidateRatioToBest)
+    .filter(Number.isFinite);
+  const maxMemoryRatio = memoryRatios.length === 0 ? Number.NaN : Math.max(...memoryRatios);
+  const failures: string[] = [];
+  if (
+    options.maxGeomeanRatio !== undefined &&
+    Number.isFinite(geomeanRatio) &&
+    geomeanRatio > options.maxGeomeanRatio
+  ) {
+    failures.push(`geomean ratio ${geomeanRatio.toFixed(3)}x exceeds ${options.maxGeomeanRatio.toFixed(3)}x`);
+  }
+  if (
+    options.maxMemoryRatio !== undefined &&
+    Number.isFinite(maxMemoryRatio) &&
+    maxMemoryRatio > options.maxMemoryRatio
+  ) {
+    failures.push(`memory ratio ${maxMemoryRatio.toFixed(3)}x exceeds ${options.maxMemoryRatio.toFixed(3)}x`);
+  }
+  return {
+    ok: failures.length === 0,
+    geomeanRatio,
+    maxMemoryRatio,
+    failures,
+  };
 };

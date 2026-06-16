@@ -3,6 +3,7 @@ import {
   buildAuxiliaryMetricMatrix,
   buildScenarioMatrix,
   compareSummaries,
+  evaluateBenchmarkRegressionGate,
   formatAuxiliaryMetricTable,
   formatComparisonTable,
   formatScenarioMatrixTable,
@@ -99,5 +100,61 @@ describe("local compare report", () => {
     expect(formatAuxiliaryMetricTable(rows, implementations, "tachyon-dom")).toContain(
       "| ready JS heap | 3.00MB | 2.00MB | 4.00MB | 2.000x |",
     );
+  });
+
+  it("evaluates benchmark regression thresholds", () => {
+    const operationRows = [
+      {
+        id: "createRows",
+        label: "create rows",
+        baseline: "vanillajs-lite-keyed",
+        candidate: "tachyon-dom",
+        baselineMean: 10,
+        candidateMean: 12,
+        ratio: 1.2,
+        deltaPercent: 20,
+        baselineMedian: 10,
+        candidateMedian: 12,
+      },
+      {
+        id: "swapRows",
+        label: "swap rows",
+        baseline: "vanillajs-lite-keyed",
+        candidate: "tachyon-dom",
+        baselineMean: 10,
+        candidateMean: 18,
+        ratio: 1.8,
+        deltaPercent: 80,
+        baselineMedian: 10,
+        candidateMedian: 18,
+      },
+    ];
+    const auxiliaryRows = [
+      {
+        id: "readyHeap",
+        label: "ready JS heap",
+        unit: "mb" as const,
+        values: { "tachyon-dom": 4, "vanillajs-lite-keyed": 2 },
+        bestValue: 2,
+        candidateRatioToBest: 2,
+      },
+    ];
+
+    expect(
+      evaluateBenchmarkRegressionGate(operationRows, auxiliaryRows, { maxGeomeanRatio: 1.5, maxMemoryRatio: 2 }),
+    ).toEqual({
+      ok: true,
+      geomeanRatio: Math.sqrt(1.2 * 1.8),
+      maxMemoryRatio: 2,
+      failures: [],
+    });
+    expect(
+      evaluateBenchmarkRegressionGate(operationRows, auxiliaryRows, { maxGeomeanRatio: 1.4, maxMemoryRatio: 1.5 }),
+    ).toEqual({
+      ok: false,
+      geomeanRatio: Math.sqrt(1.2 * 1.8),
+      maxMemoryRatio: 2,
+      failures: ["geomean ratio 1.470x exceeds 1.400x", "memory ratio 2.000x exceeds 1.500x"],
+    });
   });
 });

@@ -8,6 +8,7 @@ import {
   buildAuxiliaryMetricMatrix,
   buildScenarioMatrix,
   compareSummaries,
+  evaluateBenchmarkRegressionGate,
   formatAuxiliaryMetricTable,
   formatScenarioMatrixTable,
   summarizeAuxiliaryMetric,
@@ -23,6 +24,8 @@ type CliOptions = {
   headful: boolean;
   browserChannel?: string;
   output?: string;
+  maxGeomeanRatio?: number;
+  maxMemoryRatio?: number;
 };
 
 type Implementation = {
@@ -92,6 +95,14 @@ const parsePositiveInteger = (value: string, name: string): Result<number, strin
   return ok(parsed);
 };
 
+const parsePositiveNumber = (value: string, name: string): Result<number, string> => {
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return err(`${name} must be a positive number.`);
+  }
+  return ok(parsed);
+};
+
 const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
   const options: CliOptions = {
     iterations: 7,
@@ -135,6 +146,26 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
         return err("--output requires a value.");
       }
       options.output = value;
+    } else if (arg === "--max-geomean-ratio") {
+      const value = argv[++index];
+      if (!value) {
+        return err("--max-geomean-ratio requires a value.");
+      }
+      const parsed = parsePositiveNumber(value, "--max-geomean-ratio");
+      if (!parsed.ok) {
+        return err(parsed.error);
+      }
+      options.maxGeomeanRatio = parsed.value;
+    } else if (arg === "--max-memory-ratio") {
+      const value = argv[++index];
+      if (!value) {
+        return err("--max-memory-ratio requires a value.");
+      }
+      const parsed = parsePositiveNumber(value, "--max-memory-ratio");
+      if (!parsed.ok) {
+        return err(parsed.error);
+      }
+      options.maxMemoryRatio = parsed.value;
     } else {
       return err(`Unknown argument: ${arg}`);
     }
@@ -476,6 +507,19 @@ const run = async (options: CliOptions): Promise<void> => {
     const geomeanRatio =
       baselineRows.reduce((total, row) => total + Math.log(row.ratio), 0) / Math.max(baselineRows.length, 1);
     console.log(`Tachyon DOM geometric mean ratio vs vanillajs-lite-keyed: ${Math.exp(geomeanRatio).toFixed(3)}x`);
+    const gate = evaluateBenchmarkRegressionGate(baselineRows, auxiliaryRows, {
+      ...(options.maxGeomeanRatio === undefined ? {} : { maxGeomeanRatio: options.maxGeomeanRatio }),
+      ...(options.maxMemoryRatio === undefined ? {} : { maxMemoryRatio: options.maxMemoryRatio }),
+    });
+    if (options.maxGeomeanRatio !== undefined || options.maxMemoryRatio !== undefined) {
+      console.log(`Benchmark regression gate: ${gate.ok ? "passed" : "failed"}`);
+      for (const failure of gate.failures) {
+        console.error(`Benchmark regression: ${failure}`);
+      }
+      if (!gate.ok) {
+        process.exitCode = 1;
+      }
+    }
     console.log("");
     console.log(`Wrote JSON results to ${outputPath}`);
   } finally {

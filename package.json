@@ -2,6 +2,9 @@
   "name": "tachyon-dom",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "tachyon-dom": "./dist/cli.js"
+  },
   "files": [
     "dist"
   ],
@@ -14,6 +17,18 @@
     "./compiler": {
       "types": "./dist/compiler.d.ts",
       "import": "./dist/compiler.js"
+    },
+    "./diagnostics": {
+      "types": "./dist/diagnostics.d.ts",
+      "import": "./dist/diagnostics.js"
+    },
+    "./typed": {
+      "types": "./dist/typed.d.ts",
+      "import": "./dist/typed.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.js"
     },
     "./runtime/text": {
       "types": "./dist/runtime/text.d.ts",
@@ -75,6 +90,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json",
     "bench:local": "tsx benchmark/local-compare/run-local-compare.ts",
+    "bench:local:gate": "tsx benchmark/local-compare/run-local-compare.ts --max-geomean-ratio 1.25 --max-memory-ratio 1.5",
     "bench:local:smoke": "tsx benchmark/local-compare/run-local-compare.ts --iterations 1 --warmup 1",
     "example:stream": "tsx examples/store-hydrate-stream.ts",
     "example:web": "vite --host 127.0.0.1",
