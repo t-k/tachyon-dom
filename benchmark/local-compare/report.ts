@@ -7,6 +7,9 @@ export type ScenarioSummary = {
   values: readonly number[];
   mean: number;
   median: number;
+  min: number;
+  max: number;
+  p95: number;
 };
 
 export type ComparisonRow = {
@@ -30,6 +33,25 @@ export type ScenarioMatrixRow = {
   candidateRatioToFastest: number;
 };
 
+export type AuxiliaryMetricUnit = "ms" | "mb" | "count" | "kib";
+
+export type AuxiliaryMetricSummary = {
+  id: string;
+  label: string;
+  unit: AuxiliaryMetricUnit;
+  implementation: ImplementationName;
+  value: number;
+};
+
+export type AuxiliaryMetricMatrixRow = {
+  id: string;
+  label: string;
+  unit: AuxiliaryMetricUnit;
+  values: Record<ImplementationName, number>;
+  bestValue: number;
+  candidateRatioToBest: number;
+};
+
 export const mean = (values: readonly number[]): number => {
   if (values.length === 0) {
     return Number.NaN;
@@ -49,6 +71,15 @@ export const median = (values: readonly number[]): number => {
   return ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
 };
 
+export const percentile = (values: readonly number[], percentileValue: number): number => {
+  if (values.length === 0) {
+    return Number.NaN;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil((percentileValue / 100) * sorted.length) - 1));
+  return sorted[index] as number;
+};
+
 export const summarizeScenario = (
   id: string,
   label: string,
@@ -61,6 +92,9 @@ export const summarizeScenario = (
   values,
   mean: mean(values),
   median: median(values),
+  min: values.length === 0 ? Number.NaN : Math.min(...values),
+  max: values.length === 0 ? Number.NaN : Math.max(...values),
+  p95: percentile(values, 95),
 });
 
 export const compareSummaries = (
@@ -121,9 +155,65 @@ export const buildScenarioMatrix = (
   });
 };
 
+export const summarizeAuxiliaryMetric = (
+  id: string,
+  label: string,
+  unit: AuxiliaryMetricUnit,
+  implementation: ImplementationName,
+  value: number,
+): AuxiliaryMetricSummary => ({
+  id,
+  label,
+  unit,
+  implementation,
+  value,
+});
+
+export const buildAuxiliaryMetricMatrix = (
+  summaries: readonly AuxiliaryMetricSummary[],
+  implementations: readonly ImplementationName[],
+  candidate: ImplementationName,
+): AuxiliaryMetricMatrixRow[] => {
+  const byKey = new Map(summaries.map((summary) => [`${summary.implementation}:${summary.id}`, summary]));
+  const metricOrder = summaries
+    .filter((summary) => summary.implementation === candidate)
+    .map((summary) => ({ id: summary.id, label: summary.label, unit: summary.unit }));
+
+  return metricOrder.map((metric) => {
+    const values: Record<ImplementationName, number> = {};
+    for (const implementation of implementations) {
+      values[implementation] = byKey.get(`${implementation}:${metric.id}`)?.value ?? Number.NaN;
+    }
+    const bestValue = Math.min(...Object.values(values).filter(Number.isFinite));
+    const candidateValue = values[candidate] ?? Number.NaN;
+    return {
+      ...metric,
+      values,
+      bestValue,
+      candidateRatioToBest: candidateValue / bestValue,
+    };
+  });
+};
+
 const formatMilliseconds = (value: number): string => `${value.toFixed(2)}ms`;
 
 const formatPercent = (value: number): string => `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+
+const formatMetricValue = (value: number, unit: AuxiliaryMetricUnit): string => {
+  if (!Number.isFinite(value)) {
+    return "n/a";
+  }
+  if (unit === "ms") {
+    return formatMilliseconds(value);
+  }
+  if (unit === "mb") {
+    return `${value.toFixed(2)}MB`;
+  }
+  if (unit === "kib") {
+    return `${value.toFixed(2)}KiB`;
+  }
+  return `${Math.round(value)}`;
+};
 
 export const formatComparisonTable = (rows: readonly ComparisonRow[]): string => {
   const lines = ["| Scenario | Baseline | Candidate | Ratio | Delta |", "|---|---:|---:|---:|---:|"];
@@ -151,6 +241,23 @@ export const formatScenarioMatrixTable = (
       `| ${row.label} | ${implementations
         .map((implementation) => formatMilliseconds(row.means[implementation] ?? Number.NaN))
         .join(" | ")} | ${row.candidateRatioToFastest.toFixed(3)}x |`,
+    );
+  }
+  return lines.join("\n");
+};
+
+export const formatAuxiliaryMetricTable = (
+  rows: readonly AuxiliaryMetricMatrixRow[],
+  implementations: readonly ImplementationName[],
+  candidate: ImplementationName,
+): string => {
+  const header = ["Metric", ...implementations.map((implementation) => `${implementation}`), `${candidate} vs best`];
+  const lines = [`| ${header.join(" | ")} |`, `|---${"|---:".repeat(implementations.length + 1)}|`];
+  for (const row of rows) {
+    lines.push(
+      `| ${row.label} | ${implementations
+        .map((implementation) => formatMetricValue(row.values[implementation] ?? Number.NaN, row.unit))
+        .join(" | ")} | ${row.candidateRatioToBest.toFixed(3)}x |`,
     );
   }
   return lines.join("\n");

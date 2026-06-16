@@ -1,14 +1,18 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type LaunchOptions, type Page } from "playwright";
 import { createServer, type ViteDevServer } from "vite";
 import { err, ok, type Result } from "neverthrow";
 import {
+  buildAuxiliaryMetricMatrix,
   buildScenarioMatrix,
   compareSummaries,
+  formatAuxiliaryMetricTable,
   formatScenarioMatrixTable,
+  summarizeAuxiliaryMetric,
   summarizeScenario,
+  type AuxiliaryMetricSummary,
   type ImplementationName,
   type ScenarioSummary,
 } from "./report";
@@ -25,6 +29,7 @@ type Implementation = {
   name: ImplementationName;
   title: string;
   path: string;
+  sourcePaths: readonly string[];
 };
 
 type Scenario = {
@@ -37,21 +42,30 @@ const implementations: readonly Implementation[] = [
     name: "vanillajs-lite-keyed",
     title: "vanillajs-lite-keyed",
     path: "/benchmark/local-compare/vanillajs-lite/",
+    sourcePaths: ["benchmark/local-compare/vanillajs-lite"],
   },
   {
     name: "vanillajs-3-keyed",
     title: "vanillajs-3-keyed",
     path: "/benchmark/local-compare/vanillajs-3/",
+    sourcePaths: ["benchmark/local-compare/vanillajs-3"],
   },
   {
     name: "vanillajs-keyed",
     title: "vanillajs-keyed",
     path: "/benchmark/local-compare/vanillajs/",
+    sourcePaths: ["benchmark/local-compare/vanillajs"],
   },
   {
     name: "tachyon-dom",
     title: "Tachyon DOM",
     path: "/benchmark/js-framework-benchmark/",
+    sourcePaths: [
+      "src/index.ts",
+      "benchmark/js-framework-benchmark/index.html",
+      "benchmark/js-framework-benchmark/src/main.ts",
+      "benchmark/js-framework-benchmark/src/i18n.ts",
+    ],
   },
 ];
 
@@ -185,6 +199,26 @@ const installDeterministicRandom = async (page: Page): Promise<void> => {
   });
 };
 
+const settlePage = async (page: Page): Promise<void> => {
+  await page.evaluate(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))`);
+};
+
+const clickInPage = async (page: Page, selector: string): Promise<void> => {
+  await page.evaluate(`(() => {
+    const targetSelector = ${JSON.stringify(selector)};
+    const element = document.querySelector(targetSelector);
+    if (!element) {
+      throw new Error("Missing selector: " + targetSelector);
+    }
+    if (element instanceof HTMLElement) {
+      element.click();
+    } else {
+      element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    }
+  })()`);
+  await settlePage(page);
+};
+
 const browserScenarioScript = String.raw`
 window.__runLocalBenchmarkScenario = async (id) => {
   const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -290,6 +324,86 @@ const measureImplementation = async (
   return summaries;
 };
 
+const jsHeapUsedMb = async (page: Page): Promise<number> => {
+  const session = await page.context().newCDPSession(page);
+  try {
+    const usage = await session.send("Runtime.getHeapUsage");
+    return usage.usedSize / 1024 / 1024;
+  } finally {
+    await session.detach();
+  }
+};
+
+const domNodeCount = async (page: Page): Promise<number> =>
+  await page.evaluate(`document.getElementsByTagName("*").length`);
+
+const navigateAndSettle = async (page: Page, url: string): Promise<number> => {
+  await page.goto(url, { waitUntil: "load" });
+  await page.waitForSelector("#run");
+  await settlePage(page);
+  return await page.evaluate(`performance.now()`);
+};
+
+const sourceSizeBytes = async (filePath: string): Promise<number> => {
+  const absolutePath = path.resolve(projectRoot, filePath);
+  const fileStat = await stat(absolutePath);
+  if (fileStat.isFile()) {
+    return fileStat.size;
+  }
+  const entries = await readdir(absolutePath);
+  const sizes = await Promise.all(entries.map((entry) => sourceSizeBytes(path.join(filePath, entry))));
+  return sizes.reduce((total, size) => total + size, 0);
+};
+
+const measureAuxiliaryMetrics = async (
+  browser: Browser,
+  baseUrl: string,
+  implementation: Implementation,
+): Promise<AuxiliaryMetricSummary[]> => {
+  const page = await browser.newPage();
+  await installDeterministicRandom(page);
+  try {
+    const url = `${baseUrl}${implementation.path}`;
+    const startupMs = await navigateAndSettle(page, url);
+    const readyHeapMb = await jsHeapUsedMb(page);
+    const readyDomNodes = await domNodeCount(page);
+
+    await clickInPage(page, "#run");
+    const runHeapMb = await jsHeapUsedMb(page);
+    const runDomNodes = await domNodeCount(page);
+
+    await navigateAndSettle(page, url);
+    for (let cycle = 0; cycle < 5; cycle++) {
+      await clickInPage(page, "#run");
+      await clickInPage(page, "#clear");
+    }
+    const runClearHeapMb = await jsHeapUsedMb(page);
+    const runClearDomNodes = await domNodeCount(page);
+    const sourceBytes = (
+      await Promise.all(implementation.sourcePaths.map((sourcePath) => sourceSizeBytes(sourcePath)))
+    ).reduce((total, size) => total + size, 0);
+
+    return [
+      summarizeAuxiliaryMetric("startup", "startup load + 2 frames", "ms", implementation.name, startupMs),
+      summarizeAuxiliaryMetric("readyHeap", "ready JS heap", "mb", implementation.name, readyHeapMb),
+      summarizeAuxiliaryMetric("runHeap", "1k rows JS heap", "mb", implementation.name, runHeapMb),
+      summarizeAuxiliaryMetric("runClearHeap", "run/clear 5x JS heap", "mb", implementation.name, runClearHeapMb),
+      summarizeAuxiliaryMetric("readyDomNodes", "ready DOM nodes", "count", implementation.name, readyDomNodes),
+      summarizeAuxiliaryMetric("runDomNodes", "1k rows DOM nodes", "count", implementation.name, runDomNodes),
+      summarizeAuxiliaryMetric(
+        "runClearDomNodes",
+        "run/clear 5x DOM nodes",
+        "count",
+        implementation.name,
+        runClearDomNodes,
+      ),
+      summarizeAuxiliaryMetric("localSourceSize", "local source size", "kib", implementation.name, sourceBytes / 1024),
+    ];
+  } finally {
+    await page.close();
+  }
+};
+
 const defaultOutputPath = (): string => {
   const stamp = new Date()
     .toISOString()
@@ -301,7 +415,9 @@ const defaultOutputPath = (): string => {
 const writeResults = async (
   options: CliOptions,
   summaries: readonly ScenarioSummary[],
-  table: string,
+  auxiliaryMetrics: readonly AuxiliaryMetricSummary[],
+  operationTable: string,
+  auxiliaryTable: string,
 ): Promise<string> => {
   const outputPath = path.resolve(projectRoot, options.output ?? defaultOutputPath());
   await mkdir(path.dirname(outputPath), { recursive: true });
@@ -316,7 +432,11 @@ const writeResults = async (
         candidate: "tachyon-dom",
         implementations: implementations.map((implementation) => implementation.name),
         summaries,
-        table,
+        auxiliaryMetrics,
+        tables: {
+          operations: operationTable,
+          auxiliary: auxiliaryTable,
+        },
       },
       null,
       2,
@@ -333,19 +453,25 @@ const run = async (options: CliOptions): Promise<void> => {
     const baseUrl = baseUrlFor(server);
     browser = await launchBrowser(options);
     const summaries: ScenarioSummary[] = [];
+    const auxiliaryMetrics: AuxiliaryMetricSummary[] = [];
 
     for (const implementation of implementations) {
       console.log(`Measuring ${implementation.title}...`);
       summaries.push(...(await measureImplementation(browser, baseUrl, implementation, options)));
+      auxiliaryMetrics.push(...(await measureAuxiliaryMetrics(browser, baseUrl, implementation)));
     }
 
     const implementationNames = implementations.map((implementation) => implementation.name);
     const matrixRows = buildScenarioMatrix(summaries, implementationNames, "tachyon-dom");
-    const table = formatScenarioMatrixTable(matrixRows, implementationNames, "tachyon-dom");
+    const operationTable = formatScenarioMatrixTable(matrixRows, implementationNames, "tachyon-dom");
+    const auxiliaryRows = buildAuxiliaryMetricMatrix(auxiliaryMetrics, implementationNames, "tachyon-dom");
+    const auxiliaryTable = formatAuxiliaryMetricTable(auxiliaryRows, implementationNames, "tachyon-dom");
     const baselineRows = compareSummaries(summaries, "vanillajs-lite-keyed", "tachyon-dom");
-    const outputPath = await writeResults(options, summaries, table);
+    const outputPath = await writeResults(options, summaries, auxiliaryMetrics, operationTable, auxiliaryTable);
     console.log("");
-    console.log(table);
+    console.log(operationTable);
+    console.log("");
+    console.log(auxiliaryTable);
     console.log("");
     const geomeanRatio =
       baselineRows.reduce((total, row) => total + Math.log(row.ratio), 0) / Math.max(baselineRows.length, 1);

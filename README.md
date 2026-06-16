@@ -26,4 +26,6 @@ npm run lint
 npm run bench:local
 ```
 
-`npm run bench:local` starts a temporary Vite server, measures Tachyon DOM against local copies of the keyed vanilla benchmark implementations in Playwright Chromium, prints a ratio table, and writes JSON results under `benchmark/local-compare/results/`.
+`npm run bench:local` starts a temporary Vite server, measures Tachyon DOM against local copies of the keyed vanilla benchmark implementations in Playwright Chromium, prints ratio tables, and writes JSON results under `benchmark/local-compare/results/`.
+
+The local benchmark prints row-operation timings plus auxiliary metrics for startup, JS heap usage, DOM node counts, and local source size. JSON output also keeps per-run values with mean, median, min, max, and p95.
