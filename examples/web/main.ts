@@ -37,7 +37,7 @@ type HydratedDemoState = {
   rows: DemoRow[];
 };
 
-const templateSource = `<main><store count={initialCount}/><h1>{title}</h1><component name="CounterPanel"><section hydrate:id={islandId} class:active={active}><if test={active}><button id="boundary-button" on:click={increment}>{count}</button></if><ul><for each={rows} key={row.id}><li class:active={row.active}>{row.label}</li></for></ul></section></component></main>`;
+const templateSource = `<main><store count={initialCount}/><h1>{title}</h1><component name="CounterPanel"><section hydrate:id={islandId} class:active={active}><if test={active}><button id="boundary-button" data-testid="boundary-button" on:click={increment}>{count}</button></if><ul><for each={rows} key={row.id}><li class:active={row.active}>{row.label}</li></for></ul></section></component></main>`;
 
 const initialRows = (): DemoRow[] => [
   { id: 1, label: "Compiled template", active: true },
@@ -97,25 +97,25 @@ const renderShell = (): string => `
     <section class="grid">
       <article class="panel">
         <h2>Browser Preview</h2>
-        <div id="preview" class="preview"></div>
+        <div id="preview" class="preview" data-testid="preview"></div>
         <div class="controls">
-          <button id="increment">Increment store</button>
-          <button id="hydrate" class="secondary">Hydrate boundary</button>
-          <button id="prepend" class="secondary">Prepend row</button>
-          <button id="rotate" class="secondary">Rotate rows</button>
-          <button id="toggle" class="secondary">Toggle active</button>
+          <button id="increment" data-testid="increment">Increment store</button>
+          <button id="hydrate" class="secondary" data-testid="hydrate">Hydrate boundary</button>
+          <button id="prepend" class="secondary" data-testid="prepend">Prepend row</button>
+          <button id="rotate" class="secondary" data-testid="rotate">Rotate rows</button>
+          <button id="toggle" class="secondary" data-testid="toggle">Toggle active</button>
         </div>
       </article>
       <aside class="panel">
         <h2>Runtime State</h2>
         <div class="metrics">
-          <div class="metric"><span>Count</span><strong id="metric-count">0</strong></div>
-          <div class="metric"><span>Rows</span><strong id="metric-rows">0</strong></div>
-          <div class="metric"><span>Hydrate</span><strong id="metric-hydrate">0</strong></div>
-          <div class="metric"><span>Hydrated</span><strong id="metric-hydrated">no</strong></div>
+          <div class="metric"><span>Count</span><strong id="metric-count" data-testid="metric-count">0</strong></div>
+          <div class="metric"><span>Rows</span><strong id="metric-rows" data-testid="metric-rows">0</strong></div>
+          <div class="metric"><span>Hydrate</span><strong id="metric-hydrate" data-testid="metric-hydrate">0</strong></div>
+          <div class="metric"><span>Hydrated</span><strong id="metric-hydrated" data-testid="metric-hydrated">no</strong></div>
         </div>
         <h2>Stream Chunks</h2>
-        <div id="chunks" class="chunk-list"></div>
+        <div id="chunks" class="chunk-list" data-testid="stream-chunks"></div>
       </aside>
     </section>
     <section class="grid">
@@ -125,11 +125,11 @@ const renderShell = (): string => `
       </article>
       <article class="panel">
         <h2>Compiler IR</h2>
-        <pre class="code">${escapeText(JSON.stringify(compiled.ir.directives, null, 2))}</pre>
+        <pre class="code" data-testid="compiler-ir">${escapeText(JSON.stringify(compiled.ir.directives, null, 2))}</pre>
       </article>
       <article class="panel">
         <h2>Generated Client Shape</h2>
-        <pre class="code">${escapeText(generatedClientModule)}</pre>
+        <pre class="code" data-testid="generated-client">${escapeText(generatedClientModule)}</pre>
       </article>
     </section>
   </div>

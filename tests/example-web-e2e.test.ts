@@ -39,27 +39,59 @@ describe("browser hydration boundary example", () => {
     if (!page) {
       throw new Error("Missing page.");
     }
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.goto(`${baseUrl()}/examples/web/`, { waitUntil: "networkidle" });
 
-    const htmlBefore = await page.locator("#preview main").evaluate((node) => node.innerHTML);
+    const htmlBefore = await page
+      .getByTestId("preview")
+      .locator("main")
+      .evaluate((node) => node.innerHTML);
     expect(htmlBefore).toContain("<!--tachyon-hydrate:counter-panel:start-->");
-    expect(await page.locator("#metric-count").textContent()).toBe("7");
-    expect(await page.locator("#metric-rows").textContent()).toBe("3");
-    expect(await page.locator("#metric-hydrated").textContent()).toBe("no");
+    expect(await page.getByTestId("metric-count").textContent()).toBe("7");
+    expect(await page.getByTestId("metric-rows").textContent()).toBe("3");
+    expect(await page.getByTestId("metric-hydrated").textContent()).toBe("no");
+    await expectGeneratedPanels(page);
 
-    await page.locator("#boundary-button").click();
-    expect(await page.locator("#metric-count").textContent()).toBe("7");
+    await page.getByTestId("boundary-button").click();
+    expect(await page.getByTestId("metric-count").textContent()).toBe("7");
 
-    await page.locator("#hydrate").click();
-    const htmlAfterHydrate = await page.locator("#preview main").evaluate((node) => node.innerHTML);
+    await page.getByTestId("hydrate").click();
+    const htmlAfterHydrate = await page
+      .getByTestId("preview")
+      .locator("main")
+      .evaluate((node) => node.innerHTML);
     expect(htmlAfterHydrate).toBe(htmlBefore);
-    expect(await page.locator("#metric-hydrated").textContent()).toBe("yes");
+    expect(await page.getByTestId("metric-hydrated").textContent()).toBe("yes");
 
-    await page.locator("#boundary-button").click();
-    await page.locator("#prepend").click();
+    await page.getByTestId("boundary-button").click();
+    await page.getByTestId("prepend").click();
 
-    expect(await page.locator("#metric-count").textContent()).toBe("8");
-    expect(await page.locator("#metric-rows").textContent()).toBe("4");
-    expect(await page.locator(".preview li").first().textContent()).toContain("Inserted row 4");
+    expect(await page.getByTestId("metric-count").textContent()).toBe("8");
+    expect(await page.getByTestId("metric-rows").textContent()).toBe("4");
+    expect(await page.getByTestId("preview").locator("li").first().textContent()).toContain("Inserted row 4");
+  }, 30000);
+
+  it("keeps the specification app usable on a mobile viewport", async () => {
+    if (!page) {
+      throw new Error("Missing page.");
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${baseUrl()}/examples/web/`, { waitUntil: "networkidle" });
+
+    await page.getByTestId("hydrate").click();
+    await page.getByTestId("increment").click();
+    await page.getByTestId("prepend").click();
+
+    expect(await page.getByTestId("metric-count").textContent()).toBe("8");
+    expect(await page.getByTestId("metric-rows").textContent()).toBe("4");
+    const previewBox = await page.getByTestId("preview").boundingBox();
+    expect(previewBox?.width).toBeGreaterThan(300);
+    await expectGeneratedPanels(page);
   }, 30000);
 });
+
+const expectGeneratedPanels = async (page: Page): Promise<void> => {
+  expect(await page.getByTestId("generated-client").textContent()).toContain(`mountConditional`);
+  expect(await page.getByTestId("compiler-ir").textContent()).toContain(`"kind": "component"`);
+  expect(await page.getByTestId("stream-chunks").textContent()).toContain(`tachyon-hydrate:counter-panel:start`);
+};

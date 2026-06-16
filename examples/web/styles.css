@@ -48,6 +48,7 @@ pre {
   margin: 0 auto;
   max-width: 1180px;
   padding: 24px;
+  width: min(100%, 1180px);
 }
 
 .topbar {
@@ -77,6 +78,7 @@ pre {
   background: #ffffff;
   border: 1px solid #d9e0e7;
   border-radius: 8px;
+  contain: layout style paint;
   display: grid;
   gap: 12px;
   min-width: 0;
@@ -91,8 +93,10 @@ pre {
 .preview {
   border: 1px solid #c9d3df;
   border-radius: 8px;
-  min-height: 210px;
+  min-height: 220px;
+  overflow: auto;
   padding: 16px;
+  scrollbar-gutter: stable;
 }
 
 .preview section {
@@ -157,12 +161,16 @@ pre {
   color: #d9e7f4;
   font-size: 12px;
   max-height: 340px;
+  min-height: 140px;
   padding: 12px;
 }
 
 .chunk-list {
   display: grid;
   gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  scrollbar-gutter: stable;
 }
 
 .chunk {
