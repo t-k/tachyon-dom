@@ -12,7 +12,6 @@ import type {
 import { storeDefinitionsFor } from "../ir";
 import {
   attrExpression,
-  expressionPattern,
   expressionToScopeAccess,
   isForNode,
   isStoreNode,
@@ -21,20 +20,20 @@ import {
   readExpressionAttribute,
   renderableChildren,
   serializeStaticAttr,
+  textExpressionSegments,
 } from "../utils";
 import { isAssignableExpression } from "../expression";
 
 const lowerTextNode = (node: TextNode, path: number[], context: LoweringContext): string => {
   let output = "";
-  let cursor = 0;
-  for (const match of node.value.matchAll(expressionPattern)) {
-    const start = match.index ?? 0;
-    output += node.value.slice(cursor, start);
-    context.bindings.push({ kind: "text", path: [...path], expression: (match[1] as string).trim() });
+  for (const segment of textExpressionSegments(node.value)) {
+    if (segment.kind === "text") {
+      output += segment.value;
+      continue;
+    }
+    context.bindings.push({ kind: "text", path: [...path], expression: segment.value });
     output += " ";
-    cursor = start + match[0].length;
   }
-  output += node.value.slice(cursor);
   return output;
 };
 

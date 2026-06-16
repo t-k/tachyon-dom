@@ -1,6 +1,12 @@
 # Tachyon DOM Syntax Specification
 
-This document fixes the small HTML-first syntax surface used by the compiler, runtime, and SSR targets. JavaScript expressions are intentionally restricted to identifiers and dotted paths for now, so every target can analyze dependencies without evaluating arbitrary code.
+This document fixes the small HTML-first syntax surface used by the compiler, runtime, and SSR targets. Template expressions are parsed into Tachyon DOM's compiler IR before they are emitted to client, server string, and server stream targets.
+
+## Expressions
+
+The default expression parser is `auto`: it first uses the small native parser for the hot path, then falls back to OXC for syntax the native parser does not cover. `parseExpression(source, { backend: "native" | "oxc" | "auto" })` can pin a backend for tests and compiler benchmarking.
+
+Supported expression forms include identifiers, dotted paths, literals, arrays, objects, unary `!` and `-`, binary arithmetic/comparison/logical operators, ternaries, calls, optional chaining, nullish coalescing, computed member access, and template literals. Assignable expressions for `bind:*` accept identifier paths and non-optional member expressions.
 
 ## Text Bindings
 

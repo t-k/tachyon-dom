@@ -4,13 +4,13 @@ import {
   attrString,
   escapeHtml,
   escapeMarker,
-  expressionPattern,
   expressionToScopeAccess,
   jsString,
   itemNameFromKey,
   readExpressionAttribute,
   readPath,
   serializeStaticAttr,
+  textExpressionSegments,
 } from "../utils";
 
 const componentScope = (node: ElementNode, scope: Record<string, unknown>): Record<string, unknown> => {
@@ -44,14 +44,13 @@ const componentScope = (node: ElementNode, scope: Record<string, unknown>): Reco
 
 const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
   let output = "";
-  let cursor = 0;
-  for (const match of node.value.matchAll(expressionPattern)) {
-    const start = match.index ?? 0;
-    output += node.value.slice(cursor, start);
-    output += escapeHtml(readPath(scope, (match[1] as string).trim()));
-    cursor = start + match[0].length;
+  for (const segment of textExpressionSegments(node.value)) {
+    if (segment.kind === "text") {
+      output += segment.value;
+      continue;
+    }
+    output += escapeHtml(readPath(scope, segment.value));
   }
-  output += node.value.slice(cursor);
   return output;
 };
 
@@ -170,19 +169,14 @@ export const renderServerTemplate = (template: CompiledTemplate, scope: Record<s
 
 const renderTextExpression = (node: TextNode, locals: ReadonlySet<string> = new Set()): string => {
   const parts: string[] = [];
-  let cursor = 0;
-  for (const match of node.value.matchAll(expressionPattern)) {
-    const start = match.index ?? 0;
-    const staticText = node.value.slice(cursor, start);
-    if (staticText) {
-      parts.push(jsString(staticText));
+  for (const segment of textExpressionSegments(node.value)) {
+    if (segment.kind === "text") {
+      if (segment.value) {
+        parts.push(jsString(segment.value));
+      }
+      continue;
     }
-    parts.push(`escapeHtml(${expressionToScopeAccess((match[1] as string).trim(), locals)})`);
-    cursor = start + match[0].length;
-  }
-  const trailing = node.value.slice(cursor);
-  if (trailing) {
-    parts.push(jsString(trailing));
+    parts.push(`escapeHtml(${expressionToScopeAccess(segment.value, locals)})`);
   }
   return parts.length > 0 ? parts.join(" + ") : `""`;
 };

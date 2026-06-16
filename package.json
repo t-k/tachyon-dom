@@ -114,6 +114,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json",
+    "bench:compiler": "tsx benchmark/compiler/compare-expression-backends.ts",
     "bench:local": "tsx benchmark/local-compare/run-local-compare.ts",
     "bench:local:full": "tsx benchmark/local-compare/run-local-compare.ts --iterations 9 --warmup 3",
     "bench:local:gate": "tsx benchmark/local-compare/run-local-compare.ts --max-geomean-ratio 1.25 --max-memory-ratio 1.5",
@@ -124,6 +125,9 @@
     "test": "vitest run",
     "lint": "oxlint .",
     "format": "oxfmt --write ."
+  },
+  "dependencies": {
+    "oxc-parser": "^0.136.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.3",

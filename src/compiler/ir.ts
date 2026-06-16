@@ -12,11 +12,11 @@ import type {
 import {
   attrExpression,
   attrString,
-  expressionPattern,
   identifierPattern,
   itemNameFromKey,
   readExpressionAttribute,
   renderableChildren,
+  textExpressionSegments,
 } from "./utils";
 
 const semanticError = (message: string): Result<never, CompilerError> => err({ message, offset: 0 });
@@ -71,11 +71,12 @@ const validateExpression = (expression: string, context: string): Result<void, C
 
 const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError> => {
   if (node.type === "text") {
-    for (const match of node.value.matchAll(expressionPattern)) {
-      const expression = (match[1] as string).trim();
-      const result = validateExpression(expression, "text");
-      if (!result.ok) {
-        return result;
+    for (const segment of textExpressionSegments(node.value)) {
+      if (segment.kind === "expression") {
+        const result = validateExpression(segment.value, "text");
+        if (!result.ok) {
+          return result;
+        }
       }
     }
     return ok(undefined);

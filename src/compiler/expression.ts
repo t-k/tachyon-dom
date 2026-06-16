@@ -1,5 +1,12 @@
+import type { Expression as OxcExpression, ParseResult, ParserOptions } from "oxc-parser";
 import { err, ok, type Result } from "../result";
 import type { CompilerError } from "./types";
+
+export type ExpressionParserBackend = "auto" | "native" | "oxc";
+
+export type ExpressionParseOptions = {
+  backend?: ExpressionParserBackend;
+};
 
 export type ExpressionNode =
   | { type: "identifier"; path: string[] }
@@ -9,7 +16,9 @@ export type ExpressionNode =
   | { type: "unary"; operator: "!" | "-"; argument: ExpressionNode }
   | { type: "binary"; operator: string; left: ExpressionNode; right: ExpressionNode }
   | { type: "conditional"; test: ExpressionNode; consequent: ExpressionNode; alternate: ExpressionNode }
-  | { type: "call"; callee: ExpressionNode; args: ExpressionNode[] };
+  | { type: "call"; callee: ExpressionNode; args: ExpressionNode[] }
+  | { type: "member"; object: ExpressionNode; property: ExpressionNode; computed: boolean; optional: boolean }
+  | { type: "template"; parts: Array<string | ExpressionNode> };
 
 type Token =
   | { type: "identifier"; value: string }
@@ -27,6 +36,8 @@ type Parser = {
 const operators = [
   "===",
   "!==",
+  "??",
+  "?.",
   ">=",
   "<=",
   "&&",
@@ -52,6 +63,7 @@ const operators = [
 ];
 const binaryPrecedence = new Map([
   ["||", 1],
+  ["??", 1],
   ["&&", 2],
   ["===", 3],
   ["!==", 3],
@@ -292,7 +304,7 @@ const parseExpressionInternal = (parser: Parser, minPrecedence: number): Result<
   }
 };
 
-export const parseExpression = (source: string): Result<ExpressionNode, CompilerError> => {
+const parseNativeExpression = (source: string): Result<ExpressionNode, CompilerError> => {
   const tokens = tokenize(source);
   if (!tokens.ok) {
     return tokens;
@@ -306,6 +318,239 @@ export const parseExpression = (source: string): Result<ExpressionNode, Compiler
     return expressionError(`Unexpected expression token: ${peek(parser).value}.`);
   }
   return expression;
+};
+
+const literalPropertyName = (node: ExpressionNode): string | undefined =>
+  node.type === "literal" && typeof node.value === "string" ? node.value : undefined;
+
+const maybeIdentifierPath = (
+  object: ExpressionNode,
+  property: ExpressionNode,
+  computed: boolean,
+  optional: boolean,
+): ExpressionNode => {
+  const propertyName = literalPropertyName(property);
+  if (!computed && !optional && object.type === "identifier" && propertyName) {
+    return { type: "identifier", path: [...object.path, propertyName] };
+  }
+  return { type: "member", object, property, computed, optional };
+};
+
+const oxcError = (message: string): Result<never, CompilerError> => expressionError(message);
+
+type OxcParserModule = {
+  parseSync: (filename: string, sourceText: string, options?: ParserOptions | undefined | null) => ParseResult;
+};
+
+type NodeProcessWithBuiltinModule = {
+  process?: {
+    getBuiltinModule?: (name: string) => unknown;
+  };
+};
+
+type CreateRequireModule = {
+  createRequire?: (filename: string) => (specifier: string) => unknown;
+};
+
+let cachedOxcParser: OxcParserModule | undefined;
+
+const loadOxcParser = (): OxcParserModule | undefined => {
+  if (cachedOxcParser) {
+    return cachedOxcParser;
+  }
+  const moduleApi = (globalThis as NodeProcessWithBuiltinModule).process?.getBuiltinModule?.("module") as
+    | CreateRequireModule
+    | undefined;
+  const require = moduleApi?.createRequire?.(import.meta.url);
+  const loaded = require?.("oxc-parser") as OxcParserModule | undefined;
+  if (loaded?.parseSync) {
+    cachedOxcParser = loaded;
+  }
+  return cachedOxcParser;
+};
+
+const oxcExpressionToNode = (node: OxcExpression): Result<ExpressionNode, CompilerError> => {
+  if (node.type === "Literal") {
+    if (
+      typeof node.value === "string" ||
+      typeof node.value === "number" ||
+      typeof node.value === "boolean" ||
+      node.value === null
+    ) {
+      return ok({ type: "literal", value: node.value });
+    }
+    return oxcError("Unsupported literal expression.");
+  }
+  if (node.type === "Identifier") {
+    return ok({ type: "identifier", path: [node.name] });
+  }
+  if (node.type === "ArrayExpression") {
+    const items: ExpressionNode[] = [];
+    for (const item of node.elements) {
+      if (!item || item.type === "SpreadElement") {
+        return oxcError("Unsupported array expression.");
+      }
+      const parsed = oxcExpressionToNode(item);
+      if (!parsed.ok) {
+        return parsed;
+      }
+      items.push(parsed.value);
+    }
+    return ok({ type: "array", items });
+  }
+  if (node.type === "ObjectExpression") {
+    const entries: Array<{ key: string; value: ExpressionNode }> = [];
+    for (const property of node.properties) {
+      if (property.type !== "Property" || property.kind !== "init" || property.method || property.computed) {
+        return oxcError("Unsupported object property expression.");
+      }
+      const key =
+        property.key.type === "Identifier"
+          ? property.key.name
+          : property.key.type === "Literal" &&
+              (typeof property.key.value === "string" || typeof property.key.value === "number")
+            ? String(property.key.value)
+            : undefined;
+      if (!key) {
+        return oxcError("Unsupported object key expression.");
+      }
+      const value = oxcExpressionToNode(property.value);
+      if (!value.ok) {
+        return value;
+      }
+      entries.push({ key, value: value.value });
+    }
+    return ok({ type: "object", entries });
+  }
+  if (node.type === "UnaryExpression") {
+    if (node.operator !== "!" && node.operator !== "-") {
+      return oxcError(`Unsupported unary operator: ${node.operator}.`);
+    }
+    const argument = oxcExpressionToNode(node.argument);
+    return argument.ok ? ok({ type: "unary", operator: node.operator, argument: argument.value }) : argument;
+  }
+  if (node.type === "BinaryExpression" || node.type === "LogicalExpression") {
+    if (node.left.type === "PrivateIdentifier") {
+      return oxcError("Unsupported private identifier expression.");
+    }
+    const left = oxcExpressionToNode(node.left);
+    if (!left.ok) {
+      return left;
+    }
+    const right = oxcExpressionToNode(node.right);
+    if (!right.ok) {
+      return right;
+    }
+    return ok({ type: "binary", operator: node.operator, left: left.value, right: right.value });
+  }
+  if (node.type === "ConditionalExpression") {
+    const test = oxcExpressionToNode(node.test);
+    const consequent = oxcExpressionToNode(node.consequent);
+    const alternate = oxcExpressionToNode(node.alternate);
+    if (!test.ok) return test;
+    if (!consequent.ok) return consequent;
+    if (!alternate.ok) return alternate;
+    return ok({ type: "conditional", test: test.value, consequent: consequent.value, alternate: alternate.value });
+  }
+  if (node.type === "CallExpression") {
+    const callee = oxcExpressionToNode(node.callee);
+    if (!callee.ok) {
+      return callee;
+    }
+    const args: ExpressionNode[] = [];
+    for (const argument of node.arguments) {
+      if (argument.type === "SpreadElement") {
+        return oxcError("Unsupported spread call argument.");
+      }
+      const parsed = oxcExpressionToNode(argument);
+      if (!parsed.ok) {
+        return parsed;
+      }
+      args.push(parsed.value);
+    }
+    return ok({ type: "call", callee: callee.value, args });
+  }
+  if (node.type === "ChainExpression") {
+    return oxcExpressionToNode(node.expression);
+  }
+  if (node.type === "MemberExpression") {
+    const object = oxcExpressionToNode(node.object);
+    if (!object.ok) {
+      return object;
+    }
+    const property = node.computed
+      ? oxcExpressionToNode(node.property)
+      : node.property.type === "Identifier"
+        ? ok<ExpressionNode>({ type: "literal", value: node.property.name })
+        : oxcError("Unsupported private member expression.");
+    return property.ok ? ok(maybeIdentifierPath(object.value, property.value, node.computed, node.optional)) : property;
+  }
+  if (node.type === "TemplateLiteral") {
+    const parts: Array<string | ExpressionNode> = [];
+    for (const [index, quasi] of node.quasis.entries()) {
+      parts.push(quasi.value.cooked ?? quasi.value.raw);
+      const expression = node.expressions[index];
+      if (!expression) {
+        continue;
+      }
+      const parsed = oxcExpressionToNode(expression);
+      if (!parsed.ok) {
+        return parsed;
+      }
+      parts.push(parsed.value);
+    }
+    return ok({ type: "template", parts });
+  }
+  if (
+    node.type === "ParenthesizedExpression" ||
+    node.type === "TSAsExpression" ||
+    node.type === "TSSatisfiesExpression" ||
+    node.type === "TSNonNullExpression" ||
+    node.type === "TSInstantiationExpression"
+  ) {
+    return oxcExpressionToNode(node.expression);
+  }
+  return oxcError(`Unsupported expression syntax: ${node.type}.`);
+};
+
+const parseOxcExpression = (source: string): Result<ExpressionNode, CompilerError> => {
+  const parser = loadOxcParser();
+  if (!parser) {
+    return expressionError("OXC parser backend is unavailable in this runtime.");
+  }
+  const wrapped = `const __tachyon_expr = (${source});`;
+  try {
+    const result = parser.parseSync("tachyon-expression.ts", wrapped, {
+      astType: "js",
+      lang: "ts",
+      preserveParens: false,
+      sourceType: "module",
+    });
+    const [error] = result.errors;
+    if (error) {
+      return expressionError(error.message);
+    }
+    const declaration = result.program.body[0];
+    const init = declaration?.type === "VariableDeclaration" ? declaration.declarations[0]?.init : undefined;
+    return init ? oxcExpressionToNode(init) : expressionError("Unable to read OXC expression.");
+  } catch (error) {
+    return expressionError(error instanceof Error ? error.message : "Unable to parse expression with OXC.");
+  }
+};
+
+export const parseExpression = (
+  source: string,
+  options: ExpressionParseOptions = {},
+): Result<ExpressionNode, CompilerError> => {
+  const backend = options.backend ?? "auto";
+  if (backend === "oxc") {
+    return parseOxcExpression(source);
+  }
+  const native = parseNativeExpression(source);
+  if (backend === "native" || native.ok) {
+    return native;
+  }
+  return parseOxcExpression(source);
 };
 
 const readPath = (scope: Record<string, unknown>, path: readonly string[]): unknown => {
@@ -348,7 +593,26 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
     }
     return callee(...node.args.map((arg) => evaluateExpressionNode(arg, scope)));
   }
+  if (node.type === "member") {
+    const object = evaluateExpressionNode(node.object, scope);
+    if (object == null) {
+      return undefined;
+    }
+    const property = evaluateExpressionNode(node.property, scope);
+    if (property == null) {
+      return undefined;
+    }
+    return (object as Record<PropertyKey, unknown>)[property as PropertyKey];
+  }
+  if (node.type === "template") {
+    return node.parts
+      .map((part) => (typeof part === "string" ? part : String(evaluateExpressionNode(part, scope))))
+      .join("");
+  }
   const left = evaluateExpressionNode(node.left, scope);
+  if (node.operator === "??") {
+    return left ?? evaluateExpressionNode(node.right, scope);
+  }
   const right = evaluateExpressionNode(node.right, scope);
   if (node.operator === "===") return left === right;
   if (node.operator === "!==") return left !== right;
@@ -378,10 +642,18 @@ export const expressionToJs = (
   source: string,
   locals: ReadonlySet<string> = new Set(),
   scopeName = "scope",
+  options: ExpressionParseOptions = {},
 ): string => {
-  const parsed = parseExpression(source);
+  const parsed = parseExpression(source, options);
   return parsed.ok ? expressionNodeToJs(parsed.value, locals, scopeName) : "undefined";
 };
+
+const memberObjectToJs = (node: ExpressionNode, locals: ReadonlySet<string>, scopeName: string): string => {
+  const expression = expressionNodeToJs(node, locals, scopeName);
+  return node.type === "identifier" || node.type === "member" || node.type === "call" ? expression : `(${expression})`;
+};
+
+const isIdentifierName = (value: string): boolean => /^[A-Za-z_$][\w$]*$/.test(value);
 
 export const expressionNodeToJs = (
   node: ExpressionNode,
@@ -419,6 +691,22 @@ export const expressionNodeToJs = (
       .map((arg) => expressionNodeToJs(arg, locals, scopeName))
       .join(", ")})`;
   }
+  if (node.type === "member") {
+    const object = memberObjectToJs(node.object, locals, scopeName);
+    const propertyName = literalPropertyName(node.property);
+    if (!node.computed && propertyName && isIdentifierName(propertyName)) {
+      return `${object}${node.optional ? "?." : "."}${propertyName}`;
+    }
+    const property = expressionNodeToJs(node.property, locals, scopeName);
+    return `${object}${node.optional ? "?." : ""}[${property}]`;
+  }
+  if (node.type === "template") {
+    return node.parts
+      .map((part) =>
+        typeof part === "string" ? JSON.stringify(part) : `String(${expressionNodeToJs(part, locals, scopeName)})`,
+      )
+      .join(" + ");
+  }
   return `(${expressionNodeToJs(node.left, locals, scopeName)} ${node.operator} ${expressionNodeToJs(
     node.right,
     locals,
@@ -426,7 +714,17 @@ export const expressionNodeToJs = (
   )})`;
 };
 
-export const isAssignableExpression = (source: string): boolean => {
-  const parsed = parseExpression(source);
-  return parsed.ok && parsed.value.type === "identifier";
+const isAssignableNode = (node: ExpressionNode): boolean => {
+  if (node.type === "identifier") {
+    return true;
+  }
+  if (node.type === "member") {
+    return !node.optional && isAssignableNode(node.object);
+  }
+  return false;
+};
+
+export const isAssignableExpression = (source: string, options: ExpressionParseOptions = {}): boolean => {
+  const parsed = parseExpression(source, options);
+  return parsed.ok && isAssignableNode(parsed.value);
 };

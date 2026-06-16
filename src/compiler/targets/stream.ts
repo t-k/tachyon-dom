@@ -2,29 +2,24 @@ import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../t
 import {
   attrExpression,
   attrString,
-  expressionPattern,
   expressionToScopeAccess,
   itemNameFromKey,
   jsString,
   readExpressionAttribute,
+  textExpressionSegments,
 } from "../utils";
 import { renderOpenTagExpression } from "./server";
 
 const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, indent: string): string[] => {
   const statements: string[] = [];
-  let cursor = 0;
-  for (const match of node.value.matchAll(expressionPattern)) {
-    const start = match.index ?? 0;
-    const staticText = node.value.slice(cursor, start);
-    if (staticText) {
-      statements.push(`${indent}yield ${jsString(staticText)};`);
+  for (const segment of textExpressionSegments(node.value)) {
+    if (segment.kind === "text") {
+      if (segment.value) {
+        statements.push(`${indent}yield ${jsString(segment.value)};`);
+      }
+      continue;
     }
-    statements.push(`${indent}yield escapeHtml(${expressionToScopeAccess((match[1] as string).trim(), locals)});`);
-    cursor = start + match[0].length;
-  }
-  const trailing = node.value.slice(cursor);
-  if (trailing) {
-    statements.push(`${indent}yield ${jsString(trailing)};`);
+    statements.push(`${indent}yield escapeHtml(${expressionToScopeAccess(segment.value, locals)});`);
   }
   return statements;
 };
