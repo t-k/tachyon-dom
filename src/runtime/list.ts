@@ -1,5 +1,7 @@
 import { setClassPresence } from "./class";
+import { setAttributeValue, setRef, setStyleValue } from "./attr";
 import { setText, textAt } from "./text";
+import { bindControl, setControlValue } from "./form";
 
 type TextBinding = {
   kind: "text";
@@ -21,7 +23,34 @@ type EventBinding = {
   handler: string;
 };
 
-type Binding = TextBinding | ClassBinding | EventBinding;
+type AttributeBinding = {
+  kind: "attr";
+  path: number[];
+  name: string;
+  expression: string;
+};
+
+type StyleBinding = {
+  kind: "style";
+  path: number[];
+  name: string;
+  expression: string;
+};
+
+type RefBinding = {
+  kind: "ref";
+  path: number[];
+  expression: string;
+};
+
+type ModelBinding = {
+  kind: "model";
+  path: number[];
+  property: "value" | "checked";
+  expression: string;
+};
+
+type Binding = TextBinding | ClassBinding | EventBinding | AttributeBinding | StyleBinding | RefBinding | ModelBinding;
 
 type KeyedListOptions = {
   key: string;
@@ -34,6 +63,7 @@ type RowRecord = {
   key: PropertyKey;
   element: Element;
   scope: Record<string, unknown>;
+  cleanups: Array<() => void>;
 };
 
 type ListState = {
@@ -92,7 +122,7 @@ const cleanupListState = (state: ListState): void => {
     cleanup();
   }
   state.cleanups.length = 0;
-  state.records.forEach((record) => record.element.remove());
+  state.records.forEach(cleanupRecord);
   state.records.clear();
 };
 
@@ -160,6 +190,10 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
 };
 
 const cleanupRecord = (record: RowRecord): void => {
+  for (const cleanup of record.cleanups) {
+    cleanup();
+  }
+  record.cleanups.length = 0;
   record.element.remove();
 };
 
@@ -169,7 +203,46 @@ const applyRowBindings = (row: Element, scope: Record<string, unknown>, options:
       setText(textAt(row, binding.path), readPath(scope, binding.expression));
     } else if (binding.kind === "class") {
       setClassPresence(nodeAt(row, binding.path) as Element, binding.className, readPath(scope, binding.expression));
+    } else if (binding.kind === "attr") {
+      setAttributeValue(nodeAt(row, binding.path) as Element, binding.name, readPath(scope, binding.expression));
+    } else if (binding.kind === "style") {
+      setStyleValue(nodeAt(row, binding.path) as Element, binding.name, readPath(scope, binding.expression));
+    } else if (binding.kind === "ref") {
+      setRef(scope, binding.expression, nodeAt(row, binding.path) as Element);
+    } else if (binding.kind === "model") {
+      setControlValue(
+        nodeAt(row, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+        binding.property,
+        readPath(scope, binding.expression),
+      );
     }
+  }
+};
+
+const bindRowControls = (record: RowRecord, options: KeyedListOptions): void => {
+  for (const binding of options.bindings) {
+    if (binding.kind !== "model") {
+      continue;
+    }
+    const element = nodeAt(record.element, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+    record.cleanups.push(
+      bindControl(
+        element,
+        binding.property,
+        () => readPath(record.scope, binding.expression),
+        (value) => {
+          const parts = binding.expression.split(".");
+          const property = parts.pop();
+          let current: unknown = record.scope;
+          for (const part of parts) {
+            current = current && typeof current === "object" ? (current as Record<string, unknown>)[part] : undefined;
+          }
+          if (property && current && typeof current === "object") {
+            (current as Record<string, unknown>)[property] = value;
+          }
+        },
+      ),
+    );
   }
 };
 
@@ -197,9 +270,11 @@ const createRecord = (
     key,
     element: row,
     scope,
+    cleanups: [],
   };
   state.recordsByElement.set(row, record);
   applyRowBindings(record.element, record.scope, options);
+  bindRowControls(record, options);
   return record;
 };
 

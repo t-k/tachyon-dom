@@ -1,4 +1,5 @@
 import type { Attribute, ElementNode, TemplateNode } from "./types";
+import { evaluateExpression, expressionToJs } from "./expression";
 
 export const expressionPattern = /\{([^{}]+)\}/g;
 export const identifierPattern = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
@@ -50,18 +51,7 @@ export const escapeMarker = (value: unknown): string =>
     .replaceAll(">", "&gt;");
 
 export const readPath = (scope: Record<string, unknown>, expression: string): unknown => {
-  if (!identifierPattern.test(expression)) {
-    return undefined;
-  }
-  const parts = expression.split(".");
-  let current: unknown = scope;
-  for (const part of parts) {
-    if (current == null || typeof current !== "object") {
-      return undefined;
-    }
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
+  return evaluateExpression(expression, scope);
 };
 
 export const serializeStaticAttr = (attr: Attribute): string => {
@@ -71,15 +61,12 @@ export const serializeStaticAttr = (attr: Attribute): string => {
   return ` ${attr.name}="${attr.value}"`;
 };
 
-export const expressionToScopeAccess = (expression: string, locals: ReadonlySet<string> = new Set()): string => {
-  if (!identifierPattern.test(expression)) {
-    return "undefined";
-  }
-  const [head] = expression.split(".");
-  if (head && locals.has(head)) {
-    return expression;
-  }
-  return `scope.${expression}`;
+export const expressionToScopeAccess = (
+  expression: string,
+  locals: ReadonlySet<string> = new Set(),
+  scopeName = "scope",
+): string => {
+  return expressionToJs(expression, locals, scopeName);
 };
 
 export const jsString = (value: string): string => JSON.stringify(value);

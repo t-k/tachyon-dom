@@ -42,6 +42,33 @@ export type EventBinding = {
   handler: string;
 };
 
+export type AttributeBinding = {
+  kind: "attr";
+  path: number[];
+  name: string;
+  expression: string;
+};
+
+export type StyleBinding = {
+  kind: "style";
+  path: number[];
+  name: string;
+  expression: string;
+};
+
+export type RefBinding = {
+  kind: "ref";
+  path: number[];
+  expression: string;
+};
+
+export type ModelBinding = {
+  kind: "model";
+  path: number[];
+  property: "value" | "checked";
+  expression: string;
+};
+
 export type ListBinding = {
   kind: "list";
   path: number[];
@@ -57,10 +84,21 @@ export type ConditionalBinding = {
   path: number[];
   test: string;
   templateHtml: string;
-  bindings: Array<TextBinding | ClassBinding | EventBinding>;
+  bindings: Array<
+    TextBinding | ClassBinding | EventBinding | AttributeBinding | StyleBinding | RefBinding | ModelBinding
+  >;
 };
 
-export type ClientBinding = TextBinding | ClassBinding | EventBinding | ListBinding | ConditionalBinding;
+export type ClientBinding =
+  | TextBinding
+  | ClassBinding
+  | EventBinding
+  | AttributeBinding
+  | StyleBinding
+  | RefBinding
+  | ModelBinding
+  | ListBinding
+  | ConditionalBinding;
 
 export type StoreDefinition = {
   name: string;

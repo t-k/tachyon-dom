@@ -95,9 +95,23 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
 
   const attrs: string[] = [];
   const classes: string[] = [];
+  const styles: string[] = [];
   const hydrateId = attrExpression(node, "hydrate:id");
   for (const attr of node.attrs) {
-    if (attr.name.startsWith("on:") || attr.name === "hydrate:id") {
+    if (
+      attr.name.startsWith("on:") ||
+      attr.name.startsWith("bind:") ||
+      attr.name === "ref" ||
+      attr.name === "hydrate:id"
+    ) {
+      continue;
+    }
+    if (attr.name.startsWith("style:")) {
+      const expression = readExpressionAttribute(attr.value);
+      const value = expression ? readPath(scope, expression) : undefined;
+      if (value != null && value !== false) {
+        styles.push(`${attr.name.slice(6)}:${String(value)}`);
+      }
       continue;
     }
     if (attr.name.startsWith("class:")) {
@@ -123,6 +137,9 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
   }
   if (classes.length > 0) {
     attrs.unshift(` class="${escapeHtml(classes.join(" "))}"`);
+  }
+  if (styles.length > 0) {
+    attrs.push(` style="${escapeHtml(styles.join(";"))}"`);
   }
   const children = node.children.map((child) => renderNode(child, scope)).join("");
   const html = `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
@@ -166,9 +183,25 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
   const parts: string[] = [jsString(`<${node.tagName}`)];
   const staticClasses: string[] = [];
   const dynamicClasses: string[] = [];
+  const dynamicStyles: string[] = [];
 
   for (const attr of node.attrs) {
-    if (attr.name.startsWith("on:") || attr.name === "hydrate:id") {
+    if (
+      attr.name.startsWith("on:") ||
+      attr.name.startsWith("bind:") ||
+      attr.name === "ref" ||
+      attr.name === "hydrate:id"
+    ) {
+      continue;
+    }
+    if (attr.name.startsWith("style:")) {
+      const expression = readExpressionAttribute(attr.value);
+      if (expression) {
+        const value = expressionToScopeAccess(expression, locals);
+        dynamicStyles.push(
+          `(${value} == null || ${value} === false ? "" : ${jsString(`${attr.name.slice(6)}:`)} + escapeHtml(${value}) + ${jsString(";")})`,
+        );
+      }
       continue;
     }
     if (attr.name.startsWith("class:")) {
@@ -200,6 +233,12 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
       dynamicClasses.length > 0 ? ` + ${dynamicClasses.join(" + ")}` : ""
     }`;
     parts.push(`(${classExpression} ? ${jsString(` class="`)} + (${classExpression}).trim() + ${jsString(`"`)} : "")`);
+  }
+  if (dynamicStyles.length > 0) {
+    const styleExpression = dynamicStyles.join(" + ");
+    parts.push(
+      `(${styleExpression} ? ${jsString(` style="`)} + (${styleExpression}).replace(/;$/, "") + ${jsString(`"`)} : "")`,
+    );
   }
 
   parts.push(jsString(">"));

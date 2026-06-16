@@ -23,6 +23,7 @@ import {
   renderableChildren,
   serializeStaticAttr,
 } from "../utils";
+import { isAssignableExpression } from "../expression";
 
 const lowerTextNode = (node: TextNode, path: number[], context: LoweringContext): string => {
   let output = "";
@@ -69,8 +70,14 @@ const lowerIf = (node: ElementNode, path: number[], context: LoweringContext): s
     test: attrExpression(node, "test") ?? "false",
     templateHtml,
     bindings: childContext.bindings.filter(
-      (binding): binding is TextBinding | ClassBinding | EventBinding =>
-        binding.kind === "text" || binding.kind === "class" || binding.kind === "event",
+      (binding): binding is ConditionalBinding["bindings"][number] =>
+        binding.kind === "text" ||
+        binding.kind === "class" ||
+        binding.kind === "event" ||
+        binding.kind === "attr" ||
+        binding.kind === "style" ||
+        binding.kind === "ref" ||
+        binding.kind === "model",
     ),
   });
   return "<!---->";
@@ -133,6 +140,28 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
       }
       continue;
     }
+    if (attr.name.startsWith("bind:")) {
+      const expression = readExpressionAttribute(attr.value);
+      if (expression && isAssignableExpression(expression)) {
+        const property = attr.name.slice(5) === "checked" ? "checked" : "value";
+        context.bindings.push({ kind: "model", path: [...path], property, expression });
+      }
+      continue;
+    }
+    if (attr.name === "ref") {
+      const expression = readExpressionAttribute(attr.value);
+      if (expression) {
+        context.bindings.push({ kind: "ref", path: [...path], expression });
+      }
+      continue;
+    }
+    if (attr.name.startsWith("style:")) {
+      const expression = readExpressionAttribute(attr.value);
+      if (expression) {
+        context.bindings.push({ kind: "style", path: [...path], name: attr.name.slice(6), expression });
+      }
+      continue;
+    }
     if (attr.name.startsWith("class:")) {
       const expression = readExpressionAttribute(attr.value);
       if (expression) {
@@ -145,6 +174,7 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
     }
     const expression = readExpressionAttribute(attr.value);
     if (expression) {
+      context.bindings.push({ kind: "attr", path: [...path], name: attr.name, expression });
       continue;
     }
     if (attr.name === "class" && attr.value !== true) {
@@ -203,7 +233,7 @@ const elementExpression = (path: readonly number[]): string =>
   path.length === 0 ? "root" : `elementAt(root, ${JSON.stringify(path)})`;
 
 const runtimeValueExpression = (expression: string, reactive: boolean, sourceName: string): string => {
-  const value = expressionToScopeAccess(expression).replace(/^scope\./, `${sourceName}.`);
+  const value = expressionToScopeAccess(expression, new Set(), sourceName);
   return reactive ? `read(${value})` : value;
 };
 
@@ -214,6 +244,10 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const sourceName = scopeName(needsStore);
   const needsText = bindings.some((binding) => binding.kind === "text");
   const needsClass = bindings.some((binding) => binding.kind === "class");
+  const needsAttr = bindings.some(
+    (binding) => binding.kind === "attr" || binding.kind === "style" || binding.kind === "ref",
+  );
+  const needsModel = bindings.some((binding) => binding.kind === "model");
   const needsEvent = bindings.some((binding) => binding.kind === "event");
   const needsList = bindings.some((binding) => binding.kind === "list");
   const needsConditional = bindings.some((binding) => binding.kind === "if");
@@ -222,8 +256,18 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (needsText) {
     lines.push(`import { setText, textAt } from "tachyon-dom/runtime/text";`);
   }
-  if (needsClass) {
-    lines.push(`import { elementAt, setClassPresence } from "tachyon-dom/runtime/class";`);
+  if (needsClass || needsAttr || needsModel) {
+    lines.push(
+      needsClass
+        ? `import { elementAt, setClassPresence } from "tachyon-dom/runtime/class";`
+        : `import { elementAt } from "tachyon-dom/runtime/class";`,
+    );
+  }
+  if (needsAttr) {
+    lines.push(`import { setAttributeValue, setRef, setStyleValue } from "tachyon-dom/runtime/attr";`);
+  }
+  if (needsModel) {
+    lines.push(`import { bindControl, setControlValue } from "tachyon-dom/runtime/form";`);
   }
   if (needsEvent) {
     lines.push(`import { delegate } from "tachyon-dom/runtime/event";`);
@@ -249,7 +293,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       .join(", ");
     lines.push(`  const state = createStore({ ...scope, ${fields} });`);
   }
-  if (reactive || needsEvent) {
+  if (reactive || needsEvent || needsModel) {
     lines.push(`  const cleanups = [];`);
   }
   for (const binding of bindings) {
@@ -260,15 +304,34 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       const statement = `setClassPresence(${elementExpression(binding.path)}, ${JSON.stringify(binding.className)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
       lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
     } else if (binding.kind === "event") {
-      const statement = `delegate(root, ${JSON.stringify(binding.eventName)}, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.handler).replace(/^scope\./, `${scopeName(needsStore)}.`)})`;
+      const statement = `delegate(root, ${JSON.stringify(binding.eventName)}, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.handler, new Set(), scopeName(needsStore))})`;
       lines.push(`  cleanups.push(${statement});`);
+    } else if (binding.kind === "attr") {
+      const statement = `setAttributeValue(${elementExpression(binding.path)}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
+      lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
+    } else if (binding.kind === "style") {
+      const statement = `setStyleValue(${elementExpression(binding.path)}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
+      lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
+    } else if (binding.kind === "ref") {
+      lines.push(`  setRef(${sourceName}, ${JSON.stringify(binding.expression)}, ${elementExpression(binding.path)});`);
+    } else if (binding.kind === "model") {
+      const target = elementExpression(binding.path);
+      const value = runtimeValueExpression(binding.expression, false, sourceName);
+      lines.push(
+        `  cleanups.push(bindControl(${target}, ${JSON.stringify(binding.property)}, () => ${value}, (value) => { ${expressionToScopeAccess(binding.expression, new Set(), sourceName)} = value; }));`,
+      );
+      if (reactive) {
+        lines.push(
+          `  cleanups.push(effect(() => setControlValue(${target}, ${JSON.stringify(binding.property)}, ${runtimeValueExpression(binding.expression, true, sourceName)})));`,
+        );
+      }
     } else if (binding.kind === "list") {
       lines.push(emitListBinding(binding, reactive, sourceName));
     } else {
       lines.push(emitConditionalBinding(binding, reactive, sourceName));
     }
   }
-  if (reactive || needsEvent) {
+  if (reactive || needsEvent || needsModel) {
     lines.push(`  return () => {`);
     lines.push(`    for (const cleanup of cleanups) cleanup();`);
     lines.push(`  };`);

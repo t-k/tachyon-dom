@@ -1,4 +1,5 @@
 import { err, ok, type Result } from "../result";
+import { isAssignableExpression, parseExpression } from "./expression";
 import type {
   CompilerError,
   ComponentProp,
@@ -61,7 +62,8 @@ const componentStores = (node: ElementNode): StoreDefinition[] => {
 };
 
 const validateExpression = (expression: string, context: string): Result<void, CompilerError> => {
-  if (!identifierPattern.test(expression)) {
+  const parsed = parseExpression(expression);
+  if (!parsed.ok) {
     return semanticError(`Invalid ${context} expression: ${expression}.`);
   }
   return ok(undefined);
@@ -131,6 +133,14 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     }
     if (!identifierPattern.test(thenName)) {
       return semanticError(`Invalid await then binding: ${thenName}.`);
+    }
+  }
+  for (const attr of node.attrs) {
+    if (attr.name.startsWith("bind:")) {
+      const expression = readExpressionAttribute(attr.value);
+      if (!expression || !isAssignableExpression(expression)) {
+        return semanticError(`${attr.name} requires an assignable expression.`);
+      }
     }
   }
   return ok(undefined);

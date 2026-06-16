@@ -1,5 +1,7 @@
 import { elementAt, setClassPresence } from "./class";
+import { setAttributeValue, setRef, setStyleValue } from "./attr";
 import { delegate } from "./event";
+import { bindControl, setControlValue } from "./form";
 import { setText, textAt } from "./text";
 
 type TextBinding = {
@@ -22,7 +24,41 @@ type EventBinding = {
   handler: string;
 };
 
-type ConditionalBinding = TextBinding | ClassBinding | EventBinding;
+type AttributeBinding = {
+  kind: "attr";
+  path: number[];
+  name: string;
+  expression: string;
+};
+
+type StyleBinding = {
+  kind: "style";
+  path: number[];
+  name: string;
+  expression: string;
+};
+
+type RefBinding = {
+  kind: "ref";
+  path: number[];
+  expression: string;
+};
+
+type ModelBinding = {
+  kind: "model";
+  path: number[];
+  property: "value" | "checked";
+  expression: string;
+};
+
+type ConditionalBinding =
+  | TextBinding
+  | ClassBinding
+  | EventBinding
+  | AttributeBinding
+  | StyleBinding
+  | RefBinding
+  | ModelBinding;
 
 export type ConditionalOptions = {
   templateHtml: string;
@@ -55,6 +91,18 @@ const readPath = (scope: Record<string, unknown>, expression: string): unknown =
     current = (current as Record<string, unknown>)[part];
   }
   return current;
+};
+
+const writePath = (scope: Record<string, unknown>, expression: string, value: unknown): void => {
+  const parts = expression.split(".");
+  const property = parts.pop();
+  let current: unknown = scope;
+  for (const part of parts) {
+    current = current && typeof current === "object" ? (current as Record<string, unknown>)[part] : undefined;
+  }
+  if (property && current && typeof current === "object") {
+    (current as Record<string, unknown>)[property] = value;
+  }
 };
 
 const signatureFor = (options: ConditionalOptions): string => JSON.stringify(options);
@@ -91,10 +139,40 @@ const bindNodes = (
       setText(textAt(firstElement, binding.path), readPath(scope, binding.expression));
     } else if (binding.kind === "class") {
       setClassPresence(elementAt(firstElement, binding.path), binding.className, readPath(scope, binding.expression));
-    } else if (state.cleanups.length === 0) {
-      const handler = readPath(scope, binding.handler);
-      if (typeof handler === "function") {
-        state.cleanups.push(delegate(firstElement, binding.eventName, binding.path, handler as EventListener));
+    } else if (binding.kind === "attr") {
+      setAttributeValue(elementAt(firstElement, binding.path), binding.name, readPath(scope, binding.expression));
+    } else if (binding.kind === "style") {
+      setStyleValue(elementAt(firstElement, binding.path), binding.name, readPath(scope, binding.expression));
+    } else if (binding.kind === "ref") {
+      setRef(scope, binding.expression, elementAt(firstElement, binding.path));
+    } else if (binding.kind === "model") {
+      setControlValue(
+        elementAt(firstElement, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+        binding.property,
+        readPath(scope, binding.expression),
+      );
+    }
+  }
+  if (state.cleanups.length === 0) {
+    for (const binding of options.bindings) {
+      if (binding.kind === "event") {
+        const handler = readPath(scope, binding.handler);
+        if (typeof handler === "function") {
+          state.cleanups.push(delegate(firstElement, binding.eventName, binding.path, handler as EventListener));
+        }
+      } else if (binding.kind === "model") {
+        const element = elementAt(firstElement, binding.path) as
+          | HTMLInputElement
+          | HTMLSelectElement
+          | HTMLTextAreaElement;
+        state.cleanups.push(
+          bindControl(
+            element,
+            binding.property,
+            () => readPath(scope, binding.expression),
+            (value) => writePath(scope, binding.expression, value),
+          ),
+        );
       }
     }
   }

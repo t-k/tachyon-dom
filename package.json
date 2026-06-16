@@ -31,6 +31,14 @@
       "types": "./dist/runtime/conditional.d.ts",
       "import": "./dist/runtime/conditional.js"
     },
+    "./runtime/attr": {
+      "types": "./dist/runtime/attr.d.ts",
+      "import": "./dist/runtime/attr.js"
+    },
+    "./runtime/form": {
+      "types": "./dist/runtime/form.d.ts",
+      "import": "./dist/runtime/form.js"
+    },
     "./runtime/hydrate": {
       "types": "./dist/runtime/hydrate.d.ts",
       "import": "./dist/runtime/hydrate.js"

@@ -1,0 +1,48 @@
+export const setAttributeValue = (element: Element, name: string, value: unknown): void => {
+  if (value == null || value === false) {
+    element.removeAttribute(name);
+    if (name in element) {
+      try {
+        (element as unknown as Record<string, unknown>)[name] = false;
+      } catch {
+        // Some readonly DOM properties throw on assignment.
+      }
+    }
+    return;
+  }
+  if (value === true) {
+    element.setAttribute(name, "");
+  } else {
+    element.setAttribute(name, String(value));
+  }
+  if (name in element) {
+    try {
+      (element as unknown as Record<string, unknown>)[name] = value;
+    } catch {
+      // Some readonly DOM properties throw on assignment.
+    }
+  }
+};
+
+export const setStyleValue = (element: Element, name: string, value: unknown): void => {
+  if (!(element instanceof HTMLElement || element instanceof SVGElement)) {
+    return;
+  }
+  element.style.setProperty(name, value == null || value === false ? "" : String(value));
+};
+
+export const setRef = (scope: Record<string, unknown>, expression: string, element: Element): void => {
+  const parts = expression.split(".");
+  let current: Record<string, unknown> = scope;
+  for (const part of parts.slice(0, -1)) {
+    const next = current[part];
+    if (next == null || typeof next !== "object") {
+      return;
+    }
+    current = next as Record<string, unknown>;
+  }
+  const last = parts.at(-1);
+  if (last) {
+    current[last] = element;
+  }
+};

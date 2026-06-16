@@ -60,9 +60,46 @@ const readQuotedValue = (parser: Parser): Result<string, CompilerError> => {
   return ok(value);
 };
 
+const readBracedValue = (parser: Parser): Result<string, CompilerError> => {
+  let depth = 0;
+  let quote: string | undefined;
+  const start = parser.offset;
+  while (parser.offset < parser.source.length) {
+    const char = parser.source[parser.offset] as string;
+    const previous = parser.source[parser.offset - 1];
+    if (quote) {
+      if (char === quote && previous !== "\\") {
+        quote = undefined;
+      }
+      parser.offset++;
+      continue;
+    }
+    if (char === `"` || char === `'`) {
+      quote = char;
+      parser.offset++;
+      continue;
+    }
+    if (char === "{") {
+      depth++;
+    } else if (char === "}") {
+      depth--;
+      parser.offset++;
+      if (depth === 0) {
+        return ok(parser.source.slice(start, parser.offset));
+      }
+      continue;
+    }
+    parser.offset++;
+  }
+  return parserError(parser, "Unclosed braced attribute value.");
+};
+
 const readAttributeValue = (parser: Parser): Result<string, CompilerError> => {
   if (peek(parser) === `"` || peek(parser) === `'`) {
     return readQuotedValue(parser);
+  }
+  if (peek(parser) === "{") {
+    return readBracedValue(parser);
   }
   return ok(readWhile(parser, (char) => !isWhitespace(char) && char !== ">" && char !== "/"));
 };

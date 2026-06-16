@@ -53,6 +53,62 @@ describe("HTML-first compiler", () => {
     ).toBe(`<button class="btn danger" title="&lt;Save &amp; close&gt;">&lt;Save &amp; close&gt;</button>`);
   });
 
+  it("accepts expression syntax in text and braced attributes", () => {
+    const result = compileTemplate(
+      `<section data-count={count + 1} title={format(label)}><p>{selected ? label : "none"}</p></section>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.bindings).toEqual([
+      { kind: "attr", path: [], name: "data-count", expression: "count + 1" },
+      { kind: "attr", path: [], name: "title", expression: "format(label)" },
+      { kind: "text", path: [0, 0], expression: `selected ? label : "none"` },
+    ]);
+    expect(
+      renderServerTemplate(result.value, {
+        count: 2,
+        label: "Ready",
+        selected: false,
+        format: (value: string) => `Status: ${value}`,
+      }),
+    ).toBe(`<section data-count="3" title="Status: Ready"><p>none</p></section>`);
+  });
+
+  it("extracts attr, style, ref, and form model bindings from client markup", () => {
+    const result = compileTemplate(
+      `<section data-count={count + 1} style:width={size + "px"} ref={refs.panel}><input bind:value={user.name}></input><label><input bind:checked={user.active}></input>{user.name}</label></section>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.templateHtml).toBe(`<section><input></input><label><input></input> </label></section>`);
+    expect(result.value.client.bindings).toEqual([
+      { kind: "attr", path: [], name: "data-count", expression: "count + 1" },
+      { kind: "style", path: [], name: "width", expression: `size + "px"` },
+      { kind: "ref", path: [], expression: "refs.panel" },
+      { kind: "model", path: [0], property: "value", expression: "user.name" },
+      { kind: "model", path: [1, 0], property: "checked", expression: "user.active" },
+      { kind: "text", path: [1, 1], expression: "user.name" },
+    ]);
+
+    const refs: { panel?: Element } = {};
+    expect(renderServerTemplate(result.value, { count: 2, size: 10, user: { name: "Ada", active: true }, refs })).toBe(
+      `<section data-count="3" style="width:10px"><input></input><label><input></input>Ada</label></section>`,
+    );
+
+    const code = generateClientModule(result.value);
+    expect(code).toContain(`from "tachyon-dom/runtime/attr"`);
+    expect(code).toContain(`from "tachyon-dom/runtime/form"`);
+    expect(code).toContain(`setAttributeValue(root, "data-count", (scope.count + 1));`);
+    expect(code).toContain(`setStyleValue(root, "width", (scope.size + "px"));`);
+    expect(code).toContain(`setRef(scope, "refs.panel", root);`);
+    expect(code).toContain(`bindControl(elementAt(root, [0]), "value"`);
+    expect(code).toContain(`bindControl(elementAt(root, [1,0]), "checked"`);
+  });
+
   it("generates modular client code that imports only needed runtime helpers", () => {
     const result = compileTemplate(`<button class:danger={selected} on:click={select}>{label}</button>`);
     if (!result.ok) {
@@ -296,7 +352,7 @@ describe("HTML-first compiler", () => {
         `<main><section hydrate:id={islandId}></section><section hydrate:id={islandId}></section></main>`,
         "Duplicate hydrate boundary id expression: islandId.",
       ],
-      [`<div>{count + 1}</div>`, "Invalid text expression: count + 1."],
+      [`<input bind:value={count + 1}></input>`, "bind:value requires an assignable expression."],
       [
         `<component name="Panel"><h1>One</h1><p>Two</p></component>`,
         "<component> requires exactly one renderable root child.",
