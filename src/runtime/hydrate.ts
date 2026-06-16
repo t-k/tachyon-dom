@@ -110,8 +110,10 @@ export const createHydrationBoundary = (
   });
 };
 
-export const serializeHydrationState = (id: string, state: unknown): string =>
-  `<script type="application/json" data-tachyon-state="${escapeAttribute(id)}">${escapeScriptJson(JSON.stringify(state))}</script>`;
+export const serializeHydrationState = (id: string, state: unknown, options: { nonce?: string } = {}): string => {
+  const nonce = options.nonce ? ` nonce="${escapeAttribute(options.nonce)}"` : "";
+  return `<script type="application/json" data-tachyon-state="${escapeAttribute(id)}"${nonce}>${escapeScriptJson(JSON.stringify(state))}</script>`;
+};
 
 export const readHydrationState = <T>(root: ParentNode, id: string): Result<T, HydrationBoundaryError> => {
   const script = Array.from(root.querySelectorAll(`script[type="application/json"][data-tachyon-state]`)).find(

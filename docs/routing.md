@@ -59,6 +59,19 @@ Actions run for non-GET/HEAD requests before loaders. Loaders run from parent to
 
 If an action or loader returns one of these responses, route rendering short-circuits.
 
+HTML responses use explicit trusted HTML helpers:
+
+- `escapeToHtml(value)` escapes text and returns `TrustedHtml`.
+- `unsafeHtml(markup)` marks raw HTML as trusted and should only be used for framework-generated or otherwise trusted markup.
+
+## CSP Nonces
+
+Pass `cspNonce` to `renderRoute()` to propagate a nonce to route head scripts and route hydration state scripts:
+
+```ts
+await renderRoute(routes, request, { cspNonce: nonce });
+```
+
 ## Security Options
 
 `renderRoute()` supports:
@@ -67,6 +80,30 @@ If an action or loader returns one of these responses, route rendering short-cir
 - `maxActionBodyBytes`
 
 `createSecurityHeaders()` returns default defense-in-depth headers including `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `COOP`, optional HSTS, and optional nonce-based CSP. Use `applySecurityHeaders(response, headers)` to merge them onto a response.
+
+## Server Adapters
+
+`tachyon-dom/adapters` provides:
+
+- `createNodeHandler({ routes })`
+- `createWorkersHandler({ routes })`
+
+Both adapters can apply `securityHeaders` and can use `streaming: true` to route through `renderRouteStream()`.
+
+## Streaming Finalization
+
+`renderRouteStream()` returns fallback chunks immediately and exposes a `final` promise for finalized `headHtml`, `resourceHints`, `stateScript`, headers, and status. Use this when an outer server shell needs to flush route fallback early but still collect final metadata.
+
+## Type Generation
+
+`generateRouteTypes(manifest)` emits a TypeScript declaration shape backed by `ParamsForPath`.
+
+## Testing
+
+`tachyon-dom/testing` provides:
+
+- `renderRouteForTest(routes, path)`
+- `assertRouteParity(routes, cases)`
 
 ## Vite
 

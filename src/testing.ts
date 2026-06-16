@@ -11,3 +11,23 @@ export const renderRouteForTest = async (
   }
   return result.value;
 };
+
+export type RouteParityCase = {
+  path: string;
+  clientHtml: string;
+};
+
+export const assertRouteParity = async (
+  routes: readonly RouteDefinition[],
+  cases: readonly RouteParityCase[],
+  options: RouteRenderOptions = {},
+): Promise<void> => {
+  for (const testCase of cases) {
+    const rendered = await renderRouteForTest(routes, testCase.path, options);
+    if (rendered.html !== testCase.clientHtml) {
+      throw new Error(
+        `Route parity mismatch for ${testCase.path}: expected ${rendered.html}, received ${testCase.clientHtml}`,
+      );
+    }
+  }
+};

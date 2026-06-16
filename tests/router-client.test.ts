@@ -134,4 +134,46 @@ describe("client router", () => {
     expect(root.innerHTML).toBe(`<h1>Missing /missing</h1>`);
     router.dispose();
   });
+
+  it("caches loaders, prefetches, invalidates, and announces navigation", async () => {
+    document.body.innerHTML = `<main id="app"></main><div id="live" aria-live="polite"></div>`;
+    const root = document.querySelector("#app");
+    const live = document.querySelector("#live");
+    if (!(root instanceof HTMLElement) || !(live instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    let loads = 0;
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => `<a href="/cached" data-prefetch="hover">Cached</a>` },
+        {
+          path: "/cached",
+          load: () => ({ count: ++loads }),
+          render: ({ data }) => `<h1>${(data as { count: number }).count}</h1>`,
+        },
+      ],
+      cache: true,
+      liveRegion: live,
+      title: ({ url }) => `Page ${url.pathname}`,
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    await router.prefetch("/cached");
+    await router.navigate("/cached");
+    await router.navigate("/");
+    await router.navigate("/cached");
+
+    expect(loads).toBe(1);
+    expect(root.innerHTML).toBe(`<h1>1</h1>`);
+    expect(document.title).toBe("Page /cached");
+    expect(live.textContent).toBe("Navigated to /cached");
+
+    router.invalidate("/cached");
+    await router.navigate("/cached", { replace: true });
+    expect(loads).toBe(2);
+    router.dispose();
+  });
 });

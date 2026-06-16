@@ -24,11 +24,16 @@ export type ClientRouterOptions = {
   error?: (context: { url: URL; error: unknown }) => string | Node | readonly Node[] | DocumentFragment;
   scrollTo?: (x: number, y: number) => void;
   focusSelector?: string;
+  cache?: boolean;
+  liveRegion?: Element;
+  title?: (context: { url: URL; data: unknown }) => string;
 };
 
 export type ClientRouter = {
   start: () => Promise<void>;
   navigate: (href: string, options?: { replace?: boolean }) => Promise<void>;
+  prefetch: (href: string) => Promise<void>;
+  invalidate: (href?: string) => void;
   settled: () => Promise<void>;
   dispose: () => void;
 };
@@ -127,6 +132,8 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   const focusSelector = options.focusSelector ?? "[autofocus],h1,[data-route-focus],main";
   let controller: AbortController | undefined;
   let currentNavigation: Promise<void> = Promise.resolve();
+  const cache = new Map<string, unknown>();
+  const cacheKey = (url: URL): string => `${url.pathname}${url.search}`;
 
   const renderNotFound = (url: URL): void => {
     renderInto(options.root, options.notFound ? options.notFound({ url }) : `<h1>Not Found</h1>`);
@@ -134,6 +141,37 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
 
   const renderError = (url: URL, error: unknown): void => {
     renderInto(options.root, options.error ? options.error({ url, error }) : `<h1>Navigation Error</h1>`);
+  };
+
+  const loadData = async (url: URL, match: ClientMatch, signal: AbortSignal): Promise<unknown> => {
+    const key = cacheKey(url);
+    if (options.cache && cache.has(key)) {
+      return cache.get(key);
+    }
+    const data = match.route.load ? await match.route.load({ url, params: match.params, signal }) : undefined;
+    if (options.cache && !signal.aborted) {
+      cache.set(key, data);
+    }
+    return data;
+  };
+
+  const updateA11y = (url: URL, data: unknown): void => {
+    if (options.title) {
+      document.title = options.title({ url, data });
+    }
+    if (options.liveRegion) {
+      options.liveRegion.textContent = `Navigated to ${url.pathname}`;
+    }
+  };
+
+  const prefetch = async (href: string): Promise<void> => {
+    const url = toUrl(href, location.href || baseUrl);
+    const match = matchClientRoute(options.routes, url.pathname);
+    if (!match) {
+      return;
+    }
+    const prefetchController = new AbortController();
+    await loadData(url, match, prefetchController.signal);
   };
 
   const navigate = async (href: string, navigateOptions: { replace?: boolean } = {}): Promise<void> => {
@@ -156,9 +194,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
       }
       let data: unknown;
       try {
-        data = match.route.load
-          ? await match.route.load({ url, params: match.params, signal: nextController.signal })
-          : undefined;
+        data = await loadData(url, match, nextController.signal);
         if (nextController.signal.aborted) {
           return;
         }
@@ -174,6 +210,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         renderInto(options.root, rendered);
         scrollTo(0, 0);
         focusRouteContent(options.root, focusSelector);
+        updateA11y(url, data);
       } catch (error) {
         if (!nextController.signal.aborted) {
           renderError(url, error);
@@ -204,6 +241,18 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     void navigate(url.pathname + url.search + url.hash);
   };
 
+  const onPointerOver = (event: Event): void => {
+    const target = event.target instanceof Element ? event.target : undefined;
+    const link = target?.closest("a[href][data-prefetch]");
+    if (!(link instanceof HTMLAnchorElement) || !options.root.contains(link)) {
+      return;
+    }
+    const url = new URL(link.href);
+    if (url.origin === location.origin) {
+      void prefetch(url.pathname + url.search + url.hash);
+    }
+  };
+
   const onPopState = (): void => {
     void navigate(location.pathname + location.search + location.hash, { replace: true });
   };
@@ -211,14 +260,24 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   return {
     start: async () => {
       options.root.addEventListener("click", onClick);
+      options.root.addEventListener("pointerover", onPointerOver);
       addEventListener("popstate", onPopState);
       await navigate(location.pathname + location.search + location.hash, { replace: true });
     },
     navigate,
+    prefetch,
+    invalidate: (href?: string) => {
+      if (!href) {
+        cache.clear();
+        return;
+      }
+      cache.delete(cacheKey(toUrl(href, location.href || baseUrl)));
+    },
     settled: () => currentNavigation,
     dispose: () => {
       controller?.abort();
       options.root.removeEventListener("click", onClick);
+      options.root.removeEventListener("pointerover", onPointerOver);
       removeEventListener("popstate", onPopState);
     },
   };

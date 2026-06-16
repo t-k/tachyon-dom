@@ -31,6 +31,11 @@ export type RouteHeadDescriptor = {
   scripts?: Array<Record<string, string>>;
 };
 
+export type TrustedHtml = {
+  __tachyonTrustedHtml: true;
+  value: string;
+};
+
 export type RouteContext<Data = unknown, ActionResult = unknown> = {
   request: Request;
   url: URL;
@@ -96,6 +101,7 @@ export type RouteRenderOptions = {
   error?: (context: { request: Request; url: URL; error: unknown }) => string | Promise<string>;
   allowedMethods?: readonly string[];
   maxActionBodyBytes?: number;
+  cspNonce?: string;
 };
 
 export type RouteError = {
@@ -172,12 +178,26 @@ export const json = (data: unknown, init: ResponseInit = {}): RouteResponse => {
   return routeResponse(JSON.stringify(data), { ...init, headers });
 };
 
-export const html = (body: string, init: ResponseInit = {}): RouteResponse => {
+const escapeHtml = (value: unknown): string =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll(`"`, "&quot;");
+
+export const unsafeHtml = (value: string): TrustedHtml => ({ __tachyonTrustedHtml: true, value });
+
+export const escapeToHtml = (value: unknown): TrustedHtml => unsafeHtml(escapeHtml(value));
+
+const trustedHtmlValue = (value: TrustedHtml | string): string =>
+  typeof value === "string" ? escapeHtml(value) : value.value;
+
+export const html = (body: TrustedHtml, init: ResponseInit = {}): RouteResponse => {
   const headers = new Headers(init.headers);
   if (!headers.has("content-type")) {
     headers.set("content-type", "text/html; charset=utf-8");
   }
-  return routeResponse(body, { ...init, headers });
+  return routeResponse(trustedHtmlValue(body), { ...init, headers });
 };
 
 export const createSecurityHeaders = (
@@ -325,6 +345,18 @@ export const createRouteManifest = (
   return entries;
 };
 
+export const generateRouteTypes = (manifest: readonly Pick<RouteManifestEntry, "id" | "path">[]): string => {
+  const lines = [
+    `import type { ParamsForPath } from "tachyon-dom/router";`,
+    ``,
+    `export type RouteTypes = {`,
+    ...manifest.map((route) => `  "${route.id}": { path: "${route.path}"; params: ParamsForPath<"${route.path}"> };`),
+    `};`,
+    ``,
+  ];
+  return lines.join("\n");
+};
+
 const compileRoutePath = (path: string): { regex: RegExp; names: string[]; wildcard: boolean } => {
   if (path === "*") {
     return { regex: /^.*$/, names: [], wildcard: true };
@@ -407,19 +439,12 @@ const requestFor = (input: Request | URL | string): Request => {
   return new Request(input instanceof URL ? input : new URL(input, "http://tachyon.local"));
 };
 
-const escapeHtml = (value: unknown): string =>
-  String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll(`"`, "&quot;");
-
 const renderAttributes = (attrs: Record<string, string>): string =>
   Object.entries(attrs)
     .map(([name, value]) => ` ${name}="${escapeHtml(value)}"`)
     .join("");
 
-export const renderHead = (descriptor: RouteHeadDescriptor): string => {
+export const renderHead = (descriptor: RouteHeadDescriptor, options: { nonce?: string } = {}): string => {
   const chunks: string[] = [];
   if (descriptor.title !== undefined) {
     chunks.push(`<title>${escapeHtml(descriptor.title)}</title>`);
@@ -431,7 +456,9 @@ export const renderHead = (descriptor: RouteHeadDescriptor): string => {
     chunks.push(`<link${renderAttributes(link)}>`);
   }
   for (const script of descriptor.scripts ?? []) {
-    chunks.push(`<script${renderAttributes(script)}></script>`);
+    chunks.push(
+      `<script${renderAttributes({ ...script, ...(options.nonce && !script.nonce ? { nonce: options.nonce } : {}) })}></script>`,
+    );
   }
   return chunks.join("");
 };
@@ -627,12 +654,14 @@ export const renderRoute = async (
       }
     }
     const stateScript = Object.entries(loaderData)
-      .map(([id, data]) => serializeHydrationState(`route:${id}`, data))
+      .map(([id, data]) =>
+        serializeHydrationState(`route:${id}`, data, options.cspNonce === undefined ? {} : { nonce: options.cspNonce }),
+      )
       .join("");
     return ok({
       status: 200,
       html: outlet,
-      headHtml: renderHead(mergeHead(heads)),
+      headHtml: renderHead(mergeHead(heads), options.cspNonce === undefined ? {} : { nonce: options.cspNonce }),
       resourceHints: renderResourceHints(
         collectRouteResources(match.value.branch, {
           request,
@@ -649,7 +678,7 @@ export const renderRoute = async (
       match: match.value,
     });
   } catch (error) {
-    const boundary = match.value.route.error ?? options.error;
+    const boundary = [...match.value.branch].reverse().find((entry) => entry.route.error)?.route.error ?? options.error;
     const html = boundary ? await boundary({ request, url, error }) : `<h1>Internal Server Error</h1>`;
     return ok({
       status: 500,
@@ -672,6 +701,7 @@ export type RouteStreamResult = {
   resourceHints: string;
   stateScript: string;
   headers: Headers;
+  final: Promise<Pick<RouteRenderResult, "headHtml" | "resourceHints" | "stateScript" | "headers" | "status">>;
 };
 
 export const renderRouteStream = async (
@@ -696,19 +726,45 @@ export const renderRouteStream = async (
       resourceHints: rendered.value.resourceHints,
       stateScript: rendered.value.stateScript,
       headers: rendered.value.headers,
+      final: Promise.resolve({
+        status: rendered.value.status,
+        headHtml: rendered.value.headHtml,
+        resourceHints: rendered.value.resourceHints,
+        stateScript: rendered.value.stateScript,
+        headers: rendered.value.headers,
+      }),
     });
   }
+  const renderedPromise = renderRoute(routes, request, options);
   const chunks = async function* (): AsyncIterable<string> {
     for (const entry of match.value.branch) {
       if (entry.route.fallback) {
         yield entry.route.fallback;
       }
     }
-    const rendered = await renderRoute(routes, request, options);
+    const rendered = await renderedPromise;
     if (rendered.ok) {
       yield rendered.value.html;
     }
   };
+  const final = renderedPromise.then((rendered) => {
+    if (!rendered.ok) {
+      return {
+        status: rendered.error.status,
+        headHtml: "",
+        resourceHints: "",
+        stateScript: "",
+        headers: new Headers(),
+      };
+    }
+    return {
+      status: rendered.value.status,
+      headHtml: rendered.value.headHtml,
+      resourceHints: rendered.value.resourceHints,
+      stateScript: rendered.value.stateScript,
+      headers: rendered.value.headers,
+    };
+  });
   return ok({
     status: 200,
     chunks: chunks(),
@@ -716,5 +772,6 @@ export const renderRouteStream = async (
     resourceHints: renderResourceHints(collectRouteResources(match.value.branch)),
     stateScript: "",
     headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+    final,
   });
 };

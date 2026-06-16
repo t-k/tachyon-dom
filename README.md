@@ -46,9 +46,11 @@ The first list runtime path, `tachyon-dom/runtime/list`, preserves keyed row ele
 
 ## Routing
 
-Routing is provided as a separate layer instead of being baked into the template compiler. The server router in `tachyon-dom/router` supports static routes, `:param` routes, wildcard routes, nested layouts through `outlet`, route loaders, form actions, 404/error boundaries, head descriptor rendering, and route hydration state scripts. The client router in `tachyon-dom/runtime/router` supports same-origin link interception, History API navigation, `popstate`, abortable route loaders, scroll-to-top hooks, focus restoration, and 404/error rendering.
+Routing is provided as a separate layer instead of being baked into the template compiler. The server router in `tachyon-dom/router` supports static routes, `:param` routes, wildcard routes, nested layouts through `outlet`, route loaders, form actions, 404/error boundaries, head descriptor rendering, route hydration state scripts, trusted HTML responses, CSP nonce propagation, resource hints, streaming finalization, and route type generation. The client router in `tachyon-dom/runtime/router` supports same-origin link interception, History API navigation, `popstate`, abortable route loaders, loader cache/prefetch/invalidation, scroll-to-top hooks, focus restoration, navigation announcements, title updates, and 404/error rendering.
 
 The Vite integration also exposes `tachyonDomRoutes()` for a `virtual:tachyon-dom/routes` module. It emits a manifest plus lazy dynamic imports, which keeps route modules split into separate chunks.
+
+Server adapters live in `tachyon-dom/adapters` for Node and Cloudflare Workers-style runtimes.
 
 ## Commands
 

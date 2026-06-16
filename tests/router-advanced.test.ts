@@ -8,14 +8,18 @@ import {
   createFileRouteManifest,
   createSecurityHeaders,
   defineRouteModule,
+  escapeToHtml,
+  generateRouteTypes,
   html,
   json,
   redirect,
+  renderHead,
   renderResourceHints,
   renderRoute,
   renderRouteStream,
   routeFromModule,
   scanFileRoutes,
+  unsafeHtml,
   type ParamsForPath,
   type RouteDefinition,
 } from "../src/router";
@@ -110,7 +114,7 @@ describe("advanced router features", () => {
     expectTypeOf<Params>().toEqualTypeOf<{ id: string; path: string }>();
   });
 
-  it("short-circuits redirect/json/html route responses", async () => {
+  it("short-circuits redirect/json/escaped html route responses", async () => {
     const redirectResult = await renderRoute(
       [{ path: "/login", action: () => redirect("/dashboard"), render: () => "never" }],
       new Request("https://example.com/login", { method: "POST" }),
@@ -126,10 +130,39 @@ describe("advanced router features", () => {
     expect(jsonResult.ok && jsonResult.value.headers.get("content-type")).toBe("application/json; charset=utf-8");
 
     const htmlResult = await renderRoute(
-      [{ path: "/raw", loader: () => html("<h1>Raw</h1>"), render: () => "never" }],
+      [{ path: "/raw", loader: () => html(escapeToHtml("<h1>Raw</h1>")), render: () => "never" }],
+      "https://example.com/raw",
+    );
+    expect(htmlResult.ok && htmlResult.value.html).toBe("&lt;h1&gt;Raw&lt;/h1&gt;");
+  });
+
+  it("requires explicit unsafeHtml for raw HTML route responses", async () => {
+    const htmlResult = await renderRoute(
+      [{ path: "/raw", loader: () => html(unsafeHtml("<h1>Raw</h1>")), render: () => "never" }],
       "https://example.com/raw",
     );
     expect(htmlResult.ok && htmlResult.value.html).toBe("<h1>Raw</h1>");
+  });
+
+  it("propagates CSP nonces to head scripts and hydration state", async () => {
+    expect(renderHead({ scripts: [{ src: "/app.js", type: "module" }] }, { nonce: "n-1" })).toBe(
+      `<script src="/app.js" type="module" nonce="n-1"></script>`,
+    );
+    const result = await renderRoute(
+      [{ id: "home", path: "/", loader: () => ({ ok: true }), render: () => "<h1>Home</h1>" }],
+      "https://example.com/",
+      { cspNonce: "n-1" },
+    );
+    expect(result.ok && result.value.stateScript).toContain(`nonce="n-1"`);
+  });
+
+  it("generates route type declarations from a manifest", () => {
+    expect(
+      generateRouteTypes([
+        { id: "home", path: "/" },
+        { id: "user", path: "/users/:id" },
+      ]),
+    ).toContain(`"user": { path: "/users/:id"; params: ParamsForPath<"/users/:id"> }`);
   });
 
   it("renders streaming route fallbacks before loader content", async () => {
@@ -153,6 +186,10 @@ describe("advanced router features", () => {
       chunks.push(chunk);
     }
     expect(chunks).toEqual(["<p>Loading</p>", "<h1>Ready</h1>"]);
+    await expect(result.value.final).resolves.toMatchObject({
+      headHtml: "",
+      stateScript: expect.stringContaining(`data-tachyon-state="route:stream"`),
+    });
   });
 
   it("applies security headers and route test utilities", async () => {

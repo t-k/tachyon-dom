@@ -117,6 +117,32 @@ describe("server router", () => {
     expect(broken.ok && broken.value).toMatchObject({ status: 500, html: "<h1>boom</h1>" });
   });
 
+  it("bubbles errors to the nearest nested route error boundary", async () => {
+    const result = await renderRoute(
+      [
+        {
+          id: "app",
+          path: "/app",
+          error: ({ error }) => `<h1>App ${error instanceof Error ? error.message : "error"}</h1>`,
+          render: ({ outlet }) => `<main>${outlet}</main>`,
+          children: [
+            {
+              id: "broken",
+              path: "broken",
+              loader: () => {
+                throw new Error("boom");
+              },
+              render: () => "never",
+            },
+          ],
+        },
+      ],
+      "https://example.com/app/broken",
+    );
+
+    expect(result.ok && result.value).toMatchObject({ status: 500, html: "<h1>App boom</h1>" });
+  });
+
   it("escapes head descriptors", () => {
     expect(
       renderHead({

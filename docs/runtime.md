@@ -27,3 +27,13 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `interaction`
 
 The compiler records hydration boundaries with `hydrate:id={id}`. Runtime scheduling chooses when to call `handle.hydrate()`.
+
+## Client Router Cache
+
+`createClientRouter()` supports:
+
+- `cache: true` for pathname/search keyed loader caching.
+- `router.prefetch(href)` to warm loader data.
+- `router.invalidate(href?)` to clear one cache entry or all cache entries.
+- `liveRegion` to announce navigations.
+- `title` to update `document.title` after route render.
