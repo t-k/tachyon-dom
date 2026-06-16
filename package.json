@@ -130,14 +130,19 @@
     "oxc-parser": "^0.136.0"
   },
   "devDependencies": {
+    "@marko/runtime-tags": "^6.1.8",
+    "@marko/vite": "^6.1.0",
     "@types/node": "^24.0.3",
     "jsdom": "^26.1.0",
+    "marko": "^5.39.7",
     "oxfmt": "^0.55.0",
     "oxlint": "^1.70.0",
     "playwright": "^1.61.0",
+    "solid-js": "^1.9.13",
     "tsx": "^4.22.4",
     "typescript": "^5.8.3",
     "vite": "^8.0.16",
+    "vite-plugin-solid": "^2.11.12",
     "vitest": "^4.1.9"
   },
   "packageManager": "pnpm@10.32.1"

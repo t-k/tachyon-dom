@@ -1,7 +1,9 @@
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import marko from "@marko/vite";
 import { chromium, type Browser, type LaunchOptions, type Page } from "playwright";
+import solid from "vite-plugin-solid";
 import { createServer, type ViteDevServer } from "vite";
 import { err, ok, type Result } from "../../src/result";
 import {
@@ -58,6 +60,18 @@ const implementations: readonly Implementation[] = [
     title: "vanillajs-keyed",
     path: "/benchmark/local-compare/vanillajs/",
     sourcePaths: ["benchmark/local-compare/vanillajs"],
+  },
+  {
+    name: "solid-keyed",
+    title: "solid-keyed",
+    path: "/benchmark/local-compare/solid/",
+    sourcePaths: ["benchmark/local-compare/solid"],
+  },
+  {
+    name: "marko-keyed",
+    title: "marko-keyed",
+    path: "/benchmark/local-compare/marko/",
+    sourcePaths: ["benchmark/local-compare/marko"],
   },
   {
     name: "tachyon-dom",
@@ -178,6 +192,7 @@ const startServer = async (): Promise<ViteDevServer> => {
   const server = await createServer({
     root: projectRoot,
     logLevel: "silent",
+    plugins: [solid(), marko({ linked: false })],
     server: {
       host: "127.0.0.1",
       port: Number.isFinite(requestedPort) ? requestedPort : 0,
