@@ -134,6 +134,10 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     if (!identifierPattern.test(thenName)) {
       return semanticError(`Invalid await then binding: ${thenName}.`);
     }
+    const reorder = attrString(node, "reorder");
+    if (reorder && reorder !== "preserve" && reorder !== "resolve") {
+      return semanticError(`<await> reorder must be "preserve" or "resolve".`);
+    }
   }
   for (const attr of node.attrs) {
     if (attr.name.startsWith("bind:")) {
@@ -210,11 +214,17 @@ const collectDirectives = (node: TemplateNode, path: number[], directives: Templ
     });
   }
   if (node.tagName === "await") {
+    const fallback = attrString(node, "fallback");
+    const errorText = attrString(node, "error");
+    const reorder = attrString(node, "reorder");
     directives.push({
       kind: "await",
       path: [...path],
       value: attrExpression(node, "value") ?? "undefined",
       thenName: attrString(node, "then") ?? "value",
+      ...(fallback ? { fallback } : {}),
+      ...(errorText ? { error: errorText } : {}),
+      ...(reorder === "preserve" || reorder === "resolve" ? { reorder } : {}),
     });
   }
   for (const attr of node.attrs) {

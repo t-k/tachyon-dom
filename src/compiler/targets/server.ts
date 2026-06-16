@@ -336,6 +336,10 @@ export const generateServerModule = (template: CompiledTemplate): string => {
   const lines = [
     `const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
+    `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll("-->", "--\\\\>");`,
+    `const escapeAttribute = (value) => String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");`,
+    `export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`,
+    `export const renderHydrationState = (id, state) => '<script type="application/json" data-tachyon-state="' + escapeAttribute(id) + '">' + escapeScriptJson(JSON.stringify(state)) + '</script>';`,
     `export const render = (scope) => ${renderElementExpression(template.root)};`,
   ];
   return `${lines.join("\n")}\n`;

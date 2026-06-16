@@ -389,6 +389,23 @@ describe("HTML-first compiler", () => {
       ],
       stores: [{ name: "count", initial: "initial" }],
     });
+    expect(result.value.client.components).toEqual([
+      {
+        path: [],
+        name: "Panel",
+        props: [
+          { name: "label", expression: "title" },
+          { name: "initial", expression: "initialCount" },
+        ],
+        stores: [{ name: "count", initial: "initial" }],
+      },
+      {
+        path: [2],
+        name: "Nested",
+        props: [{ name: "value", expression: "label" }],
+        stores: [],
+      },
+    ]);
     expect(renderServerTemplate(result.value, { title: "Hello", initialCount: 4 })).toBe(
       `<section><h1>Hello</h1><button>4</button><p>Hello</p></section>`,
     );
@@ -397,6 +414,9 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`const label = scope.title;`);
     expect(code).toContain(`const count = initial;`);
     expect(code).toContain(`const value = label;`);
+
+    const clientCode = generateClientModule(result.value);
+    expect(clientCode).toContain(`export const componentBoundaries = [{"path":[],"name":"Panel"`);
   });
 
   it("generates await fragments for the streaming server target", async () => {
@@ -418,5 +438,56 @@ describe("HTML-first compiler", () => {
       chunks.push(chunk);
     }
     expect(chunks.join("")).toBe(`<main><h1>Before</h1><p>Ready</p></main>`);
+  });
+
+  it("generates hydration state helpers for server modules", () => {
+    const result = compileTemplate(`<main><section hydrate:id={islandId}>{label}</section></main>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateServerModule(result.value);
+
+    expect(code).toContain(`export const hydrationBoundaries = [{"path":[0],"id":"islandId"}];`);
+    expect(code).toContain(`export const renderHydrationState = (id, state) =>`);
+  });
+
+  it("records await streaming options and emits fallback and error chunks", async () => {
+    const result = compileTemplate(
+      `<main><await value={messagePromise} then="message" fallback="Loading" error="Failed" reorder="preserve"><p>{message}</p></await></main>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.ir.directives).toContainEqual({
+      kind: "await",
+      path: [0],
+      value: "messagePromise",
+      thenName: "message",
+      fallback: "Loading",
+      error: "Failed",
+      reorder: "preserve",
+    });
+
+    const code = generateServerStreamModule(result.value);
+    expect(code).toContain(`yield "Loading";`);
+    expect(code).toContain(`} catch {`);
+    expect(code).toContain(`yield "Failed";`);
+
+    const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
+      stream: (scope: { messagePromise: Promise<string> }) => AsyncIterable<string>;
+    };
+    const successChunks: string[] = [];
+    for await (const chunk of module.stream({ messagePromise: Promise.resolve("Ready") })) {
+      successChunks.push(chunk);
+    }
+    expect(successChunks.join("")).toBe(`<main>Loading<p>Ready</p></main>`);
+
+    const errorChunks: string[] = [];
+    for await (const chunk of module.stream({ messagePromise: Promise.reject(new Error("Nope")) })) {
+      errorChunks.push(chunk);
+    }
+    expect(errorChunks.join("")).toBe(`<main>LoadingFailed</main>`);
   });
 });

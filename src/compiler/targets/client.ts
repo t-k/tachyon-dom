@@ -7,6 +7,7 @@ import type {
   GenerateClientModuleOptions,
   ListBinding,
   LoweringContext,
+  StoreDefinition,
   TemplateNode,
   TextBinding,
   TextNode,
@@ -19,6 +20,7 @@ import {
   isForNode,
   isStoreNode,
   itemNameFromKey,
+  attrString,
   readExpressionAttribute,
   renderableChildren,
   serializeStaticAttr,
@@ -43,7 +45,35 @@ const addStoreDefinitions = (node: ElementNode, context: LoweringContext): void 
   context.stores.push(...storeDefinitionsFor(node));
 };
 
+const componentStores = (node: ElementNode): StoreDefinition[] => {
+  const stores: StoreDefinition[] = [];
+  const visit = (child: TemplateNode): void => {
+    if (child.type !== "element" || child.tagName === "component") {
+      return;
+    }
+    if (child.tagName === "store") {
+      stores.push(...storeDefinitionsFor(child));
+      return;
+    }
+    child.children.forEach(visit);
+  };
+  node.children.forEach(visit);
+  return stores;
+};
+
 const lowerComponent = (node: ElementNode, path: number[], context: LoweringContext): string => {
+  context.components.push({
+    path: [...path],
+    name: attrString(node, "name") ?? "Anonymous",
+    props: node.attrs.flatMap((attr) => {
+      if (attr.name === "name") {
+        return [];
+      }
+      const expression = readExpressionAttribute(attr.value);
+      return expression ? [{ name: attr.name, expression }] : [];
+    }),
+    stores: componentStores(node),
+  });
   const children = renderableChildren(node);
   if (children.length === 0) {
     return "";
@@ -59,6 +89,7 @@ const lowerIf = (node: ElementNode, path: number[], context: LoweringContext): s
     bindings: [],
     stores: [],
     hydrationBoundaries: [],
+    components: [],
   };
   const children = renderableChildren(node);
   const templateHtml = children
@@ -89,6 +120,7 @@ const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
     bindings: [],
     stores: [],
     hydrationBoundaries: [],
+    components: [],
   };
   const children = renderableChildren(node);
   const templateHtml = children
@@ -217,6 +249,7 @@ export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client
     bindings: [],
     stores: [],
     hydrationBoundaries: [],
+    components: [],
   };
   const templateHtml = lowerElement(root, [], context);
   return {
@@ -224,6 +257,7 @@ export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client
     bindings: context.bindings,
     stores: context.stores,
     hydrationBoundaries: context.hydrationBoundaries,
+    components: context.components,
   };
 };
 
@@ -286,6 +320,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
+  lines.push(`export const componentBoundaries = ${JSON.stringify(template.client.components)};`);
   lines.push(`export const bind = (root, scope) => {`);
   if (needsStore) {
     const fields = template.client.stores

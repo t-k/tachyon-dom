@@ -115,13 +115,28 @@ export type ComponentProp = {
   expression: string;
 };
 
+export type ComponentBoundary = {
+  path: number[];
+  name: string;
+  props: ComponentProp[];
+  stores: StoreDefinition[];
+};
+
 export type TemplateDirective =
   | { kind: "for"; path: number[]; each: string; key: string; itemName: string }
   | { kind: "if"; path: number[]; test: string }
   | { kind: "store"; path: number[]; stores: StoreDefinition[] }
   | { kind: "event"; path: number[]; eventName: string; handler: string }
   | { kind: "component"; path: number[]; name: string; props: ComponentProp[]; stores: StoreDefinition[] }
-  | { kind: "await"; path: number[]; value: string; thenName: string }
+  | {
+      kind: "await";
+      path: number[];
+      value: string;
+      thenName: string;
+      fallback?: string;
+      error?: string;
+      reorder?: "preserve" | "resolve";
+    }
   | { kind: "hydrate"; path: number[]; id: string };
 
 export type TemplateIr = {
@@ -139,6 +154,7 @@ export type CompiledTemplate = {
     bindings: ClientBinding[];
     stores: StoreDefinition[];
     hydrationBoundaries: HydrationBoundary[];
+    components: ComponentBoundary[];
   };
 };
 
@@ -146,6 +162,7 @@ export type LoweringContext = {
   bindings: ClientBinding[];
   stores: StoreDefinition[];
   hydrationBoundaries: HydrationBoundary[];
+  components: ComponentBoundary[];
 };
 
 export type GenerateClientModuleOptions = {

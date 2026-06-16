@@ -67,12 +67,31 @@ const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<str
   }
   if (node.tagName === "await") {
     const thenName = attrString(node, "then") ?? "value";
+    const fallback = attrString(node, "fallback");
+    const errorText = attrString(node, "error");
     const childLocals = new Set(locals);
     childLocals.add(thenName);
-    const statements = [
-      `${indent}{`,
+    const statements = [`${indent}{`];
+    if (fallback) {
+      statements.push(`${indent}  yield ${jsString(fallback)};`);
+    }
+    if (errorText) {
+      statements.push(`${indent}  try {`);
+      statements.push(
+        `${indent}    const ${thenName} = await ${expressionToScopeAccess(attrExpression(node, "value") ?? "undefined", locals)};`,
+      );
+      for (const child of node.children) {
+        statements.push(...renderNodeYieldStatements(child, childLocals, `${indent}    `));
+      }
+      statements.push(`${indent}  } catch {`);
+      statements.push(`${indent}    yield ${jsString(errorText)};`);
+      statements.push(`${indent}  }`);
+      statements.push(`${indent}}`);
+      return statements;
+    }
+    statements.push(
       `${indent}  const ${thenName} = await ${expressionToScopeAccess(attrExpression(node, "value") ?? "undefined", locals)};`,
-    ];
+    );
     for (const child of node.children) {
       statements.push(...renderNodeYieldStatements(child, childLocals, `${indent}  `));
     }
