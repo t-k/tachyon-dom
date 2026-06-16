@@ -99,6 +99,28 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`return () => {`);
   });
 
+  it("extracts store tags without adding client DOM nodes", () => {
+    const result = compileTemplate(`<section><store count={initialCount}/><button>{count}</button></section>`);
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.templateHtml).toBe(`<section><button> </button></section>`);
+    expect(result.value.client.stores).toEqual([{ name: "count", initial: "initialCount" }]);
+
+    const code = generateClientModule(result.value, { reactive: true });
+
+    expect(code).toContain(`import { createStore } from "@local/tachyon-dom/runtime/store";`);
+    expect(code).toContain(`const state = createStore({ ...scope, count: scope.initialCount });`);
+    expect(code).toContain(`setText(textAt(root, [0,0]), read(state.count))`);
+
+    const withoutStore = compileTemplate(`<section><button>{count}</button></section>`);
+    if (withoutStore.isErr()) {
+      throw new Error(withoutStore.error.message);
+    }
+    expect(generateClientModule(withoutStore.value, { reactive: true })).not.toContain(`runtime/store`);
+  });
+
   it("generates a separate server target without client runtime imports", () => {
     const result = compileTemplate(`<button class:danger={selected}>{label}</button>`);
     if (result.isErr()) {
@@ -135,10 +157,28 @@ describe("HTML-first compiler", () => {
 
     const code = generateServerStreamModule(result.value);
 
-    expect(code).toContain(`export const stream = function* (scope)`);
+    expect(code).toContain(`export const stream = async function* (scope)`);
     expect(code).toContain(`for (const row of scope.rows)`);
     expect(code).toContain(`yield escapeHtml(row.id);`);
     expect(code).not.toContain(`@local/tachyon-dom/runtime`);
+  });
+
+  it("records hydrate boundaries and emits server markers", () => {
+    const result = compileTemplate(`<main><section hydrate:id={islandId}><button>{label}</button></section></main>`);
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.hydrationBoundaries).toEqual([{ path: [0], id: "islandId" }]);
+    expect(result.value.client.templateHtml).toBe(`<main><section><button> </button></section></main>`);
+    expect(renderServerTemplate(result.value, { islandId: "cart", label: "Buy" })).toBe(
+      `<main><!--tachyon-hydrate:cart:start--><section><button>Buy</button></section><!--tachyon-hydrate:cart:end--></main>`,
+    );
+
+    const code = generateServerStreamModule(result.value);
+
+    expect(code).toContain(`yield "<!--tachyon-hydrate:" + escapeMarker(scope.islandId) + ":start-->";`);
+    expect(code).toContain(`yield "<!--tachyon-hydrate:" + escapeMarker(scope.islandId) + ":end-->";`);
   });
 
   it("extracts keyed list boundaries for client code", () => {

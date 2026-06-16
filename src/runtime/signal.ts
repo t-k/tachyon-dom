@@ -23,6 +23,20 @@ const cleanup = (runner: EffectRunner): void => {
   runner.dependencies.clear();
 };
 
+const track = (subscribers: SubscriberSet): void => {
+  if (activeEffect && !activeEffect.disposed) {
+    subscribers.add(activeEffect);
+    activeEffect.dependencies.add(subscribers);
+  }
+};
+
+const notify = (subscribers: SubscriberSet): void => {
+  const snapshot = Array.from(subscribers);
+  for (const subscriber of snapshot) {
+    subscriber.run();
+  }
+};
+
 export const isSignal = (value: unknown): value is Signal<unknown> =>
   typeof value === "function" && (value as Partial<Signal<unknown>>)[signalBrand] === true;
 
@@ -36,10 +50,7 @@ export const createSignal = <T>(initial: T): Signal<T> => {
   let current = initial;
   const subscribers: SubscriberSet = new Set();
   const signal = (() => {
-    if (activeEffect && !activeEffect.disposed) {
-      subscribers.add(activeEffect);
-      activeEffect.dependencies.add(subscribers);
-    }
+    track(subscribers);
     return current;
   }) as Signal<T>;
   Object.defineProperty(signal, signalBrand, { value: true });
@@ -48,13 +59,44 @@ export const createSignal = <T>(initial: T): Signal<T> => {
       return;
     }
     current = value;
-    const snapshot = Array.from(subscribers);
-    for (const subscriber of snapshot) {
-      subscriber.run();
-    }
+    notify(subscribers);
   };
   signal.update = (updater) => signal.set(updater(current));
   return signal;
+};
+
+export const createStore = <T extends Record<PropertyKey, unknown>>(initial: T): T => {
+  const values = { ...initial } as Record<PropertyKey, unknown>;
+  const subscribers = new Map<PropertyKey, SubscriberSet>();
+  const subscribersFor = (property: PropertyKey): SubscriberSet => {
+    let set = subscribers.get(property);
+    if (!set) {
+      set = new Set();
+      subscribers.set(property, set);
+    }
+    return set;
+  };
+
+  return new Proxy(values, {
+    get(target, property, receiver) {
+      if (property === Symbol.toStringTag) {
+        return "TachyonStore";
+      }
+      track(subscribersFor(property));
+      return Reflect.get(target, property, receiver);
+    },
+    set(target, property, value, receiver) {
+      const previous = Reflect.get(target, property, receiver);
+      if (Object.is(previous, value)) {
+        return true;
+      }
+      const didSet = Reflect.set(target, property, value, receiver);
+      if (didSet) {
+        notify(subscribersFor(property));
+      }
+      return didSet;
+    },
+  }) as T;
 };
 
 export const effect = (fn: () => void): (() => void) => {

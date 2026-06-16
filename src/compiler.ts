@@ -56,13 +56,31 @@ export type ListBinding = {
 
 export type ClientBinding = TextBinding | ClassBinding | EventBinding | ListBinding;
 
+export type StoreDefinition = {
+  name: string;
+  initial: string;
+};
+
+export type HydrationBoundary = {
+  path: number[];
+  id: string;
+};
+
 export type CompiledTemplate = {
   source: string;
   root: ElementNode;
   client: {
     templateHtml: string;
     bindings: ClientBinding[];
+    stores: StoreDefinition[];
+    hydrationBoundaries: HydrationBoundary[];
   };
+};
+
+type LoweringContext = {
+  bindings: ClientBinding[];
+  stores: StoreDefinition[];
+  hydrationBoundaries: HydrationBoundary[];
 };
 
 type Parser = {
@@ -151,6 +169,7 @@ const attrExpression = (node: ElementNode, name: string): string | undefined => 
 };
 
 const isForNode = (node: TemplateNode): node is ElementNode => node.type === "element" && node.tagName === "for";
+const isStoreNode = (node: TemplateNode): node is ElementNode => node.type === "element" && node.tagName === "store";
 
 const itemNameFromKey = (key: string): string => {
   const [itemName] = key.split(".");
@@ -265,6 +284,11 @@ const escapeHtml = (value: unknown): string =>
     .replaceAll(">", "&gt;")
     .replaceAll(`"`, "&quot;");
 
+const escapeMarker = (value: unknown): string =>
+  String(value ?? "")
+    .replaceAll("--", "- -")
+    .replaceAll(">", "&gt;");
+
 const readPath = (scope: Record<string, unknown>, expression: string): unknown => {
   if (!identifierPattern.test(expression)) {
     return undefined;
@@ -287,13 +311,13 @@ const serializeStaticAttr = (attr: Attribute): string => {
   return ` ${attr.name}="${attr.value}"`;
 };
 
-const lowerTextNode = (node: TextNode, path: number[], bindings: ClientBinding[]): string => {
+const lowerTextNode = (node: TextNode, path: number[], context: LoweringContext): string => {
   let output = "";
   let cursor = 0;
   for (const match of node.value.matchAll(expressionPattern)) {
     const start = match.index ?? 0;
     output += node.value.slice(cursor, start);
-    bindings.push({ kind: "text", path: [...path], expression: (match[1] as string).trim() });
+    context.bindings.push({ kind: "text", path: [...path], expression: (match[1] as string).trim() });
     output += " ";
     cursor = start + match[0].length;
   }
@@ -301,27 +325,50 @@ const lowerTextNode = (node: TextNode, path: number[], bindings: ClientBinding[]
   return output;
 };
 
-const lowerElement = (node: ElementNode, path: number[], bindings: ClientBinding[]): string => {
+const addStoreDefinitions = (node: ElementNode, context: LoweringContext): void => {
+  for (const attr of node.attrs) {
+    if (!identifierPattern.test(attr.name)) {
+      continue;
+    }
+    const initial = readExpressionAttribute(attr.value);
+    if (initial) {
+      context.stores.push({ name: attr.name, initial });
+    }
+  }
+};
+
+const lowerElement = (node: ElementNode, path: number[], context: LoweringContext): string => {
   if (node.tagName === "for") {
+    return "";
+  }
+  if (node.tagName === "store") {
+    addStoreDefinitions(node, context);
     return "";
   }
 
   const attrs: string[] = [];
   const staticClassNames: string[] = [];
+  const hydrateId = attrExpression(node, "hydrate:id");
+  if (hydrateId) {
+    context.hydrationBoundaries.push({ path: [...path], id: hydrateId });
+  }
 
   for (const attr of node.attrs) {
     if (attr.name.startsWith("on:")) {
       const handler = readExpressionAttribute(attr.value);
       if (handler) {
-        bindings.push({ kind: "event", path: [...path], eventName: attr.name.slice(3), handler });
+        context.bindings.push({ kind: "event", path: [...path], eventName: attr.name.slice(3), handler });
       }
       continue;
     }
     if (attr.name.startsWith("class:")) {
       const expression = readExpressionAttribute(attr.value);
       if (expression) {
-        bindings.push({ kind: "class", path: [...path], className: attr.name.slice(6), expression });
+        context.bindings.push({ kind: "class", path: [...path], className: attr.name.slice(6), expression });
       }
+      continue;
+    }
+    if (attr.name === "hydrate:id") {
       continue;
     }
     const expression = readExpressionAttribute(attr.value);
@@ -343,10 +390,14 @@ const lowerElement = (node: ElementNode, path: number[], bindings: ClientBinding
   let domIndex = 0;
   for (const child of node.children) {
     if (isForNode(child)) {
-      bindings.push(lowerList(child, path));
+      context.bindings.push(lowerList(child, path));
       continue;
     }
-    children += lowerNode(child, [...path, domIndex], bindings);
+    if (isStoreNode(child)) {
+      addStoreDefinitions(child, context);
+      continue;
+    }
+    children += lowerNode(child, [...path, domIndex], context);
     domIndex++;
   }
   return `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
@@ -354,14 +405,18 @@ const lowerElement = (node: ElementNode, path: number[], bindings: ClientBinding
 
 const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
   const key = attrExpression(node, "key") ?? "item";
-  const childBindings: ClientBinding[] = [];
+  const childContext: LoweringContext = {
+    bindings: [],
+    stores: [],
+    hydrationBoundaries: [],
+  };
   const renderableChildren = node.children.filter((child) => child.type !== "text" || child.value.length > 0);
   const templateHtml = renderableChildren
-    .map((child, index) => lowerNode(child, renderableChildren.length === 1 ? [] : [index], childBindings))
+    .map((child, index) => lowerNode(child, renderableChildren.length === 1 ? [] : [index], childContext))
     .join("");
   for (const child of node.children.filter(isForNode)) {
     if (isForNode(child)) {
-      childBindings.push(lowerList(child, []));
+      childContext.bindings.push(lowerList(child, []));
     }
   }
   return {
@@ -371,15 +426,15 @@ const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
     itemName: itemNameFromKey(key),
     key,
     templateHtml,
-    bindings: childBindings,
+    bindings: childContext.bindings,
   };
 };
 
-const lowerNode = (node: TemplateNode, path: number[], bindings: ClientBinding[]): string => {
+const lowerNode = (node: TemplateNode, path: number[], context: LoweringContext): string => {
   if (node.type === "text") {
-    return lowerTextNode(node, path, bindings);
+    return lowerTextNode(node, path, context);
   }
-  return lowerElement(node, path, bindings);
+  return lowerElement(node, path, context);
 };
 
 export const compileTemplate = (source: string): Result<CompiledTemplate, CompilerError> => {
@@ -387,14 +442,20 @@ export const compileTemplate = (source: string): Result<CompiledTemplate, Compil
   if (rootResult.isErr()) {
     return err(rootResult.error);
   }
-  const bindings: ClientBinding[] = [];
-  const templateHtml = lowerElement(rootResult.value, [], bindings);
+  const context: LoweringContext = {
+    bindings: [],
+    stores: [],
+    hydrationBoundaries: [],
+  };
+  const templateHtml = lowerElement(rootResult.value, [], context);
   return ok({
     source,
     root: rootResult.value,
     client: {
       templateHtml,
-      bindings,
+      bindings: context.bindings,
+      stores: context.stores,
+      hydrationBoundaries: context.hydrationBoundaries,
     },
   });
 };
@@ -416,9 +477,13 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
   if (node.tagName === "for") {
     return renderFor(node, scope);
   }
+  if (node.tagName === "store") {
+    return "";
+  }
 
   const attrs: string[] = [];
   const classes: string[] = [];
+  const hydrateId = attrExpression(node, "hydrate:id");
   for (const attr of node.attrs) {
     if (attr.name.startsWith("on:")) {
       continue;
@@ -428,6 +493,9 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
       if (expression && readPath(scope, expression)) {
         classes.push(attr.name.slice(6));
       }
+      continue;
+    }
+    if (attr.name === "hydrate:id") {
       continue;
     }
     if (attr.name === "class" && attr.value !== true) {
@@ -448,7 +516,12 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
     attrs.unshift(` class="${escapeHtml(classes.join(" "))}"`);
   }
   const children = node.children.map((child) => renderNode(child, scope)).join("");
-  return `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
+  const html = `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
+  if (!hydrateId) {
+    return html;
+  }
+  const marker = escapeMarker(readPath(scope, hydrateId));
+  return `<!--tachyon-hydrate:${marker}:start-->${html}<!--tachyon-hydrate:${marker}:end-->`;
 };
 
 const renderFor = (node: ElementNode, scope: Record<string, unknown>): string => {
@@ -488,6 +561,8 @@ const expressionToScopeAccess = (expression: string, locals: ReadonlySet<string>
   return `scope.${expression}`;
 };
 
+const scopeName = (usesStore: boolean): string => (usesStore ? "state" : "scope");
+
 type GenerateClientModuleOptions = {
   reactive?: boolean;
 };
@@ -495,14 +570,16 @@ type GenerateClientModuleOptions = {
 const elementExpression = (path: readonly number[]): string =>
   path.length === 0 ? "root" : `elementAt(root, ${JSON.stringify(path)})`;
 
-const runtimeValueExpression = (expression: string, reactive: boolean): string => {
-  const value = expressionToScopeAccess(expression);
+const runtimeValueExpression = (expression: string, reactive: boolean, sourceName: string): string => {
+  const value = expressionToScopeAccess(expression).replace(/^scope\./, `${sourceName}.`);
   return reactive ? `read(${value})` : value;
 };
 
 export const generateClientModule = (template: CompiledTemplate, options: GenerateClientModuleOptions = {}): string => {
   const bindings = template.client.bindings;
   const reactive = options.reactive === true;
+  const needsStore = template.client.stores.length > 0;
+  const sourceName = scopeName(needsStore);
   const needsText = bindings.some((binding) => binding.kind === "text");
   const needsClass = bindings.some((binding) => binding.kind === "class");
   const needsEvent = bindings.some((binding) => binding.kind === "event");
@@ -524,20 +601,30 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (needsSignal) {
     lines.push(`import { effect, read } from "@local/tachyon-dom/runtime/signal";`);
   }
+  if (needsStore) {
+    lines.push(`import { createStore } from "@local/tachyon-dom/runtime/store";`);
+  }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
+  lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
   lines.push(`export const bind = (root, scope) => {`);
+  if (needsStore) {
+    const fields = template.client.stores
+      .map((store) => `${store.name}: ${expressionToScopeAccess(store.initial)}`)
+      .join(", ");
+    lines.push(`  const state = createStore({ ...scope, ${fields} });`);
+  }
   if (reactive || needsEvent) {
     lines.push(`  const cleanups = [];`);
   }
   for (const binding of bindings) {
     if (binding.kind === "text") {
-      const statement = `setText(textAt(root, ${JSON.stringify(binding.path)}), ${runtimeValueExpression(binding.expression, reactive)})`;
+      const statement = `setText(textAt(root, ${JSON.stringify(binding.path)}), ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
       lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
     } else if (binding.kind === "class") {
-      const statement = `setClassPresence(${elementExpression(binding.path)}, ${JSON.stringify(binding.className)}, ${runtimeValueExpression(binding.expression, reactive)})`;
+      const statement = `setClassPresence(${elementExpression(binding.path)}, ${JSON.stringify(binding.className)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
       lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
     } else if (binding.kind === "event") {
-      const statement = `delegate(root, ${JSON.stringify(binding.eventName)}, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.handler)})`;
+      const statement = `delegate(root, ${JSON.stringify(binding.eventName)}, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.handler).replace(/^scope\./, `${scopeName(needsStore)}.`)})`;
       lines.push(`  cleanups.push(${statement});`);
     } else {
       const listOptions = [
@@ -548,7 +635,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         `    bindings: ${JSON.stringify(binding.bindings)},`,
         `  }`,
       ].join("\n");
-      const statement = `mountKeyedList(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.each, reactive)}, ${listOptions})`;
+      const statement = `mountKeyedList(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.each, reactive, sourceName)}, ${listOptions})`;
       lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
     }
   }
@@ -628,11 +715,20 @@ const renderElementExpression = (node: ElementNode, locals: ReadonlySet<string> 
   if (node.tagName === "for") {
     return renderForExpression(node, locals);
   }
+  if (node.tagName === "store") {
+    return `""`;
+  }
 
   const parts: string[] = [renderOpenTagExpression(node, locals)];
   parts.push(...node.children.map((child) => renderNodeExpression(child, locals)));
   parts.push(jsString(`</${node.tagName}>`));
-  return parts.join(" + ");
+  const expression = parts.join(" + ");
+  const hydrateId = attrExpression(node, "hydrate:id");
+  if (!hydrateId) {
+    return expression;
+  }
+  const marker = expressionToScopeAccess(hydrateId, locals);
+  return `${jsString("<!--tachyon-hydrate:")} + escapeMarker(${marker}) + ${jsString(":start-->")} + ${expression} + ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${marker}) + ${jsString(":end-->")}`;
 };
 
 const renderNodeExpression = (node: TemplateNode, locals: ReadonlySet<string> = new Set()): string => {
@@ -656,6 +752,7 @@ const renderForExpression = (node: ElementNode, locals: ReadonlySet<string>): st
 export const generateServerModule = (template: CompiledTemplate): string => {
   const lines = [
     `const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
+    `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `export const render = (scope) => ${renderElementExpression(template.root)};`,
   ];
   return `${lines.join("\n")}\n`;
@@ -702,11 +799,26 @@ const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<str
   if (node.tagName === "for") {
     return renderForYieldStatements(node, locals, indent);
   }
-  const statements = [`${indent}yield ${renderOpenTagExpression(node, locals)};`];
+  if (node.tagName === "store") {
+    return [];
+  }
+  const hydrateId = attrExpression(node, "hydrate:id");
+  const statements: string[] = [];
+  if (hydrateId) {
+    statements.push(
+      `${indent}yield ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${expressionToScopeAccess(hydrateId, locals)}) + ${jsString(":start-->")};`,
+    );
+  }
+  statements.push(`${indent}yield ${renderOpenTagExpression(node, locals)};`);
   for (const child of node.children) {
     statements.push(...renderNodeYieldStatements(child, locals, indent));
   }
   statements.push(`${indent}yield ${jsString(`</${node.tagName}>`)};`);
+  if (hydrateId) {
+    statements.push(
+      `${indent}yield ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${expressionToScopeAccess(hydrateId, locals)}) + ${jsString(":end-->")};`,
+    );
+  }
   return statements;
 };
 
@@ -720,7 +832,8 @@ const renderNodeYieldStatements = (node: TemplateNode, locals: ReadonlySet<strin
 export const generateServerStreamModule = (template: CompiledTemplate): string => {
   const lines = [
     `const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
-    `export const stream = function* (scope) {`,
+    `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
+    `export const stream = async function* (scope) {`,
     ...renderNodeYieldStatements(template.root, new Set(), "  "),
     `};`,
   ];

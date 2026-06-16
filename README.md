@@ -25,12 +25,16 @@ The framework direction is HTML-first syntax with Solid-style fine-grained react
 - extract `class:name={expr}` class bindings
 - extract `on:event={handler}` event bindings
 - extract `<for each={items} key={item.id}>` keyed list boundaries
+- extract `<store count={initialCount}/>` store tags without adding DOM nodes
+- record `hydrate:id={islandId}` hydration boundaries for server/client handoff
 - render an escaped server string for the same template
-- generate a streaming server target as a separate compiler output
+- generate a chunk-yielding streaming server target as a separate compiler output
 - generate client code that imports only the runtime helper modules it needs
 - optionally generate fine-grained client bindings through `@local/tachyon-dom/runtime/signal`
 
 The compiler output is intentionally close to the current direct DOM runtime: static markup stays static, dynamic text/class/event slots are recorded as explicit paths, and generated client code can import subpath helpers such as `@local/tachyon-dom/runtime/text`.
+
+The first server streaming adapter, `@local/tachyon-dom/server/stream`, accepts sync or async HTML chunks and adapts them to `ReadableStream<Uint8Array>` or `Response` without building a single full HTML string first.
 
 The first list runtime path, `@local/tachyon-dom/runtime/list`, preserves keyed row elements across updates, moves reused elements into order, patches text/class bindings, removes stale rows, and keeps event handlers current through a mutable row scope. Row events are delegated through the list container so reused rows do not need one listener per row.
 

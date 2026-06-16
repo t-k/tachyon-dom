@@ -34,6 +34,14 @@
     "./runtime/signal": {
       "types": "./dist/runtime/signal.d.ts",
       "import": "./dist/runtime/signal.js"
+    },
+    "./runtime/store": {
+      "types": "./dist/runtime/store.d.ts",
+      "import": "./dist/runtime/store.js"
+    },
+    "./server/stream": {
+      "types": "./dist/server/stream.d.ts",
+      "import": "./dist/server/stream.js"
     }
   },
   "scripts": {
