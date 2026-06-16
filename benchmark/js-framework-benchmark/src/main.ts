@@ -113,7 +113,7 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
     throw new Error("Benchmark row template must contain a table row.");
   }
 
-  let selected = -1;
+  let selectedRow: BenchmarkTableRow | undefined;
   const rowPool: BenchmarkTableRow[] = [];
   const liveRows = () => tbody.rows;
   const takeRow = (): BenchmarkTableRow => rowPool.pop() ?? (baseRow.cloneNode(true) as BenchmarkTableRow);
@@ -135,16 +135,18 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
     tbody.appendChild(fragment);
   };
   const clear = (): void => {
-    selected = -1;
-    releaseRows();
+    selectedRow = undefined;
+    rowPool.length = 0;
+    tbody.textContent = "";
   };
   const replace = (count: number): void => {
     const parent = tbody.parentNode;
     const nextSibling = tbody.nextSibling;
-    clear();
     if (parent) {
       tbody.remove();
     }
+    selectedRow = undefined;
+    releaseRows();
     appendRows(count);
     parent?.insertBefore(tbody, nextSibling);
   };
@@ -159,27 +161,27 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
     },
     selectIndex: (index) => {
       const rows = liveRows();
-      if (index < 0 || index >= rows.length || selected === index) {
+      if (index < 0 || index >= rows.length) {
         return;
       }
-      if (selected > -1) {
-        (rows[selected] as HTMLTableRowElement).className = "";
+      const row = rows[index] as BenchmarkTableRow;
+      if (selectedRow === row) {
+        return;
       }
-      selected = index;
-      (rows[index] as HTMLTableRowElement).className = "danger";
+      if (selectedRow) {
+        selectedRow.className = "";
+      }
+      selectedRow = row;
+      row.className = "danger";
     },
     removeIndex: (index) => {
       const row = liveRows()[index];
       if (!row) {
         return;
       }
-      row.className = "";
-      rowPool.push(row as BenchmarkTableRow);
-      row.remove();
-      if (selected === index) {
-        selected = -1;
-      } else if (selected > index) {
-        selected--;
+      tbody.deleteRow(index);
+      if (selectedRow === row) {
+        selectedRow = undefined;
       }
     },
     swap: (a, b) => {
@@ -194,18 +196,13 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
       if (nextA === rowB) {
         tbody.insertBefore(rowB, rowA);
       } else {
-        tbody.insertBefore(rowB, nextA);
+        tbody.insertBefore(rowB, rowA);
         tbody.insertBefore(rowA, nextB);
-      }
-      if (selected === a) {
-        selected = b;
-      } else if (selected === b) {
-        selected = a;
       }
     },
     clear,
     length: () => liveRows().length,
-    selectedIndex: () => selected,
+    selectedIndex: () => selectedRow?.sectionRowIndex ?? -1,
   };
 
   root.querySelector("#run")?.addEventListener("click", () => renderer.replace(1000));
