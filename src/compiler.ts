@@ -737,25 +737,25 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const lines: string[] = [];
   if (needsText) {
-    lines.push(`import { setText, textAt } from "@local/tachyon-dom/runtime/text";`);
+    lines.push(`import { setText, textAt } from "tachyon-dom/runtime/text";`);
   }
   if (needsClass) {
-    lines.push(`import { elementAt, setClassPresence } from "@local/tachyon-dom/runtime/class";`);
+    lines.push(`import { elementAt, setClassPresence } from "tachyon-dom/runtime/class";`);
   }
   if (needsEvent) {
-    lines.push(`import { delegate } from "@local/tachyon-dom/runtime/event";`);
+    lines.push(`import { delegate } from "tachyon-dom/runtime/event";`);
   }
   if (needsList) {
-    lines.push(`import { mountKeyedList } from "@local/tachyon-dom/runtime/list";`);
+    lines.push(`import { mountKeyedList } from "tachyon-dom/runtime/list";`);
   }
   if (needsConditional) {
-    lines.push(`import { mountConditional } from "@local/tachyon-dom/runtime/conditional";`);
+    lines.push(`import { mountConditional } from "tachyon-dom/runtime/conditional";`);
   }
   if (needsSignal) {
-    lines.push(`import { effect, read } from "@local/tachyon-dom/runtime/signal";`);
+    lines.push(`import { effect, read } from "tachyon-dom/runtime/signal";`);
   }
   if (needsStore) {
-    lines.push(`import { createStore } from "@local/tachyon-dom/runtime/store";`);
+    lines.push(`import { createStore } from "tachyon-dom/runtime/store";`);
   }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);

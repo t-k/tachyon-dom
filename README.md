@@ -18,7 +18,7 @@ Byte weight is intentionally secondary for now. The runtime is split so benchmar
 
 ## Compiler Direction
 
-The framework direction is HTML-first syntax with Solid-style fine-grained reactivity and Marko-style separated server/client compiler targets. The first compiler slice lives in `@local/tachyon-dom/compiler` and can:
+The framework direction is HTML-first syntax with Solid-style fine-grained reactivity and Marko-style separated server/client compiler targets. The first compiler slice lives in `tachyon-dom/compiler` and can:
 
 - parse a single-root HTML-like template
 - extract `{expr}` text bindings
@@ -30,15 +30,15 @@ The framework direction is HTML-first syntax with Solid-style fine-grained react
 - render an escaped server string for the same template
 - generate a chunk-yielding streaming server target as a separate compiler output
 - generate client code that imports only the runtime helper modules it needs
-- optionally generate fine-grained client bindings through `@local/tachyon-dom/runtime/signal`
+- optionally generate fine-grained client bindings through `tachyon-dom/runtime/signal`
 
 The fixed syntax surface is documented in [`docs/syntax-spec.md`](docs/syntax-spec.md).
 
-The compiler output is intentionally close to the current direct DOM runtime: static markup stays static, dynamic text/class/event slots are recorded as explicit paths, and generated client code can import subpath helpers such as `@local/tachyon-dom/runtime/text`.
+The compiler output is intentionally close to the current direct DOM runtime: static markup stays static, dynamic text/class/event slots are recorded as explicit paths, and generated client code can import subpath helpers such as `tachyon-dom/runtime/text`.
 
-The first server streaming adapter, `@local/tachyon-dom/server/stream`, accepts sync or async HTML chunks and adapts them to `ReadableStream<Uint8Array>` or `Response` without building a single full HTML string first.
+The first server streaming adapter, `tachyon-dom/server/stream`, accepts sync or async HTML chunks and adapts them to `ReadableStream<Uint8Array>` or `Response` without building a single full HTML string first.
 
-The first list runtime path, `@local/tachyon-dom/runtime/list`, preserves keyed row elements across updates, moves reused elements into order, patches text/class bindings, removes stale rows, and keeps event handlers current through a mutable row scope. Row events are delegated through the list container so reused rows do not need one listener per row.
+The first list runtime path, `tachyon-dom/runtime/list`, preserves keyed row elements across updates, moves reused elements into order, patches text/class bindings, removes stale rows, and keeps event handlers current through a mutable row scope. Row events are delegated through the list container so reused rows do not need one listener per row.
 
 ## Commands
 

@@ -61,9 +61,9 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value);
 
-    expect(code).toContain(`from "@local/tachyon-dom/runtime/text"`);
-    expect(code).toContain(`from "@local/tachyon-dom/runtime/class"`);
-    expect(code).toContain(`from "@local/tachyon-dom/runtime/event"`);
+    expect(code).toContain(`from "tachyon-dom/runtime/text"`);
+    expect(code).toContain(`from "tachyon-dom/runtime/class"`);
+    expect(code).toContain(`from "tachyon-dom/runtime/event"`);
     expect(code).toContain(`export const templateHtml = "<button> </button>";`);
     expect(code).toContain(`setText(textAt(root, [0]), scope.label);`);
     expect(code).toContain(`setClassPresence(root, "danger", scope.selected);`);
@@ -78,7 +78,7 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value);
 
-    expect(code).toContain(`import { elementAt, setClassPresence } from "@local/tachyon-dom/runtime/class";`);
+    expect(code).toContain(`import { elementAt, setClassPresence } from "tachyon-dom/runtime/class";`);
     expect(code).toContain(`setClassPresence(elementAt(root, [0]), "active", scope.selected);`);
   });
 
@@ -92,7 +92,7 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value, { reactive: true });
 
-    expect(code).toContain(`import { effect, read } from "@local/tachyon-dom/runtime/signal";`);
+    expect(code).toContain(`import { effect, read } from "tachyon-dom/runtime/signal";`);
     expect(code).toContain(`const cleanups = [];`);
     expect(code).toContain(`cleanups.push(effect(() => setText(textAt(root, [0,0]), read(scope.title))));`);
     expect(code).toContain(`cleanups.push(effect(() => mountKeyedList(root, [1], read(scope.rows)`);
@@ -110,7 +110,7 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value, { reactive: true });
 
-    expect(code).toContain(`import { createStore } from "@local/tachyon-dom/runtime/store";`);
+    expect(code).toContain(`import { createStore } from "tachyon-dom/runtime/store";`);
     expect(code).toContain(`const state = createStore({ ...scope, count: scope.initialCount });`);
     expect(code).toContain(`setText(textAt(root, [0,0]), read(state.count))`);
 
@@ -133,7 +133,7 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`escapeHtml(scope.label)`);
     expect(code).toContain(`scope.selected ? " danger" : ""`);
     expect(code).toContain(`" class=`);
-    expect(code).not.toContain(`@local/tachyon-dom/runtime`);
+    expect(code).not.toContain(`tachyon-dom/runtime`);
   });
 
   it("generates server list code that uses loop-local item scope", () => {
@@ -160,7 +160,7 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`export const stream = async function* (scope)`);
     expect(code).toContain(`for (const row of scope.rows)`);
     expect(code).toContain(`yield escapeHtml(row.id);`);
-    expect(code).not.toContain(`@local/tachyon-dom/runtime`);
+    expect(code).not.toContain(`tachyon-dom/runtime`);
   });
 
   it("records hydrate boundaries and emits server markers", () => {
@@ -232,7 +232,7 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value);
 
-    expect(code).toContain(`from "@local/tachyon-dom/runtime/list"`);
+    expect(code).toContain(`from "tachyon-dom/runtime/list"`);
     expect(code).toContain(`mountKeyedList(root, [], scope.rows`);
     expect(code).toContain(`key: "row.id"`);
     expect(code).toContain(`itemName: "row"`);
@@ -283,7 +283,7 @@ describe("HTML-first compiler", () => {
     expect(renderServerTemplate(result.value, { active: false, count: 3 })).toBe(`<main><section></section></main>`);
 
     const code = generateClientModule(result.value, { reactive: true });
-    expect(code).toContain(`from "@local/tachyon-dom/runtime/conditional"`);
+    expect(code).toContain(`from "tachyon-dom/runtime/conditional"`);
     expect(code).toContain(`mountConditional(root, [0,0], read(scope.active), scope, {`);
   });
 });

@@ -2,5 +2,6 @@ node_modules/
 dist/
 coverage/
 .vite/
+.codex/
 docs.local/
 benchmark/local-compare/results/
