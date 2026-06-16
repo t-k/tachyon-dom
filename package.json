@@ -47,6 +47,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json",
     "bench:local": "tsx benchmark/local-compare/run-local-compare.ts",
+    "example:stream": "tsx examples/store-hydrate-stream.ts",
     "test": "vitest run",
     "lint": "oxlint .",
     "format": "oxfmt --write ."
@@ -64,5 +65,6 @@
     "typescript": "^5.8.3",
     "vite": "^8.0.16",
     "vitest": "^4.1.9"
-  }
+  },
+  "packageManager": "pnpm@10.32.1"
 }

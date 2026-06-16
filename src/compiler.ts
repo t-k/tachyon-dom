@@ -488,6 +488,9 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
     if (attr.name.startsWith("on:")) {
       continue;
     }
+    if (attr.name === "hydrate:id") {
+      continue;
+    }
     if (attr.name.startsWith("class:")) {
       const expression = readExpressionAttribute(attr.value);
       if (expression && readPath(scope, expression)) {
@@ -676,6 +679,9 @@ const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<string>)
 
   for (const attr of node.attrs) {
     if (attr.name.startsWith("on:")) {
+      continue;
+    }
+    if (attr.name === "hydrate:id") {
       continue;
     }
     if (attr.name.startsWith("class:")) {
