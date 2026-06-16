@@ -1,6 +1,6 @@
 import { setClassPresence } from "./class";
 import { setAttributeValue, setRef, setStyleValue } from "./attr";
-import { setText, textAt } from "./text";
+import { setText } from "./text";
 import { bindControl, setControlValue } from "./form";
 
 type TextBinding = {

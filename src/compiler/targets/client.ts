@@ -1,15 +1,12 @@
 import type {
-  ClassBinding,
   CompiledTemplate,
   ConditionalBinding,
   ElementNode,
-  EventBinding,
   GenerateClientModuleOptions,
   ListBinding,
   LoweringContext,
   StoreDefinition,
   TemplateNode,
-  TextBinding,
   TextNode,
 } from "../types";
 import { storeDefinitionsFor } from "../ir";
