@@ -113,15 +113,20 @@ export const createChunkedRowList = <T>(
     items.push(...nextItems);
   };
 
-  const clear = (): void => {
+  const clearInternal = (clearCachedChunks: boolean): void => {
     items.length = 0;
     selected = -1;
+    if (clearCachedChunks) {
+      chunkCache.clear();
+    }
     options.tbody.textContent = "";
   };
 
+  const clear = (): void => clearInternal(true);
+
   const replace = (nextItems: readonly T[]): void => {
     const reattach = reattachAfterBulkMutation(options.tbody);
-    clear();
+    clearInternal(false);
     appendInternal(nextItems);
     reattach();
   };

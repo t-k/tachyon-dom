@@ -9,6 +9,7 @@
     "dist"
   ],
   "type": "module",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -114,6 +115,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json",
     "bench:local": "tsx benchmark/local-compare/run-local-compare.ts",
+    "bench:local:full": "tsx benchmark/local-compare/run-local-compare.ts --iterations 9 --warmup 3",
     "bench:local:gate": "tsx benchmark/local-compare/run-local-compare.ts --max-geomean-ratio 1.25 --max-memory-ratio 1.5",
     "bench:local:smoke": "tsx benchmark/local-compare/run-local-compare.ts --iterations 1 --warmup 1",
     "example:router": "tsx examples/router.ts",

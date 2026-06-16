@@ -1,9 +1,14 @@
-import { createChunkedRowList, textAt, type ChunkedRowList } from "../../../src/index";
+import { createChunkedRowList, type ChunkedRowList } from "../../../src/index";
 import { messages } from "./i18n";
 
 export type BenchmarkRow = {
   id: number;
   label: string;
+};
+
+type BenchmarkTableRow = HTMLTableRowElement & {
+  $id?: Text;
+  $label?: Text;
 };
 
 const adjectives = [
@@ -75,13 +80,19 @@ export const buildData = (count: number): BenchmarkRow[] => {
   return rows;
 };
 
+const idText = (row: BenchmarkTableRow): Text => (row.$id ??= row.firstChild?.firstChild as Text);
+
+const labelText = (row: BenchmarkTableRow): Text =>
+  (row.$label ??= row.firstChild?.nextSibling?.firstChild?.firstChild as Text);
+
 const bindBenchmarkRow = (row: HTMLTableRowElement, item: BenchmarkRow): void => {
-  textAt(row, [0, 0]).nodeValue = String(item.id);
-  textAt(row, [1, 0, 0]).nodeValue = item.label;
+  const benchmarkRow = row as BenchmarkTableRow;
+  idText(benchmarkRow).nodeValue = String(item.id);
+  labelText(benchmarkRow).nodeValue = item.label;
 };
 
 const updateBenchmarkRow = (row: HTMLTableRowElement, item: BenchmarkRow): void => {
-  textAt(row, [1, 0, 0]).nodeValue = item.label;
+  labelText(row as BenchmarkTableRow).nodeValue = item.label;
 };
 
 const indexFromEvent = (event: Event, renderer: ChunkedRowList<BenchmarkRow>): number => {

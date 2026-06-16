@@ -60,6 +60,7 @@ pnpm test
 pnpm build
 pnpm lint
 pnpm bench:local
+pnpm bench:local:full
 pnpm bench:local:gate
 pnpm bench:local:smoke
 ```
@@ -74,6 +75,8 @@ tachyon-dom preview --host 127.0.0.1 --port 4173
 ```
 
 `pnpm bench:local` starts a temporary Vite server, measures Tachyon DOM against local copies of the keyed vanilla benchmark implementations in Playwright Chromium, prints ratio tables, and writes JSON results under `benchmark/local-compare/results/`.
+
+`pnpm bench:local:full` runs the same comparison with extra warmup and measured iterations for noisier performance investigations.
 
 `pnpm bench:local:smoke` runs the same local comparison with one warmup and one measured iteration for feature-PR checks.
 

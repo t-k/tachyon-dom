@@ -53,6 +53,17 @@ describe("DX helpers", () => {
     expect(scoped.source).toBe(`<button>{count}</button>`);
   });
 
+  it("marks the package as tree-shakable for bundlers", async () => {
+    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+      sideEffects?: boolean;
+      exports?: Record<string, unknown>;
+    };
+
+    expect(packageJson.sideEffects).toBe(false);
+    expect(packageJson.exports).toHaveProperty("./runtime/list");
+    expect(packageJson.exports).toHaveProperty("./router");
+  });
+
   it("compiles template files through the CLI helper", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-"));
     try {

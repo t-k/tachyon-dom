@@ -93,5 +93,9 @@ describe("createChunkedRowList", () => {
     renderer.clear();
     expect(renderer.length()).toBe(0);
     expect(tbody.rows.length).toBe(0);
+
+    renderer.append([{ id: 1000, label: "row 1000" }]);
+    expect(renderer.length()).toBe(1);
+    expect(tbody.rows[0]?.cells[1]?.textContent).toBe("row 1000");
   });
 });
