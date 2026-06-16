@@ -11,6 +11,12 @@ export type LocatedHydrationBoundary = {
   element: Element;
 };
 
+export type HydrationBoundaryDiagnostic = {
+  id: string;
+  type: "missing-start" | "missing-end" | "duplicate" | "missing-element";
+  message: string;
+};
+
 export type HydrationBoundaryHandle = {
   hydrate: () => void;
   hydrated: () => boolean;
@@ -77,6 +83,31 @@ export const locateHydrationBoundary = (
     return err({ message: `Missing hydrate boundary element for ${id}.` });
   }
   return ok({ id, start, end, element });
+};
+
+export const diagnoseHydrationBoundaries = (
+  root: ParentNode,
+  expectedIds: readonly string[],
+): HydrationBoundaryDiagnostic[] => {
+  const comments = commentsIn(root);
+  const diagnostics: HydrationBoundaryDiagnostic[] = [];
+  for (const id of expectedIds) {
+    const starts = comments.filter((comment) => comment.data === markerText(id, "start"));
+    const ends = comments.filter((comment) => comment.data === markerText(id, "end"));
+    if (starts.length === 0) {
+      diagnostics.push({ id, type: "missing-start", message: `Missing hydrate boundary start marker for ${id}.` });
+    }
+    if (ends.length === 0) {
+      diagnostics.push({ id, type: "missing-end", message: `Missing hydrate boundary end marker for ${id}.` });
+    }
+    if (starts.length > 1 || ends.length > 1) {
+      diagnostics.push({ id, type: "duplicate", message: `Duplicate hydrate boundary markers for ${id}.` });
+    }
+    if (starts.length === 1 && ends.length === 1 && !nextElementBetween(starts[0] as Comment, ends[0] as Comment)) {
+      diagnostics.push({ id, type: "missing-element", message: `Missing hydrate boundary element for ${id}.` });
+    }
+  }
+  return diagnostics;
 };
 
 export const createHydrationBoundary = (

@@ -18,6 +18,10 @@
       "types": "./dist/compiler.d.ts",
       "import": "./dist/compiler.js"
     },
+    "./cookies": {
+      "types": "./dist/cookies.d.ts",
+      "import": "./dist/cookies.js"
+    },
     "./adapters": {
       "types": "./dist/adapters.d.ts",
       "import": "./dist/adapters.js"
@@ -101,6 +105,10 @@
     "./server/stream": {
       "types": "./dist/server/stream.d.ts",
       "import": "./dist/server/stream.js"
+    },
+    "./security": {
+      "types": "./dist/security.d.ts",
+      "import": "./dist/security.js"
     }
   },
   "scripts": {

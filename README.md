@@ -46,11 +46,11 @@ The first list runtime path, `tachyon-dom/runtime/list`, preserves keyed row ele
 
 ## Routing
 
-Routing is provided as a separate layer instead of being baked into the template compiler. The server router in `tachyon-dom/router` supports static routes, `:param` routes, wildcard routes, nested layouts through `outlet`, route loaders, form actions, 404/error boundaries, head descriptor rendering, route hydration state scripts, trusted HTML responses, CSP nonce propagation, resource hints, streaming finalization, and route type generation. The client router in `tachyon-dom/runtime/router` supports same-origin link interception, History API navigation, `popstate`, abortable route loaders, loader cache/prefetch/invalidation, scroll-to-top hooks, focus restoration, navigation announcements, title updates, and 404/error rendering.
+Routing is provided as a separate layer instead of being baked into the template compiler. The server router in `tachyon-dom/router` supports static routes, `:param` routes, wildcard routes, nested layouts through `outlet`, route loaders, form actions, 404/error boundaries, head descriptor rendering, route hydration state scripts, trusted HTML responses, backend HTML sanitization helpers, CSRF guards, middleware, observability hooks, deferred data helpers, CSP nonce propagation, resource hints, streaming finalization, build manifests, and route type generation. The client router in `tachyon-dom/runtime/router` supports same-origin link interception, History API navigation, `popstate`, abortable route loaders, loader cache/prefetch/invalidation, route HMR revalidation, scroll-to-top hooks, focus restoration, navigation announcements, title updates, and 404/error rendering.
 
 The Vite integration also exposes `tachyonDomRoutes()` for a `virtual:tachyon-dom/routes` module. It emits a manifest plus lazy dynamic imports, which keeps route modules split into separate chunks.
 
-Server adapters live in `tachyon-dom/adapters` for Node and Cloudflare Workers-style runtimes.
+Server adapters live in `tachyon-dom/adapters` for Node and Cloudflare Workers-style runtimes, with optional static asset serving and security header merging. `tachyon-dom/runtime/form` includes progressive form enhancement, and `tachyon-dom/runtime/hydrate` includes boundary mismatch diagnostics for SSR tests and development builds.
 
 ## Commands
 
@@ -62,6 +62,15 @@ pnpm lint
 pnpm bench:local
 pnpm bench:local:gate
 pnpm bench:local:smoke
+```
+
+The package CLI also exposes:
+
+```sh
+tachyon-dom compile view.tachyon.html --target client --out view.js
+tachyon-dom routes src/routes --out route-manifest.json
+tachyon-dom dev --host 127.0.0.1 --port 5173
+tachyon-dom preview --host 127.0.0.1 --port 4173
 ```
 
 `pnpm bench:local` starts a temporary Vite server, measures Tachyon DOM against local copies of the keyed vanilla benchmark implementations in Playwright Chromium, prints ratio tables, and writes JSON results under `benchmark/local-compare/results/`.

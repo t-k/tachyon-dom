@@ -38,6 +38,15 @@ export type ClientRouter = {
   dispose: () => void;
 };
 
+export type RouteHotReloader = {
+  accept: (update?: { routeIds?: readonly string[]; href?: string }) => Promise<void>;
+};
+
+export type RouteHotReloaderOptions = Pick<ClientRouter, "invalidate" | "navigate"> & {
+  currentPath?: () => string;
+  onUpdate?: (update: { routeIds?: readonly string[]; href: string }) => void | Promise<void>;
+};
+
 type ClientMatch = {
   route: ClientRouteDefinition;
   params: ClientRouteParams;
@@ -282,3 +291,12 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     },
   };
 };
+
+export const createRouteHotReloader = (options: RouteHotReloaderOptions): RouteHotReloader => ({
+  accept: async (update = {}) => {
+    const href = update.href ?? options.currentPath?.() ?? `${location.pathname}${location.search}${location.hash}`;
+    options.invalidate(href);
+    await options.onUpdate?.({ ...update, href });
+    await options.navigate(href, { replace: true });
+  },
+});

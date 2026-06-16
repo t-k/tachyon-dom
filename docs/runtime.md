@@ -10,7 +10,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/list`: keyed list mounting, reuse, move, and multi-root item support.
 - `runtime/conditional`: conditional DOM mounting.
 - `runtime/hydrate`: SSR boundary location, state handoff, and hydration scheduling.
-- `runtime/router`: client-side navigation with link interception, History API, abortable loaders, scroll hooks, and focus restoration.
+- `runtime/router`: client-side navigation with link interception, History API, abortable loaders, scroll hooks, focus restoration, and route HMR cache invalidation.
 - `runtime/fragment`: wrapper-free fragment mounting.
 - `runtime/portal`: external target mounting.
 - `runtime/store` and `runtime/signal`: fine-grained store/signal helpers.
@@ -28,6 +28,12 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 
 The compiler records hydration boundaries with `hydrate:id={id}`. Runtime scheduling chooses when to call `handle.hydrate()`.
 
+`diagnoseHydrationBoundaries(root, expectedIds)` reports missing, duplicate, or empty boundary markers so SSR/client mismatches can fail loudly in tests and development builds.
+
+## Progressive Forms
+
+`enhanceForm(form, options)` intercepts submit events only when JavaScript is running, builds a `Request` from the existing form markup, and calls `fetch()` or a custom `submit()` callback. Without JavaScript, the same form remains a normal browser form.
+
 ## Client Router Cache
 
 `createClientRouter()` supports:
@@ -37,3 +43,5 @@ The compiler records hydration boundaries with `hydrate:id={id}`. Runtime schedu
 - `router.invalidate(href?)` to clear one cache entry or all cache entries.
 - `liveRegion` to announce navigations.
 - `title` to update `document.title` after route render.
+
+`createRouteHotReloader()` invalidates the current route cache entry and re-navigates with `replace: true` when a route module update arrives from a dev server.

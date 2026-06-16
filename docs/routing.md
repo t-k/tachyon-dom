@@ -51,11 +51,13 @@ Actions run for non-GET/HEAD requests before loaders. Loaders run from parent to
 
 `renderRouteStream()` yields route `fallback` chunks before the final rendered route HTML.
 
+`middleware` runs before route matching and can rewrite the incoming `Request` or return a short-circuit `Response`. `hooks` expose request, match, loader, action, render, and error observations for tracing and metrics.
+
 ## Response Helpers
 
 - `redirect("/path")` returns a 302 route response. External redirects are rejected unless `allowExternal` is set.
 - `json(data)` returns an application/json route response.
-- `html(markup)` returns a text/html route response.
+- `html(trustedHtml)` returns a text/html route response.
 
 If an action or loader returns one of these responses, route rendering short-circuits.
 
@@ -63,6 +65,9 @@ HTML responses use explicit trusted HTML helpers:
 
 - `escapeToHtml(value)` escapes text and returns `TrustedHtml`.
 - `unsafeHtml(markup)` marks raw HTML as trusted and should only be used for framework-generated or otherwise trusted markup.
+- `sanitizeHtml(markup)` is available from `tachyon-dom/security` for allowlist-based backend sanitization before passing content to `html()`.
+
+`defer(record)` separates immediate values from promised values, and `resolveDeferredData()` resolves the full object. `renderRoute()` resolves deferred loader data before rendering; `renderRouteStream()` can still flush route fallbacks before the final route HTML.
 
 ## CSP Nonces
 
@@ -78,8 +83,19 @@ await renderRoute(routes, request, { cspNonce: nonce });
 
 - `allowedMethods`
 - `maxActionBodyBytes`
+- `csrf: { token }` for action requests
+- `middleware`
+- `hooks`
 
 `createSecurityHeaders()` returns default defense-in-depth headers including `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `COOP`, optional HSTS, and optional nonce-based CSP. Use `applySecurityHeaders(response, headers)` to merge them onto a response.
+
+`tachyon-dom/security` also exports:
+
+- `createCsrfToken()`
+- `csrfInput(token)`
+- `verifyCsrfRequest(request, { token })`
+
+`tachyon-dom/cookies` exports `parseCookies()`, `serializeCookie()`, and `createMemorySessionStorage()` for small server adapters and examples.
 
 ## Server Adapters
 
@@ -87,8 +103,9 @@ await renderRoute(routes, request, { cspNonce: nonce });
 
 - `createNodeHandler({ routes })`
 - `createWorkersHandler({ routes })`
+- `createStaticAssetHandler({ rootDir, basePath })`
 
-Both adapters can apply `securityHeaders` and can use `streaming: true` to route through `renderRouteStream()`.
+Both adapters can apply `securityHeaders`, serve `staticAssets`, and can use `streaming: true` to route through `renderRouteStream()`.
 
 ## Streaming Finalization
 
@@ -97,6 +114,14 @@ Both adapters can apply `securityHeaders` and can use `streaming: true` to route
 ## Type Generation
 
 `generateRouteTypes(manifest)` emits a TypeScript declaration shape backed by `ParamsForPath`.
+
+`createRouteBuildManifest(routes, { buildId, assets })` creates a route build manifest containing route paths, per-route assets, and generated route types.
+
+The CLI can write file-route manifests:
+
+```sh
+tachyon-dom routes src/routes --out route-manifest.json
+```
 
 ## Testing
 

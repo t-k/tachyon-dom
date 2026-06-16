@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createHydrationBoundary,
+  diagnoseHydrationBoundaries,
   locateHydrationBoundary,
   readHydrationState,
   scheduleHydration,
@@ -116,5 +117,20 @@ describe("hydrate boundary runtime", () => {
     main.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(secondResult.value.hydrated()).toBe(true);
     cleanup();
+  });
+
+  it("diagnoses missing and duplicate hydration boundary markers", () => {
+    document.body.innerHTML = `
+      <!--tachyon-hydrate:a:start--><section></section><!--tachyon-hydrate:a:end-->
+      <!--tachyon-hydrate:a:start--><section></section><!--tachyon-hydrate:a:end-->
+      <!--tachyon-hydrate:b:start--><section></section>
+    `;
+
+    expect(diagnoseHydrationBoundaries(document.body, ["a", "b", "c"])).toEqual([
+      { id: "a", type: "duplicate", message: "Duplicate hydrate boundary markers for a." },
+      { id: "b", type: "missing-end", message: "Missing hydrate boundary end marker for b." },
+      { id: "c", type: "missing-start", message: "Missing hydrate boundary start marker for c." },
+      { id: "c", type: "missing-end", message: "Missing hydrate boundary end marker for c." },
+    ]);
   });
 });

@@ -102,6 +102,13 @@ export type RouteRenderOptions = {
   allowedMethods?: readonly string[];
   maxActionBodyBytes?: number;
   cspNonce?: string;
+  csrf?: {
+    token: string;
+    headerName?: string;
+    fieldName?: string;
+  };
+  middleware?: readonly RouteMiddleware[];
+  hooks?: RouteHooks;
 };
 
 export type RouteError = {
@@ -130,6 +137,35 @@ export type RouteResponse = {
   body: string;
 };
 
+export type RouteMiddlewareResult = Request | Response | RouteResponse | void;
+
+export type RouteMiddleware = (context: {
+  request: Request;
+  url: URL;
+}) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>;
+
+export type RouteHooks = {
+  onRequest?: (context: { request: Request; url: URL }) => void | Promise<void>;
+  onMatch?: (context: { request: Request; url: URL; match: MatchedRoute }) => void | Promise<void>;
+  onLoader?: (context: { request: Request; url: URL; route: RouteDefinition; data: unknown }) => void | Promise<void>;
+  onAction?: (context: { request: Request; url: URL; route: RouteDefinition; result: unknown }) => void | Promise<void>;
+  onRender?: (context: { request: Request; url: URL; html: string; match: MatchedRoute }) => void | Promise<void>;
+  onError?: (context: { request: Request; url: URL; error: unknown; match?: MatchedRoute }) => void | Promise<void>;
+};
+
+export type DeferredData<T extends Record<string, unknown> = Record<string, unknown>> = {
+  __tachyonDeferredData: true;
+  immediate: Partial<T>;
+  pending: Partial<{ [Key in keyof T]: Promise<Awaited<T[Key]>> }>;
+};
+
+export type RouteBuildManifest = {
+  buildId: string;
+  routes: RouteManifestEntry[];
+  assets: Record<string, string[]>;
+  types: string;
+};
+
 const routeError = (message: string, status: number): RouteError => ({ message, status });
 
 const trimSlashes = (value: string): string => value.replace(/^\/+|\/+$/g, "");
@@ -152,6 +188,13 @@ const isRouteResponse = (value: unknown): value is RouteResponse =>
     value &&
     typeof value === "object" &&
     (value as { __tachyonRouteResponse?: unknown }).__tachyonRouteResponse === true,
+  );
+
+const isWebResponse = (value: unknown): value is Response => value instanceof Response;
+
+export const isDeferredData = (value: unknown): value is DeferredData =>
+  Boolean(
+    value && typeof value === "object" && (value as { __tachyonDeferredData?: unknown }).__tachyonDeferredData === true,
   );
 
 const routeResponse = (body: string, init: ResponseInit = {}): RouteResponse => ({
@@ -198,6 +241,41 @@ export const html = (body: TrustedHtml, init: ResponseInit = {}): RouteResponse 
     headers.set("content-type", "text/html; charset=utf-8");
   }
   return routeResponse(trustedHtmlValue(body), { ...init, headers });
+};
+
+export const defer = <T extends Record<string, unknown>>(values: T): DeferredData<T> => {
+  const immediate: Partial<T> = {};
+  const pending: Partial<{ [Key in keyof T]: Promise<Awaited<T[Key]>> }> = {};
+  for (const [key, value] of Object.entries(values) as Array<[keyof T, T[keyof T]]>) {
+    if (value instanceof Promise) {
+      pending[key] = value as Promise<Awaited<T[keyof T]>>;
+    } else {
+      immediate[key] = value;
+    }
+  }
+  return { __tachyonDeferredData: true, immediate, pending };
+};
+
+export const resolveDeferredData = async <T extends Record<string, unknown>>(data: DeferredData<T>): Promise<T> => {
+  const resolved: Record<string, unknown> = { ...data.immediate };
+  for (const [key, value] of Object.entries(data.pending)) {
+    resolved[key] = await value;
+  }
+  return resolved as T;
+};
+
+const verifyCsrf = async (request: Request, options: NonNullable<RouteRenderOptions["csrf"]>): Promise<boolean> => {
+  const headerName = options.headerName ?? "x-csrf-token";
+  const fieldName = options.fieldName ?? "_csrf";
+  if (request.headers.get(headerName) === options.token) {
+    return true;
+  }
+  const contentType = request.headers.get("content-type") ?? "";
+  if (contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) {
+    const form = await request.clone().formData();
+    return form.get(fieldName) === options.token;
+  }
+  return false;
 };
 
 export const createSecurityHeaders = (
@@ -355,6 +433,32 @@ export const generateRouteTypes = (manifest: readonly Pick<RouteManifestEntry, "
     ``,
   ];
   return lines.join("\n");
+};
+
+export const createRouteBuildManifest = (
+  routes: readonly RouteDefinition[],
+  options: {
+    buildId: string;
+    assets?: readonly { routeId: string; files: readonly string[] }[];
+  },
+): RouteBuildManifest => {
+  const manifest = createRouteManifest(routes);
+  const assets: Record<string, string[]> = {};
+  for (const route of manifest) {
+    const definition = flattenRoutes(routes).find((candidate) => routeId(candidate.route, candidate.path) === route.id);
+    const staticResources =
+      typeof definition?.route.resources === "function" ? [] : (definition?.route.resources ?? []);
+    assets[route.id] = staticResources.map((resource) => resource.href);
+  }
+  for (const entry of options.assets ?? []) {
+    assets[entry.routeId] = [...(assets[entry.routeId] ?? []), ...entry.files];
+  }
+  return {
+    buildId: options.buildId,
+    routes: manifest,
+    assets,
+    types: generateRouteTypes(manifest),
+  };
 };
 
 const compileRoutePath = (path: string): { regex: RegExp; names: string[]; wildcard: boolean } => {
@@ -519,8 +623,55 @@ export const renderRoute = async (
   input: Request | URL | string,
   options: RouteRenderOptions = {},
 ): Promise<Result<RouteRenderResult, RouteError>> => {
-  const request = requestFor(input);
-  const url = new URL(request.url);
+  let request = requestFor(input);
+  let url = new URL(request.url);
+  const emptyMatch = (pathname = url.pathname): MatchedRoute => ({
+    route: { path: "*", render: () => "" },
+    branch: [],
+    params: {},
+    pathname,
+  });
+  const routeResponseResult = (response: RouteResponse, match = emptyMatch()): RouteRenderResult => ({
+    status: response.status,
+    html: response.headers.get("content-type")?.startsWith("text/html") ? response.body : "",
+    responseBody: response.body,
+    headHtml: "",
+    resourceHints: "",
+    stateScript: "",
+    loaderData: {},
+    actionResult: undefined,
+    headers: response.headers,
+    match,
+  });
+  const webResponseResult = async (response: Response, match = emptyMatch()): Promise<RouteRenderResult> => {
+    const body = await response.text();
+    return {
+      status: response.status,
+      html: response.headers.get("content-type")?.startsWith("text/html") ? body : "",
+      responseBody: body,
+      headHtml: "",
+      resourceHints: "",
+      stateScript: "",
+      loaderData: {},
+      actionResult: undefined,
+      headers: response.headers,
+      match,
+    };
+  };
+  await options.hooks?.onRequest?.({ request, url });
+  for (const middleware of options.middleware ?? []) {
+    const result = await middleware({ request, url });
+    if (isRouteResponse(result)) {
+      return ok(routeResponseResult(result));
+    }
+    if (isWebResponse(result)) {
+      return ok(await webResponseResult(result));
+    }
+    if (result instanceof Request) {
+      request = result;
+      url = new URL(request.url);
+    }
+  }
   if (options.allowedMethods && !options.allowedMethods.includes(request.method)) {
     return ok({
       status: 405,
@@ -531,12 +682,7 @@ export const renderRoute = async (
       loaderData: {},
       actionResult: undefined,
       headers: new Headers({ allow: options.allowedMethods.join(", "), "content-type": "text/html; charset=utf-8" }),
-      match: {
-        route: { path: "*", render: () => "" },
-        branch: [],
-        params: {},
-        pathname: url.pathname,
-      },
+      match: emptyMatch(),
     });
   }
   const contentLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
@@ -550,12 +696,7 @@ export const renderRoute = async (
       loaderData: {},
       actionResult: undefined,
       headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
-      match: {
-        route: { path: "*", render: () => "" },
-        branch: [],
-        params: {},
-        pathname: url.pathname,
-      },
+      match: emptyMatch(),
     });
   }
   const match = matchRoute(routes, url);
@@ -570,18 +711,27 @@ export const renderRoute = async (
       loaderData: {},
       actionResult: undefined,
       headers: new Headers(),
-      match: {
-        route: { path: "*", render: () => html },
-        branch: [],
-        params: {},
-        pathname: url.pathname,
-      },
+      match: emptyMatch(),
     });
   }
   try {
+    await options.hooks?.onMatch?.({ request, url, match: match.value });
     let actionResult: unknown;
     const loaderData: Record<string, unknown> = {};
     if (request.method !== "GET" && request.method !== "HEAD" && match.value.route.action) {
+      if (options.csrf && !(await verifyCsrf(request, options.csrf))) {
+        return ok({
+          status: 403,
+          html: "<h1>Forbidden</h1>",
+          headHtml: "",
+          resourceHints: "",
+          stateScript: "",
+          loaderData: {},
+          actionResult: undefined,
+          headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+          match: match.value,
+        });
+      }
       actionResult = await match.value.route.action({
         request,
         url,
@@ -590,19 +740,9 @@ export const renderRoute = async (
         loaderData,
         actionResult: undefined,
       });
+      await options.hooks?.onAction?.({ request, url, route: match.value.route, result: actionResult });
       if (isRouteResponse(actionResult)) {
-        return ok({
-          status: actionResult.status,
-          html: actionResult.headers.get("content-type")?.startsWith("text/html") ? actionResult.body : "",
-          responseBody: actionResult.body,
-          headHtml: "",
-          resourceHints: "",
-          stateScript: "",
-          loaderData,
-          actionResult,
-          headers: actionResult.headers,
-          match: match.value,
-        });
+        return ok({ ...routeResponseResult(actionResult, match.value), loaderData, actionResult });
       }
     }
     for (const entry of match.value.branch) {
@@ -617,20 +757,10 @@ export const renderRoute = async (
           actionResult,
         });
         if (isRouteResponse(data)) {
-          return ok({
-            status: data.status,
-            html: data.headers.get("content-type")?.startsWith("text/html") ? data.body : "",
-            responseBody: data.body,
-            headHtml: "",
-            resourceHints: "",
-            stateScript: "",
-            loaderData,
-            actionResult,
-            headers: data.headers,
-            match: match.value,
-          });
+          return ok({ ...routeResponseResult(data, match.value), loaderData, actionResult });
         }
-        loaderData[id] = data;
+        loaderData[id] = isDeferredData(data) ? await resolveDeferredData(data) : data;
+        await options.hooks?.onLoader?.({ request, url, route: entry.route, data: loaderData[id] });
       }
     }
     let outlet = "";
@@ -653,6 +783,7 @@ export const renderRoute = async (
         heads.unshift(await entry.route.head(context));
       }
     }
+    await options.hooks?.onRender?.({ request, url, html: outlet, match: match.value });
     const stateScript = Object.entries(loaderData)
       .map(([id, data]) =>
         serializeHydrationState(`route:${id}`, data, options.cspNonce === undefined ? {} : { nonce: options.cspNonce }),
@@ -678,6 +809,7 @@ export const renderRoute = async (
       match: match.value,
     });
   } catch (error) {
+    await options.hooks?.onError?.({ request, url, error, match: match.value });
     const boundary = [...match.value.branch].reverse().find((entry) => entry.route.error)?.route.error ?? options.error;
     const html = boundary ? await boundary({ request, url, error }) : `<h1>Internal Server Error</h1>`;
     return ok({

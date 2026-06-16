@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { compileFile } from "../src/cli";
+import { buildRouteManifestFile, compileFile } from "../src/cli";
 import { diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
@@ -64,6 +64,32 @@ describe("DX helpers", () => {
 
       expect(result.ok).toBe(true);
       expect(await readFile(output, "utf8")).toContain(`export const templateHtml = "<main> </main>";`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("builds a file route manifest through the CLI helper", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-routes-"));
+    try {
+      const routesDir = path.join(dir, "routes");
+      const output = path.join(dir, "route-manifest.json");
+      await mkdir(path.join(routesDir, "users"), { recursive: true });
+      await writeFile(path.join(routesDir, "index.tachyon.html"), `<main>Home</main>`);
+      await writeFile(path.join(routesDir, "users", "[id].tachyon.html"), `<main>User</main>`);
+
+      const result = await buildRouteManifestFile({ routesDir, output });
+
+      expect(result.ok).toBe(true);
+      expect(JSON.parse(await readFile(output, "utf8"))).toEqual([
+        { id: "index", path: "/", file: path.join(routesDir, "index.tachyon.html"), kind: "template" },
+        {
+          id: "users-id",
+          path: "/users/:id",
+          file: path.join(routesDir, "users", "[id].tachyon.html"),
+          kind: "template",
+        },
+      ]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
