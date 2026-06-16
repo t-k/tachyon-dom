@@ -45,4 +45,39 @@ describe("server adapters", () => {
     expect(res.setHeader).toHaveBeenCalledWith("content-type", "text/html; charset=utf-8");
     expect(chunks.join("")).toBe("<h1>Home</h1>");
   });
+
+  it("pipes Node streaming responses without buffering through end text", async () => {
+    const routes: RouteDefinition[] = [
+      { path: "/", fallback: "<p>Loading</p>", loader: async () => "Ready", render: ({ data }) => `<h1>${data}</h1>` },
+    ];
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/";
+    req.headers = { host: "example.com" };
+    const chunks: string[] = [];
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      write: vi.fn((chunk: Buffer | string) => {
+        chunks.push(String(chunk));
+      }),
+      end: vi.fn(),
+      once: vi.fn((event: string, callback: () => void) => {
+        if (event === "finish") {
+          callback();
+        }
+      }),
+      emit: vi.fn(),
+    };
+
+    await createNodeHandler({ routes, streaming: true })(req as never, res as never);
+
+    expect(res.write).toHaveBeenCalled();
+    expect(res.end).toHaveBeenCalledWith();
+    expect(chunks.join("")).toBe("<p>Loading</p><h1>Ready</h1>");
+  });
 });

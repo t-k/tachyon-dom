@@ -11,6 +11,12 @@ export type ClientRouteDefinition<Data = unknown> = {
   id?: string;
   path: string;
   load?: (context: Omit<ClientRouteContext<Data>, "data">) => Data | Promise<Data>;
+  action?: (context: Omit<ClientRouteContext<Data>, "data"> & { request: Request }) => Response | Promise<Response>;
+  revalidateOnAction?:
+    | "self"
+    | "all"
+    | readonly string[]
+    | ((context: { url: URL; response: Response }) => readonly string[]);
   render: (
     context: ClientRouteContext<Data>,
   ) => string | Node | readonly Node[] | DocumentFragment | Promise<string | Node | readonly Node[] | DocumentFragment>;
@@ -32,7 +38,9 @@ export type ClientRouterOptions = {
 export type ClientRouter = {
   start: () => Promise<void>;
   navigate: (href: string, options?: { replace?: boolean }) => Promise<void>;
+  submit: (href: string, init?: RequestInit) => Promise<Response>;
   prefetch: (href: string) => Promise<void>;
+  revalidate: (hrefs?: string | readonly string[]) => Promise<void>;
   invalidate: (href?: string) => void;
   settled: () => Promise<void>;
   dispose: () => void;
@@ -45,6 +53,14 @@ export type RouteHotReloader = {
 export type RouteHotReloaderOptions = Pick<ClientRouter, "invalidate" | "navigate"> & {
   currentPath?: () => string;
   onUpdate?: (update: { routeIds?: readonly string[]; href: string }) => void | Promise<void>;
+};
+
+export type RouteHotApi = {
+  on: (
+    event: "tachyon-dom:routes-update",
+    callback: (payload: { routeIds?: readonly string[]; href?: string }) => void,
+  ) => void;
+  dispose?: (callback: () => void) => void;
 };
 
 type ClientMatch = {
@@ -183,6 +199,51 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     await loadData(url, match, prefetchController.signal);
   };
 
+  const revalidate = async (hrefs?: string | readonly string[]): Promise<void> => {
+    if (!hrefs) {
+      cache.clear();
+    } else if (typeof hrefs === "string") {
+      cache.delete(cacheKey(toUrl(hrefs, location.href || baseUrl)));
+    } else {
+      for (const href of hrefs) {
+        cache.delete(cacheKey(toUrl(href, location.href || baseUrl)));
+      }
+    }
+    await navigate(location.pathname + location.search + location.hash, { replace: true });
+  };
+
+  const hrefsForAction = (url: URL, match: ClientMatch, response: Response): string | readonly string[] | undefined => {
+    const policy = match.route.revalidateOnAction ?? "self";
+    if (policy === "all") {
+      return undefined;
+    }
+    if (policy === "self") {
+      return url.pathname + url.search;
+    }
+    if (typeof policy === "function") {
+      return policy({ url, response });
+    }
+    return policy;
+  };
+
+  const submit = async (href: string, init: RequestInit = {}): Promise<Response> => {
+    const url = toUrl(href, location.href || baseUrl);
+    const match = matchClientRoute(options.routes, url.pathname);
+    if (!match?.route.action) {
+      throw new Error(`No action route matched ${url.pathname}.`);
+    }
+    const actionController = new AbortController();
+    const request = new Request(url, { method: init.method ?? "POST", ...init, signal: actionController.signal });
+    const response = await match.route.action({ url, params: match.params, signal: actionController.signal, request });
+    const locationHeader = response.headers.get("location");
+    if (response.status >= 300 && response.status < 400 && locationHeader) {
+      await navigate(locationHeader, { replace: true });
+      return response;
+    }
+    await revalidate(hrefsForAction(url, match, response));
+    return response;
+  };
+
   const navigate = async (href: string, navigateOptions: { replace?: boolean } = {}): Promise<void> => {
     controller?.abort();
     const nextController = new AbortController();
@@ -274,7 +335,9 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
       await navigate(location.pathname + location.search + location.hash, { replace: true });
     },
     navigate,
+    submit,
     prefetch,
+    revalidate,
     invalidate: (href?: string) => {
       if (!href) {
         cache.clear();
@@ -300,3 +363,21 @@ export const createRouteHotReloader = (options: RouteHotReloaderOptions): RouteH
     await options.navigate(href, { replace: true });
   },
 });
+
+export const connectRouteHotReloader = (hot: RouteHotApi | undefined, reloader: RouteHotReloader): (() => void) => {
+  if (!hot) {
+    return () => undefined;
+  }
+  let disposed = false;
+  hot.on("tachyon-dom:routes-update", (payload) => {
+    if (!disposed) {
+      void reloader.accept(payload);
+    }
+  });
+  hot.dispose?.(() => {
+    disposed = true;
+  });
+  return () => {
+    disposed = true;
+  };
+};

@@ -176,4 +176,47 @@ describe("client router", () => {
     expect(loads).toBe(2);
     router.dispose();
   });
+
+  it("submits actions and revalidates loader cache by route policy", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    let loads = 0;
+    const requests: string[] = [];
+    const router = createClientRouter({
+      root,
+      routes: [
+        { id: "home", path: "/", render: () => "home" },
+        {
+          id: "todos",
+          path: "/todos",
+          load: () => ({ count: ++loads }),
+          action: async ({ request }) => {
+            requests.push(`${request.method} ${new URL(request.url).pathname}`);
+            return new Response("ok");
+          },
+          revalidateOnAction: "self",
+          render: ({ data }) => `<h1>${(data as { count: number }).count}</h1>`,
+        },
+      ],
+      cache: true,
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    await router.navigate("/todos");
+    await router.navigate("/");
+    await router.navigate("/todos");
+    expect(loads).toBe(1);
+
+    const response = await router.submit("/todos", { method: "POST", body: new FormData() });
+    expect(await response.text()).toBe("ok");
+    expect(requests).toEqual(["POST /todos"]);
+    expect(loads).toBe(2);
+    expect(root.innerHTML).toBe("<h1>2</h1>");
+    router.dispose();
+  });
 });

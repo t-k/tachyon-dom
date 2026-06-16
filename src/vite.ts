@@ -73,7 +73,6 @@ export const tachyonDomRoutes = (options: TachyonDomRoutesViteOptions): Plugin =
         }))
       : []),
   ];
-  const routeModules = (): Set<string> => new Set(routes().map((route) => route.module));
   return {
     name: "tachyon-dom-routes",
     resolveId(id) {
@@ -92,7 +91,8 @@ export const tachyonDomRoutes = (options: TachyonDomRoutesViteOptions): Plugin =
       return `export const routes = [${modules}];\nexport const manifest = routes.map(({ id, path }) => ({ id, path }));\n`;
     },
     handleHotUpdate(context) {
-      if (!routeModules().has(context.file)) {
+      const changed = routes().filter((route) => route.module === context.file);
+      if (changed.length === 0) {
         return;
       }
       const module = context.server.moduleGraph.getModuleById(resolvedVirtualId);
@@ -100,6 +100,11 @@ export const tachyonDomRoutes = (options: TachyonDomRoutesViteOptions): Plugin =
         return;
       }
       context.server.moduleGraph.invalidateModule(module);
+      context.server.ws.send({
+        type: "custom",
+        event: "tachyon-dom:routes-update",
+        data: { routeIds: changed.map((route) => route.id) },
+      });
       return [module, ...context.modules];
     },
   };

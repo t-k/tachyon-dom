@@ -6,6 +6,7 @@ import {
   applySecurityHeaders,
   collectRouteResources,
   createFileRouteManifest,
+  createHrefBuilder,
   createSecurityHeaders,
   defineRouteModule,
   escapeToHtml,
@@ -112,6 +113,12 @@ describe("advanced router features", () => {
   it("supports typed route params at compile time", () => {
     type Params = ParamsForPath<"/users/:id/files/*path">;
     expectTypeOf<Params>().toEqualTypeOf<{ id: string; path: string }>();
+
+    const href = createHrefBuilder([
+      { id: "home", path: "/" },
+      { id: "user", path: "/users/:id" },
+    ] as const);
+    expectTypeOf<Parameters<typeof href>[0]>().toEqualTypeOf<"home" | "user">();
   });
 
   it("short-circuits redirect/json/escaped html route responses", async () => {

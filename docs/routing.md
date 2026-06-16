@@ -53,6 +53,8 @@ Actions run for non-GET/HEAD requests before loaders. Loaders run from parent to
 
 `middleware` runs before route matching and can rewrite the incoming `Request` or return a short-circuit `Response`. `hooks` expose request, match, loader, action, render, and error observations for tracing and metrics.
 
+`requireUser(getUser, options)` creates route middleware for protected routes. It redirects to `/login` by default, can use a custom redirect target, or can return a custom forbidden response.
+
 ## Response Helpers
 
 - `redirect("/path")` returns a 302 route response. External redirects are rejected unless `allowExternal` is set.
@@ -68,6 +70,8 @@ HTML responses use explicit trusted HTML helpers:
 - `sanitizeHtml(markup)` is available from `tachyon-dom/security` for allowlist-based backend sanitization before passing content to `html()`.
 
 `defer(record)` separates immediate values from promised values, and `resolveDeferredData()` resolves the full object. `renderRoute()` resolves deferred loader data before rendering; `renderRouteStream()` can still flush route fallbacks before the final route HTML.
+
+`renderDeferredDataScript(id, deferred, { nonce })` serializes resolved deferred data for client-side stream handoff.
 
 ## CSP Nonces
 
@@ -97,6 +101,8 @@ await renderRoute(routes, request, { cspNonce: nonce });
 
 `tachyon-dom/cookies` exports `parseCookies()`, `serializeCookie()`, and `createMemorySessionStorage()` for small server adapters and examples.
 
+For server sessions, `createCookieSessionStorage({ secret })` stores signed session payloads in secure, HTTP-only, SameSite=Lax cookies. `signCookieValue()` and `verifySignedCookieValue()` are also exported for custom adapters.
+
 ## Server Adapters
 
 `tachyon-dom/adapters` provides:
@@ -116,6 +122,8 @@ Both adapters can apply `securityHeaders`, serve `staticAssets`, and can use `st
 `generateRouteTypes(manifest)` emits a TypeScript declaration shape backed by `ParamsForPath`.
 
 `createRouteBuildManifest(routes, { buildId, assets })` creates a route build manifest containing route paths, per-route assets, and generated route types.
+
+`createHrefBuilder(manifest)` and `hrefForRoute(manifest, id, params)` build URLs from route IDs and params. `createRoutePreloadPlan(manifest, routeId)` converts route assets into preload/modulepreload/prefetch entries for route-aware preloading.
 
 The CLI can write file-route manifests:
 

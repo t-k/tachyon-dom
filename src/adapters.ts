@@ -118,6 +118,25 @@ export const createWorkersHandler = (options: HandlerOptions): { fetch: (request
   fetch: (request) => responseFor(options, request),
 });
 
+export const writeNodeResponse = async (webResponse: Response, response: ServerResponse): Promise<void> => {
+  response.statusCode = webResponse.status;
+  webResponse.headers.forEach((value, key) => response.setHeader(key, value));
+  const writable = response as ServerResponse & { write?: (chunk: Buffer) => void };
+  if (!webResponse.body || typeof writable.write !== "function") {
+    response.end(await webResponse.text());
+    return;
+  }
+  const reader = webResponse.body.getReader();
+  while (true) {
+    const result = await reader.read();
+    if (result.done) {
+      response.end();
+      return;
+    }
+    writable.write(Buffer.from(result.value));
+  }
+};
+
 const requestBody = (request: IncomingMessage): BodyInit | undefined => {
   if (request.method === "GET" || request.method === "HEAD") {
     return undefined;
@@ -142,7 +161,5 @@ export const createNodeHandler =
     } as RequestInit;
     const webRequest = new Request(requestUrl(request), init);
     const webResponse = await responseFor(options, webRequest);
-    response.statusCode = webResponse.status;
-    webResponse.headers.forEach((value, key) => response.setHeader(key, value));
-    response.end(await webResponse.text());
+    await writeNodeResponse(webResponse, response);
   };

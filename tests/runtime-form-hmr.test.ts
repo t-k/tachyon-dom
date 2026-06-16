@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createRouteHotReloader } from "../src/runtime/router";
+import { applyDeferredDataChunk } from "../src/runtime/stream-client";
+import { connectRouteHotReloader, createRouteHotReloader } from "../src/runtime/router";
 import { enhanceForm } from "../src/runtime/form";
 
 describe("runtime form and HMR helpers", () => {
@@ -40,5 +41,40 @@ describe("runtime form and HMR helpers", () => {
     await reloader.accept({ routeIds: ["user"] });
 
     expect(calls).toEqual(["invalidate:/users/1", "navigate:/users/1:replace"]);
+  });
+
+  it("connects route HMR updates from Vite import.meta.hot style APIs", async () => {
+    const callbacks = new Map<string, (payload: { routeIds?: string[]; href?: string }) => void>();
+    const calls: string[] = [];
+    connectRouteHotReloader(
+      {
+        on: (event, callback) => callbacks.set(event, callback),
+        dispose: () => undefined,
+      },
+      createRouteHotReloader({
+        currentPath: () => "/current",
+        invalidate: (href) => calls.push(`invalidate:${href}`),
+        navigate: async (href) => {
+          calls.push(`navigate:${href}`);
+        },
+      }),
+    );
+
+    callbacks.get("tachyon-dom:routes-update")?.({ routeIds: ["home"] });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(calls).toEqual(["invalidate:/current", "navigate:/current"]);
+  });
+
+  it("applies deferred data chunks to matching DOM sinks", () => {
+    document.body.innerHTML = `<output data-tachyon-deferred-target="route:post:comments"></output>`;
+    const applied = applyDeferredDataChunk(document, {
+      id: "route:post",
+      key: "comments",
+      value: ["A", "B"],
+    });
+
+    expect(applied).toBe(true);
+    expect(document.querySelector("output")?.textContent).toBe(`["A","B"]`);
   });
 });

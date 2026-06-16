@@ -45,3 +45,14 @@ The compiler records hydration boundaries with `hydrate:id={id}`. Runtime schedu
 - `title` to update `document.title` after route render.
 
 `createRouteHotReloader()` invalidates the current route cache entry and re-navigates with `replace: true` when a route module update arrives from a dev server.
+
+`connectRouteHotReloader(import.meta.hot, reloader)` wires Vite-style custom HMR events to the route hot reloader. The Vite routes plugin emits `tachyon-dom:routes-update` when a route module changes.
+
+Routes can define `action()` and `revalidateOnAction`. `router.submit(href, init)` calls the matched action, invalidates cache entries according to the policy, and re-renders the current route.
+
+## Deferred Data
+
+`runtime/stream-client` provides:
+
+- `applyDeferredDataChunk(root, chunk)` to write streamed deferred values into `[data-tachyon-deferred-target="id:key"]` elements.
+- `readDeferredDataScript(root, id)` to read server-emitted deferred data scripts.

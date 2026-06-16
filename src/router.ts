@@ -166,6 +166,19 @@ export type RouteBuildManifest = {
   types: string;
 };
 
+export type RoutePreloadEntry = {
+  href: string;
+  rel: "modulepreload" | "preload" | "prefetch";
+  as?: string;
+};
+
+export type UserGuardOptions<User> = {
+  redirectTo?: string;
+  forbidden?: (context: { request: Request; url: URL }) => RouteResponse | Response;
+  getRedirect?: (context: { request: Request; url: URL }) => string;
+  onUser?: (context: { request: Request; url: URL; user: User }) => void | Promise<void>;
+};
+
 const routeError = (message: string, status: number): RouteError => ({ message, status });
 
 const trimSlashes = (value: string): string => value.replace(/^\/+|\/+$/g, "");
@@ -264,6 +277,21 @@ export const resolveDeferredData = async <T extends Record<string, unknown>>(dat
   return resolved as T;
 };
 
+const escapeScriptJson = (value: string): string => value.replaceAll("<", "\\u003c").replaceAll("-->", "--\\>");
+
+const escapeAttribute = (value: string): string =>
+  value.replaceAll("&", "&amp;").replaceAll(`"`, "&quot;").replaceAll("<", "&lt;");
+
+export const renderDeferredDataScript = async <T extends Record<string, unknown>>(
+  id: string,
+  data: DeferredData<T>,
+  options: { nonce?: string } = {},
+): Promise<string> => {
+  const resolved = await resolveDeferredData(data);
+  const nonce = options.nonce ? ` nonce="${escapeAttribute(options.nonce)}"` : "";
+  return `<script type="application/json" data-tachyon-deferred="${escapeAttribute(id)}"${nonce}>${escapeScriptJson(JSON.stringify(resolved))}</script>`;
+};
+
 const verifyCsrf = async (request: Request, options: NonNullable<RouteRenderOptions["csrf"]>): Promise<boolean> => {
   const headerName = options.headerName ?? "x-csrf-token";
   const fieldName = options.fieldName ?? "_csrf";
@@ -314,6 +342,23 @@ export const applySecurityHeaders = (response: Response, headers: Headers): Resp
     headers: nextHeaders,
   });
 };
+
+export const requireUser =
+  <User>(
+    getUser: (context: { request: Request; url: URL }) => User | undefined | null | Promise<User | undefined | null>,
+    options: UserGuardOptions<User> = {},
+  ): RouteMiddleware =>
+  async ({ request, url }) => {
+    const user = await getUser({ request, url });
+    if (user) {
+      await options.onUser?.({ request, url, user });
+      return;
+    }
+    if (options.forbidden) {
+      return options.forbidden({ request, url });
+    }
+    return redirect(options.getRedirect?.({ request, url }) ?? options.redirectTo ?? "/login");
+  };
 
 export const defineRouteModule = <Data = unknown, ActionResult = unknown>(
   module: RouteModule<Data, ActionResult>,
@@ -460,6 +505,56 @@ export const createRouteBuildManifest = (
     types: generateRouteTypes(manifest),
   };
 };
+
+const routeById = (manifest: readonly Pick<RouteManifestEntry, "id" | "path">[], id: string) =>
+  manifest.find((route) => route.id === id);
+
+export const hrefForRoute = (
+  manifest: readonly Pick<RouteManifestEntry, "id" | "path">[],
+  id: string,
+  params: RouteParams = {},
+): string => {
+  const route = routeById(manifest, id);
+  if (!route) {
+    throw new Error(`Unknown route id: ${id}`);
+  }
+  return route.path
+    .split("/")
+    .map((segment) => {
+      if (segment.startsWith(":")) {
+        const value = params[segment.slice(1)];
+        if (value === undefined) {
+          throw new Error(`Missing route param: ${segment.slice(1)}`);
+        }
+        return encodeURIComponent(value);
+      }
+      if (segment.startsWith("*")) {
+        const value = params[segment.slice(1)];
+        if (value === undefined) {
+          throw new Error(`Missing route param: ${segment.slice(1)}`);
+        }
+        return value.split("/").map(encodeURIComponent).join("/");
+      }
+      return segment;
+    })
+    .join("/");
+};
+
+export const createHrefBuilder =
+  <Manifest extends readonly Pick<RouteManifestEntry, "id" | "path">[]>(manifest: Manifest) =>
+  <Id extends Manifest[number]["id"]>(id: Id, params: RouteParams = {}): string =>
+    hrefForRoute(manifest, String(id), params);
+
+export const createRoutePreloadPlan = (manifest: RouteBuildManifest, routeId: string): RoutePreloadEntry[] =>
+  (manifest.assets[routeId] ?? []).map((href) => {
+    if (href.endsWith(".js") || href.endsWith(".mjs")) {
+      return { href, rel: "modulepreload" };
+    }
+    if (href.endsWith(".css")) {
+      return { href, rel: "preload", as: "style" };
+    }
+    return { href, rel: "prefetch" };
+  });
 
 const compileRoutePath = (path: string): { regex: RegExp; names: string[]; wildcard: boolean } => {
   if (path === "*") {

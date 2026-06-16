@@ -3,7 +3,17 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createStaticAssetHandler } from "../src/adapters";
-import { createRouteBuildManifest, defer, resolveDeferredData, renderRoute, type RouteDefinition } from "../src/router";
+import {
+  createHrefBuilder,
+  createRouteBuildManifest,
+  createRoutePreloadPlan,
+  defer,
+  hrefForRoute,
+  renderDeferredDataScript,
+  resolveDeferredData,
+  renderRoute,
+  type RouteDefinition,
+} from "../src/router";
 
 describe("router platform features", () => {
   it("serves static assets without allowing path traversal", async () => {
@@ -40,6 +50,25 @@ describe("router platform features", () => {
     expect(manifest.types).toContain(`ParamsForPath<"/users/:id">`);
   });
 
+  it("builds typed hrefs and route preload plans from manifests", () => {
+    const routes: RouteDefinition[] = [
+      { id: "home", path: "/", resources: [{ rel: "stylesheet", href: "/app.css" }], render: () => "home" },
+      { id: "user", path: "/users/:id", render: () => "user" },
+    ];
+    const manifest = createRouteBuildManifest(routes, {
+      buildId: "b1",
+      assets: [{ routeId: "user", files: ["/user.js", "/user.css"] }],
+    });
+    const href = createHrefBuilder(manifest.routes);
+
+    expect(href("user", { id: "42" })).toBe("/users/42");
+    expect(hrefForRoute(manifest.routes, "user", { id: "a b" })).toBe("/users/a%20b");
+    expect(createRoutePreloadPlan(manifest, "user")).toEqual([
+      { href: "/user.js", rel: "modulepreload" },
+      { href: "/user.css", rel: "preload", as: "style" },
+    ]);
+  });
+
   it("runs route middleware and observability hooks around rendering", async () => {
     const events: string[] = [];
     const routes: RouteDefinition[] = [{ id: "rewritten", path: "/rewritten", render: () => "<h1>Done</h1>" }];
@@ -69,5 +98,8 @@ describe("router platform features", () => {
 
     expect(deferred.immediate).toEqual({ title: "Now" });
     await expect(resolveDeferredData(deferred)).resolves.toEqual({ title: "Now", comments: ["A", "B"] });
+    await expect(renderDeferredDataScript("route:post", deferred, { nonce: "n1" })).resolves.toContain(
+      `data-tachyon-deferred="route:post" nonce="n1"`,
+    );
   });
 });

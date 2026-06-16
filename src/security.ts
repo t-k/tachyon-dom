@@ -9,7 +9,10 @@ export type CsrfOptions = {
 export type SanitizeHtmlOptions = {
   allowedTags?: readonly string[];
   allowedAttributes?: readonly string[];
+  adapter?: HtmlSanitizer;
 };
+
+export type HtmlSanitizer = (markup: string) => TrustedHtml;
 
 const defaultAllowedTags = [
   "a",
@@ -102,6 +105,9 @@ const sanitizeAttributes = (raw: string, allowedAttributes: Set<string>): string
     .join("");
 
 export const sanitizeHtml = (markup: string, options: SanitizeHtmlOptions = {}): TrustedHtml => {
+  if (options.adapter) {
+    return options.adapter(markup);
+  }
   const allowedTags = new Set(options.allowedTags ?? defaultAllowedTags);
   const allowedAttributes = new Set(options.allowedAttributes ?? defaultAllowedAttributes);
   const withoutScripts = markup.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
@@ -120,6 +126,13 @@ export const sanitizeHtml = (markup: string, options: SanitizeHtmlOptions = {}):
   );
   return unsafeHtml(sanitized);
 };
+
+export const createHtmlSanitizer =
+  (adapter: { sanitize: (markup: string) => string | TrustedHtml }): HtmlSanitizer =>
+  (markup) => {
+    const result = adapter.sanitize(markup);
+    return typeof result === "string" ? unsafeHtml(result) : result;
+  };
 
 export const createCsrfToken = (seed?: string): string => {
   if (seed !== undefined) {

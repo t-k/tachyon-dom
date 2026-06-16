@@ -1,3 +1,5 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
+
 export type CookieOptions = {
   path?: string;
   domain?: string;
@@ -19,6 +21,13 @@ export type MemorySessionStorageOptions = {
   id?: () => string;
 };
 
+export type CookieSessionStorageOptions = {
+  secret: string;
+  cookieName?: string;
+  cookie?: CookieOptions;
+  id?: () => string;
+};
+
 const encodeCookiePart = (value: string): string => encodeURIComponent(value).replaceAll("%20", "+");
 
 const decodeCookiePart = (value: string): string => decodeURIComponent(value.replaceAll("+", "%20"));
@@ -28,6 +37,41 @@ const sessionId = (): string => {
     return crypto.randomUUID();
   }
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+};
+
+const base64UrlEncode = (value: string): string => Buffer.from(value, "utf8").toString("base64url");
+
+const base64UrlDecode = (value: string): string => Buffer.from(value, "base64url").toString("utf8");
+
+const signatureFor = (value: string, secret: string): string =>
+  createHmac("sha256", secret).update(value).digest("base64url");
+
+const defaultSessionCookie = (): CookieOptions => ({ httpOnly: true, path: "/", sameSite: "Lax", secure: true });
+
+export const signCookieValue = (value: string, secret: string): string => {
+  const payload = base64UrlEncode(value);
+  return `${payload}.${signatureFor(payload, secret)}`;
+};
+
+export const verifySignedCookieValue = (signedValue: string | undefined, secret: string): string | undefined => {
+  if (!signedValue) {
+    return undefined;
+  }
+  const [payload, signature] = signedValue.split(".");
+  if (!payload || !signature) {
+    return undefined;
+  }
+  const expected = signatureFor(payload, secret);
+  const actualBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expected);
+  if (actualBuffer.byteLength !== expectedBuffer.byteLength || !timingSafeEqual(actualBuffer, expectedBuffer)) {
+    return undefined;
+  }
+  try {
+    return base64UrlDecode(payload);
+  } catch {
+    return undefined;
+  }
 };
 
 export const parseCookies = (header: string | null | undefined): Record<string, string> => {
@@ -100,5 +144,34 @@ export const createMemorySessionStorage = <Data extends Record<string, unknown> 
       sessions.delete(session.id);
       return serializeCookie(cookieName, "", { ...cookieOptions, maxAge: 0 });
     },
+  };
+};
+
+export const createCookieSessionStorage = <Data extends Record<string, unknown> = Record<string, unknown>>(
+  options: CookieSessionStorageOptions,
+) => {
+  const cookieName = options.cookieName ?? "__Host-tachyon_session";
+  const cookieOptions = options.cookie ?? defaultSessionCookie();
+  const createId = options.id ?? sessionId;
+
+  return {
+    createSession: async (data: Data): Promise<Session<Data>> => ({ id: createId(), data }),
+    getSession: async (cookieHeader: string | null | undefined): Promise<Session<Data>> => {
+      const signed = parseCookies(cookieHeader)[cookieName];
+      const verified = verifySignedCookieValue(signed, options.secret);
+      if (!verified) {
+        return { id: "", data: {} as Data };
+      }
+      try {
+        const parsed = JSON.parse(verified) as Session<Data>;
+        return { id: parsed.id, data: parsed.data };
+      } catch {
+        return { id: "", data: {} as Data };
+      }
+    },
+    commitSession: async (session: Session<Data>): Promise<string> =>
+      serializeCookie(cookieName, signCookieValue(JSON.stringify(session), options.secret), cookieOptions),
+    destroySession: async (_session: Session<Data>): Promise<string> =>
+      serializeCookie(cookieName, "", { ...cookieOptions, maxAge: 0 }),
   };
 };

@@ -139,4 +139,39 @@ describe("DX helpers", () => {
     expect(code).toContain(`module: () => import("/src/routes/users/[id].tachyon.html")`);
     expect(code).toContain(`path: "/about"`);
   });
+
+  it("sends route HMR updates for changed route modules", () => {
+    const plugin = tachyonDomRoutes({
+      routes: [{ id: "home", path: "/", module: "/src/routes/index.tachyon.html" }],
+    });
+    if (typeof plugin.handleHotUpdate !== "function") {
+      throw new Error("Missing HMR hook.");
+    }
+    const module = { id: "\0virtual:tachyon-dom/routes" };
+    const sent: unknown[] = [];
+
+    const result = plugin.handleHotUpdate.call(
+      {} as never,
+      {
+        file: "/src/routes/index.tachyon.html",
+        modules: [{ id: "/src/routes/index.tachyon.html" }],
+        server: {
+          ws: {
+            send: (payload: unknown) => sent.push(payload),
+          },
+          moduleGraph: {
+            getModuleById: () => module,
+            invalidateModule: (invalidated: unknown) => sent.push({ invalidated }),
+          },
+        },
+      } as never,
+    );
+
+    expect(result).toEqual([module, { id: "/src/routes/index.tachyon.html" }]);
+    expect(sent).toContainEqual({
+      type: "custom",
+      event: "tachyon-dom:routes-update",
+      data: { routeIds: ["home"] },
+    });
+  });
 });
