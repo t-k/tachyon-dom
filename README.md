@@ -30,6 +30,8 @@ The framework direction is HTML-first syntax with Solid-style fine-grained react
 
 The compiler output is intentionally close to the current direct DOM runtime: static markup stays static, dynamic text/class/event slots are recorded as explicit paths, and generated client code can import subpath helpers such as `@local/tachyon-dom/runtime/text`.
 
+The first list runtime path, `@local/tachyon-dom/runtime/list`, preserves keyed row elements across updates, moves reused elements into order, patches text/class bindings, removes stale rows, and keeps event handlers current through a mutable row scope.
+
 ## Commands
 
 ```sh
