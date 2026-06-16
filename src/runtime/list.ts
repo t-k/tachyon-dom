@@ -210,10 +210,16 @@ const updateRecord = (record: RowRecord, item: unknown, options: KeyedListOption
 const moveBefore = (container: Element, node: Node, before: Node | null): void => {
   const movableContainer = container as MoveBeforeElement;
   if (typeof movableContainer.moveBefore === "function") {
-    movableContainer.moveBefore(node, before);
-  } else {
-    container.insertBefore(node, before);
+    try {
+      movableContainer.moveBefore(node, before);
+      return;
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "HierarchyRequestError")) {
+        throw error;
+      }
+    }
   }
+  container.insertBefore(node, before);
 };
 
 export const mountKeyedList = (

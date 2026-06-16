@@ -74,6 +74,47 @@ describe("mountKeyedList", () => {
     expect(root.innerHTML).toBe(`<li><span>Three updated</span></li><li><span>One updated</span></li>`);
   });
 
+  it("falls back to insertBefore when moveBefore rejects the hierarchy", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    let attemptedMoveBefore = false;
+    (root as HTMLElement & { moveBefore: (node: Node, child: Node | null) => void }).moveBefore = () => {
+      attemptedMoveBefore = true;
+      throw new DOMException("Invalid hierarchy.", "HierarchyRequestError");
+    };
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [{ kind: "text" as const, path: [0, 0], expression: "item.label" }],
+    };
+
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 1, label: "One" },
+        { id: 2, label: "Two" },
+      ],
+      options,
+    );
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 2, label: "Two" },
+        { id: 1, label: "One" },
+      ],
+      options,
+    );
+
+    expect(attemptedMoveBefore).toBe(true);
+    expect(root.innerHTML).toBe(`<li><span>Two</span></li><li><span>One</span></li>`);
+  });
+
   it("keeps event handlers current when keyed rows are reused", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");
