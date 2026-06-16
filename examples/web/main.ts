@@ -64,7 +64,9 @@ const generatedClientModule = generateClientModule(compiled, { reactive: true })
 const encodeBase64 = (value: string): string => btoa(value);
 
 const importGeneratedServerModule = async (): Promise<GeneratedServerModule> =>
-  (await import(`data:text/javascript;base64,${encodeBase64(generatedServerStreamModule)}`)) as GeneratedServerModule;
+  (await import(
+    /* @vite-ignore */ `data:text/javascript;base64,${encodeBase64(generatedServerStreamModule)}`
+  )) as GeneratedServerModule;
 
 const readStreamChunks = async (stream: ReadableStream<Uint8Array>): Promise<string[]> => {
   const reader = stream.getReader();
