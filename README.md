@@ -23,4 +23,7 @@ npm install
 npm test
 npm run build
 npm run lint
+npm run bench:local
 ```
+
+`npm run bench:local` starts a temporary Vite server, measures Tachyon DOM against local copies of the keyed vanilla benchmark implementations in Playwright Chromium, prints a ratio table, and writes JSON results under `benchmark/local-compare/results/`.

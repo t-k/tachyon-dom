@@ -1,2 +1,4 @@
 benchmark/js-framework-benchmark/index.html
 benchmark/local-compare/vanillajs-lite/index.html
+benchmark/local-compare/vanillajs-3/index.html
+benchmark/local-compare/vanillajs/index.html

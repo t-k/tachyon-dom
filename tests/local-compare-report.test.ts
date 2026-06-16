@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildScenarioMatrix,
   compareSummaries,
   formatComparisonTable,
+  formatScenarioMatrixTable,
   mean,
   median,
   summarizeScenario,
@@ -24,6 +26,8 @@ describe("local compare report", () => {
       {
         id: "createRows",
         label: "create rows",
+        baseline: "vanillajs-lite-keyed",
+        candidate: "tachyon-dom",
         baselineMean: 12,
         candidateMean: 18,
         ratio: 1.5,
@@ -33,5 +37,33 @@ describe("local compare report", () => {
       },
     ]);
     expect(formatComparisonTable(rows)).toContain("| create rows | 12.00ms | 18.00ms | 1.500x | +50.0% |");
+  });
+
+  it("builds a multi-implementation scenario matrix", () => {
+    const summaries = [
+      summarizeScenario("createRows", "create rows", "vanillajs-lite-keyed", [10]),
+      summarizeScenario("createRows", "create rows", "vanillajs-3-keyed", [8]),
+      summarizeScenario("createRows", "create rows", "tachyon-dom", [12]),
+    ];
+    const implementations = ["vanillajs-lite-keyed", "vanillajs-3-keyed", "tachyon-dom"];
+
+    const rows = buildScenarioMatrix(summaries, implementations, "tachyon-dom");
+
+    expect(rows).toEqual([
+      {
+        id: "createRows",
+        label: "create rows",
+        means: {
+          "tachyon-dom": 12,
+          "vanillajs-3-keyed": 8,
+          "vanillajs-lite-keyed": 10,
+        },
+        fastestMean: 8,
+        candidateRatioToFastest: 1.5,
+      },
+    ]);
+    expect(formatScenarioMatrixTable(rows, implementations, "tachyon-dom")).toContain(
+      "| create rows | 10.00ms | 8.00ms | 12.00ms | 1.500x |",
+    );
   });
 });

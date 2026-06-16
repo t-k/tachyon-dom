@@ -5,8 +5,9 @@ import { chromium, type Browser, type LaunchOptions, type Page } from "playwrigh
 import { createServer, type ViteDevServer } from "vite";
 import { err, ok, type Result } from "neverthrow";
 import {
+  buildScenarioMatrix,
   compareSummaries,
-  formatComparisonTable,
+  formatScenarioMatrixTable,
   summarizeScenario,
   type ImplementationName,
   type ScenarioSummary,
@@ -36,6 +37,16 @@ const implementations: readonly Implementation[] = [
     name: "vanillajs-lite-keyed",
     title: "vanillajs-lite-keyed",
     path: "/benchmark/local-compare/vanillajs-lite/",
+  },
+  {
+    name: "vanillajs-3-keyed",
+    title: "vanillajs-3-keyed",
+    path: "/benchmark/local-compare/vanillajs-3/",
+  },
+  {
+    name: "vanillajs-keyed",
+    title: "vanillajs-keyed",
+    path: "/benchmark/local-compare/vanillajs/",
   },
   {
     name: "tachyon-dom",
@@ -303,6 +314,7 @@ const writeResults = async (
         warmup: options.warmup,
         baseline: "vanillajs-lite-keyed",
         candidate: "tachyon-dom",
+        implementations: implementations.map((implementation) => implementation.name),
         summaries,
         table,
       },
@@ -327,11 +339,17 @@ const run = async (options: CliOptions): Promise<void> => {
       summaries.push(...(await measureImplementation(browser, baseUrl, implementation, options)));
     }
 
-    const rows = compareSummaries(summaries, "vanillajs-lite-keyed", "tachyon-dom");
-    const table = formatComparisonTable(rows);
+    const implementationNames = implementations.map((implementation) => implementation.name);
+    const matrixRows = buildScenarioMatrix(summaries, implementationNames, "tachyon-dom");
+    const table = formatScenarioMatrixTable(matrixRows, implementationNames, "tachyon-dom");
+    const baselineRows = compareSummaries(summaries, "vanillajs-lite-keyed", "tachyon-dom");
     const outputPath = await writeResults(options, summaries, table);
     console.log("");
     console.log(table);
+    console.log("");
+    const geomeanRatio =
+      baselineRows.reduce((total, row) => total + Math.log(row.ratio), 0) / Math.max(baselineRows.length, 1);
+    console.log(`Tachyon DOM geometric mean ratio vs vanillajs-lite-keyed: ${Math.exp(geomeanRatio).toFixed(3)}x`);
     console.log("");
     console.log(`Wrote JSON results to ${outputPath}`);
   } finally {

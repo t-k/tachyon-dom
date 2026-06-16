@@ -1,4 +1,4 @@
-export type ImplementationName = "tachyon-dom" | "vanillajs-lite-keyed";
+export type ImplementationName = string;
 
 export type ScenarioSummary = {
   id: string;
@@ -12,12 +12,22 @@ export type ScenarioSummary = {
 export type ComparisonRow = {
   id: string;
   label: string;
+  baseline: ImplementationName;
+  candidate: ImplementationName;
   baselineMean: number;
   candidateMean: number;
   ratio: number;
   deltaPercent: number;
   baselineMedian: number;
   candidateMedian: number;
+};
+
+export type ScenarioMatrixRow = {
+  id: string;
+  label: string;
+  means: Record<ImplementationName, number>;
+  fastestMean: number;
+  candidateRatioToFastest: number;
 };
 
 export const mean = (values: readonly number[]): number => {
@@ -71,6 +81,8 @@ export const compareSummaries = (
     rows.push({
       id: candidateSummary.id,
       label: candidateSummary.label,
+      baseline,
+      candidate,
       baselineMean: baselineSummary.mean,
       candidateMean: candidateSummary.mean,
       ratio,
@@ -83,15 +95,62 @@ export const compareSummaries = (
   return rows;
 };
 
+export const buildScenarioMatrix = (
+  summaries: readonly ScenarioSummary[],
+  implementations: readonly ImplementationName[],
+  candidate: ImplementationName,
+): ScenarioMatrixRow[] => {
+  const byKey = new Map(summaries.map((summary) => [`${summary.implementation}:${summary.id}`, summary]));
+  const scenarioOrder = summaries
+    .filter((summary) => summary.implementation === candidate)
+    .map((summary) => ({ id: summary.id, label: summary.label }));
+
+  return scenarioOrder.map((scenario) => {
+    const means: Record<ImplementationName, number> = {};
+    for (const implementation of implementations) {
+      means[implementation] = byKey.get(`${implementation}:${scenario.id}`)?.mean ?? Number.NaN;
+    }
+    const fastestMean = Math.min(...Object.values(means).filter(Number.isFinite));
+    const candidateMean = means[candidate] ?? Number.NaN;
+    return {
+      ...scenario,
+      means,
+      fastestMean,
+      candidateRatioToFastest: candidateMean / fastestMean,
+    };
+  });
+};
+
 const formatMilliseconds = (value: number): string => `${value.toFixed(2)}ms`;
 
 const formatPercent = (value: number): string => `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 
 export const formatComparisonTable = (rows: readonly ComparisonRow[]): string => {
-  const lines = ["| Scenario | vanillajs-lite mean | Tachyon DOM mean | Ratio | Delta |", "|---|---:|---:|---:|---:|"];
+  const lines = ["| Scenario | Baseline | Candidate | Ratio | Delta |", "|---|---:|---:|---:|---:|"];
   for (const row of rows) {
     lines.push(
       `| ${row.label} | ${formatMilliseconds(row.baselineMean)} | ${formatMilliseconds(row.candidateMean)} | ${row.ratio.toFixed(3)}x | ${formatPercent(row.deltaPercent)} |`,
+    );
+  }
+  return lines.join("\n");
+};
+
+export const formatScenarioMatrixTable = (
+  rows: readonly ScenarioMatrixRow[],
+  implementations: readonly ImplementationName[],
+  candidate: ImplementationName,
+): string => {
+  const header = [
+    "Scenario",
+    ...implementations.map((implementation) => `${implementation} mean`),
+    `${candidate} vs fastest`,
+  ];
+  const lines = [`| ${header.join(" | ")} |`, `|---${"|---:".repeat(implementations.length + 1)}|`];
+  for (const row of rows) {
+    lines.push(
+      `| ${row.label} | ${implementations
+        .map((implementation) => formatMilliseconds(row.means[implementation] ?? Number.NaN))
+        .join(" | ")} | ${row.candidateRatioToFastest.toFixed(3)}x |`,
     );
   }
   return lines.join("\n");
