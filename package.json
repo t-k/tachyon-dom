@@ -39,6 +39,10 @@
       "types": "./dist/runtime/form.d.ts",
       "import": "./dist/runtime/form.js"
     },
+    "./runtime/fragment": {
+      "types": "./dist/runtime/fragment.d.ts",
+      "import": "./dist/runtime/fragment.js"
+    },
     "./runtime/hydrate": {
       "types": "./dist/runtime/hydrate.d.ts",
       "import": "./dist/runtime/hydrate.js"
@@ -46,6 +50,10 @@
     "./runtime/list": {
       "types": "./dist/runtime/list.d.ts",
       "import": "./dist/runtime/list.js"
+    },
+    "./runtime/portal": {
+      "types": "./dist/runtime/portal.d.ts",
+      "import": "./dist/runtime/portal.js"
     },
     "./runtime/signal": {
       "types": "./dist/runtime/signal.d.ts",

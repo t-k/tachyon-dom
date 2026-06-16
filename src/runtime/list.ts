@@ -62,6 +62,7 @@ type KeyedListOptions = {
 type RowRecord = {
   key: PropertyKey;
   element: Element;
+  nodes: Node[];
   scope: Record<string, unknown>;
   cleanups: Array<() => void>;
 };
@@ -101,6 +102,15 @@ const nodeAt = (root: Node, path: readonly number[]): Node => {
     current = current.childNodes[index] as Node;
   }
   return current;
+};
+
+const nodeAtRecord = (record: RowRecord, path: readonly number[]): Node => {
+  if (record.nodes.length <= 1) {
+    return nodeAt(record.element, path);
+  }
+  const [firstIndex, ...rest] = path;
+  const root = record.nodes[firstIndex ?? 0] ?? record.element;
+  return nodeAt(root, rest);
 };
 
 const createTemplate = (templateHtml: string): HTMLTemplateElement => {
@@ -151,11 +161,11 @@ const bindListEvents = (container: Element, state: ListState, options: KeyedList
       if (!row) {
         return;
       }
-      const target = nodeAt(row, binding.path);
-      if (!(event.target instanceof Node) || !target.contains(event.target)) {
+      const record = state.recordsByElement.get(row);
+      const target = record ? nodeAtRecord(record, binding.path) : nodeAt(row, binding.path);
+      if (!(event.target instanceof Node) || !(target instanceof Element) || !target.contains(event.target)) {
         return;
       }
-      const record = state.recordsByElement.get(row);
       const handler = record ? readPath(record.scope, binding.handler) : undefined;
       if (typeof handler === "function") {
         (handler as EventListener)(event);
@@ -194,24 +204,34 @@ const cleanupRecord = (record: RowRecord): void => {
     cleanup();
   }
   record.cleanups.length = 0;
-  record.element.remove();
+  for (const node of record.nodes) {
+    node.parentNode?.removeChild(node);
+  }
 };
 
-const applyRowBindings = (row: Element, scope: Record<string, unknown>, options: KeyedListOptions): void => {
+const applyRowBindings = (record: RowRecord, scope: Record<string, unknown>, options: KeyedListOptions): void => {
   for (const binding of options.bindings) {
     if (binding.kind === "text") {
-      setText(textAt(row, binding.path), readPath(scope, binding.expression));
+      setText(nodeAtRecord(record, binding.path) as Text, readPath(scope, binding.expression));
     } else if (binding.kind === "class") {
-      setClassPresence(nodeAt(row, binding.path) as Element, binding.className, readPath(scope, binding.expression));
+      setClassPresence(
+        nodeAtRecord(record, binding.path) as Element,
+        binding.className,
+        readPath(scope, binding.expression),
+      );
     } else if (binding.kind === "attr") {
-      setAttributeValue(nodeAt(row, binding.path) as Element, binding.name, readPath(scope, binding.expression));
+      setAttributeValue(
+        nodeAtRecord(record, binding.path) as Element,
+        binding.name,
+        readPath(scope, binding.expression),
+      );
     } else if (binding.kind === "style") {
-      setStyleValue(nodeAt(row, binding.path) as Element, binding.name, readPath(scope, binding.expression));
+      setStyleValue(nodeAtRecord(record, binding.path) as Element, binding.name, readPath(scope, binding.expression));
     } else if (binding.kind === "ref") {
-      setRef(scope, binding.expression, nodeAt(row, binding.path) as Element);
+      setRef(scope, binding.expression, nodeAtRecord(record, binding.path) as Element);
     } else if (binding.kind === "model") {
       setControlValue(
-        nodeAt(row, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+        nodeAtRecord(record, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
         binding.property,
         readPath(scope, binding.expression),
       );
@@ -224,7 +244,7 @@ const bindRowControls = (record: RowRecord, options: KeyedListOptions): void => 
     if (binding.kind !== "model") {
       continue;
     }
-    const element = nodeAt(record.element, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+    const element = nodeAtRecord(record, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
     record.cleanups.push(
       bindControl(
         element,
@@ -261,26 +281,34 @@ const createRecord = (
   options: KeyedListOptions,
   existingElement?: Element,
 ): RowRecord | undefined => {
-  const row = existingElement ?? state.template.content.firstElementChild?.cloneNode(true);
-  if (!(row instanceof Element)) {
+  const nodes = existingElement
+    ? [existingElement]
+    : Array.from(state.template.content.childNodes).map((node) => node.cloneNode(true));
+  const element = nodes.find((node): node is Element => node instanceof Element);
+  if (!element) {
     return undefined;
   }
   const scope = scopedItem(options.itemName, item);
   const record = {
     key,
-    element: row,
+    element,
+    nodes,
     scope,
     cleanups: [],
   };
-  state.recordsByElement.set(row, record);
-  applyRowBindings(record.element, record.scope, options);
+  for (const node of nodes) {
+    if (node instanceof Element) {
+      state.recordsByElement.set(node, record);
+    }
+  }
+  applyRowBindings(record, record.scope, options);
   bindRowControls(record, options);
   return record;
 };
 
 const updateRecord = (record: RowRecord, item: unknown, options: KeyedListOptions): void => {
   record.scope[options.itemName] = item;
-  applyRowBindings(record.element, record.scope, options);
+  applyRowBindings(record, record.scope, options);
 };
 
 const moveBefore = (container: Element, node: Node, before: Node | null): void => {
@@ -335,14 +363,22 @@ export const mountKeyedList = (
   state.records.forEach((record, key) => {
     if (!nextRecords.has(key)) {
       cleanupRecord(record);
-      state.recordsByElement.delete(record.element);
+      for (const node of record.nodes) {
+        if (node instanceof Element) {
+          state.recordsByElement.delete(node);
+        }
+      }
     }
   });
+  let domIndex = 0;
   for (let index = 0; index < orderedRecords.length; index++) {
     const record = orderedRecords[index] as RowRecord;
-    const currentNode = container.childNodes[index] ?? null;
-    if (currentNode !== record.element) {
-      moveBefore(container, record.element, currentNode);
+    for (const node of record.nodes) {
+      const currentNode = container.childNodes[domIndex] ?? null;
+      if (currentNode !== node) {
+        moveBefore(container, node, currentNode);
+      }
+      domIndex++;
     }
   }
   state.records = nextRecords;

@@ -231,4 +231,47 @@ describe("mountKeyedList", () => {
     expect(removeCount).toBe(0);
     expect(calls).toEqual(["updated"]);
   });
+
+  it("mounts, updates, and reorders keyed items with multiple root nodes", () => {
+    document.body.innerHTML = `<section id="items"></section>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<h2> </h2><p> </p>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "item.title" },
+        { kind: "text" as const, path: [1, 0], expression: "item.body" },
+      ],
+    };
+
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 1, title: "One", body: "First" },
+        { id: 2, title: "Two", body: "Second" },
+      ],
+      options,
+    );
+    const oneTitle = root.children[0];
+    const oneBody = root.children[1];
+
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 2, title: "Two updated", body: "Second updated" },
+        { id: 1, title: "One updated", body: "First updated" },
+      ],
+      options,
+    );
+
+    expect(root.children[2]).toBe(oneTitle);
+    expect(root.children[3]).toBe(oneBody);
+    expect(root.innerHTML).toBe(`<h2>Two updated</h2><p>Second updated</p><h2>One updated</h2><p>First updated</p>`);
+  });
 });
