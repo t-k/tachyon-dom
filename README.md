@@ -42,6 +42,12 @@ The first server streaming adapter, `tachyon-dom/server/stream`, accepts sync or
 
 The first list runtime path, `tachyon-dom/runtime/list`, preserves keyed row elements across updates, moves reused elements into order, patches text/class bindings, removes stale rows, and keeps event handlers current through a mutable row scope. Row events are delegated through the list container so reused rows do not need one listener per row.
 
+## Routing
+
+Routing is provided as a separate layer instead of being baked into the template compiler. The server router in `tachyon-dom/router` supports static routes, `:param` routes, wildcard routes, nested layouts through `outlet`, route loaders, form actions, 404/error boundaries, head descriptor rendering, and route hydration state scripts. The client router in `tachyon-dom/runtime/router` supports same-origin link interception, History API navigation, `popstate`, abortable route loaders, scroll-to-top hooks, focus restoration, and 404/error rendering.
+
+The Vite integration also exposes `tachyonDomRoutes()` for a `virtual:tachyon-dom/routes` module. It emits a manifest plus lazy dynamic imports, which keeps route modules split into separate chunks.
+
 ## Commands
 
 ```sh
@@ -50,12 +56,15 @@ pnpm test
 pnpm build
 pnpm lint
 pnpm bench:local
+pnpm bench:local:gate
 pnpm bench:local:smoke
 ```
 
 `pnpm bench:local` starts a temporary Vite server, measures Tachyon DOM against local copies of the keyed vanilla benchmark implementations in Playwright Chromium, prints ratio tables, and writes JSON results under `benchmark/local-compare/results/`.
 
 `pnpm bench:local:smoke` runs the same local comparison with one warmup and one measured iteration for feature-PR checks.
+
+`pnpm bench:local:gate` runs the local comparison with operation and memory regression thresholds.
 
 The local benchmark prints row-operation timings plus auxiliary metrics for startup, JS heap usage, DOM node counts, and local source size. JSON output also keeps per-run values with mean, median, min, max, and p95.
 
@@ -72,3 +81,5 @@ pnpm example:stream
 ```
 
 The CLI example in `examples/store-hydrate-stream.ts` prints the streamed SSR HTML for the same store/hydrate/streaming slice.
+
+`examples/router.ts` shows nested route rendering with a loader, route head tags, and route hydration state.

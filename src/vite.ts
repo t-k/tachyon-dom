@@ -9,6 +9,17 @@ export type TachyonDomViteOptions = {
   reactive?: boolean;
 };
 
+export type TachyonDomRouteModule = {
+  id: string;
+  path: string;
+  module: string;
+};
+
+export type TachyonDomRoutesViteOptions = {
+  routes: readonly TachyonDomRouteModule[];
+  virtualId?: string;
+};
+
 const codeForTarget = (
   target: NonNullable<TachyonDomViteOptions["target"]>,
   template: Parameters<typeof generateClientModule>[0],
@@ -42,6 +53,41 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         code: appendInlineSourceMap(code, createSourceMap(source, id, `${id}.js`)),
         map: null,
       };
+    },
+  };
+};
+
+export const tachyonDomRoutes = (options: TachyonDomRoutesViteOptions): Plugin => {
+  const virtualId = options.virtualId ?? "virtual:tachyon-dom/routes";
+  const resolvedVirtualId = `\0${virtualId}`;
+  const routeModules = new Set(options.routes.map((route) => route.module));
+  return {
+    name: "tachyon-dom-routes",
+    resolveId(id) {
+      return id === virtualId ? resolvedVirtualId : null;
+    },
+    load(id) {
+      if (id !== resolvedVirtualId) {
+        return null;
+      }
+      const routes = options.routes
+        .map(
+          (route) =>
+            `{ id: ${JSON.stringify(route.id)}, path: ${JSON.stringify(route.path)}, module: () => import(${JSON.stringify(route.module)}) }`,
+        )
+        .join(", ");
+      return `export const routes = [${routes}];\nexport const manifest = routes.map(({ id, path }) => ({ id, path }));\n`;
+    },
+    handleHotUpdate(context) {
+      if (!routeModules.has(context.file)) {
+        return;
+      }
+      const module = context.server.moduleGraph.getModuleById(resolvedVirtualId);
+      if (!module) {
+        return;
+      }
+      context.server.moduleGraph.invalidateModule(module);
+      return [module, ...context.modules];
     },
   };
 };

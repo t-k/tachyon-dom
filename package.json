@@ -30,6 +30,10 @@
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.js"
     },
+    "./router": {
+      "types": "./dist/router.d.ts",
+      "import": "./dist/router.js"
+    },
     "./runtime/text": {
       "types": "./dist/runtime/text.d.ts",
       "import": "./dist/runtime/text.js"
@@ -70,6 +74,10 @@
       "types": "./dist/runtime/portal.d.ts",
       "import": "./dist/runtime/portal.js"
     },
+    "./runtime/router": {
+      "types": "./dist/runtime/router.d.ts",
+      "import": "./dist/runtime/router.js"
+    },
     "./runtime/signal": {
       "types": "./dist/runtime/signal.d.ts",
       "import": "./dist/runtime/signal.js"
@@ -92,6 +100,7 @@
     "bench:local": "tsx benchmark/local-compare/run-local-compare.ts",
     "bench:local:gate": "tsx benchmark/local-compare/run-local-compare.ts --max-geomean-ratio 1.25 --max-memory-ratio 1.5",
     "bench:local:smoke": "tsx benchmark/local-compare/run-local-compare.ts --iterations 1 --warmup 1",
+    "example:router": "tsx examples/router.ts",
     "example:stream": "tsx examples/store-hydrate-stream.ts",
     "example:web": "vite --host 127.0.0.1",
     "test": "vitest run",

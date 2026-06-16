@@ -6,7 +6,7 @@ import { compileFile } from "../src/cli";
 import { diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
-import { tachyonDom } from "../src/vite";
+import { tachyonDom, tachyonDomRoutes } from "../src/vite";
 
 type PanelScope = {
   title: string;
@@ -90,5 +90,24 @@ describe("DX helpers", () => {
     });
     expect(typeof result === "object" && result?.code).toContain(`from "tachyon-dom/runtime/signal"`);
     expect(typeof result === "object" && result?.code).toContain(`sourceMappingURL=data:application/json;base64`);
+  });
+
+  it("generates a virtual route manifest with lazy route modules", async () => {
+    const plugin = tachyonDomRoutes({
+      routes: [
+        { id: "home", path: "/", module: "/src/routes/index.tachyon.html" },
+        { id: "user", path: "/users/:id", module: "/src/routes/users/[id].tachyon.html" },
+      ],
+    });
+    if (typeof plugin.resolveId !== "function" || typeof plugin.load !== "function") {
+      throw new Error("Missing virtual module hooks.");
+    }
+
+    const resolved = await plugin.resolveId.call({} as never, "virtual:tachyon-dom/routes", undefined, {} as never);
+    const code = await plugin.load.call({} as never, resolved as string, {} as never);
+
+    expect(resolved).toBe("\0virtual:tachyon-dom/routes");
+    expect(code).toContain(`export const manifest = routes.map`);
+    expect(code).toContain(`module: () => import("/src/routes/users/[id].tachyon.html")`);
   });
 });
