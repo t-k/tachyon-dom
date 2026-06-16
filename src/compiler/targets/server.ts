@@ -1,6 +1,7 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types";
 import {
   attrExpression,
+  attrString,
   escapeHtml,
   escapeMarker,
   expressionPattern,
@@ -11,6 +12,35 @@ import {
   readPath,
   serializeStaticAttr,
 } from "../utils";
+
+const componentScope = (node: ElementNode, scope: Record<string, unknown>): Record<string, unknown> => {
+  const next = { ...scope };
+  for (const attr of node.attrs) {
+    if (attr.name === "name") {
+      continue;
+    }
+    const expression = readExpressionAttribute(attr.value);
+    if (expression) {
+      next[attr.name] = readPath(next, expression);
+    }
+  }
+  const applyStores = (child: TemplateNode): void => {
+    if (child.type !== "element" || child.tagName !== "store") {
+      if (child.type === "element" && child.tagName !== "component") {
+        child.children.forEach(applyStores);
+      }
+      return;
+    }
+    for (const attr of child.attrs) {
+      const initial = readExpressionAttribute(attr.value);
+      if (initial) {
+        next[attr.name] = readPath(next, initial);
+      }
+    }
+  };
+  node.children.forEach(applyStores);
+  return next;
+};
 
 const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
   let output = "";
@@ -54,7 +84,13 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
     return "";
   }
   if (node.tagName === "component") {
-    return node.children.map((child) => renderNode(child, scope)).join("");
+    const next = componentScope(node, scope);
+    return node.children.map((child) => renderNode(child, next)).join("");
+  }
+  if (node.tagName === "await") {
+    const thenName = attrString(node, "then") ?? "value";
+    const value = readPath(scope, attrExpression(node, "value") ?? "undefined");
+    return node.children.map((child) => renderNode(child, { ...scope, [thenName]: value })).join("");
   }
 
   const attrs: string[] = [];
@@ -201,7 +237,15 @@ const renderElementExpression = (node: ElementNode, locals: ReadonlySet<string> 
     return `""`;
   }
   if (node.tagName === "component") {
-    return node.children.map((child) => renderNodeExpression(child, locals)).join(" + ") || `""`;
+    return renderComponentExpression(node, locals);
+  }
+  if (node.tagName === "await") {
+    const value = expressionToScopeAccess(attrExpression(node, "value") ?? "undefined", locals);
+    const thenName = attrString(node, "then") ?? "value";
+    const childLocals = new Set(locals);
+    childLocals.add(thenName);
+    const childExpression = node.children.map((child) => renderNodeExpression(child, childLocals)).join(" + ");
+    return `(((${thenName}) => ${childExpression || `""`})(${value}))`;
   }
 
   const parts: string[] = [renderOpenTagExpression(node, locals)];
@@ -214,6 +258,39 @@ const renderElementExpression = (node: ElementNode, locals: ReadonlySet<string> 
   }
   const marker = expressionToScopeAccess(hydrateId, locals);
   return `${jsString("<!--tachyon-hydrate:")} + escapeMarker(${marker}) + ${jsString(":start-->")} + ${expression} + ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${marker}) + ${jsString(":end-->")}`;
+};
+
+const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string>): string => {
+  const localNames = new Set(locals);
+  const declarations: string[] = [];
+  for (const attr of node.attrs) {
+    if (attr.name === "name") {
+      continue;
+    }
+    const expression = readExpressionAttribute(attr.value);
+    if (expression) {
+      declarations.push(`const ${attr.name} = ${expressionToScopeAccess(expression, localNames)};`);
+      localNames.add(attr.name);
+    }
+  }
+  const applyStoreDeclarations = (child: TemplateNode): void => {
+    if (child.type !== "element" || child.tagName !== "store") {
+      if (child.type === "element" && child.tagName !== "component") {
+        child.children.forEach(applyStoreDeclarations);
+      }
+      return;
+    }
+    for (const attr of child.attrs) {
+      const initial = readExpressionAttribute(attr.value);
+      if (initial) {
+        declarations.push(`const ${attr.name} = ${expressionToScopeAccess(initial, localNames)};`);
+        localNames.add(attr.name);
+      }
+    }
+  };
+  node.children.forEach(applyStoreDeclarations);
+  const expression = node.children.map((child) => renderNodeExpression(child, localNames)).join(" + ") || `""`;
+  return `(() => { ${declarations.join(" ")} return ${expression}; })()`;
 };
 
 export const generateServerModule = (template: CompiledTemplate): string => {

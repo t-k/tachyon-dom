@@ -5,7 +5,7 @@ import {
   generateServerStreamModule,
   type ListBinding,
 } from "../../src/compiler";
-import { createHydrationBoundary } from "../../src/runtime/hydrate";
+import { createHydrationBoundary, readHydrationState, serializeHydrationState } from "../../src/runtime/hydrate";
 import { mountKeyedList } from "../../src/runtime/list";
 import { effect } from "../../src/runtime/signal";
 import { createStore } from "../../src/runtime/store";
@@ -30,6 +30,11 @@ type DemoScope = {
 
 type GeneratedServerModule = {
   stream: (scope: DemoScope) => AsyncIterable<string>;
+};
+
+type HydratedDemoState = {
+  count: number;
+  rows: DemoRow[];
 };
 
 const templateSource = `<main><store count={initialCount}/><h1>{title}</h1><component name="CounterPanel"><section hydrate:id={islandId} class:active={active}><if test={active}><button id="boundary-button" on:click={increment}>{count}</button></if><ul><for each={rows} key={row.id}><li class:active={row.active}>{row.label}</li></for></ul></section></component></main>`;
@@ -136,7 +141,9 @@ const bindPreview = (preview: HTMLElement, scope: DemoScope): void => {
     throw new Error("Missing streamed root.");
   }
 
-  const state = createStore({ ...scope, rows: [...scope.rows] });
+  const hydrationState = readHydrationState<HydratedDemoState>(preview, scope.islandId);
+  const initialState = hydrationState.ok ? hydrationState.value : { count: scope.count, rows: scope.rows };
+  const state = createStore({ ...scope, count: initialState.count, rows: [...initialState.rows] });
   const countMetric = document.querySelector("#metric-count");
   const rowsMetric = document.querySelector("#metric-rows");
   const hydrateMetric = document.querySelector("#metric-hydrate");
@@ -261,11 +268,13 @@ export const mountWebExample = async (app: HTMLElement): Promise<void> => {
   }
 
   const render = async (): Promise<void> => {
+    const scope = initialScope();
     const { stream } = await importGeneratedServerModule();
-    const chunks = await readTextStreamChunks(renderToReadableStream(stream(initialScope())));
-    preview.innerHTML = chunks.join("");
+    const chunks = await readTextStreamChunks(renderToReadableStream(stream(scope)));
+    preview.innerHTML =
+      chunks.join("") + serializeHydrationState(scope.islandId, { count: scope.count, rows: scope.rows });
     chunksTarget.innerHTML = renderChunkList(chunks);
-    bindPreview(preview, initialScope());
+    bindPreview(preview, scope);
   };
 
   app.querySelector("#rerender")?.addEventListener("click", () => {

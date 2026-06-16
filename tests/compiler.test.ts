@@ -301,6 +301,8 @@ describe("HTML-first compiler", () => {
         `<component name="Panel"><h1>One</h1><p>Two</p></component>`,
         "<component> requires exactly one renderable root child.",
       ],
+      [`<main><await then="message"><p>{message}</p></await></main>`, "<await> requires value={promise}."],
+      [`<main><await value={messagePromise}><p>{message}</p></await></main>`, `<await> requires then="name".`],
     ] as const;
 
     for (const [source, message] of cases) {
@@ -311,5 +313,54 @@ describe("HTML-first compiler", () => {
       }
       expect(result.error.message).toBe(message);
     }
+  });
+
+  it("renders component props and local stores on server targets", () => {
+    const result = compileTemplate(
+      `<component name="Panel" label={title} initial={initialCount}><section><store count={initial}/><h1>{label}</h1><button>{count}</button><component name="Nested" value={label}><p>{value}</p></component></section></component>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.ir.directives).toContainEqual({
+      kind: "component",
+      path: [],
+      name: "Panel",
+      props: [
+        { name: "label", expression: "title" },
+        { name: "initial", expression: "initialCount" },
+      ],
+      stores: [{ name: "count", initial: "initial" }],
+    });
+    expect(renderServerTemplate(result.value, { title: "Hello", initialCount: 4 })).toBe(
+      `<section><h1>Hello</h1><button>4</button><p>Hello</p></section>`,
+    );
+
+    const code = generateServerModule(result.value);
+    expect(code).toContain(`const label = scope.title;`);
+    expect(code).toContain(`const count = initial;`);
+    expect(code).toContain(`const value = label;`);
+  });
+
+  it("generates await fragments for the streaming server target", async () => {
+    const result = compileTemplate(
+      `<main><h1>Before</h1><await value={messagePromise} then="message"><p>{message}</p></await></main>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateServerStreamModule(result.value);
+    expect(code).toContain(`const message = await scope.messagePromise;`);
+
+    const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
+      stream: (scope: { messagePromise: Promise<string> }) => AsyncIterable<string>;
+    };
+    const chunks: string[] = [];
+    for await (const chunk of module.stream({ messagePromise: Promise.resolve("Ready") })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toBe(`<main><h1>Before</h1><p>Ready</p></main>`);
   });
 });

@@ -19,6 +19,11 @@ export type HydrationBoundaryHandle = {
 
 type HydrationCleanup = void | (() => void);
 
+const escapeScriptJson = (value: string): string => value.replaceAll("<", "\\u003c").replaceAll("-->", "--\\>");
+
+const escapeAttribute = (value: string): string =>
+  value.replaceAll("&", "&amp;").replaceAll(`"`, "&quot;").replaceAll("<", "&lt;");
+
 const markerText = (id: string, edge: "start" | "end"): string => `tachyon-hydrate:${id}:${edge}`;
 
 const commentsIn = (root: ParentNode): Comment[] => {
@@ -91,4 +96,21 @@ export const createHydrationBoundary = (
       isHydrated = false;
     },
   });
+};
+
+export const serializeHydrationState = (id: string, state: unknown): string =>
+  `<script type="application/json" data-tachyon-state="${escapeAttribute(id)}">${escapeScriptJson(JSON.stringify(state))}</script>`;
+
+export const readHydrationState = <T>(root: ParentNode, id: string): Result<T, HydrationBoundaryError> => {
+  const script = Array.from(root.querySelectorAll(`script[type="application/json"][data-tachyon-state]`)).find(
+    (candidate) => candidate.getAttribute("data-tachyon-state") === id,
+  );
+  if (!script) {
+    return err({ message: `Missing hydration state for ${id}.` });
+  }
+  try {
+    return ok(JSON.parse(script.textContent ?? "null") as T);
+  } catch {
+    return err({ message: `Invalid hydration state for ${id}.` });
+  }
 };

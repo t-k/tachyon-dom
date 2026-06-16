@@ -27,6 +27,8 @@ The framework direction is HTML-first syntax with Solid-style fine-grained react
 - extract `<for each={items} key={item.id}>` keyed list boundaries
 - extract `<store count={initialCount}/>` store tags without adding DOM nodes
 - record `hydrate:id={islandId}` hydration boundaries for server/client handoff
+- record `<component name="Panel" prop={value}>` transparent component boundaries with props and local stores
+- generate `<await value={promise} then="name">` streaming fragments in the server stream target
 - render an escaped server string for the same template
 - generate a chunk-yielding streaming server target as a separate compiler output
 - generate client code that imports only the runtime helper modules it needs

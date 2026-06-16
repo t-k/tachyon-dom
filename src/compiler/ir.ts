@@ -44,6 +44,22 @@ const componentProps = (node: ElementNode): ComponentProp[] =>
       return expression ? [{ name: attr.name, expression }] : [];
     });
 
+const componentStores = (node: ElementNode): StoreDefinition[] => {
+  const stores: StoreDefinition[] = [];
+  const visit = (child: TemplateNode): void => {
+    if (child.type !== "element" || child.tagName === "component") {
+      return;
+    }
+    if (child.tagName === "store") {
+      stores.push(...storeDefinitionsFor(child));
+      return;
+    }
+    child.children.forEach(visit);
+  };
+  node.children.forEach(visit);
+  return stores;
+};
+
 const validateExpression = (expression: string, context: string): Result<void, CompilerError> => {
   if (!identifierPattern.test(expression)) {
     return semanticError(`Invalid ${context} expression: ${expression}.`);
@@ -105,6 +121,18 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
       return semanticError("<component> requires exactly one renderable root child.");
     }
   }
+  if (node.tagName === "await") {
+    if (!attrExpression(node, "value")) {
+      return semanticError("<await> requires value={promise}.");
+    }
+    const thenName = attrString(node, "then");
+    if (!thenName) {
+      return semanticError(`<await> requires then="name".`);
+    }
+    if (!identifierPattern.test(thenName)) {
+      return semanticError(`Invalid await then binding: ${thenName}.`);
+    }
+  }
   return ok(undefined);
 };
 
@@ -151,9 +179,7 @@ const collectDirectives = (node: TemplateNode, path: number[], directives: Templ
       path: [...path],
       name: componentName(node) ?? "Anonymous",
       props: componentProps(node),
-      stores: node.children
-        .filter((child): child is ElementNode => child.type === "element" && child.tagName === "store")
-        .flatMap(storeDefinitionsFor),
+      stores: componentStores(node),
     });
   }
   const hydrateId = attrExpression(node, "hydrate:id");
@@ -171,6 +197,14 @@ const collectDirectives = (node: TemplateNode, path: number[], directives: Templ
       each: attrExpression(node, "each") ?? "[]",
       key,
       itemName: itemNameFromKey(key),
+    });
+  }
+  if (node.tagName === "await") {
+    directives.push({
+      kind: "await",
+      path: [...path],
+      value: attrExpression(node, "value") ?? "undefined",
+      thenName: attrString(node, "then") ?? "value",
     });
   }
   for (const attr of node.attrs) {
@@ -195,6 +229,10 @@ export const createTemplateIr = (root: ElementNode): Result<TemplateIr, Compiler
     return err(validationResult.error);
   }
   const directives: TemplateDirective[] = [];
-  root.children.forEach((child, index) => collectDirectives(child, [index], directives));
+  if (root.tagName === "component" || root.tagName === "for" || root.tagName === "if" || root.tagName === "await") {
+    collectDirectives(root, [], directives);
+  } else {
+    root.children.forEach((child, index) => collectDirectives(child, [index], directives));
+  }
   return ok({ kind: "template", root, directives });
 };

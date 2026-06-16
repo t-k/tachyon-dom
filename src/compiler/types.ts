@@ -83,6 +83,7 @@ export type TemplateDirective =
   | { kind: "store"; path: number[]; stores: StoreDefinition[] }
   | { kind: "event"; path: number[]; eventName: string; handler: string }
   | { kind: "component"; path: number[]; name: string; props: ComponentProp[]; stores: StoreDefinition[] }
+  | { kind: "await"; path: number[]; value: string; thenName: string }
   | { kind: "hydrate"; path: number[]; id: string };
 
 export type TemplateIr = {

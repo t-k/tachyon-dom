@@ -1,5 +1,13 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types";
-import { attrExpression, expressionPattern, expressionToScopeAccess, itemNameFromKey, jsString } from "../utils";
+import {
+  attrExpression,
+  attrString,
+  expressionPattern,
+  expressionToScopeAccess,
+  itemNameFromKey,
+  jsString,
+  readExpressionAttribute,
+} from "../utils";
 import { renderOpenTagExpression } from "./server";
 
 const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, indent: string): string[] => {
@@ -55,7 +63,21 @@ const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<str
     return [];
   }
   if (node.tagName === "component") {
-    return node.children.flatMap((child) => renderNodeYieldStatements(child, locals, indent));
+    return renderComponentYieldStatements(node, locals, indent);
+  }
+  if (node.tagName === "await") {
+    const thenName = attrString(node, "then") ?? "value";
+    const childLocals = new Set(locals);
+    childLocals.add(thenName);
+    const statements = [
+      `${indent}{`,
+      `${indent}  const ${thenName} = await ${expressionToScopeAccess(attrExpression(node, "value") ?? "undefined", locals)};`,
+    ];
+    for (const child of node.children) {
+      statements.push(...renderNodeYieldStatements(child, childLocals, `${indent}  `));
+    }
+    statements.push(`${indent}}`);
+    return statements;
   }
   const hydrateId = attrExpression(node, "hydrate:id");
   const statements: string[] = [];
@@ -80,6 +102,38 @@ const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<str
       )}) + ${jsString(":end-->")};`,
     );
   }
+  return statements;
+};
+
+const renderComponentYieldStatements = (node: ElementNode, locals: ReadonlySet<string>, indent: string): string[] => {
+  const localNames = new Set(locals);
+  const statements = [`${indent}{`];
+  for (const attr of node.attrs) {
+    if (attr.name === "name") {
+      continue;
+    }
+    const expression = readExpressionAttribute(attr.value);
+    if (expression) {
+      statements.push(`${indent}  const ${attr.name} = ${expressionToScopeAccess(expression, localNames)};`);
+      localNames.add(attr.name);
+    }
+  }
+  for (const child of node.children) {
+    if (child.type !== "element" || child.tagName !== "store") {
+      continue;
+    }
+    for (const attr of child.attrs) {
+      const initial = readExpressionAttribute(attr.value);
+      if (initial) {
+        statements.push(`${indent}  const ${attr.name} = ${expressionToScopeAccess(initial, localNames)};`);
+        localNames.add(attr.name);
+      }
+    }
+  }
+  for (const child of node.children) {
+    statements.push(...renderNodeYieldStatements(child, localNames, `${indent}  `));
+  }
+  statements.push(`${indent}}`);
   return statements;
 };
 

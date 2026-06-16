@@ -1,18 +1,18 @@
-# Tachyon DOM構文仕様
+# Tachyon DOM Syntax Specification
 
-この文書はcompiler/runtime/SSRの契約を揺らさないための小さな構文仕様です。構文はHTML-firstを優先し、JavaScript式は属性値またはテキスト内の`{expr}`として扱います。現時点の式は識別子とドットパスに限定します。
+This document fixes the small HTML-first syntax surface used by the compiler, runtime, and SSR targets. JavaScript expressions are intentionally restricted to identifiers and dotted paths for now, so every target can analyze dependencies without evaluating arbitrary code.
 
-## テキストバインディング
+## Text Bindings
 
-`{value}`はテキストノードの動的スロットです。client targetでは静的テンプレート内に空白テキストを残し、`runtime/text`で直接更新します。SSR targetではHTML escape済み文字列として出力します。
+`{value}` creates a dynamic text slot. The client target leaves a placeholder text node in the static template and updates it through `runtime/text`. The server targets emit an HTML-escaped value.
 
 ```html
 <h1>{title}</h1>
 ```
 
-## 条件分岐
+## Conditional Rendering
 
-`<if test={condition}>...</if>`は条件付きレンダリングです。client targetではコメントアンカーと`runtime/conditional`へのbindingになり、SSR/stream targetでは`test`がtruthyの場合だけ子を出力します。
+`<if test={condition}>...</if>` renders children only when `test` is truthy. The client target lowers it to a comment anchor plus a `runtime/conditional` binding. The server targets omit the children when the condition is falsy.
 
 ```html
 <if test="{active}">
@@ -20,9 +20,9 @@
 </if>
 ```
 
-## keyed list
+## Keyed Lists
 
-`<for each={items} key={item.id}>...</for>`はkeyed list boundaryです。`key`の先頭識別子がitem名になります。client targetでは親要素に対する`runtime/list` bindingになり、SSR/stream targetでは配列を順に出力します。
+`<for each={items} key={item.id}>...</for>` creates a keyed list boundary. The first identifier in `key` becomes the item binding name. The client target lowers it to `runtime/list`; the server targets render the array in order.
 
 ```html
 <ul>
@@ -32,42 +32,68 @@
 </ul>
 ```
 
-## store
+## Stores
 
-`<store name={initial}/>`はDOMを出力しないstore定義です。client targetで`runtime/store`を必要な場合だけimportし、`createStore({ ...scope, name: scope.initial })`を生成します。
+`<store name={initial}/>` defines state without emitting a DOM node. The client target imports `runtime/store` only when a template declares stores.
 
 ```html
 <store count="{initialCount}" />
 ```
 
-## event
+Inside a component, store declarations create local server/stream scope values for that component subtree.
 
-`on:event={handler}`はイベントbindingです。client targetで`runtime/event`を必要な場合だけimportし、指定pathの要素へlistenerを復元します。SSR targetには出力しません。
+## Events
+
+`on:event={handler}` creates an event binding. The client target imports `runtime/event` only when events are present. Server targets do not emit event attributes.
 
 ```html
 <button on:click="{increment}">{count}</button>
 ```
 
-## component
+## Components
 
-`<component name="Name">...</component>`は透明なcomponent boundaryです。DOM要素としては出力せず、IRにcomponent directiveとして残します。現時点では1つのroot要素を持つcomponentを基本形とし、nested componentの境界確認と将来のcomponent target分割に使います。
+`<component name="Name">...</component>` creates a transparent component boundary. It does not emit a wrapper element. A component must currently have exactly one renderable root child.
+
+Component props are expression attributes other than `name`, and are exposed as local names while rendering the component subtree.
 
 ```html
-<component name="CounterPanel">
-  <section>...</section>
+<component name="Panel" label="{title}">
+  <section>{label}</section>
 </component>
 ```
 
-## hydrate boundary
+Components may be nested, and nested component props are resolved against the parent component scope.
 
-`hydrate:id={islandId}`はSSR済みHTMLとclient hydrationを接続するboundaryです。client templateからは属性を取り除き、SSR/stream targetでは`<!--tachyon-hydrate:<id>:start-->`と`<!--tachyon-hydrate:<id>:end-->`で対象要素を囲みます。client runtimeは`runtime/hydrate`でmarker pairを探し、既存DOMを置換せずにイベントとstate/list bindingだけを復元します。
+## Hydration Boundaries
+
+`hydrate:id={islandId}` connects SSR HTML to client hydration. The client template removes the attribute. The server targets wrap the element with marker comments:
 
 ```html
-<section hydrate:id="{islandId}">
-  <button>{count}</button>
-</section>
+<!--tachyon-hydrate:<id>:start-->
+<section>...</section>
+<!--tachyon-hydrate:<id>:end-->
 ```
 
-## compiler pipeline
+`runtime/hydrate` locates marker pairs and hydrates the existing element without replacing SSR DOM. `serializeHydrationState(id, state)` and `readHydrationState(root, id)` provide the first state handoff path.
 
-compilerは`HTML解析→Template IR→client target/SSR string target/SSR stream target`の順に処理します。`CompiledTemplate.ir.directives`には`store`、`component`、`hydrate`、`if`、`event`、`for`を明示的に記録し、各targetは同じIR rootとdirective契約を前提に出力します。
+## Await Streaming
+
+`<await value={promise} then="name">...</await>` creates an async streaming fragment. The stream target awaits `value`, binds the resolved value to `then`, and yields the child HTML as soon as it is ready.
+
+```html
+<await value="{messagePromise}" then="message">
+  <p>{message}</p>
+</await>
+```
+
+The synchronous server string target treats the current `value` as the resolved value. Use the stream target when `value` is a Promise.
+
+## Compiler Pipeline
+
+The compiler pipeline is:
+
+```text
+HTML parser -> Template IR -> client target / server string target / server stream target
+```
+
+`CompiledTemplate.ir.directives` records `store`, `component`, `hydrate`, `if`, `event`, `for`, and `await` directives. Each target consumes the same parsed root and IR contract.
