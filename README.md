@@ -16,6 +16,19 @@ The initial runtime optimizes:
 
 Byte weight is intentionally secondary for now. The runtime is split so benchmark-specialized code can remain separate from future general-purpose modules.
 
+## Compiler Direction
+
+The framework direction is HTML-first syntax with Solid-style fine-grained reactivity and Marko-style separated server/client compiler targets. The first compiler slice lives in `@local/tachyon-dom/compiler` and can:
+
+- parse a single-root HTML-like template
+- extract `{expr}` text bindings
+- extract `class:name={expr}` class bindings
+- extract `on:event={handler}` event bindings
+- render an escaped server string for the same template
+- generate client code that imports only the runtime helper modules it needs
+
+The compiler output is intentionally close to the current direct DOM runtime: static markup stays static, dynamic text/class/event slots are recorded as explicit paths, and generated client code can import subpath helpers such as `@local/tachyon-dom/runtime/text`.
+
 ## Commands
 
 ```sh

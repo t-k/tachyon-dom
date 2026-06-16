@@ -1,4 +1,5 @@
 import { err, ok, type Result } from "neverthrow";
+export { textAt } from "./runtime/text";
 
 export type RowKey = number | string;
 
@@ -213,12 +214,4 @@ export const createChunkedRowList = <T>(
     selectedIndex: () => selected,
     length: () => items.length,
   });
-};
-
-export const textAt = (root: Node, path: readonly number[]): Text => {
-  let current: Node = root;
-  for (const index of path) {
-    current = current.childNodes[index] as Node;
-  }
-  return current as Text;
 };

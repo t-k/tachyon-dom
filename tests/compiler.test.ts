@@ -1,0 +1,81 @@
+import { describe, expect, it } from "vitest";
+import { compileTemplate, generateClientModule, generateServerModule, renderServerTemplate } from "../src/compiler";
+
+describe("HTML-first compiler", () => {
+  it("extracts text bindings while keeping a static client template", () => {
+    const result = compileTemplate(`<tr><td>{row.id}</td><td><a>{row.label}</a></td></tr>`);
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.templateHtml).toBe("<tr><td> </td><td><a> </a></td></tr>");
+    expect(result.value.client.bindings).toEqual([
+      { kind: "text", path: [0, 0], expression: "row.id" },
+      { kind: "text", path: [1, 0, 0], expression: "row.label" },
+    ]);
+  });
+
+  it("separates class and event directives from static markup", () => {
+    const result = compileTemplate(`<button class="btn" class:danger={selected} on:click={select}>{label}</button>`);
+
+    expect(result.isOk()).toBe(true);
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.templateHtml).toBe(`<button class="btn"> </button>`);
+    expect(result.value.client.bindings).toEqual([
+      { kind: "class", path: [], className: "danger", expression: "selected" },
+      { kind: "event", path: [], eventName: "click", handler: "select" },
+      { kind: "text", path: [0], expression: "label" },
+    ]);
+  });
+
+  it("renders an escaped server string with static and dynamic classes", () => {
+    const result = compileTemplate(`<button class="btn" class:danger={selected} title={label}>{label}</button>`);
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    expect(
+      renderServerTemplate(result.value, {
+        selected: true,
+        label: `<Save & close>`,
+      }),
+    ).toBe(`<button class="btn danger" title="&lt;Save &amp; close&gt;">&lt;Save &amp; close&gt;</button>`);
+  });
+
+  it("generates modular client code that imports only needed runtime helpers", () => {
+    const result = compileTemplate(`<button class:danger={selected} on:click={select}>{label}</button>`);
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateClientModule(result.value);
+
+    expect(code).toContain(`from "@local/tachyon-dom/runtime/text"`);
+    expect(code).toContain(`from "@local/tachyon-dom/runtime/class"`);
+    expect(code).toContain(`from "@local/tachyon-dom/runtime/event"`);
+    expect(code).toContain(`export const templateHtml = "<button> </button>";`);
+    expect(code).toContain(`setText(textAt(root, [0]), scope.label);`);
+    expect(code).toContain(`setClassPresence(root, "danger", scope.selected);`);
+    expect(code).toContain(`delegate(root, "click", [], scope.select);`);
+  });
+
+  it("generates a separate server target without client runtime imports", () => {
+    const result = compileTemplate(`<button class:danger={selected}>{label}</button>`);
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateServerModule(result.value);
+
+    expect(code).toContain(`export const render = (scope) =>`);
+    expect(code).toContain(`escapeHtml(scope.label)`);
+    expect(code).toContain(`scope.selected ? " danger" : ""`);
+    expect(code).toContain(`" class=`);
+    expect(code).not.toContain(`@local/tachyon-dom/runtime`);
+  });
+});

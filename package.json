@@ -10,6 +10,22 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./compiler": {
+      "types": "./dist/compiler.d.ts",
+      "import": "./dist/compiler.js"
+    },
+    "./runtime/text": {
+      "types": "./dist/runtime/text.d.ts",
+      "import": "./dist/runtime/text.js"
+    },
+    "./runtime/class": {
+      "types": "./dist/runtime/class.d.ts",
+      "import": "./dist/runtime/class.js"
+    },
+    "./runtime/event": {
+      "types": "./dist/runtime/event.d.ts",
+      "import": "./dist/runtime/event.js"
     }
   },
   "scripts": {
