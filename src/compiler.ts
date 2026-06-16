@@ -5,24 +5,24 @@ export type CompilerError = {
   offset: number;
 };
 
-type Attribute = {
+export type Attribute = {
   name: string;
   value: string | true;
 };
 
-type ElementNode = {
+export type ElementNode = {
   type: "element";
   tagName: string;
   attrs: Attribute[];
   children: TemplateNode[];
 };
 
-type TextNode = {
+export type TextNode = {
   type: "text";
   value: string;
 };
 
-type TemplateNode = ElementNode | TextNode;
+export type TemplateNode = ElementNode | TextNode;
 
 export type TextBinding = {
   kind: "text";
@@ -54,7 +54,15 @@ export type ListBinding = {
   bindings: ClientBinding[];
 };
 
-export type ClientBinding = TextBinding | ClassBinding | EventBinding | ListBinding;
+export type ConditionalBinding = {
+  kind: "if";
+  path: number[];
+  test: string;
+  templateHtml: string;
+  bindings: Array<TextBinding | ClassBinding | EventBinding>;
+};
+
+export type ClientBinding = TextBinding | ClassBinding | EventBinding | ListBinding | ConditionalBinding;
 
 export type StoreDefinition = {
   name: string;
@@ -66,8 +74,23 @@ export type HydrationBoundary = {
   id: string;
 };
 
+export type TemplateDirective =
+  | { kind: "for"; path: number[]; each: string; key: string; itemName: string }
+  | { kind: "if"; path: number[]; test: string }
+  | { kind: "store"; path: number[]; stores: StoreDefinition[] }
+  | { kind: "event"; path: number[]; eventName: string; handler: string }
+  | { kind: "component"; path: number[]; name: string }
+  | { kind: "hydrate"; path: number[]; id: string };
+
+export type TemplateIr = {
+  kind: "template";
+  root: ElementNode;
+  directives: TemplateDirective[];
+};
+
 export type CompiledTemplate = {
   source: string;
+  ir: TemplateIr;
   root: ElementNode;
   client: {
     templateHtml: string;
@@ -341,9 +364,15 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
   if (node.tagName === "for") {
     return "";
   }
+  if (node.tagName === "if") {
+    return lowerIf(node, path, context);
+  }
   if (node.tagName === "store") {
     addStoreDefinitions(node, context);
     return "";
+  }
+  if (node.tagName === "component") {
+    return lowerComponent(node, path, context);
   }
 
   const attrs: string[] = [];
@@ -403,6 +432,43 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
   return `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
 };
 
+const renderableChildren = (node: ElementNode): TemplateNode[] =>
+  node.children.filter((child) => child.type !== "text" || child.value.length > 0);
+
+const lowerComponent = (node: ElementNode, path: number[], context: LoweringContext): string => {
+  const children = renderableChildren(node);
+  if (children.length === 0) {
+    return "";
+  }
+  if (children.length === 1) {
+    return lowerNode(children[0] as TemplateNode, path, context);
+  }
+  return children.map((child, index) => lowerNode(child, [...path, index], context)).join("");
+};
+
+const lowerIf = (node: ElementNode, path: number[], context: LoweringContext): string => {
+  const childContext: LoweringContext = {
+    bindings: [],
+    stores: [],
+    hydrationBoundaries: [],
+  };
+  const children = renderableChildren(node);
+  const templateHtml = children
+    .map((child, index) => lowerNode(child, children.length === 1 ? [] : [index], childContext))
+    .join("");
+  context.bindings.push({
+    kind: "if",
+    path: [...path],
+    test: attrExpression(node, "test") ?? "false",
+    templateHtml,
+    bindings: childContext.bindings.filter(
+      (binding): binding is TextBinding | ClassBinding | EventBinding =>
+        binding.kind === "text" || binding.kind === "class" || binding.kind === "event",
+    ),
+  });
+  return "<!---->";
+};
+
 const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
   const key = attrExpression(node, "key") ?? "item";
   const childContext: LoweringContext = {
@@ -410,11 +476,11 @@ const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
     stores: [],
     hydrationBoundaries: [],
   };
-  const renderableChildren = node.children.filter((child) => child.type !== "text" || child.value.length > 0);
-  const templateHtml = renderableChildren
-    .map((child, index) => lowerNode(child, renderableChildren.length === 1 ? [] : [index], childContext))
+  const children = renderableChildren(node);
+  const templateHtml = children
+    .map((child, index) => lowerNode(child, children.length === 1 ? [] : [index], childContext))
     .join("");
-  for (const child of node.children.filter(isForNode)) {
+  for (const child of node.children) {
     if (isForNode(child)) {
       childContext.bindings.push(lowerList(child, []));
     }
@@ -442,15 +508,17 @@ export const compileTemplate = (source: string): Result<CompiledTemplate, Compil
   if (!rootResult.ok) {
     return err(rootResult.error);
   }
+  const ir = createTemplateIr(rootResult.value);
   const context: LoweringContext = {
     bindings: [],
     stores: [],
     hydrationBoundaries: [],
   };
-  const templateHtml = lowerElement(rootResult.value, [], context);
+  const templateHtml = lowerElement(ir.root, [], context);
   return ok({
     source,
-    root: rootResult.value,
+    ir,
+    root: ir.root,
     client: {
       templateHtml,
       bindings: context.bindings,
@@ -458,6 +526,76 @@ export const compileTemplate = (source: string): Result<CompiledTemplate, Compil
       hydrationBoundaries: context.hydrationBoundaries,
     },
   });
+};
+
+const storeDefinitionsFor = (node: ElementNode): StoreDefinition[] => {
+  const stores: StoreDefinition[] = [];
+  for (const attr of node.attrs) {
+    if (!identifierPattern.test(attr.name)) {
+      continue;
+    }
+    const initial = readExpressionAttribute(attr.value);
+    if (initial) {
+      stores.push({ name: attr.name, initial });
+    }
+  }
+  return stores;
+};
+
+const componentName = (node: ElementNode): string => {
+  const attr = node.attrs.find((candidate) => candidate.name === "name");
+  return typeof attr?.value === "string" ? attr.value : "Anonymous";
+};
+
+const collectDirectives = (node: TemplateNode, path: number[], directives: TemplateDirective[]): void => {
+  if (node.type === "text") {
+    return;
+  }
+  if (node.tagName === "store") {
+    directives.push({ kind: "store", path: [...path], stores: storeDefinitionsFor(node) });
+    return;
+  }
+  const isComponent = node.tagName === "component";
+  if (isComponent) {
+    directives.push({ kind: "component", path: [...path], name: componentName(node) });
+  }
+  const hydrateId = attrExpression(node, "hydrate:id");
+  if (hydrateId) {
+    directives.push({ kind: "hydrate", path: [...path], id: hydrateId });
+  }
+  if (node.tagName === "if") {
+    directives.push({ kind: "if", path: [...path], test: attrExpression(node, "test") ?? "false" });
+  }
+  if (node.tagName === "for") {
+    const key = attrExpression(node, "key") ?? "item";
+    directives.push({
+      kind: "for",
+      path: [...path],
+      each: attrExpression(node, "each") ?? "[]",
+      key,
+      itemName: itemNameFromKey(key),
+    });
+  }
+  for (const attr of node.attrs) {
+    if (!attr.name.startsWith("on:")) {
+      continue;
+    }
+    const handler = readExpressionAttribute(attr.value);
+    if (handler) {
+      directives.push({ kind: "event", path: [...path], eventName: attr.name.slice(3), handler });
+    }
+  }
+  const children = isComponent ? renderableChildren(node) : node.children;
+  children.forEach((child, index) => {
+    const childPath = isComponent && children.length === 1 ? path : [...path, index];
+    collectDirectives(child, childPath, directives);
+  });
+};
+
+const createTemplateIr = (root: ElementNode): TemplateIr => {
+  const directives: TemplateDirective[] = [];
+  root.children.forEach((child, index) => collectDirectives(child, [index], directives));
+  return { kind: "template", root, directives };
 };
 
 const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
@@ -477,8 +615,16 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
   if (node.tagName === "for") {
     return renderFor(node, scope);
   }
+  if (node.tagName === "if") {
+    return readPath(scope, attrExpression(node, "test") ?? "false")
+      ? node.children.map((child) => renderNode(child, scope)).join("")
+      : "";
+  }
   if (node.tagName === "store") {
     return "";
+  }
+  if (node.tagName === "component") {
+    return node.children.map((child) => renderNode(child, scope)).join("");
   }
 
   const attrs: string[] = [];
@@ -587,6 +733,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsClass = bindings.some((binding) => binding.kind === "class");
   const needsEvent = bindings.some((binding) => binding.kind === "event");
   const needsList = bindings.some((binding) => binding.kind === "list");
+  const needsConditional = bindings.some((binding) => binding.kind === "if");
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const lines: string[] = [];
   if (needsText) {
@@ -600,6 +747,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (needsList) {
     lines.push(`import { mountKeyedList } from "@local/tachyon-dom/runtime/list";`);
+  }
+  if (needsConditional) {
+    lines.push(`import { mountConditional } from "@local/tachyon-dom/runtime/conditional";`);
   }
   if (needsSignal) {
     lines.push(`import { effect, read } from "@local/tachyon-dom/runtime/signal";`);
@@ -629,7 +779,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     } else if (binding.kind === "event") {
       const statement = `delegate(root, ${JSON.stringify(binding.eventName)}, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.handler).replace(/^scope\./, `${scopeName(needsStore)}.`)})`;
       lines.push(`  cleanups.push(${statement});`);
-    } else {
+    } else if (binding.kind === "list") {
       const listOptions = [
         `{`,
         `    key: ${JSON.stringify(binding.key)},`,
@@ -639,6 +789,15 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         `  }`,
       ].join("\n");
       const statement = `mountKeyedList(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.each, reactive, sourceName)}, ${listOptions})`;
+      lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
+    } else {
+      const conditionalOptions = [
+        `{`,
+        `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
+        `    bindings: ${JSON.stringify(binding.bindings)},`,
+        `  }`,
+      ].join("\n");
+      const statement = `mountConditional(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.test, reactive, sourceName)}, ${sourceName}, ${conditionalOptions})`;
       lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
     }
   }
@@ -721,8 +880,16 @@ const renderElementExpression = (node: ElementNode, locals: ReadonlySet<string> 
   if (node.tagName === "for") {
     return renderForExpression(node, locals);
   }
+  if (node.tagName === "if") {
+    const test = expressionToScopeAccess(attrExpression(node, "test") ?? "false", locals);
+    const childExpression = node.children.map((child) => renderNodeExpression(child, locals)).join(" + ");
+    return `(${test} ? ${childExpression || `""`} : "")`;
+  }
   if (node.tagName === "store") {
     return `""`;
+  }
+  if (node.tagName === "component") {
+    return node.children.map((child) => renderNodeExpression(child, locals)).join(" + ") || `""`;
   }
 
   const parts: string[] = [renderOpenTagExpression(node, locals)];
@@ -805,8 +972,19 @@ const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<str
   if (node.tagName === "for") {
     return renderForYieldStatements(node, locals, indent);
   }
+  if (node.tagName === "if") {
+    const statements = [`${indent}if (${expressionToScopeAccess(attrExpression(node, "test") ?? "false", locals)}) {`];
+    for (const child of node.children) {
+      statements.push(...renderNodeYieldStatements(child, locals, `${indent}  `));
+    }
+    statements.push(`${indent}}`);
+    return statements;
+  }
   if (node.tagName === "store") {
     return [];
+  }
+  if (node.tagName === "component") {
+    return node.children.flatMap((child) => renderNodeYieldStatements(child, locals, indent));
   }
   const hydrateId = attrExpression(node, "hydrate:id");
   const statements: string[] = [];

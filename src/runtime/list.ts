@@ -186,8 +186,9 @@ const createRecord = (
   key: PropertyKey,
   item: unknown,
   options: KeyedListOptions,
+  existingElement?: Element,
 ): RowRecord | undefined => {
-  const row = state.template.content.firstElementChild?.cloneNode(true);
+  const row = existingElement ?? state.template.content.firstElementChild?.cloneNode(true);
   if (!(row instanceof Element)) {
     return undefined;
   }
@@ -243,10 +244,12 @@ export const mountKeyedList = (
   }
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];
+  const canAdoptServerRows = state.records.size === 0 && container.children.length > 0;
   for (const item of items) {
     const key = keyFor(item, options);
     const existing = state.records.get(key);
-    const record = existing ?? createRecord(state, key, item, options);
+    const adoptable = canAdoptServerRows ? container.children[orderedRecords.length] : undefined;
+    const record = existing ?? createRecord(state, key, item, options, adoptable);
     if (!record) {
       continue;
     }

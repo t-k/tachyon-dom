@@ -237,4 +237,53 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`key: "row.id"`);
     expect(code).toContain(`itemName: "row"`);
   });
+
+  it("fixes the HTML-first syntax surface in an explicit IR", () => {
+    const result = compileTemplate(
+      `<main><store count={initialCount}/><component name="CounterPanel"><section hydrate:id={islandId}><if test={active}><button on:click={increment}>{count}</button></if><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></section></component></main>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.ir.directives).toEqual([
+      { kind: "store", path: [0], stores: [{ name: "count", initial: "initialCount" }] },
+      { kind: "component", path: [1], name: "CounterPanel" },
+      { kind: "hydrate", path: [1], id: "islandId" },
+      { kind: "if", path: [1, 0], test: "active" },
+      { kind: "event", path: [1, 0, 0], eventName: "click", handler: "increment" },
+      { kind: "for", path: [1, 1, 0], each: "rows", key: "row.id", itemName: "row" },
+    ]);
+  });
+
+  it("lowers conditional rendering and transparent component boundaries to client and server targets", () => {
+    const result = compileTemplate(
+      `<main><component name="Panel"><section><if test={active}><button on:click={increment}>{count}</button></if></section></component></main>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.templateHtml).toBe(`<main><section><!----></section></main>`);
+    expect(result.value.client.bindings).toEqual([
+      {
+        kind: "if",
+        path: [0, 0],
+        test: "active",
+        templateHtml: "<button> </button>",
+        bindings: [
+          { kind: "event", path: [], eventName: "click", handler: "increment" },
+          { kind: "text", path: [0], expression: "count" },
+        ],
+      },
+    ]);
+    expect(renderServerTemplate(result.value, { active: true, count: 3 })).toBe(
+      `<main><section><button>3</button></section></main>`,
+    );
+    expect(renderServerTemplate(result.value, { active: false, count: 3 })).toBe(`<main><section></section></main>`);
+
+    const code = generateClientModule(result.value, { reactive: true });
+    expect(code).toContain(`from "@local/tachyon-dom/runtime/conditional"`);
+    expect(code).toContain(`mountConditional(root, [0,0], read(scope.active), scope, {`);
+  });
 });

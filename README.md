@@ -32,6 +32,8 @@ The framework direction is HTML-first syntax with Solid-style fine-grained react
 - generate client code that imports only the runtime helper modules it needs
 - optionally generate fine-grained client bindings through `@local/tachyon-dom/runtime/signal`
 
+The fixed syntax surface is documented in [`docs/syntax-spec.md`](docs/syntax-spec.md).
+
 The compiler output is intentionally close to the current direct DOM runtime: static markup stays static, dynamic text/class/event slots are recorded as explicit paths, and generated client code can import subpath helpers such as `@local/tachyon-dom/runtime/text`.
 
 The first server streaming adapter, `@local/tachyon-dom/server/stream`, accepts sync or async HTML chunks and adapts them to `ReadableStream<Uint8Array>` or `Response` without building a single full HTML string first.
@@ -46,9 +48,12 @@ pnpm test
 pnpm build
 pnpm lint
 pnpm bench:local
+pnpm bench:local:smoke
 ```
 
 `pnpm bench:local` starts a temporary Vite server, measures Tachyon DOM against local copies of the keyed vanilla benchmark implementations in Playwright Chromium, prints ratio tables, and writes JSON results under `benchmark/local-compare/results/`.
+
+`pnpm bench:local:smoke` runs the same local comparison with one warmup and one measured iteration for feature-PR checks.
 
 The local benchmark prints row-operation timings plus auxiliary metrics for startup, JS heap usage, DOM node counts, and local source size. JSON output also keeps per-run values with mean, median, min, max, and p95.
 

@@ -74,6 +74,50 @@ describe("mountKeyedList", () => {
     expect(root.innerHTML).toBe(`<li><span>Three updated</span></li><li><span>One updated</span></li>`);
   });
 
+  it("adopts matching SSR rows on the first mount before applying keyed updates", () => {
+    document.body.innerHTML = `<ul id="items"><li><span>One</span></li><li><span>Two</span></li></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const first = root.children[0];
+    const second = root.children[1];
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [{ kind: "text" as const, path: [0, 0], expression: "item.label" }],
+    };
+
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 1, label: "One" },
+        { id: 2, label: "Two" },
+      ],
+      options,
+    );
+
+    expect(root.children[0]).toBe(first);
+    expect(root.children[1]).toBe(second);
+    expect(root.innerHTML).toBe(`<li><span>One</span></li><li><span>Two</span></li>`);
+
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 2, label: "Two updated" },
+        { id: 1, label: "One updated" },
+      ],
+      options,
+    );
+
+    expect(root.children[0]).toBe(second);
+    expect(root.children[1]).toBe(first);
+    expect(root.innerHTML).toBe(`<li><span>Two updated</span></li><li><span>One updated</span></li>`);
+  });
+
   it("falls back to insertBefore when moveBefore rejects the hierarchy", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");
