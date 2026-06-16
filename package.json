@@ -30,6 +30,10 @@
     "./runtime/list": {
       "types": "./dist/runtime/list.d.ts",
       "import": "./dist/runtime/list.js"
+    },
+    "./runtime/signal": {
+      "types": "./dist/runtime/signal.d.ts",
+      "import": "./dist/runtime/signal.js"
     }
   },
   "scripts": {

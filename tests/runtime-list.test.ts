@@ -98,4 +98,52 @@ describe("mountKeyedList", () => {
 
     expect(calls).toEqual(["new"]);
   });
+
+  it("delegates row events through the list container", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const calls: string[] = [];
+    const addListener = root.addEventListener.bind(root);
+    const removeListener = root.removeEventListener.bind(root);
+    let addCount = 0;
+    let removeCount = 0;
+    root.addEventListener = ((...args: Parameters<typeof root.addEventListener>) => {
+      addCount++;
+      return addListener(...args);
+    }) as typeof root.addEventListener;
+    root.removeEventListener = ((...args: Parameters<typeof root.removeEventListener>) => {
+      removeCount++;
+      return removeListener(...args);
+    }) as typeof root.removeEventListener;
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><button><span> </span></button></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0, 0], expression: "item.label" },
+        { kind: "event" as const, path: [0], eventName: "click", handler: "item.onClick" },
+      ],
+    };
+
+    mountKeyedList(
+      root,
+      [],
+      Array.from({ length: 3 }, (_, index) => ({
+        id: index + 1,
+        label: String(index + 1),
+        onClick: () => calls.push(String(index + 1)),
+      })),
+      options,
+    );
+    mountKeyedList(root, [], [{ id: 2, label: "2", onClick: () => calls.push("updated") }], options);
+
+    root.querySelector("span")?.click();
+
+    expect(addCount).toBe(1);
+    expect(removeCount).toBe(0);
+    expect(calls).toEqual(["updated"]);
+  });
 });

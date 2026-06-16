@@ -1,5 +1,4 @@
 import { setClassPresence } from "./class";
-import { delegate } from "./event";
 import { setText, textAt } from "./text";
 
 type TextBinding = {
@@ -35,13 +34,15 @@ type RowRecord = {
   key: PropertyKey;
   element: Element;
   scope: Record<string, unknown>;
-  cleanups: Array<() => void>;
 };
 
 type ListState = {
+  signature: string;
   templateHtml: string;
   records: Map<PropertyKey, RowRecord>;
+  recordsByElement: WeakMap<Element, RowRecord>;
   template: HTMLTemplateElement;
+  cleanups: Array<() => void>;
 };
 
 type MoveBeforeElement = Element & {
@@ -78,26 +79,88 @@ const createTemplate = (templateHtml: string): HTMLTemplateElement => {
   return template;
 };
 
+const optionsSignature = (options: KeyedListOptions): string =>
+  JSON.stringify({
+    key: options.key,
+    itemName: options.itemName,
+    templateHtml: options.templateHtml,
+    bindings: options.bindings,
+  });
+
+const cleanupListState = (state: ListState): void => {
+  for (const cleanup of state.cleanups) {
+    cleanup();
+  }
+  state.cleanups.length = 0;
+  state.records.forEach((record) => record.element.remove());
+  state.records.clear();
+};
+
+const rowElementFromEvent = (container: Element, event: Event): Element | undefined => {
+  let current = event.target instanceof Node ? event.target : undefined;
+  while (current && current.parentNode !== container) {
+    current = current.parentNode ?? undefined;
+  }
+  return current instanceof Element ? current : undefined;
+};
+
+const bindListEvents = (container: Element, state: ListState, options: KeyedListOptions): Array<() => void> => {
+  const cleanups: Array<() => void> = [];
+  const delegateKeys = new Set<string>();
+  for (const binding of options.bindings) {
+    if (binding.kind !== "event") {
+      continue;
+    }
+    const delegateKey = `${binding.eventName}:${binding.path.join(".")}:${binding.handler}`;
+    if (delegateKeys.has(delegateKey)) {
+      continue;
+    }
+    delegateKeys.add(delegateKey);
+    const listener: EventListener = (event) => {
+      const row = rowElementFromEvent(container, event);
+      if (!row) {
+        return;
+      }
+      const target = nodeAt(row, binding.path);
+      if (!(event.target instanceof Node) || !target.contains(event.target)) {
+        return;
+      }
+      const record = state.recordsByElement.get(row);
+      const handler = record ? readPath(record.scope, binding.handler) : undefined;
+      if (typeof handler === "function") {
+        (handler as EventListener)(event);
+      }
+    };
+    container.addEventListener(binding.eventName, listener);
+    cleanups.push(() => container.removeEventListener(binding.eventName, listener));
+  }
+  return cleanups;
+};
+
 const getListState = (container: Element, options: KeyedListOptions): ListState => {
+  const signature = optionsSignature(options);
   const current = listStates.get(container);
-  if (current && current.templateHtml === options.templateHtml) {
+  if (current && current.signature === signature) {
     return current;
   }
-  current?.records.forEach((record) => cleanupRecord(record));
+  if (current) {
+    cleanupListState(current);
+  }
   const next = {
+    signature,
     templateHtml: options.templateHtml,
     records: new Map<PropertyKey, RowRecord>(),
+    recordsByElement: new WeakMap<Element, RowRecord>(),
     template: createTemplate(options.templateHtml),
+    cleanups: [] as Array<() => void>,
   };
+  next.cleanups = bindListEvents(container, next, options);
   listStates.set(container, next);
   return next;
 };
 
 const cleanupRecord = (record: RowRecord): void => {
-  for (const cleanup of record.cleanups) {
-    cleanup();
-  }
-  record.cleanups.length = 0;
+  record.element.remove();
 };
 
 const applyRowBindings = (row: Element, scope: Record<string, unknown>, options: KeyedListOptions): void => {
@@ -108,23 +171,6 @@ const applyRowBindings = (row: Element, scope: Record<string, unknown>, options:
       setClassPresence(nodeAt(row, binding.path) as Element, binding.className, readPath(scope, binding.expression));
     }
   }
-};
-
-const bindRowEvents = (row: Element, scope: Record<string, unknown>, options: KeyedListOptions): Array<() => void> => {
-  const cleanups: Array<() => void> = [];
-  for (const binding of options.bindings) {
-    if (binding.kind !== "event") {
-      continue;
-    }
-    const listener: EventListener = (event) => {
-      const handler = readPath(scope, binding.handler);
-      if (typeof handler === "function") {
-        (handler as EventListener)(event);
-      }
-    };
-    cleanups.push(delegate(row, binding.eventName, binding.path, listener));
-  }
-  return cleanups;
 };
 
 const keyFor = (item: unknown, options: KeyedListOptions): PropertyKey => {
@@ -150,10 +196,9 @@ const createRecord = (
     key,
     element: row,
     scope,
-    cleanups: [] as Array<() => void>,
   };
+  state.recordsByElement.set(row, record);
   applyRowBindings(record.element, record.scope, options);
-  record.cleanups = bindRowEvents(record.element, record.scope, options);
   return record;
 };
 
@@ -185,7 +230,7 @@ export const mountKeyedList = (
   if (!items) {
     state.records.forEach((record) => {
       cleanupRecord(record);
-      record.element.remove();
+      state.recordsByElement.delete(record.element);
     });
     state.records.clear();
     return;
@@ -206,7 +251,7 @@ export const mountKeyedList = (
   state.records.forEach((record, key) => {
     if (!nextRecords.has(key)) {
       cleanupRecord(record);
-      record.element.remove();
+      state.recordsByElement.delete(record.element);
     }
   });
   for (let index = 0; index < orderedRecords.length; index++) {

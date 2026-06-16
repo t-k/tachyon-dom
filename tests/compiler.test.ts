@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { compileTemplate, generateClientModule, generateServerModule, renderServerTemplate } from "../src/compiler";
+import {
+  compileTemplate,
+  generateClientModule,
+  generateServerModule,
+  generateServerStreamModule,
+  renderServerTemplate,
+} from "../src/compiler";
 
 describe("HTML-first compiler", () => {
   it("extracts text bindings while keeping a static client template", () => {
@@ -61,7 +67,36 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`export const templateHtml = "<button> </button>";`);
     expect(code).toContain(`setText(textAt(root, [0]), scope.label);`);
     expect(code).toContain(`setClassPresence(root, "danger", scope.selected);`);
-    expect(code).toContain(`delegate(root, "click", [], scope.select);`);
+    expect(code).toContain(`cleanups.push(delegate(root, "click", [], scope.select));`);
+  });
+
+  it("generates class bindings against nested element paths", () => {
+    const result = compileTemplate(`<div><span class:active={selected}>{label}</span></div>`);
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateClientModule(result.value);
+
+    expect(code).toContain(`import { elementAt, setClassPresence } from "@local/tachyon-dom/runtime/class";`);
+    expect(code).toContain(`setClassPresence(elementAt(root, [0]), "active", scope.selected);`);
+  });
+
+  it("can generate reactive client bindings with modular signal imports", () => {
+    const result = compileTemplate(
+      `<section><h1>{title}</h1><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></section>`,
+    );
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateClientModule(result.value, { reactive: true });
+
+    expect(code).toContain(`import { effect, read } from "@local/tachyon-dom/runtime/signal";`);
+    expect(code).toContain(`const cleanups = [];`);
+    expect(code).toContain(`cleanups.push(effect(() => setText(textAt(root, [0,0]), read(scope.title))));`);
+    expect(code).toContain(`cleanups.push(effect(() => mountKeyedList(root, [1], read(scope.rows)`);
+    expect(code).toContain(`return () => {`);
   });
 
   it("generates a separate server target without client runtime imports", () => {
@@ -76,6 +111,33 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`escapeHtml(scope.label)`);
     expect(code).toContain(`scope.selected ? " danger" : ""`);
     expect(code).toContain(`" class=`);
+    expect(code).not.toContain(`@local/tachyon-dom/runtime`);
+  });
+
+  it("generates server list code that uses loop-local item scope", () => {
+    const result = compileTemplate(`<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td></tr></for></tbody>`);
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateServerModule(result.value);
+
+    expect(code).toContain(`scope.rows.map((row) =>`);
+    expect(code).toContain(`escapeHtml(row.id)`);
+    expect(code).not.toContain(`escapeHtml(scope.row.id)`);
+  });
+
+  it("generates a streaming server target without client runtime imports", () => {
+    const result = compileTemplate(`<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td></tr></for></tbody>`);
+    if (result.isErr()) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateServerStreamModule(result.value);
+
+    expect(code).toContain(`export const stream = function* (scope)`);
+    expect(code).toContain(`for (const row of scope.rows)`);
+    expect(code).toContain(`yield escapeHtml(row.id);`);
     expect(code).not.toContain(`@local/tachyon-dom/runtime`);
   });
 

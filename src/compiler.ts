@@ -477,25 +477,43 @@ const renderNode = (node: TemplateNode, scope: Record<string, unknown>): string 
 export const renderServerTemplate = (template: CompiledTemplate, scope: Record<string, unknown>): string =>
   renderElement(template.root, scope);
 
-const expressionToScopeAccess = (expression: string): string => {
+const expressionToScopeAccess = (expression: string, locals: ReadonlySet<string> = new Set()): string => {
   if (!identifierPattern.test(expression)) {
     return "undefined";
+  }
+  const [head] = expression.split(".");
+  if (head && locals.has(head)) {
+    return expression;
   }
   return `scope.${expression}`;
 };
 
-export const generateClientModule = (template: CompiledTemplate): string => {
+type GenerateClientModuleOptions = {
+  reactive?: boolean;
+};
+
+const elementExpression = (path: readonly number[]): string =>
+  path.length === 0 ? "root" : `elementAt(root, ${JSON.stringify(path)})`;
+
+const runtimeValueExpression = (expression: string, reactive: boolean): string => {
+  const value = expressionToScopeAccess(expression);
+  return reactive ? `read(${value})` : value;
+};
+
+export const generateClientModule = (template: CompiledTemplate, options: GenerateClientModuleOptions = {}): string => {
   const bindings = template.client.bindings;
+  const reactive = options.reactive === true;
   const needsText = bindings.some((binding) => binding.kind === "text");
   const needsClass = bindings.some((binding) => binding.kind === "class");
   const needsEvent = bindings.some((binding) => binding.kind === "event");
   const needsList = bindings.some((binding) => binding.kind === "list");
+  const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const lines: string[] = [];
   if (needsText) {
     lines.push(`import { setText, textAt } from "@local/tachyon-dom/runtime/text";`);
   }
   if (needsClass) {
-    lines.push(`import { setClassPresence } from "@local/tachyon-dom/runtime/class";`);
+    lines.push(`import { elementAt, setClassPresence } from "@local/tachyon-dom/runtime/class";`);
   }
   if (needsEvent) {
     lines.push(`import { delegate } from "@local/tachyon-dom/runtime/event";`);
@@ -503,21 +521,24 @@ export const generateClientModule = (template: CompiledTemplate): string => {
   if (needsList) {
     lines.push(`import { mountKeyedList } from "@local/tachyon-dom/runtime/list";`);
   }
+  if (needsSignal) {
+    lines.push(`import { effect, read } from "@local/tachyon-dom/runtime/signal";`);
+  }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const bind = (root, scope) => {`);
+  if (reactive || needsEvent) {
+    lines.push(`  const cleanups = [];`);
+  }
   for (const binding of bindings) {
     if (binding.kind === "text") {
-      lines.push(
-        `  setText(textAt(root, ${JSON.stringify(binding.path)}), ${expressionToScopeAccess(binding.expression)});`,
-      );
+      const statement = `setText(textAt(root, ${JSON.stringify(binding.path)}), ${runtimeValueExpression(binding.expression, reactive)})`;
+      lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
     } else if (binding.kind === "class") {
-      lines.push(
-        `  setClassPresence(root, ${JSON.stringify(binding.className)}, ${expressionToScopeAccess(binding.expression)});`,
-      );
+      const statement = `setClassPresence(${elementExpression(binding.path)}, ${JSON.stringify(binding.className)}, ${runtimeValueExpression(binding.expression, reactive)})`;
+      lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
     } else if (binding.kind === "event") {
-      lines.push(
-        `  delegate(root, ${JSON.stringify(binding.eventName)}, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.handler)});`,
-      );
+      const statement = `delegate(root, ${JSON.stringify(binding.eventName)}, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.handler)})`;
+      lines.push(`  cleanups.push(${statement});`);
     } else {
       const listOptions = [
         `{`,
@@ -527,10 +548,14 @@ export const generateClientModule = (template: CompiledTemplate): string => {
         `    bindings: ${JSON.stringify(binding.bindings)},`,
         `  }`,
       ].join("\n");
-      lines.push(
-        `  mountKeyedList(root, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.each)}, ${listOptions});`,
-      );
+      const statement = `mountKeyedList(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.each, reactive)}, ${listOptions})`;
+      lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
     }
+  }
+  if (reactive || needsEvent) {
+    lines.push(`  return () => {`);
+    lines.push(`    for (const cleanup of cleanups) cleanup();`);
+    lines.push(`  };`);
   }
   lines.push(`};`);
   return `${lines.join("\n")}\n`;
@@ -538,7 +563,7 @@ export const generateClientModule = (template: CompiledTemplate): string => {
 
 const jsString = (value: string): string => JSON.stringify(value);
 
-const renderTextExpression = (node: TextNode): string => {
+const renderTextExpression = (node: TextNode, locals: ReadonlySet<string> = new Set()): string => {
   const parts: string[] = [];
   let cursor = 0;
   for (const match of node.value.matchAll(expressionPattern)) {
@@ -547,7 +572,7 @@ const renderTextExpression = (node: TextNode): string => {
     if (staticText) {
       parts.push(jsString(staticText));
     }
-    parts.push(`escapeHtml(${expressionToScopeAccess((match[1] as string).trim())})`);
+    parts.push(`escapeHtml(${expressionToScopeAccess((match[1] as string).trim(), locals)})`);
     cursor = start + match[0].length;
   }
   const trailing = node.value.slice(cursor);
@@ -557,11 +582,7 @@ const renderTextExpression = (node: TextNode): string => {
   return parts.length > 0 ? parts.join(" + ") : `""`;
 };
 
-const renderElementExpression = (node: ElementNode): string => {
-  if (node.tagName === "for") {
-    return renderForExpression(node);
-  }
-
+const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<string>): string => {
   const parts: string[] = [jsString(`<${node.tagName}`)];
   const staticClasses: string[] = [];
   const dynamicClasses: string[] = [];
@@ -573,7 +594,9 @@ const renderElementExpression = (node: ElementNode): string => {
     if (attr.name.startsWith("class:")) {
       const expression = readExpressionAttribute(attr.value);
       if (expression) {
-        dynamicClasses.push(`(${expressionToScopeAccess(expression)} ? ${jsString(` ${attr.name.slice(6)}`)} : "")`);
+        dynamicClasses.push(
+          `(${expressionToScopeAccess(expression, locals)} ? ${jsString(` ${attr.name.slice(6)}`)} : "")`,
+        );
       }
       continue;
     }
@@ -583,8 +606,9 @@ const renderElementExpression = (node: ElementNode): string => {
     }
     const expression = readExpressionAttribute(attr.value);
     if (expression) {
+      const value = expressionToScopeAccess(expression, locals);
       parts.push(
-        `(${expressionToScopeAccess(expression)} == null || ${expressionToScopeAccess(expression)} === false ? "" : ${jsString(` ${attr.name}="`)} + escapeHtml(${expressionToScopeAccess(expression)}) + ${jsString(`"`)} )`,
+        `(${value} == null || ${value} === false ? "" : ${jsString(` ${attr.name}="`)} + escapeHtml(${value}) + ${jsString(`"`)} )`,
       );
       continue;
     }
@@ -592,36 +616,113 @@ const renderElementExpression = (node: ElementNode): string => {
   }
 
   if (staticClasses.length > 0 || dynamicClasses.length > 0) {
-    parts.push(
-      `(${jsString(staticClasses.join(" "))}${dynamicClasses.length > 0 ? ` + ${dynamicClasses.join(" + ")}` : ""} ? ${jsString(` class="`)} + (${jsString(staticClasses.join(" "))}${dynamicClasses.length > 0 ? ` + ${dynamicClasses.join(" + ")}` : ""}).trim() + ${jsString(`"`)} : "")`,
-    );
+    const classExpression = `${jsString(staticClasses.join(" "))}${dynamicClasses.length > 0 ? ` + ${dynamicClasses.join(" + ")}` : ""}`;
+    parts.push(`(${classExpression} ? ${jsString(` class="`)} + (${classExpression}).trim() + ${jsString(`"`)} : "")`);
   }
 
   parts.push(jsString(">"));
-  parts.push(...node.children.map(renderNodeExpression));
+  return parts.join(" + ");
+};
+
+const renderElementExpression = (node: ElementNode, locals: ReadonlySet<string> = new Set()): string => {
+  if (node.tagName === "for") {
+    return renderForExpression(node, locals);
+  }
+
+  const parts: string[] = [renderOpenTagExpression(node, locals)];
+  parts.push(...node.children.map((child) => renderNodeExpression(child, locals)));
   parts.push(jsString(`</${node.tagName}>`));
   return parts.join(" + ");
 };
 
-const renderNodeExpression = (node: TemplateNode): string => {
+const renderNodeExpression = (node: TemplateNode, locals: ReadonlySet<string> = new Set()): string => {
   if (node.type === "text") {
-    return renderTextExpression(node);
+    return renderTextExpression(node, locals);
   }
-  return renderElementExpression(node);
+  return renderElementExpression(node, locals);
 };
 
-const renderForExpression = (node: ElementNode): string => {
+const renderForExpression = (node: ElementNode, locals: ReadonlySet<string>): string => {
   const each = attrExpression(node, "each") ?? "[]";
   const key = attrExpression(node, "key") ?? "item";
   const itemName = itemNameFromKey(key);
-  const childExpression = node.children.map(renderNodeExpression).join(" + ");
-  return `(Array.isArray(${expressionToScopeAccess(each)}) ? ${expressionToScopeAccess(each)}.map((${itemName}) => ${childExpression || `""`}).join("") : "")`;
+  const eachAccess = expressionToScopeAccess(each, locals);
+  const childLocals = new Set(locals);
+  childLocals.add(itemName);
+  const childExpression = node.children.map((child) => renderNodeExpression(child, childLocals)).join(" + ");
+  return `(Array.isArray(${eachAccess}) ? ${eachAccess}.map((${itemName}) => ${childExpression || `""`}).join("") : "")`;
 };
 
 export const generateServerModule = (template: CompiledTemplate): string => {
   const lines = [
     `const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
     `export const render = (scope) => ${renderElementExpression(template.root)};`,
+  ];
+  return `${lines.join("\n")}\n`;
+};
+
+const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, indent: string): string[] => {
+  const statements: string[] = [];
+  let cursor = 0;
+  for (const match of node.value.matchAll(expressionPattern)) {
+    const start = match.index ?? 0;
+    const staticText = node.value.slice(cursor, start);
+    if (staticText) {
+      statements.push(`${indent}yield ${jsString(staticText)};`);
+    }
+    statements.push(`${indent}yield escapeHtml(${expressionToScopeAccess((match[1] as string).trim(), locals)});`);
+    cursor = start + match[0].length;
+  }
+  const trailing = node.value.slice(cursor);
+  if (trailing) {
+    statements.push(`${indent}yield ${jsString(trailing)};`);
+  }
+  return statements;
+};
+
+const renderForYieldStatements = (node: ElementNode, locals: ReadonlySet<string>, indent: string): string[] => {
+  const each = attrExpression(node, "each") ?? "[]";
+  const key = attrExpression(node, "key") ?? "item";
+  const itemName = itemNameFromKey(key);
+  const eachAccess = expressionToScopeAccess(each, locals);
+  const childLocals = new Set(locals);
+  childLocals.add(itemName);
+  const statements = [
+    `${indent}if (Array.isArray(${eachAccess})) {`,
+    `${indent}  for (const ${itemName} of ${eachAccess}) {`,
+  ];
+  for (const child of node.children) {
+    statements.push(...renderNodeYieldStatements(child, childLocals, `${indent}    `));
+  }
+  statements.push(`${indent}  }`, `${indent}}`);
+  return statements;
+};
+
+const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<string>, indent: string): string[] => {
+  if (node.tagName === "for") {
+    return renderForYieldStatements(node, locals, indent);
+  }
+  const statements = [`${indent}yield ${renderOpenTagExpression(node, locals)};`];
+  for (const child of node.children) {
+    statements.push(...renderNodeYieldStatements(child, locals, indent));
+  }
+  statements.push(`${indent}yield ${jsString(`</${node.tagName}>`)};`);
+  return statements;
+};
+
+const renderNodeYieldStatements = (node: TemplateNode, locals: ReadonlySet<string>, indent: string): string[] => {
+  if (node.type === "text") {
+    return renderTextYieldStatements(node, locals, indent);
+  }
+  return renderElementYieldStatements(node, locals, indent);
+};
+
+export const generateServerStreamModule = (template: CompiledTemplate): string => {
+  const lines = [
+    `const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
+    `export const stream = function* (scope) {`,
+    ...renderNodeYieldStatements(template.root, new Set(), "  "),
+    `};`,
   ];
   return `${lines.join("\n")}\n`;
 };
