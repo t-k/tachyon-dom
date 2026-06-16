@@ -110,7 +110,11 @@ export const createChunkedRowList = <T>(
       }
       options.tbody.appendChild(chunk.cloneNode(true));
     }
-    items.push(...nextItems);
+    const start = items.length;
+    items.length = start + nextItems.length;
+    for (let index = 0; index < nextItems.length; index++) {
+      items[start + index] = nextItems[index] as T;
+    }
   };
 
   const clearInternal = (clearCachedChunks: boolean): void => {

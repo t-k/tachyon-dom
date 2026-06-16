@@ -64,7 +64,6 @@ const implementations: readonly Implementation[] = [
     title: "Tachyon DOM",
     path: "/benchmark/js-framework-benchmark/",
     sourcePaths: [
-      "src/index.ts",
       "benchmark/js-framework-benchmark/index.html",
       "benchmark/js-framework-benchmark/src/main.ts",
       "benchmark/js-framework-benchmark/src/i18n.ts",

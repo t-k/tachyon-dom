@@ -15,10 +15,14 @@ describe("js-framework-benchmark app", () => {
 
     createBenchmarkTableApp(document);
     document.querySelector<HTMLButtonElement>("#run")?.click();
+    document.querySelector<HTMLButtonElement>("#add")?.click();
+    document.querySelector<HTMLButtonElement>("#update")?.click();
 
     const tbody = document.querySelector("#tbody");
     expect(tbody).toBeInstanceOf(HTMLTableSectionElement);
-    expect((tbody as HTMLTableSectionElement).rows.length).toBe(1000);
+    expect((tbody as HTMLTableSectionElement).rows.length).toBe(2000);
     expect((tbody as HTMLTableSectionElement).rows[0]?.cells[0]?.textContent).toBe("1");
+    expect((tbody as HTMLTableSectionElement).rows[0]?.cells[1]?.textContent).toContain(" !!!");
+    expect((tbody as HTMLTableSectionElement).rows[1000]?.cells[0]?.textContent).toBe("1001");
   });
 });
