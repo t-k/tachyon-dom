@@ -16,7 +16,7 @@ type GeneratedServerModule = {
 const source = `<main><store count={initialCount}/><h1>Tachyon streaming example</h1><section hydrate:id={islandId}><button>{count}</button></section></main>`;
 const compiledResult = compileTemplate(source);
 
-if (compiledResult.isErr()) {
+if (!compiledResult.ok) {
   throw new Error(compiledResult.error.message);
 }
 

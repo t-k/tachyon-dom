@@ -55,7 +55,13 @@ The local benchmark prints row-operation timings plus auxiliary metrics for star
 ## Example
 
 ```sh
+pnpm example:web
+```
+
+Open `http://127.0.0.1:5173/examples/web/` to try the browser example. It shows the compiled SSR preview, hydrate boundary markers, store updates, keyed list updates, stream chunks, and generated client module shape in one page.
+
+```sh
 pnpm example:stream
 ```
 
-The example in `examples/store-hydrate-stream.ts` compiles an HTML-first template with `<store>`, `hydrate:id`, and the chunk-yielding server stream target, then adapts the generated chunks to an HTML `Response`.
+The CLI example in `examples/store-hydrate-stream.ts` prints the streamed SSR HTML for the same store/hydrate/streaming slice.

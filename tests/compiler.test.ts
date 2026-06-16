@@ -11,8 +11,8 @@ describe("HTML-first compiler", () => {
   it("extracts text bindings while keeping a static client template", () => {
     const result = compileTemplate(`<tr><td>{row.id}</td><td><a>{row.label}</a></td></tr>`);
 
-    expect(result.isOk()).toBe(true);
-    if (result.isErr()) {
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -26,8 +26,8 @@ describe("HTML-first compiler", () => {
   it("separates class and event directives from static markup", () => {
     const result = compileTemplate(`<button class="btn" class:danger={selected} on:click={select}>{label}</button>`);
 
-    expect(result.isOk()).toBe(true);
-    if (result.isErr()) {
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -41,7 +41,7 @@ describe("HTML-first compiler", () => {
 
   it("renders an escaped server string with static and dynamic classes", () => {
     const result = compileTemplate(`<button class="btn" class:danger={selected} title={label}>{label}</button>`);
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -55,7 +55,7 @@ describe("HTML-first compiler", () => {
 
   it("generates modular client code that imports only needed runtime helpers", () => {
     const result = compileTemplate(`<button class:danger={selected} on:click={select}>{label}</button>`);
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -72,7 +72,7 @@ describe("HTML-first compiler", () => {
 
   it("generates class bindings against nested element paths", () => {
     const result = compileTemplate(`<div><span class:active={selected}>{label}</span></div>`);
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -86,7 +86,7 @@ describe("HTML-first compiler", () => {
     const result = compileTemplate(
       `<section><h1>{title}</h1><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></section>`,
     );
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -101,7 +101,7 @@ describe("HTML-first compiler", () => {
 
   it("extracts store tags without adding client DOM nodes", () => {
     const result = compileTemplate(`<section><store count={initialCount}/><button>{count}</button></section>`);
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -115,7 +115,7 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`setText(textAt(root, [0,0]), read(state.count))`);
 
     const withoutStore = compileTemplate(`<section><button>{count}</button></section>`);
-    if (withoutStore.isErr()) {
+    if (!withoutStore.ok) {
       throw new Error(withoutStore.error.message);
     }
     expect(generateClientModule(withoutStore.value, { reactive: true })).not.toContain(`runtime/store`);
@@ -123,7 +123,7 @@ describe("HTML-first compiler", () => {
 
   it("generates a separate server target without client runtime imports", () => {
     const result = compileTemplate(`<button class:danger={selected}>{label}</button>`);
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -138,7 +138,7 @@ describe("HTML-first compiler", () => {
 
   it("generates server list code that uses loop-local item scope", () => {
     const result = compileTemplate(`<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td></tr></for></tbody>`);
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -151,7 +151,7 @@ describe("HTML-first compiler", () => {
 
   it("generates a streaming server target without client runtime imports", () => {
     const result = compileTemplate(`<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td></tr></for></tbody>`);
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -165,7 +165,7 @@ describe("HTML-first compiler", () => {
 
   it("records hydrate boundaries and emits server markers", () => {
     const result = compileTemplate(`<main><section hydrate:id={islandId}><button>{label}</button></section></main>`);
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -185,7 +185,7 @@ describe("HTML-first compiler", () => {
     const result = compileTemplate(
       `<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td><td>{row.label}</td></tr></for></tbody>`,
     );
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -210,7 +210,7 @@ describe("HTML-first compiler", () => {
     const result = compileTemplate(
       `<tbody><for each={rows} key={row.id}><tr class:danger={row.selected}><td>{row.id}</td><td>{row.label}</td></tr></for></tbody>`,
     );
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 
@@ -226,7 +226,7 @@ describe("HTML-first compiler", () => {
 
   it("keeps list runtime imports modular", () => {
     const result = compileTemplate(`<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td></tr></for></tbody>`);
-    if (result.isErr()) {
+    if (!result.ok) {
       throw new Error(result.error.message);
     }
 

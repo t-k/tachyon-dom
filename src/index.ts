@@ -1,4 +1,4 @@
-import { err, ok, type Result } from "neverthrow";
+import { err, ok, type Result } from "./result";
 export { textAt } from "./runtime/text";
 
 export type RowKey = number | string;
@@ -72,7 +72,7 @@ export const createChunkedRowList = <T>(
   options: ChunkedRowListOptions<T>,
 ): Result<ChunkedRowList<T>, ChunkedRowListError> => {
   const templateRowResult = getFirstTemplateRow(options.rowTemplate);
-  if (templateRowResult.isErr()) {
+  if (!templateRowResult.ok) {
     return err(templateRowResult.error);
   }
 

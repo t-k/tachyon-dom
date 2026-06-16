@@ -117,7 +117,7 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
     updateRow: updateBenchmarkRow,
     chunkSize: 50,
   });
-  if (rendererResult.isErr()) {
+  if (!rendererResult.ok) {
     throw new Error(`Invalid row template: ${rendererResult.error.type}`);
   }
   const renderer = rendererResult.value;

@@ -36,7 +36,7 @@ const setup = () => {
       textAt(row, [1, 0, 0]).nodeValue = item.label;
     },
   });
-  if (renderer.isErr()) {
+  if (!renderer.ok) {
     throw new Error(renderer.error.type);
   }
   return { renderer: renderer.value, tbody };

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type Browser, type LaunchOptions, type Page } from "playwright";
 import { createServer, type ViteDevServer } from "vite";
-import { err, ok, type Result } from "neverthrow";
+import { err, ok, type Result } from "../../src/result";
 import {
   buildAuxiliaryMetricMatrix,
   buildScenarioMatrix,
@@ -107,7 +107,7 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
         return err("--iterations requires a value.");
       }
       const parsed = parsePositiveInteger(value, "--iterations");
-      if (parsed.isErr()) {
+      if (!parsed.ok) {
         return err(parsed.error);
       }
       options.iterations = parsed.value;
@@ -117,7 +117,7 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
         return err("--warmup requires a value.");
       }
       const parsed = parsePositiveInteger(value, "--warmup");
-      if (parsed.isErr()) {
+      if (!parsed.ok) {
         return err(parsed.error);
       }
       options.warmup = parsed.value;
@@ -485,7 +485,7 @@ const run = async (options: CliOptions): Promise<void> => {
 };
 
 const parsed = parseArgs(process.argv.slice(2));
-if (parsed.isErr()) {
+if (!parsed.ok) {
   console.error(parsed.error);
   process.exitCode = 1;
 } else {

@@ -1,4 +1,4 @@
-import { err, ok, type Result } from "neverthrow";
+import { err, ok, type Result } from "./result";
 
 export type CompilerError = {
   message: string;
@@ -185,7 +185,7 @@ const parseAttributes = (parser: Parser): Result<Attribute[], CompilerError> => 
       return ok(attrs);
     }
     const nameResult = readName(parser);
-    if (nameResult.isErr()) {
+    if (!nameResult.ok) {
       return err(nameResult.error);
     }
     consumeWhitespace(parser);
@@ -196,7 +196,7 @@ const parseAttributes = (parser: Parser): Result<Attribute[], CompilerError> => 
     parser.offset++;
     consumeWhitespace(parser);
     const valueResult = readAttributeValue(parser);
-    if (valueResult.isErr()) {
+    if (!valueResult.ok) {
       return err(valueResult.error);
     }
     attrs.push({ name: nameResult.value, value: valueResult.value });
@@ -222,11 +222,11 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
   }
 
   const tagNameResult = readName(parser);
-  if (tagNameResult.isErr()) {
+  if (!tagNameResult.ok) {
     return err(tagNameResult.error);
   }
   const attrsResult = parseAttributes(parser);
-  if (attrsResult.isErr()) {
+  if (!attrsResult.ok) {
     return err(attrsResult.error);
   }
   if (startsWith(parser, "/>")) {
@@ -242,7 +242,7 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
   while (parser.offset < parser.source.length && !startsWith(parser, `</${tagNameResult.value}`)) {
     if (peek(parser) === "<") {
       const childResult = parseElement(parser);
-      if (childResult.isErr()) {
+      if (!childResult.ok) {
         return err(childResult.error);
       }
       children.push(childResult.value);
@@ -267,7 +267,7 @@ const parseTemplate = (source: string): Result<ElementNode, CompilerError> => {
   const parser: Parser = { source, offset: 0 };
   consumeWhitespace(parser);
   const rootResult = parseElement(parser);
-  if (rootResult.isErr()) {
+  if (!rootResult.ok) {
     return err(rootResult.error);
   }
   consumeWhitespace(parser);
@@ -439,7 +439,7 @@ const lowerNode = (node: TemplateNode, path: number[], context: LoweringContext)
 
 export const compileTemplate = (source: string): Result<CompiledTemplate, CompilerError> => {
   const rootResult = parseTemplate(source);
-  if (rootResult.isErr()) {
+  if (!rootResult.ok) {
     return err(rootResult.error);
   }
   const context: LoweringContext = {
