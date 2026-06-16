@@ -1,0 +1,102 @@
+import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types";
+import { attrExpression, expressionPattern, expressionToScopeAccess, itemNameFromKey, jsString } from "../utils";
+import { renderOpenTagExpression } from "./server";
+
+const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, indent: string): string[] => {
+  const statements: string[] = [];
+  let cursor = 0;
+  for (const match of node.value.matchAll(expressionPattern)) {
+    const start = match.index ?? 0;
+    const staticText = node.value.slice(cursor, start);
+    if (staticText) {
+      statements.push(`${indent}yield ${jsString(staticText)};`);
+    }
+    statements.push(`${indent}yield escapeHtml(${expressionToScopeAccess((match[1] as string).trim(), locals)});`);
+    cursor = start + match[0].length;
+  }
+  const trailing = node.value.slice(cursor);
+  if (trailing) {
+    statements.push(`${indent}yield ${jsString(trailing)};`);
+  }
+  return statements;
+};
+
+const renderForYieldStatements = (node: ElementNode, locals: ReadonlySet<string>, indent: string): string[] => {
+  const each = attrExpression(node, "each") ?? "[]";
+  const key = attrExpression(node, "key") ?? "item";
+  const itemName = itemNameFromKey(key);
+  const eachAccess = expressionToScopeAccess(each, locals);
+  const childLocals = new Set(locals);
+  childLocals.add(itemName);
+  const statements = [
+    `${indent}if (Array.isArray(${eachAccess})) {`,
+    `${indent}  for (const ${itemName} of ${eachAccess}) {`,
+  ];
+  for (const child of node.children) {
+    statements.push(...renderNodeYieldStatements(child, childLocals, `${indent}    `));
+  }
+  statements.push(`${indent}  }`, `${indent}}`);
+  return statements;
+};
+
+const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<string>, indent: string): string[] => {
+  if (node.tagName === "for") {
+    return renderForYieldStatements(node, locals, indent);
+  }
+  if (node.tagName === "if") {
+    const statements = [`${indent}if (${expressionToScopeAccess(attrExpression(node, "test") ?? "false", locals)}) {`];
+    for (const child of node.children) {
+      statements.push(...renderNodeYieldStatements(child, locals, `${indent}  `));
+    }
+    statements.push(`${indent}}`);
+    return statements;
+  }
+  if (node.tagName === "store") {
+    return [];
+  }
+  if (node.tagName === "component") {
+    return node.children.flatMap((child) => renderNodeYieldStatements(child, locals, indent));
+  }
+  const hydrateId = attrExpression(node, "hydrate:id");
+  const statements: string[] = [];
+  if (hydrateId) {
+    statements.push(
+      `${indent}yield ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${expressionToScopeAccess(
+        hydrateId,
+        locals,
+      )}) + ${jsString(":start-->")};`,
+    );
+  }
+  statements.push(`${indent}yield ${renderOpenTagExpression(node, locals)};`);
+  for (const child of node.children) {
+    statements.push(...renderNodeYieldStatements(child, locals, indent));
+  }
+  statements.push(`${indent}yield ${jsString(`</${node.tagName}>`)};`);
+  if (hydrateId) {
+    statements.push(
+      `${indent}yield ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${expressionToScopeAccess(
+        hydrateId,
+        locals,
+      )}) + ${jsString(":end-->")};`,
+    );
+  }
+  return statements;
+};
+
+const renderNodeYieldStatements = (node: TemplateNode, locals: ReadonlySet<string>, indent: string): string[] => {
+  if (node.type === "text") {
+    return renderTextYieldStatements(node, locals, indent);
+  }
+  return renderElementYieldStatements(node, locals, indent);
+};
+
+export const generateServerStreamModule = (template: CompiledTemplate): string => {
+  const lines = [
+    `const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
+    `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
+    `export const stream = async function* (scope) {`,
+    ...renderNodeYieldStatements(template.root, new Set(), "  "),
+    `};`,
+  ];
+  return `${lines.join("\n")}\n`;
+};

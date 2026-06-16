@@ -1,0 +1,169 @@
+import { err, ok, type Result } from "../result";
+import type { Attribute, CompilerError, ElementNode, TextNode } from "./types";
+
+type Parser = {
+  source: string;
+  offset: number;
+};
+
+const isWhitespace = (char: string | undefined): boolean =>
+  char === " " || char === "\n" || char === "\t" || char === "\r";
+
+const parserError = (parser: Parser, message: string): Result<never, CompilerError> =>
+  err({ message, offset: parser.offset });
+
+const peek = (parser: Parser): string | undefined => parser.source[parser.offset];
+
+const startsWith = (parser: Parser, value: string): boolean => parser.source.startsWith(value, parser.offset);
+
+const consumeWhitespace = (parser: Parser): void => {
+  while (isWhitespace(peek(parser))) {
+    parser.offset++;
+  }
+};
+
+const readWhile = (parser: Parser, predicate: (char: string) => boolean): string => {
+  const start = parser.offset;
+  while (parser.offset < parser.source.length) {
+    const char = parser.source[parser.offset] as string;
+    if (!predicate(char)) {
+      break;
+    }
+    parser.offset++;
+  }
+  return parser.source.slice(start, parser.offset);
+};
+
+const readName = (parser: Parser): Result<string, CompilerError> => {
+  const name = readWhile(parser, (char) => /[A-Za-z0-9:_$.-]/.test(char));
+  if (!name) {
+    return parserError(parser, "Expected a name.");
+  }
+  return ok(name);
+};
+
+const readQuotedValue = (parser: Parser): Result<string, CompilerError> => {
+  const quote = peek(parser);
+  if (quote !== `"` && quote !== `'`) {
+    return parserError(parser, "Expected a quoted attribute value.");
+  }
+  parser.offset++;
+  const start = parser.offset;
+  while (parser.offset < parser.source.length && peek(parser) !== quote) {
+    parser.offset++;
+  }
+  if (peek(parser) !== quote) {
+    return parserError(parser, "Unclosed attribute value.");
+  }
+  const value = parser.source.slice(start, parser.offset);
+  parser.offset++;
+  return ok(value);
+};
+
+const readAttributeValue = (parser: Parser): Result<string, CompilerError> => {
+  if (peek(parser) === `"` || peek(parser) === `'`) {
+    return readQuotedValue(parser);
+  }
+  return ok(readWhile(parser, (char) => !isWhitespace(char) && char !== ">" && char !== "/"));
+};
+
+const parseAttributes = (parser: Parser): Result<Attribute[], CompilerError> => {
+  const attrs: Attribute[] = [];
+  while (parser.offset < parser.source.length) {
+    consumeWhitespace(parser);
+    const char = peek(parser);
+    if (char === ">" || startsWith(parser, "/>")) {
+      return ok(attrs);
+    }
+    const nameResult = readName(parser);
+    if (!nameResult.ok) {
+      return err(nameResult.error);
+    }
+    consumeWhitespace(parser);
+    if (peek(parser) !== "=") {
+      attrs.push({ name: nameResult.value, value: true });
+      continue;
+    }
+    parser.offset++;
+    consumeWhitespace(parser);
+    const valueResult = readAttributeValue(parser);
+    if (!valueResult.ok) {
+      return err(valueResult.error);
+    }
+    attrs.push({ name: nameResult.value, value: valueResult.value });
+  }
+  return parserError(parser, "Unclosed attribute list.");
+};
+
+const parseText = (parser: Parser): TextNode => {
+  const start = parser.offset;
+  while (parser.offset < parser.source.length && peek(parser) !== "<") {
+    parser.offset++;
+  }
+  return { type: "text", value: parser.source.slice(start, parser.offset) };
+};
+
+const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
+  if (peek(parser) !== "<") {
+    return parserError(parser, "Expected an opening tag.");
+  }
+  parser.offset++;
+  if (peek(parser) === "/") {
+    return parserError(parser, "Unexpected closing tag.");
+  }
+
+  const tagNameResult = readName(parser);
+  if (!tagNameResult.ok) {
+    return err(tagNameResult.error);
+  }
+  const attrsResult = parseAttributes(parser);
+  if (!attrsResult.ok) {
+    return err(attrsResult.error);
+  }
+  if (startsWith(parser, "/>")) {
+    parser.offset += 2;
+    return ok({ type: "element", tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
+  }
+  if (peek(parser) !== ">") {
+    return parserError(parser, "Expected end of opening tag.");
+  }
+  parser.offset++;
+
+  const children = [];
+  while (parser.offset < parser.source.length && !startsWith(parser, `</${tagNameResult.value}`)) {
+    if (peek(parser) === "<") {
+      const childResult = parseElement(parser);
+      if (!childResult.ok) {
+        return err(childResult.error);
+      }
+      children.push(childResult.value);
+    } else {
+      children.push(parseText(parser));
+    }
+  }
+
+  if (!startsWith(parser, `</${tagNameResult.value}`)) {
+    return parserError(parser, `Missing closing tag for <${tagNameResult.value}>.`);
+  }
+  parser.offset += tagNameResult.value.length + 2;
+  consumeWhitespace(parser);
+  if (peek(parser) !== ">") {
+    return parserError(parser, "Expected end of closing tag.");
+  }
+  parser.offset++;
+  return ok({ type: "element", tagName: tagNameResult.value, attrs: attrsResult.value, children });
+};
+
+export const parseTemplate = (source: string): Result<ElementNode, CompilerError> => {
+  const parser: Parser = { source, offset: 0 };
+  consumeWhitespace(parser);
+  const rootResult = parseElement(parser);
+  if (!rootResult.ok) {
+    return err(rootResult.error);
+  }
+  consumeWhitespace(parser);
+  if (parser.offset !== source.length) {
+    return err({ message: "Only one root element is currently supported.", offset: parser.offset });
+  }
+  return rootResult;
+};

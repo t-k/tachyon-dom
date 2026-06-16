@@ -248,7 +248,7 @@ describe("HTML-first compiler", () => {
 
     expect(result.value.ir.directives).toEqual([
       { kind: "store", path: [0], stores: [{ name: "count", initial: "initialCount" }] },
-      { kind: "component", path: [1], name: "CounterPanel" },
+      { kind: "component", path: [1], name: "CounterPanel", props: [], stores: [] },
       { kind: "hydrate", path: [1], id: "islandId" },
       { kind: "if", path: [1, 0], test: "active" },
       { kind: "event", path: [1, 0, 0], eventName: "click", handler: "increment" },
@@ -285,5 +285,31 @@ describe("HTML-first compiler", () => {
     const code = generateClientModule(result.value, { reactive: true });
     expect(code).toContain(`from "tachyon-dom/runtime/conditional"`);
     expect(code).toContain(`mountConditional(root, [0,0], read(scope.active), scope, {`);
+  });
+
+  it("rejects unsupported syntax before target generation", () => {
+    const cases = [
+      [`<ul><for key={row.id}><li>{row.label}</li></for></ul>`, "<for> requires each={items}."],
+      [`<ul><for each={rows}><li>{row.label}</li></for></ul>`, "<for> requires key={item.id}."],
+      [`<section><if><button>Save</button></if></section>`, "<if> requires test={condition}."],
+      [
+        `<main><section hydrate:id={islandId}></section><section hydrate:id={islandId}></section></main>`,
+        "Duplicate hydrate boundary id expression: islandId.",
+      ],
+      [`<div>{count + 1}</div>`, "Invalid text expression: count + 1."],
+      [
+        `<component name="Panel"><h1>One</h1><p>Two</p></component>`,
+        "<component> requires exactly one renderable root child.",
+      ],
+    ] as const;
+
+    for (const [source, message] of cases) {
+      const result = compileTemplate(source);
+      expect(result.ok).toBe(false);
+      if (result.ok) {
+        throw new Error("Expected compiler error.");
+      }
+      expect(result.error.message).toBe(message);
+    }
   });
 });
