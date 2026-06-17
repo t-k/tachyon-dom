@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createStaticAssetHandler } from "../src/adapters";
 import {
+  cacheControl,
   createHrefBuilder,
   createRouteBuildManifest,
   createRoutePreloadPlan,
@@ -12,6 +13,7 @@ import {
   renderDeferredDataScript,
   resolveDeferredData,
   renderRoute,
+  withCacheHeaders,
   type RouteDefinition,
 } from "../src/router";
 
@@ -91,6 +93,42 @@ describe("router platform features", () => {
 
     expect(result.ok && result.value.html).toBe("<h1>Done</h1>");
     expect(events).toEqual(["middleware", "match:rewritten", "render:<h1>Done</h1>"]);
+  });
+
+  it("passes environment variables to middleware, loaders, render, headers, and cache policies", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        id: "home",
+        path: "/",
+        headers: ({ env }) => ({ "x-runtime": env.RUNTIME_NAME ?? "unknown" }),
+        cache: ({ env }) => ({ mode: "public", maxAge: 60, sharedMaxAge: Number(env.PAGE_S_MAXAGE ?? 120) }),
+        loader: ({ env }) => env.RUNTIME_NAME,
+        render: ({ data, env }) => `<h1>${data}:${env.RUNTIME_NAME}</h1>`,
+      },
+    ];
+    const seen: string[] = [];
+    const result = await renderRoute(routes, "https://x.test/", {
+      env: { RUNTIME_NAME: "edge", PAGE_S_MAXAGE: "300" },
+      middleware: [
+        ({ env }) => {
+          seen.push(env.RUNTIME_NAME ?? "");
+        },
+      ],
+    });
+
+    expect(result.ok && result.value.html).toBe("<h1>edge:edge</h1>");
+    expect(result.ok && result.value.headers.get("x-runtime")).toBe("edge");
+    expect(result.ok && result.value.headers.get("cache-control")).toBe("public, max-age=60, s-maxage=300");
+    expect(seen).toEqual(["edge"]);
+  });
+
+  it("creates cache and revalidation headers for route responses", () => {
+    expect(
+      cacheControl({ mode: "public", maxAge: 60, staleWhileRevalidate: 30, tags: ["home"] }).get("cache-control"),
+    ).toBe("public, max-age=60, stale-while-revalidate=30");
+    expect(cacheControl({ mode: "public", maxAge: Number.NaN, sharedMaxAge: -1 }).get("cache-control")).toBe("public");
+    const response = withCacheHeaders(new Response("ok"), { mode: "no-store" });
+    expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
   it("resolves deferred loader data independently from route rendering", async () => {

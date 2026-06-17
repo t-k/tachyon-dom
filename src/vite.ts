@@ -2,12 +2,15 @@ import type { Plugin } from "vite";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index";
 import { diagnoseTemplate, formatDiagnostic } from "./diagnostics";
 import { createFileRouteManifest } from "./router";
-import { appendInlineSourceMap, createSourceMap } from "./source-map";
+import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "./source-map";
 
 export type TachyonDomViteOptions = {
   include?: RegExp;
   target?: "client" | "server" | "stream";
   reactive?: boolean;
+  sourcemap?: boolean;
+  productionSourceMap?: boolean;
+  onSourceMap?: (artifact: { id: string; code: string; map: SourceMap; source: string }) => void | Promise<void>;
 };
 
 export type TachyonDomRouteModule = {
@@ -40,10 +43,16 @@ const codeForTarget = (
 export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
   const include = options.include ?? /\.tachyon\.html$/;
   const target = options.target ?? "client";
+  let command = "serve";
+  let mode = "development";
   return {
     name: "tachyon-dom",
     enforce: "pre",
-    transform(source, id) {
+    configResolved(config) {
+      command = config.command;
+      mode = config.mode;
+    },
+    async transform(source, id) {
       if (!include.test(id)) {
         return null;
       }
@@ -52,8 +61,22 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         this.error(formatDiagnostic(result.error, id));
       }
       const code = codeForTarget(target, result.value, options.reactive === true);
+      const emitSourceMap = shouldEmitSourceMap({
+        sourcemap: options.sourcemap,
+        productionSourceMap: options.productionSourceMap,
+        command,
+        mode,
+      });
+      if (!emitSourceMap && (!options.onSourceMap || options.sourcemap === false)) {
+        return {
+          code,
+          map: null,
+        };
+      }
+      const map = createSourceMap(source, id, `${id}.js`);
+      await options.onSourceMap?.({ id, code, map, source });
       return {
-        code: appendInlineSourceMap(code, createSourceMap(source, id, `${id}.js`)),
+        code: emitSourceMap ? appendInlineSourceMap(code, map) : code,
         map: null,
       };
     },

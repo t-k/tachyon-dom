@@ -42,10 +42,23 @@ export type RouteContext<Data = unknown, ActionResult = unknown> = {
   url: URL;
   params: RouteParams;
   route: RouteDefinition;
+  env: RouteEnvironment;
   data: Data;
   loaderData: Record<string, unknown>;
   actionResult: ActionResult;
   outlet: string;
+};
+
+export type RouteEnvironment = Record<string, string | undefined>;
+
+export type RouteCachePolicy = {
+  mode?: "public" | "private" | "no-store";
+  maxAge?: number;
+  sharedMaxAge?: number;
+  staleWhileRevalidate?: number;
+  staleIfError?: number;
+  immutable?: boolean;
+  tags?: readonly string[];
 };
 
 export type RouteDefinition<Data = unknown, ActionResult = unknown> = {
@@ -57,6 +70,10 @@ export type RouteDefinition<Data = unknown, ActionResult = unknown> = {
     descriptor: RouteContext<Data, ActionResult>,
   ) => RouteHeadDescriptor | Promise<RouteHeadDescriptor> | RouteHeadDescriptor;
   resources?: readonly RouteResource[] | ((context: RouteContext<Data, ActionResult>) => readonly RouteResource[]);
+  headers?: HeadersInit | ((context: RouteContext<Data, ActionResult>) => HeadersInit | Promise<HeadersInit>);
+  cache?:
+    | RouteCachePolicy
+    | ((context: RouteContext<Data, ActionResult>) => RouteCachePolicy | Promise<RouteCachePolicy>);
   fallback?: string;
   error?: (context: { request: Request; url: URL; error: unknown }) => string | Promise<string>;
   notFound?: (context: { request: Request; url: URL }) => string | Promise<string>;
@@ -110,6 +127,7 @@ export type RouteRenderOptions = {
   };
   middleware?: readonly RouteMiddleware[];
   hooks?: RouteHooks;
+  env?: RouteEnvironment;
 };
 
 export type RouteError = {
@@ -123,6 +141,8 @@ export type RouteModule<Data = unknown, ActionResult = unknown> = {
   action?: RouteDefinition<Data, ActionResult>["action"];
   head?: RouteDefinition<Data, ActionResult>["head"];
   resources?: RouteDefinition<Data, ActionResult>["resources"];
+  headers?: RouteDefinition<Data, ActionResult>["headers"];
+  cache?: RouteDefinition<Data, ActionResult>["cache"];
   fallback?: string;
   template?: RouteDefinition<Data, ActionResult>["render"];
   render?: RouteDefinition<Data, ActionResult>["render"];
@@ -143,6 +163,7 @@ export type RouteMiddlewareResult = Request | Response | RouteResponse | void;
 export type RouteMiddleware = (context: {
   request: Request;
   url: URL;
+  env: RouteEnvironment;
 }) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>;
 
 export type RouteHooks = {
@@ -255,6 +276,49 @@ export const html = (body: TrustedHtml, init: ResponseInit = {}): RouteResponse 
     headers.set("content-type", "text/html; charset=utf-8");
   }
   return routeResponse(trustedHtmlValue(body), { ...init, headers });
+};
+
+const cacheSeconds = (value: number | undefined): number | undefined =>
+  value !== undefined && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
+
+export const cacheControl = (policy: RouteCachePolicy): Headers => {
+  const headers = new Headers();
+  const directives: string[] = [];
+  if (policy.mode === "no-store") {
+    directives.push("no-store");
+  } else {
+    directives.push(policy.mode ?? "public");
+    const maxAge = cacheSeconds(policy.maxAge);
+    const sharedMaxAge = cacheSeconds(policy.sharedMaxAge);
+    const staleWhileRevalidate = cacheSeconds(policy.staleWhileRevalidate);
+    const staleIfError = cacheSeconds(policy.staleIfError);
+    if (maxAge !== undefined) {
+      directives.push(`max-age=${maxAge}`);
+    }
+    if (sharedMaxAge !== undefined) {
+      directives.push(`s-maxage=${sharedMaxAge}`);
+    }
+    if (staleWhileRevalidate !== undefined) {
+      directives.push(`stale-while-revalidate=${staleWhileRevalidate}`);
+    }
+    if (staleIfError !== undefined) {
+      directives.push(`stale-if-error=${staleIfError}`);
+    }
+    if (policy.immutable) {
+      directives.push("immutable");
+    }
+  }
+  headers.set("cache-control", directives.join(", "));
+  if (policy.tags && policy.tags.length > 0) {
+    headers.set("cache-tag", policy.tags.join(","));
+  }
+  return headers;
+};
+
+export const withCacheHeaders = (response: Response, policy: RouteCachePolicy): Response => {
+  const headers = new Headers(response.headers);
+  cacheControl(policy).forEach((value, key) => headers.set(key, value));
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 };
 
 export const defer = <T extends Record<string, unknown>>(values: T): DeferredData<T> => {
@@ -421,6 +485,8 @@ export const routeFromModule = <Data = unknown, ActionResult = unknown>(
   ...(module.action ? { action: module.action } : {}),
   ...(module.head ? { head: module.head } : {}),
   ...(module.resources ? { resources: module.resources } : {}),
+  ...(module.headers ? { headers: module.headers } : {}),
+  ...(module.cache ? { cache: module.cache } : {}),
   ...(module.fallback ? { fallback: module.fallback } : {}),
   ...(module.ErrorBoundary ? { error: module.ErrorBoundary } : {}),
   ...(module.NotFound ? { notFound: module.NotFound } : {}),
@@ -739,6 +805,7 @@ export const collectRouteResources = (
             url: context?.url ?? new URL("http://tachyon.local/"),
             params: context?.params ?? entry.params,
             route: entry.route,
+            env: context?.env ?? {},
             data: context?.data,
             loaderData: context?.loaderData ?? {},
             actionResult: context?.actionResult,
@@ -760,6 +827,10 @@ const mergeHead = (heads: readonly RouteHeadDescriptor[]): RouteHeadDescriptor =
   };
 };
 
+const applyHeaders = (headers: Headers, extra: HeadersInit): void => {
+  new Headers(extra).forEach((value, key) => headers.set(key, value));
+};
+
 export const renderRoute = async (
   routes: readonly RouteDefinition[],
   input: Request | URL | string,
@@ -767,6 +838,7 @@ export const renderRoute = async (
 ): Promise<Result<RouteRenderResult, RouteError>> => {
   let request = requestFor(input);
   let url = new URL(request.url);
+  const env = options.env ?? {};
   const emptyMatch = (pathname = url.pathname): MatchedRoute => ({
     route: { path: "*", render: () => "" },
     branch: [],
@@ -802,7 +874,7 @@ export const renderRoute = async (
   };
   await options.hooks?.onRequest?.({ request, url });
   for (const middleware of options.middleware ?? []) {
-    const result = await middleware({ request, url });
+    const result = await middleware({ request, url, env });
     if (isRouteResponse(result)) {
       return ok(routeResponseResult(result));
     }
@@ -876,6 +948,7 @@ export const renderRoute = async (
         url,
         params: match.value.params,
         route: match.value.route,
+        env,
         loaderData,
         actionResult: undefined,
       });
@@ -892,6 +965,7 @@ export const renderRoute = async (
           url,
           params: match.value.params,
           route: entry.route,
+          env,
           loaderData,
           actionResult,
         });
@@ -912,6 +986,7 @@ export const renderRoute = async (
         url,
         params: match.value.params,
         route: entry.route,
+        env,
         data,
         loaderData,
         actionResult,
@@ -928,6 +1003,32 @@ export const renderRoute = async (
         serializeHydrationState(`route:${id}`, data, options.cspNonce === undefined ? {} : { nonce: options.cspNonce }),
       )
       .join("");
+    const headers = new Headers({ "content-type": "text/html; charset=utf-8" });
+    const deepestContext = {
+      request,
+      url,
+      params: match.value.params,
+      route: match.value.route,
+      env,
+      data: loaderData[routeId(match.value.route, match.value.pathname)],
+      loaderData,
+      actionResult,
+      outlet,
+    };
+    for (const entry of match.value.branch) {
+      const id = routeId(entry.route, entry.path);
+      const context = { ...deepestContext, route: entry.route, data: loaderData[id] };
+      if (entry.route.headers) {
+        applyHeaders(
+          headers,
+          typeof entry.route.headers === "function" ? await entry.route.headers(context) : entry.route.headers,
+        );
+      }
+      if (entry.route.cache) {
+        const policy = typeof entry.route.cache === "function" ? await entry.route.cache(context) : entry.route.cache;
+        applyHeaders(headers, cacheControl(policy));
+      }
+    }
     return ok({
       status: 200,
       html: outlet,
@@ -937,6 +1038,7 @@ export const renderRoute = async (
           request,
           url,
           params: match.value.params,
+          env,
           loaderData,
           actionResult,
         }),
@@ -944,7 +1046,7 @@ export const renderRoute = async (
       stateScript,
       loaderData,
       actionResult,
-      headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+      headers,
       match: match.value,
     });
   } catch (error) {

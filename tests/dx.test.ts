@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildRouteManifestFile, compileFile } from "../src/cli";
 import { diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
-import { appendInlineSourceMap, createSourceMap } from "../src/source-map";
+import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
 import { tachyonDom, tachyonDomRoutes } from "../src/vite";
 
@@ -127,6 +127,40 @@ describe("DX helpers", () => {
     });
     expect(typeof result === "object" && result?.code).toContain(`from "tachyon-dom/runtime/signal"`);
     expect(typeof result === "object" && result?.code).toContain(`sourceMappingURL=data:application/json;base64`);
+  });
+
+  it("can disable production source maps and expose artifacts for upload hooks", async () => {
+    const uploaded: string[] = [];
+    const plugin = tachyonDom({
+      productionSourceMap: false,
+      onSourceMap: ({ id }) => {
+        uploaded.push(id);
+      },
+    });
+    if (typeof plugin.configResolved === "function") {
+      await plugin.configResolved.call({} as never, { command: "build", mode: "production" } as never);
+    } else if (plugin.configResolved) {
+      await plugin.configResolved.handler.call({} as never, { command: "build", mode: "production" } as never);
+    }
+    if (typeof plugin.transform !== "function") {
+      throw new Error("Missing transform hook.");
+    }
+
+    const result = await plugin.transform.call(
+      {
+        error(error: string): never {
+          throw new Error(error);
+        },
+      } as never,
+      `<button>{label}</button>`,
+      "/src/button.tachyon.html",
+    );
+
+    expect(typeof result === "object" && result?.code).not.toContain("sourceMappingURL");
+    expect(uploaded).toEqual(["/src/button.tachyon.html"]);
+    expect(
+      shouldEmitSourceMap({ sourcemap: true, productionSourceMap: false, command: "build", mode: "production" }),
+    ).toBe(false);
   });
 
   it("generates a virtual route manifest with lazy route modules", async () => {

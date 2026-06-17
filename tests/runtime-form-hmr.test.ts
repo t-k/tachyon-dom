@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyDeferredDataChunk } from "../src/runtime/stream-client";
 import { connectRouteHotReloader, createRouteHotReloader } from "../src/runtime/router";
-import { enhanceForm } from "../src/runtime/form";
+import { enhanceForm, validateFormData } from "../src/runtime/form";
 
 describe("runtime form and HMR helpers", () => {
   it("enhances forms with fetch while preserving normal form markup", async () => {
@@ -25,6 +25,37 @@ describe("runtime form and HMR helpers", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(submitted).toEqual(["POST /save", "ok"]);
+    cleanup();
+  });
+
+  it("validates form data before enhanced submission and focuses invalid fields", async () => {
+    document.body.innerHTML = `<form action="/save" method="post"><input name="email" value="bad"></form>`;
+    const form = document.querySelector("form");
+    const input = document.querySelector("input");
+    if (!(form instanceof HTMLFormElement) || !(input instanceof HTMLInputElement)) {
+      throw new Error("Missing form.");
+    }
+    const events: string[] = [];
+    const cleanup = enhanceForm(form, {
+      validate: ({ formData }) =>
+        validateFormData(formData, {
+          email: { pattern: /^[^@]+@[^@]+$/, message: "Enter a valid email." },
+        }),
+      submit: () => {
+        events.push("submit");
+        return new Response("ok");
+      },
+      onInvalid: ({ errors }) => {
+        events.push(errors.email ?? "missing");
+      },
+    });
+
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(events).toEqual(["Enter a valid email."]);
+    expect(input.validationMessage).toBe("Enter a valid email.");
+    expect(document.activeElement).toBe(input);
     cleanup();
   });
 
