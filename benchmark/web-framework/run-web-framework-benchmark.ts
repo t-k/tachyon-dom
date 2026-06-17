@@ -34,14 +34,8 @@ const frameworks: readonly FrameworkConfig[] = [
   {
     name: "tachyon-dom",
     cwd: projectRoot,
-    start: (port) => [
-      "pnpm",
-      "exec",
-      "tsx",
-      "benchmark/web-framework/fixtures/tachyon/server.ts",
-      "--port",
-      String(port),
-    ],
+    build: ["pnpm", "build"],
+    start: (port) => ["node", "benchmark/web-framework/fixtures/tachyon/server.mjs", "--port", String(port)],
   },
   {
     name: "marko-run",
@@ -248,6 +242,10 @@ const latencyP95 = (result: AutocannonResult): number => {
   return Math.max(value, minimumLatencyMs);
 };
 
+const settle = async (ms: number): Promise<void> => {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+};
+
 const validateTextRoute = async (baseUrl: string, routePath: string, markers: readonly string[]): Promise<void> => {
   const response = await fetch(`${baseUrl}${routePath}`, { signal: AbortSignal.timeout(5_000) });
   const body = await response.text();
@@ -269,11 +267,11 @@ const validateFrameworkFixture = async (baseUrl: string): Promise<void> => {
   await validateTextRoute(baseUrl, "/stream", ["data-route", "stream", "data-stream", "done"]);
 };
 
-const measureStream = async (url: string): Promise<{ ttfb: number; complete: number }> =>
+const measureStreamOnce = async (url: string, agent: http.Agent): Promise<{ ttfb: number; complete: number }> =>
   await new Promise((resolve, reject) => {
     const start = performance.now();
     let ttfb = 0;
-    const request = http.get(url, (response) => {
+    const request = http.get(url, { agent }, (response) => {
       response.once("data", () => {
         ttfb = performance.now() - start;
       });
@@ -287,6 +285,16 @@ const measureStream = async (url: string): Promise<{ ttfb: number; complete: num
       request.destroy(new Error(`Timed out while measuring ${url}`));
     });
   });
+
+const measureStream = async (url: string): Promise<{ ttfb: number; complete: number }> => {
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  try {
+    await measureStreamOnce(url, agent);
+    return await measureStreamOnce(url, agent);
+  } finally {
+    agent.destroy();
+  }
+};
 
 const measureClientNavigation = async (browser: Browser, baseUrl: string): Promise<number> => {
   const page = await browser.newPage();
@@ -322,9 +330,10 @@ const measureFramework = async (
   const baseUrl = `http://127.0.0.1:${port}`;
   try {
     await validateFrameworkFixture(baseUrl);
+    const stream = await measureStream(`${baseUrl}/stream`);
     const staticResult = await runAutocannon(`${baseUrl}/`, options);
     const dynamicResult = await runAutocannon(`${baseUrl}/products/42`, options);
-    const stream = await measureStream(`${baseUrl}/stream`);
+    await settle(options.smoke ? 50 : 150);
     const clientNavigationMs = await measureClientNavigation(browser, baseUrl);
     return {
       framework: framework.name,

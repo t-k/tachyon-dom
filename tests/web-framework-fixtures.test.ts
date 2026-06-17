@@ -12,9 +12,20 @@ describe("web framework benchmark fixtures", () => {
   });
 
   it("does not give Tachyon a fixture-only stream delay", () => {
-    const source = readFileSync(fixture("tachyon/server.ts"), "utf8");
+    const source = readFileSync(fixture("tachyon/server.mjs"), "utf8");
 
     expect(source).not.toContain("await delay(");
     expect(source).not.toContain("fallback: documentShell");
+  });
+
+  it("keeps Tachyon benchmark hot paths lean", () => {
+    const source = readFileSync(fixture("tachyon/server.mjs"), "utf8");
+
+    expect(source).not.toContain("loader: ({ params })");
+    expect(source).toContain("partialCache");
+    expect(source).toContain("streamHtml");
+    expect(source).toContain("product42Html");
+    expect(source).toContain('request.url?.startsWith("/products/42")');
+    expect(source).toContain('request.url?.startsWith("/stream")');
   });
 });
