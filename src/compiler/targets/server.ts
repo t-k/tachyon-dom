@@ -5,6 +5,7 @@ import {
   escapeHtml,
   escapeMarker,
   expressionToScopeAccess,
+  jsOptionalPropertyAccess,
   jsString,
   itemNameFromKey,
   readExpressionAttribute,
@@ -271,7 +272,7 @@ const renderElementExpression = (node: ElementNode, locals: ReadonlySet<string> 
   }
   if (node.tagName === "slot") {
     const name = attrString(node, "name") ?? "default";
-    return `String(scope.slots?.${name} ?? "")`;
+    return `String(${jsOptionalPropertyAccess("scope.slots", name)} ?? "")`;
   }
   if (node.tagName === "for") {
     return renderForExpression(node, locals);

@@ -178,6 +178,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   let controller: AbortController | undefined;
   let currentNavigation: Promise<void> = Promise.resolve();
   const cache = new Map<string, unknown>();
+  const prefetchControllers = new Map<string, AbortController>();
   const eagerlyNavigated = new WeakSet<HTMLAnchorElement>();
   const cacheKey = (url: URL): string => `${url.pathname}${url.search}`;
   for (const entry of options.initialCache ?? []) {
@@ -219,18 +220,35 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     if (!match) {
       return;
     }
+    const key = cacheKey(url);
+    prefetchControllers.get(key)?.abort();
     const prefetchController = new AbortController();
-    await loadData(url, match, prefetchController.signal);
+    prefetchControllers.set(key, prefetchController);
+    try {
+      await loadData(url, match, prefetchController.signal);
+    } finally {
+      if (prefetchControllers.get(key) === prefetchController) {
+        prefetchControllers.delete(key);
+      }
+    }
   };
 
   const revalidate = async (hrefs?: string | readonly string[]): Promise<void> => {
     if (!hrefs) {
       cache.clear();
+      prefetchControllers.forEach((controller) => controller.abort());
+      prefetchControllers.clear();
     } else if (typeof hrefs === "string") {
-      cache.delete(cacheKey(toUrl(hrefs, location.href || baseUrl)));
+      const key = cacheKey(toUrl(hrefs, location.href || baseUrl));
+      cache.delete(key);
+      prefetchControllers.get(key)?.abort();
+      prefetchControllers.delete(key);
     } else {
       for (const href of hrefs) {
-        cache.delete(cacheKey(toUrl(href, location.href || baseUrl)));
+        const key = cacheKey(toUrl(href, location.href || baseUrl));
+        cache.delete(key);
+        prefetchControllers.get(key)?.abort();
+        prefetchControllers.delete(key);
       }
     }
     await navigate(location.pathname + location.search + location.hash, { replace: true });
@@ -396,13 +414,20 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     invalidate: (href?: string) => {
       if (!href) {
         cache.clear();
+        prefetchControllers.forEach((prefetchController) => prefetchController.abort());
+        prefetchControllers.clear();
         return;
       }
-      cache.delete(cacheKey(toUrl(href, location.href || baseUrl)));
+      const key = cacheKey(toUrl(href, location.href || baseUrl));
+      cache.delete(key);
+      prefetchControllers.get(key)?.abort();
+      prefetchControllers.delete(key);
     },
     settled: () => currentNavigation,
     dispose: () => {
       controller?.abort();
+      prefetchControllers.forEach((prefetchController) => prefetchController.abort());
+      prefetchControllers.clear();
       options.root.removeEventListener("click", onClick);
       options.root.removeEventListener("pointerdown", onPointerDown);
       options.root.removeEventListener("mousedown", onPointerDown);

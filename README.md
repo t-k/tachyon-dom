@@ -52,6 +52,12 @@ The Vite integration also exposes `tachyonDomRoutes()` for a `virtual:tachyon-do
 
 Server adapters live in `tachyon-dom/adapters` for Node and Cloudflare Workers-style runtimes, with optional static asset serving and security header merging. `tachyon-dom/runtime/form` includes progressive form enhancement, and `tachyon-dom/runtime/hydrate` includes boundary mismatch diagnostics for SSR tests and development builds.
 
+## Security Notes
+
+`sanitizeHtml(markup)` has a small built-in allowlist sanitizer for constrained, already-simple backend HTML. Do not rely on the default sanitizer for arbitrary untrusted HTML. For user-generated or third-party markup, pass a vetted adapter through `createHtmlSanitizer()`/`sanitizeHtml(..., { adapter })`, such as a DOMPurify-backed sanitizer in the target runtime.
+
+The Node adapter derives request URLs from `Host` and `X-Forwarded-Proto`. Only use those headers behind a trusted proxy or edge that normalizes them; otherwise validate the host/proto boundary before routing.
+
 ## Commands
 
 ```sh

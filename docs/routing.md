@@ -69,6 +69,18 @@ HTML responses use explicit trusted HTML helpers:
 - `unsafeHtml(markup)` marks raw HTML as trusted and should only be used for framework-generated or otherwise trusted markup.
 - `sanitizeHtml(markup)` is available from `tachyon-dom/security` for allowlist-based backend sanitization before passing content to `html()`.
 
+The default `sanitizeHtml(markup)` implementation is intentionally small and only suitable for constrained, simple backend markup. It is not a full browser-grade sanitizer for arbitrary untrusted HTML. For user-generated content, CMS content, imported third-party HTML, or any other attacker-controlled markup, provide a vetted sanitizer adapter:
+
+```ts
+import { createHtmlSanitizer, sanitizeHtml } from "tachyon-dom/security";
+
+const sanitizer = createHtmlSanitizer({
+  sanitize: (markup) => DOMPurify.sanitize(markup),
+});
+
+const trusted = sanitizeHtml(markup, { adapter: sanitizer });
+```
+
 `defer(record)` separates immediate values from promised values, and `resolveDeferredData()` resolves the full object. `renderRoute()` resolves deferred loader data before rendering; `renderRouteStream()` can still flush route fallbacks before the final route HTML.
 
 `renderDeferredDataScript(id, deferred, { nonce })` serializes resolved deferred data for client-side stream handoff.
@@ -86,8 +98,8 @@ await renderRoute(routes, request, { cspNonce: nonce });
 `renderRoute()` supports:
 
 - `allowedMethods`
-- `maxActionBodyBytes`
-- `csrf: { token }` for action requests
+- `maxActionBodyBytes`, enforced from both `Content-Length` and the actual action body bytes read by the router
+- `csrf: { token }` for action requests. Token checks use timing-safe comparison for header and form tokens.
 - `middleware`
 - `hooks`
 
@@ -112,6 +124,8 @@ For server sessions, `createCookieSessionStorage({ secret })` stores signed sess
 - `createStaticAssetHandler({ rootDir, basePath })`
 
 Both adapters can apply `securityHeaders`, serve `staticAssets`, and can use `streaming: true` to route through `renderRouteStream()`.
+
+The Node adapter constructs `Request.url` from the incoming `Host` header and `X-Forwarded-Proto` when present. Treat those headers as trusted only when the process is behind a proxy or edge layer that normalizes and validates them. If clients can reach the Node process directly, validate or strip forwarded headers at the deployment boundary before using the adapter for security-sensitive redirects, canonical URLs, or absolute links.
 
 ## Streaming Finalization
 

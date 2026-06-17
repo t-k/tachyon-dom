@@ -370,15 +370,22 @@ export const mountKeyedList = (
       }
     }
   });
-  let domIndex = 0;
+  let elementIndex = 0;
+  let nodeIndex = 0;
   for (let index = 0; index < orderedRecords.length; index++) {
     const record = orderedRecords[index] as RowRecord;
     for (const node of record.nodes) {
-      const currentNode = container.childNodes[domIndex] ?? null;
+      const currentNode =
+        node instanceof Element
+          ? (container.children[elementIndex] ?? null)
+          : (container.childNodes[nodeIndex] ?? null);
       if (currentNode !== node) {
         moveBefore(container, node, currentNode);
       }
-      domIndex++;
+      if (node instanceof Element) {
+        elementIndex++;
+      }
+      nodeIndex++;
     }
   }
   state.records = nextRecords;

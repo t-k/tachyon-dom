@@ -4,6 +4,7 @@ import {
   attrString,
   expressionToScopeAccess,
   itemNameFromKey,
+  jsOptionalPropertyAccess,
   jsString,
   readExpressionAttribute,
   textExpressionSegments,
@@ -47,7 +48,9 @@ const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<str
     return [`${indent}yield String(scope.outlet ?? "");`];
   }
   if (node.tagName === "slot") {
-    return [`${indent}yield String(scope.slots?.${attrString(node, "name") ?? "default"} ?? "");`];
+    return [
+      `${indent}yield String(${jsOptionalPropertyAccess("scope.slots", attrString(node, "name") ?? "default")} ?? "");`,
+    ];
   }
   if (node.tagName === "for") {
     return renderForYieldStatements(node, locals, indent);

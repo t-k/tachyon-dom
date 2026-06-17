@@ -2,6 +2,7 @@ import type { Attribute, ElementNode, TemplateNode } from "./types";
 import { evaluateExpression, expressionToJs } from "./expression";
 
 export const expressionPattern = /\{([^{}]+)\}/g;
+export const identifierNamePattern = /^[A-Za-z_$][\w$]*$/;
 export const identifierPattern = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
 
 export type TextExpressionSegment = { kind: "text"; value: string } | { kind: "expression"; value: string };
@@ -142,3 +143,8 @@ export const expressionToScopeAccess = (
 };
 
 export const jsString = (value: string): string => JSON.stringify(value);
+
+export const jsOptionalPropertyAccess = (objectExpression: string, propertyName: string): string =>
+  identifierNamePattern.test(propertyName)
+    ? `${objectExpression}?.${propertyName}`
+    : `${objectExpression}?.[${jsString(propertyName)}]`;

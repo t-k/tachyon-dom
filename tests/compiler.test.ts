@@ -262,6 +262,29 @@ describe("HTML-first compiler", () => {
     expect(streamCode).toContain(`yield String(scope.outlet ?? "");`);
   });
 
+  it("generates bracket slot access for non-identifier slot names", () => {
+    const result = compileTemplate(`<main><slot name="header-title"></slot></main>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(renderServerTemplate(result.value, { slots: { "header-title": "<h1>Title</h1>" } })).toBe(
+      `<main><h1>Title</h1></main>`,
+    );
+    expect(generateServerModule(result.value)).toContain(`String(scope.slots?.["header-title"] ?? "")`);
+    expect(generateServerStreamModule(result.value)).toContain(`yield String(scope.slots?.["header-title"] ?? "");`);
+  });
+
+  it("rejects component prop and store names that cannot become local bindings", () => {
+    const propResult = compileTemplate(`<component name="Panel" data-x={value}><section>{value}</section></component>`);
+    expect(propResult.ok).toBe(false);
+    expect(propResult.ok ? "" : propResult.error.message).toBe("Invalid component prop binding name: data-x.");
+
+    const storeResult = compileTemplate(`<main><store data-x={value}/><span>{value}</span></main>`);
+    expect(storeResult.ok).toBe(false);
+    expect(storeResult.ok ? "" : storeResult.error.message).toBe("Invalid store binding name: data-x.");
+  });
+
   it("extracts keyed list boundaries for client code", () => {
     const result = compileTemplate(
       `<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td><td>{row.label}</td></tr></for></tbody>`,

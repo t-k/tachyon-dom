@@ -230,5 +230,18 @@ describe("advanced router features", () => {
       { maxActionBodyBytes: 4 },
     );
     expect(oversized.ok && oversized.value).toMatchObject({ status: 413, html: "<h1>Payload Too Large</h1>" });
+
+    const oversizedWithoutLength = await renderRoute(
+      routes,
+      new Request("https://example.com/submit", {
+        method: "POST",
+        body: "too large",
+      }),
+      { maxActionBodyBytes: 4 },
+    );
+    expect(oversizedWithoutLength.ok && oversizedWithoutLength.value).toMatchObject({
+      status: 413,
+      html: "<h1>Payload Too Large</h1>",
+    });
   });
 });

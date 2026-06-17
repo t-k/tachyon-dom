@@ -12,6 +12,7 @@ import type {
 import {
   attrExpression,
   attrString,
+  identifierNamePattern,
   identifierPattern,
   itemNameFromKey,
   readExpressionAttribute,
@@ -120,8 +121,20 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     if (!componentName(node)) {
       return semanticError("<component> requires a string name attribute.");
     }
+    for (const attr of node.attrs) {
+      if (attr.name !== "name" && readExpressionAttribute(attr.value) && !identifierNamePattern.test(attr.name)) {
+        return semanticError(`Invalid component prop binding name: ${attr.name}.`);
+      }
+    }
     if (renderableChildren(node).length !== 1) {
       return semanticError("<component> requires exactly one renderable root child.");
+    }
+  }
+  if (node.tagName === "store") {
+    for (const attr of node.attrs) {
+      if (readExpressionAttribute(attr.value) && !identifierNamePattern.test(attr.name)) {
+        return semanticError(`Invalid store binding name: ${attr.name}.`);
+      }
     }
   }
   if (node.tagName === "await") {
@@ -132,7 +145,7 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     if (!thenName) {
       return semanticError(`<await> requires then="name".`);
     }
-    if (!identifierPattern.test(thenName)) {
+    if (!identifierNamePattern.test(thenName)) {
       return semanticError(`Invalid await then binding: ${thenName}.`);
     }
     const reorder = attrString(node, "reorder");

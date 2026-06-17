@@ -1,5 +1,6 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
+import { timingSafeEqual } from "./constant-time";
 import { err, ok, type Result } from "./result";
 import { serializeHydrationState } from "./runtime/hydrate";
 
@@ -295,15 +296,61 @@ export const renderDeferredDataScript = async <T extends Record<string, unknown>
 const verifyCsrf = async (request: Request, options: NonNullable<RouteRenderOptions["csrf"]>): Promise<boolean> => {
   const headerName = options.headerName ?? "x-csrf-token";
   const fieldName = options.fieldName ?? "_csrf";
-  if (request.headers.get(headerName) === options.token) {
+  if (await timingSafeEqual(request.headers.get(headerName), options.token)) {
     return true;
   }
   const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) {
     const form = await request.clone().formData();
-    return form.get(fieldName) === options.token;
+    return await timingSafeEqual(form.get(fieldName), options.token);
   }
   return false;
+};
+
+const payloadTooLargeResult = (match: MatchedRoute): RouteRenderResult => ({
+  status: 413,
+  html: "<h1>Payload Too Large</h1>",
+  headHtml: "",
+  resourceHints: "",
+  stateScript: "",
+  loaderData: {},
+  actionResult: undefined,
+  headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+  match,
+});
+
+const readLimitedRequest = async (request: Request, maxBytes: number): Promise<Request | undefined> => {
+  if (!request.body) {
+    return request;
+  }
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const result = await reader.read();
+    if (result.done) {
+      break;
+    }
+    total += result.value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(result.value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new Request(request.url, {
+    body,
+    headers: request.headers,
+    method: request.method,
+    redirect: request.redirect,
+    signal: request.signal,
+  });
 };
 
 export const createSecurityHeaders = (
@@ -782,17 +829,7 @@ export const renderRoute = async (
   }
   const contentLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
   if (options.maxActionBodyBytes !== undefined && contentLength > options.maxActionBodyBytes) {
-    return ok({
-      status: 413,
-      html: "<h1>Payload Too Large</h1>",
-      headHtml: "",
-      resourceHints: "",
-      stateScript: "",
-      loaderData: {},
-      actionResult: undefined,
-      headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
-      match: emptyMatch(),
-    });
+    return ok(payloadTooLargeResult(emptyMatch()));
   }
   const match = matchRoute(routes, url);
   if (!match.ok) {
@@ -814,6 +851,13 @@ export const renderRoute = async (
     let actionResult: unknown;
     const loaderData: Record<string, unknown> = {};
     if (request.method !== "GET" && request.method !== "HEAD" && match.value.route.action) {
+      if (options.maxActionBodyBytes !== undefined) {
+        const limitedRequest = await readLimitedRequest(request, options.maxActionBodyBytes);
+        if (!limitedRequest) {
+          return ok(payloadTooLargeResult(match.value));
+        }
+        request = limitedRequest;
+      }
       if (options.csrf && !(await verifyCsrf(request, options.csrf))) {
         return ok({
           status: 403,

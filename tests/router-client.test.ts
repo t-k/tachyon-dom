@@ -243,6 +243,37 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("aborts in-flight prefetches on dispose", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    let prefetchSignal: AbortSignal | undefined;
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => "home" },
+        {
+          path: "/slow",
+          load: ({ signal }) => {
+            prefetchSignal = signal;
+            return new Promise(() => undefined);
+          },
+          render: () => "slow",
+        },
+      ],
+    });
+
+    await router.start();
+    void router.prefetch("/slow");
+    await Promise.resolve();
+    router.dispose();
+
+    expect(prefetchSignal?.aborted).toBe(true);
+  });
+
   it("submits actions and revalidates loader cache by route policy", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");

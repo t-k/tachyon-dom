@@ -1,4 +1,5 @@
 import { unsafeHtml, type TrustedHtml } from "./router";
+import { timingSafeEqual } from "./constant-time";
 
 export type CsrfOptions = {
   token: string;
@@ -149,7 +150,7 @@ export const csrfInput = (token: string, fieldName = "_csrf"): TrustedHtml =>
 export const verifyCsrfRequest = async (request: Request, options: CsrfOptions): Promise<boolean> => {
   const headerName = options.headerName ?? "x-csrf-token";
   const fieldName = options.fieldName ?? "_csrf";
-  if (request.headers.get(headerName) === options.token) {
+  if (await timingSafeEqual(request.headers.get(headerName), options.token)) {
     return true;
   }
   const contentType = request.headers.get("content-type") ?? "";
@@ -159,7 +160,7 @@ export const verifyCsrfRequest = async (request: Request, options: CsrfOptions):
     contentType.includes("text/plain")
   ) {
     const form = await request.clone().formData();
-    return form.get(fieldName) === options.token;
+    return await timingSafeEqual(form.get(fieldName), options.token);
   }
   return false;
 };
