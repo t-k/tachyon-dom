@@ -73,6 +73,72 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("updates route targets without replacing persistent shell DOM", async () => {
+    document.body.innerHTML = `<main id="app"><nav data-shell="stable"><a href="/orders">Orders</a></nav><section id="outlet"></section></main>`;
+    const root = document.querySelector("#app");
+    const nav = document.querySelector("nav");
+    if (!(root instanceof HTMLElement) || !(nav instanceof HTMLElement)) {
+      throw new Error("Missing app shell.");
+    }
+    createWindow("/");
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", target: "#outlet", render: () => `<h1>Users</h1>` },
+        { path: "/orders", target: "#outlet", render: () => `<h1>Orders</h1>` },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+    root.querySelector("a")?.dispatchEvent(click);
+    await router.settled();
+
+    expect(document.querySelector("nav")).toBe(nav);
+    expect(root.querySelector("#outlet")?.innerHTML).toBe("<h1>Orders</h1>");
+    expect(location.pathname).toBe("/orders");
+    router.dispose();
+  });
+
+  it("eagerly navigates prefetched route targets on primary pointer down", async () => {
+    document.body.innerHTML = `<main id="app"><nav><a href="/orders">Orders</a></nav><section id="outlet"></section></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    let loads = 0;
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", target: "#outlet", render: () => `<h1>Users</h1>` },
+        {
+          path: "/orders",
+          target: "#outlet",
+          load: () => ({ count: ++loads }),
+          render: ({ data }) => `<h1>Orders ${(data as { count: number }).count}</h1>`,
+        },
+      ],
+      cache: true,
+      initialCache: [{ href: "/orders", data: { count: 1 } }],
+      eager: true,
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    root.querySelector("a")?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+    await router.settled();
+    expect(root.querySelector("#outlet")?.innerHTML).toBe("<h1>Orders 1</h1>");
+    root.querySelector("a")?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    await router.settled();
+
+    expect(root.querySelector("#outlet")?.innerHTML).toBe("<h1>Orders 1</h1>");
+    expect(location.pathname).toBe("/orders");
+    expect(loads).toBe(0);
+    router.dispose();
+  });
+
   it("aborts stale navigations and renders the latest route", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");

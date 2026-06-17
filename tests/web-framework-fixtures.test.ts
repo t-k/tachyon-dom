@@ -24,7 +24,9 @@ describe("web framework benchmark fixtures", () => {
     expect(source).not.toContain("loader: ({ params })");
     expect(source).toContain("defineStaticRoute");
     expect(source).toContain("staticRoutes");
-    expect(source).toContain("partialCache");
+    expect(source).toContain("createClientRouter");
+    expect(source).toContain('target: "#app"');
+    expect(source).toContain("staticAssets");
     expect(source).toContain("streamHtml");
     expect(source).toContain("product42Html");
     expect(source).toContain("interactiveHtml");

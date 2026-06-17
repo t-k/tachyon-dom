@@ -394,7 +394,6 @@ const measureClientNavigation = async (browser: Browser, baseUrl: string): Promi
       await page.goto(`${baseUrl}/dashboard/orders`, { waitUntil: "networkidle" });
       await page.waitForSelector('[data-route="orders"]');
     });
-    await page.waitForLoadState("networkidle").catch(() => undefined);
     return performance.now() - start;
   } finally {
     await page.close();

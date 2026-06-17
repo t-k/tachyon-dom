@@ -10,6 +10,10 @@ export type ClientRouteContext<Data = unknown> = {
 export type ClientRouteDefinition<Data = unknown> = {
   id?: string;
   path: string;
+  target?:
+    | string
+    | Element
+    | ((context: { root: Element; url: URL; params: ClientRouteParams; data: Data }) => Element | undefined | null);
   load?: (context: Omit<ClientRouteContext<Data>, "data">) => Data | Promise<Data>;
   action?: (context: Omit<ClientRouteContext<Data>, "data"> & { request: Request }) => Response | Promise<Response>;
   revalidateOnAction?:
@@ -31,6 +35,8 @@ export type ClientRouterOptions = {
   scrollTo?: (x: number, y: number) => void;
   focusSelector?: string;
   cache?: boolean;
+  initialCache?: readonly { href: string; data: unknown }[];
+  eager?: boolean;
   liveRegion?: Element;
   title?: (context: { url: URL; data: unknown }) => string;
 };
@@ -142,6 +148,20 @@ const focusRouteContent = (root: Element, selector: string): void => {
   }
 };
 
+const routeTargetFor = (root: Element, match: ClientMatch, url: URL, data: unknown): Element => {
+  const target = match.route.target;
+  if (!target) {
+    return root;
+  }
+  if (typeof target === "string") {
+    return root.querySelector(target) ?? root;
+  }
+  if (target instanceof Element) {
+    return target;
+  }
+  return target({ root, url, params: match.params, data }) ?? root;
+};
+
 const isModifiedClick = (event: MouseEvent): boolean =>
   event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
 
@@ -158,7 +178,11 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   let controller: AbortController | undefined;
   let currentNavigation: Promise<void> = Promise.resolve();
   const cache = new Map<string, unknown>();
+  const eagerlyNavigated = new WeakSet<HTMLAnchorElement>();
   const cacheKey = (url: URL): string => `${url.pathname}${url.search}`;
+  for (const entry of options.initialCache ?? []) {
+    cache.set(cacheKey(toUrl(entry.href, baseUrl)), entry.data);
+  }
 
   const renderNotFound = (url: URL): void => {
     renderInto(options.root, options.notFound ? options.notFound({ url }) : `<h1>Not Found</h1>`);
@@ -277,9 +301,10 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         } else if (location.pathname !== url.pathname || location.search !== url.search) {
           history.pushState({}, "", url);
         }
-        renderInto(options.root, rendered);
+        const target = routeTargetFor(options.root, match, url, data);
+        renderInto(target, rendered);
         scrollTo(0, 0);
-        focusRouteContent(options.root, focusSelector);
+        focusRouteContent(target, focusSelector);
         updateA11y(url, data);
       } catch (error) {
         if (!nextController.signal.aborted) {
@@ -291,24 +316,52 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     await task;
   };
 
-  const onClick = (event: Event): void => {
+  const routeLinkForEvent = (event: Event): { link: HTMLAnchorElement; url: URL } | undefined => {
     if (!(event instanceof MouseEvent) || isModifiedClick(event)) {
-      return;
+      return undefined;
     }
     const target = event.target instanceof Element ? event.target : undefined;
     const link = target?.closest("a[href]");
     if (!(link instanceof HTMLAnchorElement) || !options.root.contains(link)) {
-      return;
+      return undefined;
     }
     if (link.target || link.hasAttribute("download")) {
-      return;
+      return undefined;
     }
     const url = new URL(link.href);
     if (url.origin !== location.origin || !matchClientRoute(options.routes, url.pathname)) {
+      return undefined;
+    }
+    return { link, url };
+  };
+
+  const onPointerDown = (event: Event): void => {
+    if (!options.eager) {
+      return;
+    }
+    const routeLink = routeLinkForEvent(event);
+    if (!routeLink || !cache.has(cacheKey(routeLink.url))) {
       return;
     }
     event.preventDefault();
-    void navigate(url.pathname + url.search + url.hash);
+    if (eagerlyNavigated.has(routeLink.link)) {
+      return;
+    }
+    eagerlyNavigated.add(routeLink.link);
+    void navigate(routeLink.url.pathname + routeLink.url.search + routeLink.url.hash);
+  };
+
+  const onClick = (event: Event): void => {
+    const routeLink = routeLinkForEvent(event);
+    if (!routeLink) {
+      return;
+    }
+    event.preventDefault();
+    if (eagerlyNavigated.has(routeLink.link)) {
+      eagerlyNavigated.delete(routeLink.link);
+      return;
+    }
+    void navigate(routeLink.url.pathname + routeLink.url.search + routeLink.url.hash);
   };
 
   const onPointerOver = (event: Event): void => {
@@ -330,6 +383,8 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   return {
     start: async () => {
       options.root.addEventListener("click", onClick);
+      options.root.addEventListener("pointerdown", onPointerDown);
+      options.root.addEventListener("mousedown", onPointerDown);
       options.root.addEventListener("pointerover", onPointerOver);
       addEventListener("popstate", onPopState);
       await navigate(location.pathname + location.search + location.hash, { replace: true });
@@ -349,6 +404,8 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     dispose: () => {
       controller?.abort();
       options.root.removeEventListener("click", onClick);
+      options.root.removeEventListener("pointerdown", onPointerDown);
+      options.root.removeEventListener("mousedown", onPointerDown);
       options.root.removeEventListener("pointerover", onPointerOver);
       removeEventListener("popstate", onPopState);
     },

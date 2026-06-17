@@ -1,5 +1,10 @@
 import { createServer } from "node:http";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createNodeHandler, defineStaticRoute, type StaticRouteDefinition } from "../../../../src/adapters";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const distRoot = path.resolve(__dirname, "../../../../dist");
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -18,11 +23,11 @@ const productBody = (id) => {
   return `<h1>${escapeHtml(label)}</h1><p>Dynamic route ${escapeHtml(id)}</p><ul>${items(label)}</ul>`;
 };
 
-const usersBody = () => `<h1>Dashboard</h1><h2>Users</h2><ul>${items("user", 120)}</ul>`;
+const usersBody = () => `<h1>Dashboard</h1><h2 data-route="users">Users</h2><ul>${items("user", 120)}</ul>`;
 
-const ordersBody = () => `<h1>Dashboard</h1><h2>Orders</h2><ul>${items("order", 120)}</ul>`;
+const ordersBody = () => `<h1>Dashboard</h1><h2 data-route="orders">Orders</h2><ul>${items("order", 120)}</ul>`;
 
-const ordersNavBody = () => `<h1>Dashboard</h1><h2>Orders</h2>`;
+const ordersNavBody = () => `<h1>Dashboard</h1><h2 data-route="orders">Orders</h2>`;
 
 const streamBody = () =>
   `<h1>Stream</h1><p data-stream="shell">Shell</p><section data-stream="done"><h2>Deferred payload</h2><ul>${items("stream")}</ul></section>`;
@@ -44,8 +49,49 @@ const interactiveBody = () => `<h1>Interactive</h1><h2>Counter</h2>
 
 const partial = (route, body) => `<main id="app" data-route="${route}">${body}</main>`;
 
-const seededPartialsFor = (route) =>
-  route === "users" ? [[`${"/dashboard/orders?partial=1"}`, partial("orders", ordersNavBody())]] : [];
+const seededPartialsFor = (route) => (route === "users" ? [[`${"/dashboard/orders?partial=1"}`, ordersNavBody()]] : []);
+
+const initialCacheFor = (route) => (route === "users" ? [{ href: "/dashboard/orders", data: ordersNavBody() }] : []);
+
+const dashboardClientScript = (route) =>
+  route === "users" || route === "orders"
+    ? `<script type="module">
+      import { createClientRouter } from "/tachyon-dom/runtime/router.js";
+      const partialCache = new Map();
+      ${JSON.stringify(seededPartialsFor(route))}.forEach(([href, html]) => {
+        partialCache.set(new URL(href, location.href).href, html);
+      });
+      const partialUrl = (href) => {
+        const url = new URL(href, location.href);
+        url.searchParams.set("partial", "1");
+        return url.href;
+      };
+      const loadPartial = async ({ url, signal }) => {
+        const cacheKey = partialUrl(url.href);
+        const cached = partialCache.get(cacheKey);
+        if (cached) return cached;
+        const response = await fetch(cacheKey, { signal });
+        const html = await response.text();
+        partialCache.set(cacheKey, html);
+        return html;
+      };
+      const dashboardRoute = (path) => ({
+        path,
+        target: "#app",
+        load: loadPartial,
+        render: ({ data }) => data,
+      });
+      const router = createClientRouter({
+        root: document.body,
+        routes: [dashboardRoute("/dashboard/users"), dashboardRoute("/dashboard/orders")],
+        cache: true,
+        initialCache: ${JSON.stringify(initialCacheFor(route))},
+        eager: true,
+        focusSelector: "h1",
+      });
+      await router.start();
+    </script>`
+    : "";
 
 const documentShell = (body, route) => `<!doctype html>
 <html lang="en">
@@ -58,65 +104,13 @@ const documentShell = (body, route) => `<!doctype html>
     <nav>
       <a href="/" data-nav="home">Home</a>
       <a href="/products/42" data-nav="product">Product</a>
-      <a href="/dashboard/users" data-nav="users">Users</a>
-      <a href="/dashboard/orders" data-nav="orders">Orders</a>
+      <a href="/dashboard/users" data-nav="users" data-prefetch="hover">Users</a>
+      <a href="/dashboard/orders" data-nav="orders" data-prefetch="hover">Orders</a>
       <a href="/interactive" data-nav="interactive">Interactive</a>
       <a href="/stream" data-nav="stream">Stream</a>
     </nav>
     <main id="app" data-route="${route}">${body}</main>
-    <script>
-      const partialCache = new Map();
-      ${JSON.stringify(seededPartialsFor(route))}.forEach(([href, html]) => {
-        partialCache.set(new URL(href, location.href).href, html);
-      });
-      const partialUrl = (href) => {
-        const url = new URL(href, location.href);
-        url.searchParams.set("partial", "1");
-        return url.href;
-      };
-      const prefetchPartial = async (href) => {
-        const cacheKey = partialUrl(href);
-        if (partialCache.has(cacheKey)) return;
-        const response = await fetch(cacheKey);
-        partialCache.set(cacheKey, await response.text());
-      };
-      const navigatePartial = async (link) => {
-        const cacheKey = partialUrl(link.href);
-        let html = partialCache.get(cacheKey);
-        if (!html) {
-          const response = await fetch(cacheKey);
-          html = await response.text();
-          partialCache.set(cacheKey, html);
-        }
-        history.pushState(null, "", link.href);
-        document.querySelector("#app").outerHTML = html;
-      };
-      document.querySelectorAll("a[data-nav]").forEach((link) => {
-        if (link.pathname.startsWith("/dashboard/")) {
-          void prefetchPartial(link.href);
-        }
-        link.addEventListener("mousedown", (event) => {
-          if (!link.pathname.startsWith("/dashboard/")) return;
-          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-          if (!partialCache.has(partialUrl(link.href))) return;
-          event.preventDefault();
-          link.dataset.navigated = "1";
-          void navigatePartial(link);
-        });
-      });
-      document.addEventListener("click", async (event) => {
-        const link = event.target.closest("a[data-nav]");
-        if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        if (!link.pathname.startsWith("/dashboard/")) return;
-        event.preventDefault();
-        if (link.dataset.navigated === "1") {
-          delete link.dataset.navigated;
-          return;
-        }
-        await navigatePartial(link);
-      });
-      addEventListener("popstate", () => location.reload());
-    </script>
+    ${dashboardClientScript(route)}
   </body>
 </html>`;
 
@@ -127,14 +121,15 @@ const product42Html = documentShell(productBody("42"), "product");
 const usersHtml = documentShell(usersBody(), "users");
 const ordersHtml = documentShell(ordersBody(), "orders");
 const interactiveHtml = documentShell(interactiveBody(), "interactive");
-const usersPartialHtml = partial("users", usersBody());
-const ordersPartialHtml = partial("orders", ordersNavBody());
+const usersPartialHtml = usersBody();
+const ordersPartialHtml = ordersNavBody();
 const streamPartialHtml = partial("stream", streamBody());
 const streamHtml = partial("stream", streamBody());
 const route = (path: string, body: string): StaticRouteDefinition => defineStaticRoute({ path, body });
 const server = createServer(
   createNodeHandler({
     routes: [],
+    staticAssets: { rootDir: distRoot, basePath: "/tachyon-dom/" },
     staticRoutes: [
       route("/", homeHtml),
       route("/products/42", product42Html),
