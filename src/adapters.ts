@@ -9,12 +9,21 @@ export type HandlerOptions = RouteRenderOptions & {
   securityHeaders?: Headers;
   streaming?: boolean;
   staticAssets?: StaticAssetOptions;
+  staticRoutes?: readonly StaticRouteDefinition[];
 };
 
 export type StaticAssetOptions = {
   rootDir: string;
   basePath?: string;
   headers?: HeadersInit;
+};
+
+export type StaticRouteDefinition = {
+  path: string;
+  body: string;
+  status?: number;
+  headers?: HeadersInit;
+  methods?: readonly string[];
 };
 
 const mergeHeaders = (base: Headers, extra?: Headers): Headers => {
@@ -43,6 +52,49 @@ const contentTypeFor = (file: string): string => {
     return "application/wasm";
   }
   return "application/octet-stream";
+};
+
+export const defineStaticRoute = (route: StaticRouteDefinition): StaticRouteDefinition => route;
+
+const findStaticRoute = (
+  routes: readonly StaticRouteDefinition[] | undefined,
+  method: string,
+  url: URL,
+): StaticRouteDefinition | undefined =>
+  routes?.find((route) => {
+    const methods = route.methods ?? ["GET", "HEAD"];
+    const path = route.path.includes("?") ? `${url.pathname}${url.search}` : url.search ? "" : url.pathname;
+    return methods.includes(method) && route.path === path;
+  });
+
+const byteLength = (value: string): number => new TextEncoder().encode(value).byteLength;
+
+const headersForStaticRoute = (route: StaticRouteDefinition, extra?: Headers): Headers => {
+  const headers = mergeHeaders(new Headers(route.headers), extra);
+  if (!headers.has("content-type")) {
+    headers.set("content-type", "text/html; charset=utf-8");
+  }
+  if (!headers.has("content-length")) {
+    headers.set("content-length", String(byteLength(route.body)));
+  }
+  return headers;
+};
+
+const responseForStaticRoute = (route: StaticRouteDefinition, request: Request, securityHeaders?: Headers): Response =>
+  new Response(request.method === "HEAD" ? null : route.body, {
+    status: route.status ?? 200,
+    headers: headersForStaticRoute(route, securityHeaders),
+  });
+
+const writeNodeStaticRoute = (
+  route: StaticRouteDefinition,
+  request: IncomingMessage,
+  response: ServerResponse,
+  securityHeaders?: Headers,
+): void => {
+  response.statusCode = route.status ?? 200;
+  headersForStaticRoute(route, securityHeaders).forEach((value, key) => response.setHeader(key, value));
+  response.end(request.method === "HEAD" ? undefined : route.body);
 };
 
 export const createStaticAssetHandler =
@@ -79,6 +131,10 @@ export const createStaticAssetHandler =
   };
 
 const responseFor = async (options: HandlerOptions, request: Request): Promise<Response> => {
+  const staticRoute = findStaticRoute(options.staticRoutes, request.method, new URL(request.url));
+  if (staticRoute) {
+    return responseForStaticRoute(staticRoute, request, options.securityHeaders);
+  }
   if (options.staticAssets) {
     const asset = await createStaticAssetHandler(options.staticAssets)(request);
     if (asset) {
@@ -153,6 +209,11 @@ const requestUrl = (request: IncomingMessage): string => {
 export const createNodeHandler =
   (options: HandlerOptions) =>
   async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    const staticRoute = findStaticRoute(options.staticRoutes, request.method ?? "GET", new URL(requestUrl(request)));
+    if (staticRoute) {
+      writeNodeStaticRoute(staticRoute, request, response, options.securityHeaders);
+      return;
+    }
     const body = requestBody(request);
     const init: RequestInit = {
       method: request.method ?? "GET",

@@ -35,7 +35,14 @@ const frameworks: readonly FrameworkConfig[] = [
     name: "tachyon-dom",
     cwd: projectRoot,
     build: ["pnpm", "build"],
-    start: (port) => ["node", "benchmark/web-framework/fixtures/tachyon/server.mjs", "--port", String(port)],
+    start: (port) => [
+      "pnpm",
+      "exec",
+      "tsx",
+      "benchmark/web-framework/fixtures/tachyon/server.ts",
+      "--port",
+      String(port),
+    ],
   },
   {
     name: "marko-run",

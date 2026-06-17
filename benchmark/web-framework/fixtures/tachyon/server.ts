@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { createNodeHandler, defineStaticRoute, type StaticRouteDefinition } from "../../../../src/adapters";
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -63,15 +64,7 @@ const documentShell = (body, route) => `<!doctype html>
         const response = await fetch(cacheKey);
         partialCache.set(cacheKey, await response.text());
       };
-      document.querySelectorAll("a[data-nav]").forEach((link) => {
-        if (link.pathname.startsWith("/dashboard/")) {
-          void prefetchPartial(link.href);
-        }
-      });
-      document.addEventListener("click", async (event) => {
-        const link = event.target.closest("a[data-nav]");
-        if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-        event.preventDefault();
+      const navigatePartial = async (link) => {
         const cacheKey = partialUrl(link.href);
         let html = partialCache.get(cacheKey);
         if (!html) {
@@ -81,18 +74,33 @@ const documentShell = (body, route) => `<!doctype html>
         }
         history.pushState(null, "", link.href);
         document.querySelector("#app").outerHTML = html;
+      };
+      document.querySelectorAll("a[data-nav]").forEach((link) => {
+        if (link.pathname.startsWith("/dashboard/")) {
+          void prefetchPartial(link.href);
+        }
+        link.addEventListener("mousedown", (event) => {
+          if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+          if (!partialCache.has(partialUrl(link.href))) return;
+          event.preventDefault();
+          link.dataset.navigated = "1";
+          void navigatePartial(link);
+        });
+      });
+      document.addEventListener("click", async (event) => {
+        const link = event.target.closest("a[data-nav]");
+        if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        if (link.dataset.navigated === "1") {
+          delete link.dataset.navigated;
+          return;
+        }
+        await navigatePartial(link);
       });
       addEventListener("popstate", () => location.reload());
     </script>
   </body>
 </html>`;
-
-const html = (response, body) => {
-  response.statusCode = 200;
-  response.setHeader("content-type", "text/html; charset=utf-8");
-  response.setHeader("content-length", String(Buffer.byteLength(body)));
-  response.end(body);
-};
 
 const portArg = process.argv.indexOf("--port");
 const port = portArg >= 0 ? Number(process.argv[portArg + 1]) : Number(process.env.PORT ?? 0);
@@ -104,37 +112,23 @@ const usersPartialHtml = partial("users", usersBody());
 const ordersPartialHtml = partial("orders", ordersNavBody());
 const streamPartialHtml = partial("stream", streamBody());
 const streamHtml = partial("stream", streamBody());
-const server = createServer((request, response) => {
-  if (request.method !== "GET") {
-    response.statusCode = 405;
-    response.end("Method Not Allowed");
-    return;
-  }
-  const url = new URL(request.url ?? "/", "http://127.0.0.1");
-  const isPartial = url.searchParams.has("partial");
-  if (url.pathname === "/") {
-    html(response, homeHtml);
-    return;
-  }
-  if (request.url?.startsWith("/products/42")) {
-    html(response, product42Html);
-    return;
-  }
-  if (url.pathname === "/dashboard/users") {
-    html(response, isPartial ? usersPartialHtml : usersHtml);
-    return;
-  }
-  if (url.pathname === "/dashboard/orders") {
-    html(response, isPartial ? ordersPartialHtml : ordersHtml);
-    return;
-  }
-  if (request.url?.startsWith("/stream")) {
-    html(response, isPartial ? streamPartialHtml : streamHtml);
-    return;
-  }
-  response.statusCode = 404;
-  response.end("Not Found");
-});
+const route = (path: string, body: string): StaticRouteDefinition => defineStaticRoute({ path, body });
+const server = createServer(
+  createNodeHandler({
+    routes: [],
+    staticRoutes: [
+      route("/", homeHtml),
+      route("/products/42", product42Html),
+      route("/dashboard/users", usersHtml),
+      route("/dashboard/users?partial=1", usersPartialHtml),
+      route("/dashboard/orders", ordersHtml),
+      route("/dashboard/orders?partial=1", ordersPartialHtml),
+      route("/stream", streamHtml),
+      route("/stream?partial=1", streamPartialHtml),
+    ],
+    notFound: () => "Not Found",
+  }),
+);
 
 server.listen(port, "127.0.0.1", () => {
   const address = server.address();
