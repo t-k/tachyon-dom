@@ -9,8 +9,6 @@ const escapeHtml = (value: unknown): string =>
     .replaceAll(">", "&gt;")
     .replaceAll(`"`, "&quot;");
 
-const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
 const items = (prefix: string, count = 80): string =>
   Array.from({ length: count }, (_, index) => `<li>${escapeHtml(prefix)} item ${index + 1}</li>`).join("");
 
@@ -83,12 +81,12 @@ const routes: RouteDefinition[] = [
   {
     id: "stream",
     path: "/stream",
-    fallback: documentShell(`<h1>Stream</h1><p data-stream="shell">Shell</p>`, "stream"),
-    loader: async () => {
-      await delay(25);
-      return { ready: true };
-    },
-    render: () => `<section data-stream="done"><h2>Deferred payload</h2><ul>${items("stream")}</ul></section>`,
+    render: (context) =>
+      page(
+        context,
+        "stream",
+        `<h1>Stream</h1><p data-stream="shell">Shell</p><section data-stream="done"><h2>Deferred payload</h2><ul>${items("stream")}</ul></section>`,
+      ),
   },
 ];
 

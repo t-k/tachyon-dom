@@ -236,15 +236,37 @@ const requestsPerSecond = (result: AutocannonResult): number => {
 };
 
 const latencyP95 = (result: AutocannonResult): number => {
+  const minimumLatencyMs = 0.01;
   const percentile = result.latency.p95 ?? result.latency.p97_5 ?? result.latency.p99;
-  if (percentile !== undefined && percentile > 0) {
-    return percentile;
+  if (percentile !== undefined) {
+    return Math.max(percentile, minimumLatencyMs);
   }
   const value = result.latency.average ?? result.latency.mean;
-  if (value === undefined || value <= 0) {
+  if (value === undefined) {
     throw new Error("autocannon result is missing latency percentiles.");
   }
-  return value;
+  return Math.max(value, minimumLatencyMs);
+};
+
+const validateTextRoute = async (baseUrl: string, routePath: string, markers: readonly string[]): Promise<void> => {
+  const response = await fetch(`${baseUrl}${routePath}`, { signal: AbortSignal.timeout(5_000) });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`${routePath} returned HTTP ${response.status}.`);
+  }
+  for (const marker of markers) {
+    if (!body.includes(marker)) {
+      throw new Error(`${routePath} response did not include ${JSON.stringify(marker)}.`);
+    }
+  }
+};
+
+const validateFrameworkFixture = async (baseUrl: string): Promise<void> => {
+  await validateTextRoute(baseUrl, "/", ["data-route", "home", "Static route"]);
+  await validateTextRoute(baseUrl, "/products/42", ["data-route", "product", "Product 42"]);
+  await validateTextRoute(baseUrl, "/dashboard/users", ["data-route", "users", "Users"]);
+  await validateTextRoute(baseUrl, "/dashboard/orders", ["data-route", "orders", "Orders"]);
+  await validateTextRoute(baseUrl, "/stream", ["data-route", "stream", "data-stream", "done"]);
 };
 
 const measureStream = async (url: string): Promise<{ ttfb: number; complete: number }> =>
@@ -299,6 +321,7 @@ const measureFramework = async (
   const child = await startServer(framework, port);
   const baseUrl = `http://127.0.0.1:${port}`;
   try {
+    await validateFrameworkFixture(baseUrl);
     const staticResult = await runAutocannon(`${baseUrl}/`, options);
     const dynamicResult = await runAutocannon(`${baseUrl}/products/42`, options);
     const stream = await measureStream(`${baseUrl}/stream`);
