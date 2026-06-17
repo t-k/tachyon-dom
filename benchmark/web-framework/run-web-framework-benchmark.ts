@@ -5,7 +5,7 @@ import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { formatWebFrameworkRanking, scoreWebFrameworkMetrics, type WebFrameworkMetric } from "./report";
 
 type CliOptions = {
@@ -24,6 +24,11 @@ type FrameworkConfig = {
 type AutocannonResult = {
   requests: { average?: number; mean?: number };
   latency: { p95?: number; p97_5?: number; p99?: number; average?: number; mean?: number };
+};
+
+type ClientBundleSnapshot = {
+  resources: readonly { name: string; bytes: number }[];
+  inlineScripts: readonly string[];
 };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -271,6 +276,7 @@ const validateFrameworkFixture = async (baseUrl: string): Promise<void> => {
   await validateTextRoute(baseUrl, "/products/42", ["data-route", "product", "Product 42"]);
   await validateTextRoute(baseUrl, "/dashboard/users", ["data-route", "users", "Users"]);
   await validateTextRoute(baseUrl, "/dashboard/orders", ["data-route", "orders", "Orders"]);
+  await validateTextRoute(baseUrl, "/interactive", ["data-route", "interactive", "Counter"]);
   await validateTextRoute(baseUrl, "/stream", ["data-route", "stream", "data-stream", "done"]);
 };
 
@@ -303,6 +309,80 @@ const measureStream = async (url: string): Promise<{ ttfb: number; complete: num
   }
 };
 
+const collectClientBundleSnapshot = async (page: Page): Promise<ClientBundleSnapshot> =>
+  await page.evaluate(`(() => {
+    const resourcesByName = new Map();
+    const resources = performance
+      .getEntriesByType("resource")
+      .filter((entry) => {
+        const pathname = new URL(entry.name).pathname;
+        const extensionMatches = /\\.(?:css|js|mjs)$/.test(pathname);
+        return (
+          entry.initiatorType === "script" ||
+          entry.initiatorType === "css" ||
+          (entry.initiatorType === "link" && extensionMatches)
+        );
+      })
+      .map((entry) => ({
+        name: entry.name,
+        bytes: entry.encodedBodySize || entry.transferSize || entry.decodedBodySize || 0,
+      }));
+    for (const resource of resources) {
+      resourcesByName.set(resource.name, Math.max(resourcesByName.get(resource.name) || 0, resource.bytes));
+    }
+    for (const script of document.querySelectorAll("script[src]")) {
+      resourcesByName.set(script.src, resourcesByName.get(script.src) || 0);
+    }
+    for (const link of document.querySelectorAll("link[href]")) {
+      const rel = link.rel || "";
+      const as = link.as || "";
+      const pathname = new URL(link.href).pathname;
+      const extensionMatches = /\\.(?:css|js|mjs)$/.test(pathname);
+      if (rel === "stylesheet" || extensionMatches || ((rel === "preload" || rel === "modulepreload") && (as === "script" || as === "style"))) {
+        resourcesByName.set(link.href, resourcesByName.get(link.href) || 0);
+      }
+    }
+    const inlineScripts = Array.from(
+      document.querySelectorAll("script:not([src])"),
+      (script) => script.textContent ?? "",
+    );
+    return { resources: Array.from(resourcesByName, ([name, bytes]) => ({ name, bytes })), inlineScripts };
+  })()`);
+
+const fetchResourceBytes = async (url: string): Promise<number> => {
+  const response = await fetch(url);
+  if (!response.ok) {
+    return 0;
+  }
+  return (await response.arrayBuffer()).byteLength;
+};
+
+const measureClientBundleBytes = async (snapshots: readonly ClientBundleSnapshot[]): Promise<number> => {
+  const resources = new Map<string, number>();
+  const inlineScripts = new Set<string>();
+  for (const snapshot of snapshots) {
+    for (const resource of snapshot.resources) {
+      resources.set(resource.name, Math.max(resources.get(resource.name) ?? 0, resource.bytes));
+    }
+    for (const script of snapshot.inlineScripts) {
+      if (script.length > 0) {
+        inlineScripts.add(script);
+      }
+    }
+  }
+  const externalBytes = (
+    await Promise.all(
+      Array.from(resources, async ([url, bytes]) => (bytes > 0 ? bytes : await fetchResourceBytes(url))),
+    )
+  ).reduce((total, bytes) => total + bytes, 0);
+  const textEncoder = new TextEncoder();
+  const inlineBytes = Array.from(inlineScripts).reduce(
+    (total, script) => total + textEncoder.encode(script).byteLength,
+    0,
+  );
+  return externalBytes + inlineBytes;
+};
+
 const measureClientNavigation = async (browser: Browser, baseUrl: string): Promise<number> => {
   const page = await browser.newPage();
   try {
@@ -316,6 +396,21 @@ const measureClientNavigation = async (browser: Browser, baseUrl: string): Promi
     });
     await page.waitForLoadState("networkidle").catch(() => undefined);
     return performance.now() - start;
+  } finally {
+    await page.close();
+  }
+};
+
+const measureInteractiveBundle = async (browser: Browser, baseUrl: string): Promise<number> => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${baseUrl}/interactive`, { waitUntil: "networkidle" });
+    await page.waitForSelector('[data-route="interactive"]');
+    const snapshots: ClientBundleSnapshot[] = [await collectClientBundleSnapshot(page)];
+    await page.click('[data-action="increment"]');
+    await page.waitForSelector('[data-count="1"]');
+    snapshots.push(await collectClientBundleSnapshot(page));
+    return await measureClientBundleBytes(snapshots);
   } finally {
     await page.close();
   }
@@ -342,6 +437,7 @@ const measureFramework = async (
     const dynamicResult = await runAutocannon(`${baseUrl}/products/42`, options);
     await settle(options.smoke ? 50 : 150);
     const clientNavigationMs = await measureClientNavigation(browser, baseUrl);
+    const clientBundleBytes = await measureInteractiveBundle(browser, baseUrl);
     return {
       framework: framework.name,
       staticRequestsPerSecond: requestsPerSecond(staticResult),
@@ -351,6 +447,7 @@ const measureFramework = async (
       streamTtfbMs: stream.ttfb,
       streamCompleteMs: stream.complete,
       clientNavigationMs,
+      clientBundleBytes,
     };
   } finally {
     await stopServer(child);

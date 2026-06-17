@@ -20,6 +20,9 @@ export default function App() {
             <A href="/dashboard/orders" data-nav="orders">
               Orders
             </A>
+            <A href="/interactive" data-nav="interactive">
+              Interactive
+            </A>
             <A href="/stream" data-nav="stream">
               Stream
             </A>

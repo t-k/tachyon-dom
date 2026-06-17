@@ -27,6 +27,21 @@ const ordersNavBody = () => `<h1>Dashboard</h1><h2>Orders</h2>`;
 const streamBody = () =>
   `<h1>Stream</h1><p data-stream="shell">Shell</p><section data-stream="done"><h2>Deferred payload</h2><ul>${items("stream")}</ul></section>`;
 
+const interactiveBody = () => `<h1>Interactive</h1><h2>Counter</h2>
+<button data-action="increment" type="button">Increment</button>
+<output data-count="0">0</output>
+<script>
+  {
+    const button = document.querySelector('[data-action="increment"]');
+    const output = document.querySelector('[data-count]');
+    button.addEventListener("click", () => {
+      const next = Number(output.getAttribute("data-count")) + 1;
+      output.setAttribute("data-count", String(next));
+      output.textContent = String(next);
+    });
+  }
+</script>`;
+
 const partial = (route, body) => `<main id="app" data-route="${route}">${body}</main>`;
 
 const seededPartialsFor = (route) =>
@@ -45,6 +60,7 @@ const documentShell = (body, route) => `<!doctype html>
       <a href="/products/42" data-nav="product">Product</a>
       <a href="/dashboard/users" data-nav="users">Users</a>
       <a href="/dashboard/orders" data-nav="orders">Orders</a>
+      <a href="/interactive" data-nav="interactive">Interactive</a>
       <a href="/stream" data-nav="stream">Stream</a>
     </nav>
     <main id="app" data-route="${route}">${body}</main>
@@ -80,6 +96,7 @@ const documentShell = (body, route) => `<!doctype html>
           void prefetchPartial(link.href);
         }
         link.addEventListener("mousedown", (event) => {
+          if (!link.pathname.startsWith("/dashboard/")) return;
           if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
           if (!partialCache.has(partialUrl(link.href))) return;
           event.preventDefault();
@@ -90,6 +107,7 @@ const documentShell = (body, route) => `<!doctype html>
       document.addEventListener("click", async (event) => {
         const link = event.target.closest("a[data-nav]");
         if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        if (!link.pathname.startsWith("/dashboard/")) return;
         event.preventDefault();
         if (link.dataset.navigated === "1") {
           delete link.dataset.navigated;
@@ -108,6 +126,7 @@ const homeHtml = documentShell(homeBody(), "home");
 const product42Html = documentShell(productBody("42"), "product");
 const usersHtml = documentShell(usersBody(), "users");
 const ordersHtml = documentShell(ordersBody(), "orders");
+const interactiveHtml = documentShell(interactiveBody(), "interactive");
 const usersPartialHtml = partial("users", usersBody());
 const ordersPartialHtml = partial("orders", ordersNavBody());
 const streamPartialHtml = partial("stream", streamBody());
@@ -123,6 +142,7 @@ const server = createServer(
       route("/dashboard/users?partial=1", usersPartialHtml),
       route("/dashboard/orders", ordersHtml),
       route("/dashboard/orders?partial=1", ordersPartialHtml),
+      route("/interactive", interactiveHtml),
       route("/stream", streamHtml),
       route("/stream?partial=1", streamPartialHtml),
     ],

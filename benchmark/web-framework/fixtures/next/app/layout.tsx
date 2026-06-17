@@ -18,6 +18,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           <Link href="/dashboard/orders" data-nav="orders">
             Orders
           </Link>
+          <Link href="/interactive" data-nav="interactive">
+            Interactive
+          </Link>
           <Link href="/stream" data-nav="stream">
             Stream
           </Link>

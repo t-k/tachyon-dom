@@ -27,7 +27,17 @@ describe("web framework benchmark fixtures", () => {
     expect(source).toContain("partialCache");
     expect(source).toContain("streamHtml");
     expect(source).toContain("product42Html");
+    expect(source).toContain("interactiveHtml");
     expect(source).toContain('route("/products/42", product42Html)');
+    expect(source).toContain('route("/interactive", interactiveHtml)');
     expect(source).toContain('route("/stream", streamHtml)');
+  });
+
+  it("provides full interactive routes for client bundle measurement", () => {
+    expect(readFileSync(fixture("tachyon/server.ts"), "utf8")).toContain('data-action="increment"');
+    expect(readFileSync(fixture("marko-run/src/routes/interactive/+page.marko"), "utf8")).toContain("onClick()");
+    expect(readFileSync(fixture("solid-start/src/routes/interactive.tsx"), "utf8")).toContain("createSignal");
+    expect(readFileSync(fixture("tanstack-start/src/routes/interactive.tsx"), "utf8")).toContain("useState");
+    expect(readFileSync(fixture("next/app/interactive/counter.tsx"), "utf8")).toContain('"use client"');
   });
 });

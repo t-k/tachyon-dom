@@ -13,6 +13,7 @@ describe("web framework benchmark report", () => {
         streamTtfbMs: 20,
         streamCompleteMs: 40,
         clientNavigationMs: 20,
+        clientBundleBytes: 20_480,
       },
       {
         framework: "fast",
@@ -23,6 +24,7 @@ describe("web framework benchmark report", () => {
         streamTtfbMs: 10,
         streamCompleteMs: 20,
         clientNavigationMs: 10,
+        clientBundleBytes: 10_240,
       },
     ]);
 
@@ -31,5 +33,6 @@ describe("web framework benchmark report", () => {
     expect(rows[0]?.score).toBe(1);
     expect(rows[1]?.score).toBeGreaterThan(1);
     expect(formatWebFrameworkRanking(rows)).toContain("| 1 | fast | 1.000x |");
+    expect(formatWebFrameworkRanking(rows)).toContain("10.0KiB");
   });
 });

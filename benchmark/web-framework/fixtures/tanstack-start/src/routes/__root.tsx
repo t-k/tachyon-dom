@@ -33,6 +33,9 @@ function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
           <Link to="/dashboard/orders" data-nav="orders">
             Orders
           </Link>
+          <Link to="/interactive" data-nav="interactive">
+            Interactive
+          </Link>
           <Link to="/stream" data-nav="stream">
             Stream
           </Link>
