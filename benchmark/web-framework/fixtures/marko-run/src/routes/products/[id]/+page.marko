@@ -1,0 +1,12 @@
+<const/id=input.params.id/>
+<const/label=`Product ${id}`/>
+<const/items=Array.from({ length: 80 }, (_, index) => `${label} item ${index + 1}`)/>
+<main data-route="product">
+  <h1>${label}</h1>
+  <p>Dynamic route ${id}</p>
+  <ul>
+    <for|item| of=items>
+      <li>${item}</li>
+    </for>
+  </ul>
+</main>

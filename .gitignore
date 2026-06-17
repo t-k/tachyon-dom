@@ -5,3 +5,11 @@ coverage/
 .codex/
 docs.local/
 benchmark/local-compare/results/
+benchmark/web-framework/results/
+benchmark/web-framework/fixtures/*/.next/
+benchmark/web-framework/fixtures/*/.output/
+benchmark/web-framework/fixtures/*/.tanstack/
+benchmark/web-framework/fixtures/*/.vinxi/
+benchmark/web-framework/fixtures/*/dist/
+benchmark/web-framework/fixtures/*/node_modules/
+benchmark/web-framework/fixtures/*/src/routeTree.gen.ts
