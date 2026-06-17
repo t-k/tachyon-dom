@@ -78,9 +78,11 @@ const idText = (row: BenchmarkTableRow): Text => (row.$id ??= row.firstChild?.fi
 const labelText = (row: BenchmarkTableRow): Text =>
   (row.$label ??= row.firstChild?.nextSibling?.firstChild?.firstChild as Text);
 
-const bindBenchmarkRow = (row: BenchmarkTableRow): void => {
+const bindBenchmarkRow = (row: BenchmarkTableRow): Text => {
   idText(row).nodeValue = String(nextId++);
-  labelText(row).nodeValue = labelPool[(Math.random() * labelPool.length) | 0] as string;
+  const label = labelText(row);
+  label.nodeValue = labelPool[(Math.random() * labelPool.length) | 0] as string;
+  return label;
 };
 
 const indexFromEvent = (event: Event, renderer: BenchmarkTableApp): number => {
@@ -114,13 +116,15 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
   }
 
   let selectedRow: BenchmarkTableRow | undefined;
+  const rows: BenchmarkTableRow[] = [];
+  const labelNodes: Text[] = [];
   const rowPool: BenchmarkTableRow[] = [];
-  const liveRows = () => tbody.rows;
   const takeRow = (): BenchmarkTableRow => rowPool.pop() ?? (baseRow.cloneNode(true) as BenchmarkTableRow);
   const releaseRows = (): void => {
-    while (tbody.lastElementChild) {
-      const row = tbody.lastElementChild as BenchmarkTableRow;
+    while (rows.length > 0) {
+      const row = rows.pop() as BenchmarkTableRow;
       row.className = "";
+      labelNodes.pop();
       rowPool.push(row);
       tbody.removeChild(row);
     }
@@ -129,13 +133,17 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
     const fragment = document.createDocumentFragment();
     for (let index = 0; index < count; index++) {
       const row = takeRow();
-      bindBenchmarkRow(row);
+      const label = bindBenchmarkRow(row);
+      rows.push(row);
+      labelNodes.push(label);
       fragment.appendChild(row);
     }
     tbody.appendChild(fragment);
   };
   const clear = (): void => {
     selectedRow = undefined;
+    rows.length = 0;
+    labelNodes.length = 0;
     rowPool.length = 0;
     tbody.textContent = "";
   };
@@ -154,13 +162,11 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
     replace,
     append: appendRows,
     updateEvery: (step) => {
-      const rows = liveRows();
-      for (let index = 0; index < rows.length; index += step) {
-        labelText(rows[index] as BenchmarkTableRow).nodeValue += " !!!";
+      for (let index = 0; index < labelNodes.length; index += step) {
+        (labelNodes[index] as Text).nodeValue += " !!!";
       }
     },
     selectIndex: (index) => {
-      const rows = liveRows();
       if (index < 0 || index >= rows.length) {
         return;
       }
@@ -175,17 +181,18 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
       row.className = "danger";
     },
     removeIndex: (index) => {
-      const row = liveRows()[index];
+      const row = rows[index];
       if (!row) {
         return;
       }
-      tbody.deleteRow(index);
+      rows.splice(index, 1);
+      labelNodes.splice(index, 1);
+      row.remove();
       if (selectedRow === row) {
         selectedRow = undefined;
       }
     },
     swap: (a, b) => {
-      const rows = liveRows();
       const rowA = rows[a];
       const rowB = rows[b];
       if (!rowA || !rowB) {
@@ -193,6 +200,11 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
       }
       const nextA = rowA.nextSibling;
       const nextB = rowB.nextSibling;
+      rows[a] = rowB;
+      rows[b] = rowA;
+      const labelA = labelNodes[a] as Text;
+      labelNodes[a] = labelNodes[b] as Text;
+      labelNodes[b] = labelA;
       if (nextA === rowB) {
         tbody.insertBefore(rowB, rowA);
       } else {
@@ -201,8 +213,8 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
       }
     },
     clear,
-    length: () => liveRows().length,
-    selectedIndex: () => selectedRow?.sectionRowIndex ?? -1,
+    length: () => rows.length,
+    selectedIndex: () => (selectedRow ? rows.indexOf(selectedRow) : -1),
   };
 
   root.querySelector("#run")?.addEventListener("click", () => renderer.replace(1000));

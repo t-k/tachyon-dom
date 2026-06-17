@@ -6,7 +6,9 @@ import {
   evaluateBenchmarkRegressionGate,
   formatAuxiliaryMetricTable,
   formatComparisonTable,
+  formatGeomeanComparisonTable,
   formatScenarioMatrixTable,
+  geomeanComparison,
   mean,
   median,
   percentile,
@@ -43,6 +45,48 @@ describe("local compare report", () => {
       },
     ]);
     expect(formatComparisonTable(rows)).toContain("| create rows | 12.00ms | 18.00ms | 1.500x | +50.0% |");
+  });
+
+  it("summarizes mean and median geomean ratios for direct baseline comparisons", () => {
+    const rows = [
+      {
+        id: "createRows",
+        label: "create rows",
+        baseline: "solid-keyed",
+        candidate: "tachyon-dom",
+        baselineMean: 10,
+        candidateMean: 5,
+        ratio: 0.5,
+        deltaPercent: -50,
+        baselineMedian: 8,
+        candidateMedian: 4,
+      },
+      {
+        id: "clearRows",
+        label: "clear rows",
+        baseline: "solid-keyed",
+        candidate: "tachyon-dom",
+        baselineMean: 10,
+        candidateMean: 20,
+        ratio: 2,
+        deltaPercent: 100,
+        baselineMedian: 8,
+        candidateMedian: 16,
+      },
+    ];
+
+    const summary = geomeanComparison(rows);
+
+    expect(summary).toEqual({
+      baseline: "solid-keyed",
+      candidate: "tachyon-dom",
+      meanGeomeanRatio: 1,
+      medianGeomeanRatio: 1,
+      losses: ["clear rows 2.000x"],
+    });
+    expect(formatGeomeanComparisonTable([summary])).toContain(
+      "| solid-keyed | tachyon-dom | 1.000x | 1.000x | clear rows 2.000x |",
+    );
   });
 
   it("builds a multi-implementation scenario matrix", () => {

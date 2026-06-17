@@ -33,6 +33,14 @@ export type ScenarioMatrixRow = {
   candidateRatioToFastest: number;
 };
 
+export type GeomeanComparisonSummary = {
+  baseline: ImplementationName;
+  candidate: ImplementationName;
+  meanGeomeanRatio: number;
+  medianGeomeanRatio: number;
+  losses: readonly string[];
+};
+
 export type AuxiliaryMetricUnit = "ms" | "mb" | "count" | "kib";
 
 export type AuxiliaryMetricSummary = {
@@ -141,6 +149,26 @@ export const compareSummaries = (
   return rows;
 };
 
+const geomean = (values: readonly number[]): number => {
+  if (values.length === 0) {
+    return Number.NaN;
+  }
+  return Math.exp(values.reduce((total, value) => total + Math.log(value), 0) / values.length);
+};
+
+export const geomeanComparison = (rows: readonly ComparisonRow[]): GeomeanComparisonSummary => {
+  const first = rows[0];
+  const baseline = first?.baseline ?? "";
+  const candidate = first?.candidate ?? "";
+  return {
+    baseline,
+    candidate,
+    meanGeomeanRatio: geomean(rows.map((row) => row.ratio)),
+    medianGeomeanRatio: geomean(rows.map((row) => row.candidateMedian / row.baselineMedian)),
+    losses: rows.filter((row) => row.ratio > 1).map((row) => `${row.label} ${row.ratio.toFixed(3)}x`),
+  };
+};
+
 export const buildScenarioMatrix = (
   summaries: readonly ScenarioSummary[],
   implementations: readonly ImplementationName[],
@@ -232,6 +260,16 @@ export const formatComparisonTable = (rows: readonly ComparisonRow[]): string =>
   for (const row of rows) {
     lines.push(
       `| ${row.label} | ${formatMilliseconds(row.baselineMean)} | ${formatMilliseconds(row.candidateMean)} | ${row.ratio.toFixed(3)}x | ${formatPercent(row.deltaPercent)} |`,
+    );
+  }
+  return lines.join("\n");
+};
+
+export const formatGeomeanComparisonTable = (summaries: readonly GeomeanComparisonSummary[]): string => {
+  const lines = ["| Baseline | Candidate | Mean geomean | Median geomean | Mean losses |", "|---|---|---:|---:|---|"];
+  for (const summary of summaries) {
+    lines.push(
+      `| ${summary.baseline} | ${summary.candidate} | ${summary.meanGeomeanRatio.toFixed(3)}x | ${summary.medianGeomeanRatio.toFixed(3)}x | ${summary.losses.join(", ") || "none"} |`,
     );
   }
   return lines.join("\n");

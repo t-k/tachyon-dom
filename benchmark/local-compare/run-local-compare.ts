@@ -1,10 +1,10 @@
-import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import marko from "@marko/vite";
-import { chromium, type Browser, type LaunchOptions, type Page } from "playwright";
+import { chromium, type Browser, type CDPSession, type LaunchOptions, type Page } from "playwright";
 import solid from "vite-plugin-solid";
-import { createServer, type ViteDevServer } from "vite";
+import { build, createServer, preview, type PreviewServer, type ViteDevServer } from "vite";
 import { err, ok, type Result } from "../../src/result";
 import {
   buildAuxiliaryMetricMatrix,
@@ -12,7 +12,9 @@ import {
   compareSummaries,
   evaluateBenchmarkRegressionGate,
   formatAuxiliaryMetricTable,
+  formatGeomeanComparisonTable,
   formatScenarioMatrixTable,
+  geomeanComparison,
   summarizeAuxiliaryMetric,
   summarizeScenario,
   type AuxiliaryMetricSummary,
@@ -24,10 +26,14 @@ type CliOptions = {
   iterations: number;
   warmup: number;
   headful: boolean;
+  serveMode: "dev" | "production";
   browserChannel?: string;
   output?: string;
   maxGeomeanRatio?: number;
   maxMemoryRatio?: number;
+  traceImplementation?: ImplementationName;
+  traceScenario?: string;
+  traceOutput?: string;
 };
 
 type Implementation = {
@@ -35,6 +41,7 @@ type Implementation = {
   title: string;
   path: string;
   sourcePaths: readonly string[];
+  entrySourcePaths?: readonly string[];
 };
 
 type Scenario = {
@@ -48,30 +55,35 @@ const implementations: readonly Implementation[] = [
     title: "vanillajs-lite-keyed",
     path: "/benchmark/local-compare/vanillajs-lite/",
     sourcePaths: ["benchmark/local-compare/vanillajs-lite"],
+    entrySourcePaths: ["benchmark/local-compare/vanillajs-lite/src/Main.js"],
   },
   {
     name: "vanillajs-3-keyed",
     title: "vanillajs-3-keyed",
     path: "/benchmark/local-compare/vanillajs-3/",
     sourcePaths: ["benchmark/local-compare/vanillajs-3"],
+    entrySourcePaths: ["benchmark/local-compare/vanillajs-3/src/Main.js"],
   },
   {
     name: "vanillajs-keyed",
     title: "vanillajs-keyed",
     path: "/benchmark/local-compare/vanillajs/",
     sourcePaths: ["benchmark/local-compare/vanillajs"],
+    entrySourcePaths: ["benchmark/local-compare/vanillajs/src/Main.js"],
   },
   {
     name: "solid-keyed",
     title: "solid-keyed",
     path: "/benchmark/local-compare/solid/",
     sourcePaths: ["benchmark/local-compare/solid"],
+    entrySourcePaths: ["benchmark/local-compare/solid/src/main.jsx"],
   },
   {
     name: "marko-keyed",
     title: "marko-keyed",
     path: "/benchmark/local-compare/marko/",
     sourcePaths: ["benchmark/local-compare/marko"],
+    entrySourcePaths: ["benchmark/local-compare/marko/src/App.marko", "benchmark/local-compare/marko/src/data.js"],
   },
   {
     name: "tachyon-dom",
@@ -82,6 +94,7 @@ const implementations: readonly Implementation[] = [
       "benchmark/js-framework-benchmark/src/main.ts",
       "benchmark/js-framework-benchmark/src/i18n.ts",
     ],
+    entrySourcePaths: ["benchmark/js-framework-benchmark/src/main.ts", "benchmark/js-framework-benchmark/src/i18n.ts"],
   },
 ];
 
@@ -99,6 +112,7 @@ const scenarios: readonly Scenario[] = [
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../..");
+const benchmarkPlugins = () => [solid(), marko({ linked: false })];
 
 const parsePositiveInteger = (value: string, name: string): Result<number, string> => {
   const parsed = Number.parseInt(value, 10);
@@ -121,6 +135,7 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
     iterations: 7,
     warmup: 2,
     headful: false,
+    serveMode: "dev",
   };
 
   for (let index = 0; index < argv.length; index++) {
@@ -147,6 +162,12 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
       options.warmup = parsed.value;
     } else if (arg === "--headful") {
       options.headful = true;
+    } else if (arg === "--serve-mode") {
+      const value = argv[++index];
+      if (value !== "dev" && value !== "production") {
+        return err("--serve-mode must be dev or production.");
+      }
+      options.serveMode = value;
     } else if (arg === "--browser-channel") {
       const value = argv[++index];
       if (!value) {
@@ -179,20 +200,47 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
         return err(parsed.error);
       }
       options.maxMemoryRatio = parsed.value;
+    } else if (arg === "--trace-implementation") {
+      const value = argv[++index];
+      if (!value) {
+        return err("--trace-implementation requires a value.");
+      }
+      options.traceImplementation = value;
+    } else if (arg === "--trace-scenario") {
+      const value = argv[++index];
+      if (!value) {
+        return err("--trace-scenario requires a value.");
+      }
+      options.traceScenario = value;
+    } else if (arg === "--trace-output") {
+      const value = argv[++index];
+      if (!value) {
+        return err("--trace-output requires a value.");
+      }
+      options.traceOutput = value;
     } else {
       return err(`Unknown argument: ${arg}`);
     }
   }
 
+  if (
+    (options.traceImplementation && !options.traceScenario) ||
+    (!options.traceImplementation && options.traceScenario)
+  ) {
+    return err("--trace-implementation and --trace-scenario must be provided together.");
+  }
+
   return ok(options);
 };
 
-const startServer = async (): Promise<ViteDevServer> => {
+type BenchmarkServer = ViteDevServer | PreviewServer;
+
+const startDevServer = async (): Promise<ViteDevServer> => {
   const requestedPort = Number.parseInt(process.env.PORT ?? "0", 10);
   const server = await createServer({
     root: projectRoot,
     logLevel: "silent",
-    plugins: [solid(), marko({ linked: false })],
+    plugins: benchmarkPlugins(),
     server: {
       host: "127.0.0.1",
       port: Number.isFinite(requestedPort) ? requestedPort : 0,
@@ -203,7 +251,62 @@ const startServer = async (): Promise<ViteDevServer> => {
   return server;
 };
 
-const baseUrlFor = (server: ViteDevServer): string => {
+const productionOutDir = path.join(projectRoot, ".vite/local-compare-dist");
+
+const benchmarkHtmlInputs = (): Record<string, string> =>
+  Object.fromEntries(
+    implementations.map((implementation) => [
+      implementation.name,
+      path.join(projectRoot, implementation.path.replace(/^\//, ""), "index.html"),
+    ]),
+  );
+
+const startProductionServer = async (): Promise<PreviewServer> => {
+  const requestedPort = Number.parseInt(process.env.PORT ?? "0", 10);
+  await rm(productionOutDir, { recursive: true, force: true });
+  await build({
+    root: projectRoot,
+    logLevel: "silent",
+    plugins: benchmarkPlugins(),
+    build: {
+      outDir: productionOutDir,
+      emptyOutDir: true,
+      rollupOptions: {
+        input: benchmarkHtmlInputs(),
+      },
+    },
+  });
+  await Promise.all([
+    cp(
+      path.join(projectRoot, "benchmark/local-compare/vanillajs/src"),
+      path.join(productionOutDir, "benchmark/local-compare/vanillajs/src"),
+      { recursive: true },
+    ),
+    cp(
+      path.join(projectRoot, "benchmark/local-compare/vanillajs-3/src"),
+      path.join(productionOutDir, "benchmark/local-compare/vanillajs-3/src"),
+      { recursive: true },
+    ),
+  ]);
+  return await preview({
+    root: projectRoot,
+    logLevel: "silent",
+    plugins: benchmarkPlugins(),
+    build: {
+      outDir: productionOutDir,
+    },
+    preview: {
+      host: "127.0.0.1",
+      port: Number.isFinite(requestedPort) ? requestedPort : 0,
+      strictPort: requestedPort > 0,
+    },
+  });
+};
+
+const startServer = async (options: CliOptions): Promise<BenchmarkServer> =>
+  options.serveMode === "production" ? await startProductionServer() : await startDevServer();
+
+const baseUrlFor = (server: BenchmarkServer): string => {
   const localUrl = server.resolvedUrls?.local.find((url) => url.startsWith("http://127.0.0.1"));
   if (localUrl) {
     return localUrl.replace(/\/$/, "");
@@ -342,6 +445,63 @@ const runBrowserScenario = async (page: Page, url: string, scenarioId: string): 
   return await page.evaluate(`window.__runLocalBenchmarkScenario(${JSON.stringify(scenarioId)})`);
 };
 
+const defaultTracePath = (implementation: ImplementationName, scenarioId: string): string => {
+  const stamp = new Date()
+    .toISOString()
+    .replaceAll(":", "-")
+    .replace(/\.\d{3}Z$/, "Z");
+  return path.join(
+    projectRoot,
+    "benchmark/local-compare/results",
+    `trace-${implementation}-${scenarioId}-${stamp}.json`,
+  );
+};
+
+const readCdpStream = async (session: CDPSession, stream: string): Promise<string> => {
+  let data = "";
+  for (;;) {
+    const chunk = await session.send("IO.read", { handle: stream });
+    data += chunk.data;
+    if (chunk.eof) {
+      break;
+    }
+  }
+  await session.send("IO.close", { handle: stream });
+  return data;
+};
+
+const captureChromeTrace = async (
+  page: Page,
+  runScenario: () => Promise<number>,
+  outputPath: string,
+): Promise<number> => {
+  const session = await page.context().newCDPSession(page);
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  try {
+    await session.send("Tracing.start", {
+      categories: "devtools.timeline,disabled-by-default-devtools.timeline,blink,cc,v8",
+      transferMode: "ReturnAsStream",
+    });
+    const value = await runScenario();
+    const traceComplete = new Promise<string>((resolve, reject) => {
+      session.once("Tracing.tracingComplete", (event) => {
+        if (!event.stream) {
+          reject(new Error("Chrome tracing did not return a stream handle."));
+          return;
+        }
+        resolve(event.stream);
+      });
+    });
+    await session.send("Tracing.end");
+    const stream = await traceComplete;
+    const trace = await readCdpStream(session, stream);
+    await writeFile(outputPath, trace);
+    return value;
+  } finally {
+    await session.detach();
+  }
+};
+
 const measureImplementation = async (
   browser: Browser,
   baseUrl: string,
@@ -356,7 +516,18 @@ const measureImplementation = async (
       const values: number[] = [];
       const totalRuns = options.warmup + options.iterations;
       for (let run = 0; run < totalRuns; run++) {
-        const value = await runBrowserScenario(page, `${baseUrl}${implementation.path}`, scenario.id);
+        const shouldTrace =
+          run === options.warmup &&
+          options.traceImplementation === implementation.name &&
+          options.traceScenario === scenario.id;
+        const runScenario = () => runBrowserScenario(page, `${baseUrl}${implementation.path}`, scenario.id);
+        const value = shouldTrace
+          ? await captureChromeTrace(
+              page,
+              runScenario,
+              path.resolve(projectRoot, options.traceOutput ?? defaultTracePath(implementation.name, scenario.id)),
+            )
+          : await runScenario();
         if (run >= options.warmup) {
           values.push(value);
         }
@@ -427,6 +598,13 @@ const measureAuxiliaryMetrics = async (
     const sourceBytes = (
       await Promise.all(implementation.sourcePaths.map((sourcePath) => sourceSizeBytes(sourcePath)))
     ).reduce((total, size) => total + size, 0);
+    const entrySourceBytes = (
+      await Promise.all(
+        (implementation.entrySourcePaths ?? implementation.sourcePaths).map((sourcePath) =>
+          sourceSizeBytes(sourcePath),
+        ),
+      )
+    ).reduce((total, size) => total + size, 0);
 
     return [
       summarizeAuxiliaryMetric("startup", "startup load + 2 frames", "ms", implementation.name, startupMs),
@@ -443,6 +621,13 @@ const measureAuxiliaryMetrics = async (
         runClearDomNodes,
       ),
       summarizeAuxiliaryMetric("localSourceSize", "local source size", "kib", implementation.name, sourceBytes / 1024),
+      summarizeAuxiliaryMetric(
+        "entrySourceSize",
+        "benchmark entry source size",
+        "kib",
+        implementation.name,
+        entrySourceBytes / 1024,
+      ),
     ];
   } finally {
     await page.close();
@@ -463,6 +648,7 @@ const writeResults = async (
   auxiliaryMetrics: readonly AuxiliaryMetricSummary[],
   operationTable: string,
   auxiliaryTable: string,
+  directComparisonTable: string,
 ): Promise<string> => {
   const outputPath = path.resolve(projectRoot, options.output ?? defaultOutputPath());
   await mkdir(path.dirname(outputPath), { recursive: true });
@@ -473,6 +659,7 @@ const writeResults = async (
         generatedAt: new Date().toISOString(),
         iterations: options.iterations,
         warmup: options.warmup,
+        serveMode: options.serveMode,
         baseline: "vanillajs-lite-keyed",
         candidate: "tachyon-dom",
         implementations: implementations.map((implementation) => implementation.name),
@@ -481,6 +668,7 @@ const writeResults = async (
         tables: {
           operations: operationTable,
           auxiliary: auxiliaryTable,
+          directComparisons: directComparisonTable,
         },
       },
       null,
@@ -491,10 +679,10 @@ const writeResults = async (
 };
 
 const run = async (options: CliOptions): Promise<void> => {
-  let server: ViteDevServer | undefined;
+  let server: BenchmarkServer | undefined;
   let browser: Browser | undefined;
   try {
-    server = await startServer();
+    server = await startServer(options);
     const baseUrl = baseUrlFor(server);
     browser = await launchBrowser(options);
     const summaries: ScenarioSummary[] = [];
@@ -512,11 +700,24 @@ const run = async (options: CliOptions): Promise<void> => {
     const auxiliaryRows = buildAuxiliaryMetricMatrix(auxiliaryMetrics, implementationNames, "tachyon-dom");
     const auxiliaryTable = formatAuxiliaryMetricTable(auxiliaryRows, implementationNames, "tachyon-dom");
     const baselineRows = compareSummaries(summaries, "vanillajs-lite-keyed", "tachyon-dom");
-    const outputPath = await writeResults(options, summaries, auxiliaryMetrics, operationTable, auxiliaryTable);
+    const directComparisons = ["vanillajs-lite-keyed", "solid-keyed", "marko-keyed"].map((baseline) =>
+      geomeanComparison(compareSummaries(summaries, baseline, "tachyon-dom")),
+    );
+    const directComparisonTable = formatGeomeanComparisonTable(directComparisons);
+    const outputPath = await writeResults(
+      options,
+      summaries,
+      auxiliaryMetrics,
+      operationTable,
+      auxiliaryTable,
+      directComparisonTable,
+    );
     console.log("");
     console.log(operationTable);
     console.log("");
     console.log(auxiliaryTable);
+    console.log("");
+    console.log(directComparisonTable);
     console.log("");
     const geomeanRatio =
       baselineRows.reduce((total, row) => total + Math.log(row.ratio), 0) / Math.max(baselineRows.length, 1);
