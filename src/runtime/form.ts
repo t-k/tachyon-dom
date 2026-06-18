@@ -166,7 +166,7 @@ export const enhanceForm = (form: HTMLFormElement, options: EnhanceFormOptions =
     }
     event.preventDefault();
     clearCustomValidity(form);
-    if (!form.checkValidity()) {
+    if (!form.noValidate && !form.checkValidity()) {
       form.reportValidity();
       return;
     }
