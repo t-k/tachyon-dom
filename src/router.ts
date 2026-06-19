@@ -239,8 +239,40 @@ const routeResponse = (body: string, init: ResponseInit = {}): RouteResponse => 
   body,
 });
 
-export const redirect = (location: string, init: ResponseInit & { allowExternal?: boolean } = {}): RouteResponse => {
-  if (!init.allowExternal && !location.startsWith("/")) {
+export type RedirectOptions = ResponseInit & {
+  allowExternal?: boolean;
+  allowedOrigins?: readonly string[];
+};
+
+const isSafePathRedirect = (location: string): boolean => {
+  if (!location.startsWith("/") || location.startsWith("//")) {
+    return false;
+  }
+  try {
+    const decoded = decodeURIComponent(location);
+    return !decoded.startsWith("//") && !decoded.includes("\\");
+  } catch {
+    return false;
+  }
+};
+
+const isApprovedExternalRedirect = (location: string, allowedOrigins: readonly string[] | undefined): boolean => {
+  if (!allowedOrigins || allowedOrigins.length === 0) {
+    return false;
+  }
+  try {
+    const url = new URL(location);
+    return (url.protocol === "https:" || url.protocol === "http:") && allowedOrigins.includes(url.origin);
+  } catch {
+    return false;
+  }
+};
+
+export const redirect = (location: string, init: RedirectOptions = {}): RouteResponse => {
+  if (
+    !isSafePathRedirect(location) &&
+    !(init.allowExternal && isApprovedExternalRedirect(location, init.allowedOrigins))
+  ) {
     throw new Error(`Unsafe redirect target: ${location}`);
   }
   const headers = new Headers(init.headers);
@@ -684,8 +716,8 @@ const compileRoutePath = (path: string): { regex: RegExp; names: string[]; wildc
         names.push(segment.slice(1));
         return "([^/]+)";
       }
-      if (segment === "*") {
-        names.push("wildcard");
+      if (segment === "*" || segment.startsWith("*")) {
+        names.push(segment.slice(1) || "wildcard");
         return "(.*)";
       }
       return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -698,23 +730,60 @@ type FlatRoute = {
   route: RouteDefinition;
   path: string;
   branch: Array<{ route: RouteDefinition; path: string }>;
+  order: number;
 };
 
 const flattenRoutes = (
   routes: readonly RouteDefinition[],
   parentPath = "",
   branch: Array<{ route: RouteDefinition; path: string }> = [],
+  order = { value: 0 },
 ): FlatRoute[] => {
   const flat: FlatRoute[] = [];
   for (const route of routes) {
     const path = joinPaths(parentPath, route.path);
     const nextBranch = [...branch, { route, path }];
-    flat.push({ route, path, branch: nextBranch });
+    flat.push({ route, path, branch: nextBranch, order: order.value++ });
     if (route.children) {
-      flat.push(...flattenRoutes(route.children, path, nextBranch));
+      flat.push(...flattenRoutes(route.children, path, nextBranch, order));
     }
   }
   return flat;
+};
+
+const routeSegmentScore = (segment: string): number => {
+  if (segment === "*" || segment.startsWith("*")) {
+    return 0;
+  }
+  if (segment.startsWith(":")) {
+    return 1;
+  }
+  return 2;
+};
+
+const routeSpecificity = (path: string): number[] => {
+  if (path === "*") {
+    return [-1, 0, 0];
+  }
+  const segments = trimSlashes(path).split("/").filter(Boolean);
+  const segmentScores = segments.map(routeSegmentScore);
+  return [
+    segmentScores.reduce((total, score) => total + score, 0),
+    segments.length,
+    segmentScores.filter((score) => score === 2).length,
+  ];
+};
+
+const compareSpecificity = (left: FlatRoute, right: FlatRoute): number => {
+  const leftScores = routeSpecificity(left.path);
+  const rightScores = routeSpecificity(right.path);
+  for (let index = 0; index < leftScores.length; index += 1) {
+    const difference = (rightScores[index] ?? 0) - (leftScores[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return left.order - right.order;
 };
 
 export const matchRoute = (
@@ -724,7 +793,7 @@ export const matchRoute = (
   const url = typeof input === "string" ? new URL(input, "http://tachyon.local") : input;
   const pathname = url.pathname;
   let fallback: MatchedRoute | undefined;
-  for (const candidate of flattenRoutes(routes)) {
+  for (const candidate of [...flattenRoutes(routes)].sort(compareSpecificity)) {
     const compiled = compileRoutePath(candidate.path);
     const match = compiled.regex.exec(pathname);
     if (!match) {

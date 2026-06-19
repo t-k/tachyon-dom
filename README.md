@@ -58,6 +58,8 @@ Server adapters live in `tachyon-dom/adapters` for Node and Cloudflare Workers-s
 
 `sanitizeHtml(markup)` has a small built-in allowlist sanitizer for constrained, already-simple backend HTML. Do not rely on the default sanitizer for arbitrary untrusted HTML. For user-generated or third-party markup, pass a vetted adapter through `createHtmlSanitizer()`/`sanitizeHtml(..., { adapter })`, such as a DOMPurify-backed sanitizer in the target runtime.
 
+The built-in sanitizer rejects protocol-relative URLs and removes absolute `http:`/`https:` URLs unless their origin is explicitly listed in `allowedUrlOrigins`. `redirect()` similarly accepts path-relative targets by default; external redirects require `allowExternal: true` plus an `allowedOrigins` entry for the target origin.
+
 The Node adapter derives request URLs from `Host` and `X-Forwarded-Proto`. Only use those headers behind a trusted proxy or edge that normalizes them; otherwise validate the host/proto boundary before routing.
 
 ## Commands

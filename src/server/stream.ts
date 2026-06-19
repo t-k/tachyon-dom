@@ -17,22 +17,34 @@ async function* toAsyncChunks(source: HtmlChunkSource): AsyncIterable<HtmlChunk>
   }
 }
 
-export const renderToReadableStream = (chunks: HtmlChunkSource): ReadableStream<Uint8Array> =>
-  new ReadableStream<Uint8Array>({
-    async start(controller) {
+export const renderToReadableStream = (chunks: HtmlChunkSource): ReadableStream<Uint8Array> => {
+  const iterator = toAsyncChunks(chunks)[Symbol.asyncIterator]();
+  let cancelled = false;
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (cancelled) {
+        return;
+      }
       try {
-        for await (const chunk of toAsyncChunks(chunks)) {
-          const bytes = toBytes(chunk);
-          if (bytes.byteLength > 0) {
-            controller.enqueue(bytes);
-          }
+        const result = await iterator.next();
+        if (result.done) {
+          controller.close();
+          return;
         }
-        controller.close();
+        const bytes = toBytes(result.value);
+        if (bytes.byteLength > 0) {
+          controller.enqueue(bytes);
+        }
       } catch (error) {
         controller.error(error);
       }
     },
+    async cancel() {
+      cancelled = true;
+      await iterator.return?.();
+    },
   });
+};
 
 export const renderToResponse = (chunks: HtmlChunkSource, init: ResponseInit = {}): Response => {
   const headers = new Headers(init.headers);

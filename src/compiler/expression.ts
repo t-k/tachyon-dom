@@ -707,6 +707,13 @@ export const expressionNodeToJs = (
       )
       .join(" + ");
   }
+  if (node.operator === ">" || node.operator === "<" || node.operator === ">=" || node.operator === "<=") {
+    return `(Number(${expressionNodeToJs(node.left, locals, scopeName)}) ${node.operator} Number(${expressionNodeToJs(
+      node.right,
+      locals,
+      scopeName,
+    )}))`;
+  }
   return `(${expressionNodeToJs(node.left, locals, scopeName)} ${node.operator} ${expressionNodeToJs(
     node.right,
     locals,

@@ -10,6 +10,7 @@ export type CsrfOptions = {
 export type SanitizeHtmlOptions = {
   allowedTags?: readonly string[];
   allowedAttributes?: readonly string[];
+  allowedUrlOrigins?: readonly string[];
   adapter?: HtmlSanitizer;
 };
 
@@ -79,18 +80,32 @@ const defaultAllowedAttributes = [
 const escapeAttribute = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll(`"`, "&quot;").replaceAll("<", "&lt;");
 
-const isSafeUrl = (value: string): boolean => {
+const isSafeUrl = (value: string, allowedOrigins: readonly string[] = []): boolean => {
   const trimmed = value.trim().toLowerCase();
-  return (
-    trimmed.startsWith("/") ||
-    trimmed.startsWith("#") ||
-    trimmed.startsWith("http://") ||
-    trimmed.startsWith("https://") ||
-    trimmed.startsWith("mailto:")
-  );
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
+    try {
+      const decoded = decodeURIComponent(trimmed);
+      return !decoded.startsWith("//") && !decoded.includes("\\");
+    } catch {
+      return false;
+    }
+  }
+  if (trimmed.startsWith("#") || trimmed.startsWith("mailto:")) {
+    return true;
+  }
+  try {
+    const url = new URL(value);
+    return (url.protocol === "https:" || url.protocol === "http:") && allowedOrigins.includes(url.origin);
+  } catch {
+    return false;
+  }
 };
 
-const sanitizeAttributes = (raw: string, allowedAttributes: Set<string>): string =>
+const sanitizeAttributes = (
+  raw: string,
+  allowedAttributes: Set<string>,
+  allowedUrlOrigins: readonly string[],
+): string =>
   Array.from(raw.matchAll(/([:\w-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g))
     .flatMap((match) => {
       const name = match[1]?.toLowerCase();
@@ -98,7 +113,7 @@ const sanitizeAttributes = (raw: string, allowedAttributes: Set<string>): string
         return [];
       }
       const value = match[2] ?? match[3] ?? match[4] ?? "";
-      if ((name === "href" || name === "src" || name === "action") && value && !isSafeUrl(value)) {
+      if ((name === "href" || name === "src" || name === "action") && value && !isSafeUrl(value, allowedUrlOrigins)) {
         return [];
       }
       return value === "" ? [` ${name}`] : [` ${name}="${escapeAttribute(value)}"`];
@@ -111,6 +126,7 @@ export const sanitizeHtml = (markup: string, options: SanitizeHtmlOptions = {}):
   }
   const allowedTags = new Set(options.allowedTags ?? defaultAllowedTags);
   const allowedAttributes = new Set(options.allowedAttributes ?? defaultAllowedAttributes);
+  const allowedUrlOrigins = options.allowedUrlOrigins ?? [];
   const withoutScripts = markup.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
   const sanitized = withoutScripts.replace(
     /<\/?([a-zA-Z][\w:-]*)([^>]*)>/g,
@@ -122,7 +138,7 @@ export const sanitizeHtml = (markup: string, options: SanitizeHtmlOptions = {}):
       if (tag.startsWith("</")) {
         return `</${name}>`;
       }
-      return `<${name}${sanitizeAttributes(rawAttributes, allowedAttributes)}>`;
+      return `<${name}${sanitizeAttributes(rawAttributes, allowedAttributes, allowedUrlOrigins)}>`;
     },
   );
   return unsafeHtml(sanitized);

@@ -74,6 +74,11 @@ type ClientMatch = {
   params: ClientRouteParams;
 };
 
+type RankedClientRoute = {
+  route: ClientRouteDefinition;
+  order: number;
+};
+
 const trimSlashes = (value: string): string => value.replace(/^\/+|\/+$/g, "");
 
 const compileRoutePath = (path: string): { regex: RegExp; names: string[]; wildcard: boolean } => {
@@ -91,8 +96,8 @@ const compileRoutePath = (path: string): { regex: RegExp; names: string[]; wildc
         names.push(segment.slice(1));
         return "([^/]+)";
       }
-      if (segment === "*") {
-        names.push("wildcard");
+      if (segment === "*" || segment.startsWith("*")) {
+        names.push(segment.slice(1) || "wildcard");
         return "(.*)";
       }
       return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -101,9 +106,44 @@ const compileRoutePath = (path: string): { regex: RegExp; names: string[]; wildc
   return { regex: new RegExp(`^/${source}/?$`), names, wildcard: false };
 };
 
+const routeSegmentScore = (segment: string): number => {
+  if (segment === "*" || segment.startsWith("*")) {
+    return 0;
+  }
+  if (segment.startsWith(":")) {
+    return 1;
+  }
+  return 2;
+};
+
+const routeSpecificity = (path: string): number[] => {
+  if (path === "*") {
+    return [-1, 0, 0];
+  }
+  const segments = trimSlashes(path).split("/").filter(Boolean);
+  const segmentScores = segments.map(routeSegmentScore);
+  return [
+    segmentScores.reduce((total, score) => total + score, 0),
+    segments.length,
+    segmentScores.filter((score) => score === 2).length,
+  ];
+};
+
+const compareClientRoutes = (left: RankedClientRoute, right: RankedClientRoute): number => {
+  const leftScores = routeSpecificity(left.route.path);
+  const rightScores = routeSpecificity(right.route.path);
+  for (let index = 0; index < leftScores.length; index += 1) {
+    const difference = (rightScores[index] ?? 0) - (leftScores[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+  return left.order - right.order;
+};
+
 const matchClientRoute = (routes: readonly ClientRouteDefinition[], pathname: string): ClientMatch | undefined => {
   let fallback: ClientMatch | undefined;
-  for (const route of routes) {
+  for (const { route } of routes.map((route, order) => ({ route, order })).sort(compareClientRoutes)) {
     const compiled = compileRoutePath(route.path);
     const match = compiled.regex.exec(pathname);
     if (!match) {

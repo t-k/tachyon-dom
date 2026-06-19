@@ -201,6 +201,31 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("matches named wildcards and prioritizes static routes on the client", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/users/:id", render: ({ params }) => `<h1>User ${params.id}</h1>` },
+        { path: "/users/new", render: () => `<h1>New user</h1>` },
+        { path: "/blog/*slug", render: ({ params }) => `<h1>${params.slug}</h1>` },
+      ],
+    });
+
+    await router.start();
+    await router.navigate("/users/new");
+    expect(root.innerHTML).toBe("<h1>New user</h1>");
+
+    await router.navigate("/blog/2026/launch");
+    expect(root.innerHTML).toBe("<h1>2026/launch</h1>");
+    router.dispose();
+  });
+
   it("caches loaders, prefetches, invalidates, and announces navigation", async () => {
     document.body.innerHTML = `<main id="app"></main><div id="live" aria-live="polite"></div>`;
     const root = document.querySelector("#app");

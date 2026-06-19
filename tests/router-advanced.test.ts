@@ -110,6 +110,29 @@ describe("advanced router features", () => {
     );
   });
 
+  it("matches named wildcard route params from file-route catchalls", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        id: "blog",
+        path: "/blog/*slug",
+        render: ({ params }) => `<h1>${params.slug}</h1>`,
+      },
+    ];
+    const result = await renderRoute(routes, "https://example.com/blog/2026/launch");
+
+    expect(result.ok && result.value.html).toBe("<h1>2026/launch</h1>");
+  });
+
+  it("prefers static routes over dynamic routes regardless of declaration order", async () => {
+    const routes: RouteDefinition[] = [
+      { id: "user", path: "/users/:id", render: ({ params }) => `<h1>User ${params.id}</h1>` },
+      { id: "new-user", path: "/users/new", render: () => "<h1>New user</h1>" },
+    ];
+    const result = await renderRoute(routes, "https://example.com/users/new");
+
+    expect(result.ok && result.value.html).toBe("<h1>New user</h1>");
+  });
+
   it("supports typed route params at compile time", () => {
     type Params = ParamsForPath<"/users/:id/files/*path">;
     expectTypeOf<Params>().toEqualTypeOf<{ id: string; path: string }>();

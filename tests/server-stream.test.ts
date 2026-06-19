@@ -43,4 +43,22 @@ describe("server stream adapter", () => {
     expect(response.body).toBeInstanceOf(ReadableStream);
     expect(await readStream(response.body as ReadableStream<Uint8Array>)).toBe("<main><section>ready</section></main>");
   });
+
+  it("returns async chunk sources when stream readers cancel", async () => {
+    let cancelled = false;
+    async function* cancellableChunks(): AsyncIterable<string> {
+      try {
+        yield "<main>";
+        await new Promise(() => undefined);
+      } finally {
+        cancelled = true;
+      }
+    }
+
+    const reader = renderToReadableStream(cancellableChunks()).getReader();
+    expect(await reader.read()).toMatchObject({ done: false });
+    await reader.cancel();
+
+    expect(cancelled).toBe(true);
+  });
 });

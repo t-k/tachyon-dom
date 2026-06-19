@@ -16,6 +16,26 @@ describe("signal runtime", () => {
     expect(seen).toEqual([1, 2]);
   });
 
+  it("disposes nested effects before rerunning their owner", () => {
+    const outer = createSignal(0);
+    const inner = createSignal("a");
+    const seen: string[] = [];
+
+    const dispose = effect(() => {
+      const outerValue = outer();
+      effect(() => {
+        seen.push(`${outerValue}:${inner()}`);
+      });
+    });
+
+    outer.set(1);
+    inner.set("b");
+    dispose();
+    inner.set("c");
+
+    expect(seen).toEqual(["0:a", "1:a", "1:b"]);
+  });
+
   it("reads plain values and signal values through one helper", () => {
     const title = createSignal("Hello");
 

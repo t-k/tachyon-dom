@@ -35,4 +35,13 @@ describe("compiler expression OXC backend", () => {
       '<section title="Guest Ada">Guest Ada</section>',
     );
   });
+
+  it("keeps comparison coercion aligned between SSR evaluation and generated client JS", () => {
+    const scope = { count: "10", limit: "2" };
+    const js = expressionToJs("count > limit", new Set(), "scope");
+    const clientValue = Function("scope", `return ${js}`)(scope);
+
+    expect(evaluateExpression("count > limit", scope)).toBe(true);
+    expect(clientValue).toBe(true);
+  });
 });

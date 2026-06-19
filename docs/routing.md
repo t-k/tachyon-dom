@@ -57,7 +57,7 @@ Actions run for non-GET/HEAD requests before loaders. Loaders run from parent to
 
 ## Response Helpers
 
-- `redirect("/path")` returns a 302 route response. External redirects are rejected unless `allowExternal` is set.
+- `redirect("/path")` returns a 302 route response. External redirects are rejected unless `allowExternal` is set and the target origin is included in `allowedOrigins`.
 - `json(data)` returns an application/json route response.
 - `html(trustedHtml)` returns a text/html route response.
 
@@ -68,6 +68,14 @@ HTML responses use explicit trusted HTML helpers:
 - `escapeToHtml(value)` escapes text and returns `TrustedHtml`.
 - `unsafeHtml(markup)` marks raw HTML as trusted and should only be used for framework-generated or otherwise trusted markup.
 - `sanitizeHtml(markup)` is available from `tachyon-dom/security` for allowlist-based backend sanitization before passing content to `html()`.
+
+The built-in sanitizer keeps path-relative URLs such as `/posts/1`, same-page fragments, and `mailto:` links. Absolute `http:`/`https:` URLs are removed unless their origin is listed in `allowedUrlOrigins`:
+
+```ts
+const trusted = sanitizeHtml(markup, {
+  allowedUrlOrigins: ["https://assets.example"],
+});
+```
 
 The default `sanitizeHtml(markup)` implementation is intentionally small and only suitable for constrained, simple backend markup. It is not a full browser-grade sanitizer for arbitrary untrusted HTML. For user-generated content, CMS content, imported third-party HTML, or any other attacker-controlled markup, provide a vetted sanitizer adapter:
 

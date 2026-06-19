@@ -3,6 +3,8 @@ type SubscriberSet = Set<EffectRunner>;
 type EffectRunner = {
   disposed: boolean;
   dependencies: Set<SubscriberSet>;
+  children: Set<EffectRunner>;
+  parent: EffectRunner | undefined;
   run: () => void;
 };
 
@@ -17,10 +19,23 @@ export type Signal<T> = (() => T) & {
 };
 
 const cleanup = (runner: EffectRunner): void => {
+  for (const child of Array.from(runner.children)) {
+    disposeRunner(child);
+  }
+  runner.children.clear();
   for (const dependency of runner.dependencies) {
     dependency.delete(runner);
   }
   runner.dependencies.clear();
+};
+
+const disposeRunner = (runner: EffectRunner): void => {
+  if (runner.disposed) {
+    return;
+  }
+  runner.disposed = true;
+  cleanup(runner);
+  runner.parent?.children.delete(runner);
 };
 
 const track = (subscribers: SubscriberSet): void => {
@@ -100,9 +115,12 @@ export const createStore = <T extends Record<PropertyKey, unknown>>(initial: T):
 };
 
 export const effect = (fn: () => void): (() => void) => {
+  const parent = activeEffect && !activeEffect.disposed ? activeEffect : undefined;
   const runner: EffectRunner = {
     disposed: false,
     dependencies: new Set(),
+    children: new Set(),
+    parent,
     run: () => {
       if (runner.disposed) {
         return;
@@ -117,9 +135,7 @@ export const effect = (fn: () => void): (() => void) => {
       }
     },
   };
+  parent?.children.add(runner);
   runner.run();
-  return () => {
-    runner.disposed = true;
-    cleanup(runner);
-  };
+  return () => disposeRunner(runner);
 };

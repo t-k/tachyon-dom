@@ -8,7 +8,7 @@ import {
   verifySignedCookieValue,
 } from "../src/cookies";
 import { createCsrfToken, createHtmlSanitizer, csrfInput, sanitizeHtml, verifyCsrfRequest } from "../src/security";
-import { html, renderRoute, unsafeHtml, type RouteDefinition } from "../src/router";
+import { html, redirect, renderRoute, unsafeHtml, type RouteDefinition } from "../src/router";
 
 describe("router security helpers", () => {
   it("sanitizes route HTML before creating trusted HTML responses", async () => {
@@ -21,6 +21,40 @@ describe("router security helpers", () => {
     );
 
     expect(result.ok && result.value.html).toBe(`<article><h1>Post</h1><a>bad</a></article>`);
+  });
+
+  it("rejects protocol-relative and unapproved absolute sanitizer URLs", () => {
+    expect(
+      sanitizeHtml(
+        `<a href="//evil.test/path">protocol</a><a href="https://evil.test/path">external</a><a href="/safe">safe</a>`,
+      ).value,
+    ).toBe(`<a>protocol</a><a>external</a><a href="/safe">safe</a>`);
+    expect(sanitizeHtml(`<a href="/%5C%5Cevil.test/path">backslash</a>`).value).toBe(`<a>backslash</a>`);
+
+    expect(
+      sanitizeHtml(`<a href="https://assets.example/path">approved</a>`, {
+        allowedUrlOrigins: ["https://assets.example"],
+      }).value,
+    ).toBe(`<a href="https://assets.example/path">approved</a>`);
+  });
+
+  it("rejects unsafe redirect targets and restricts approved external origins", () => {
+    expect(() => redirect("//evil.test/path")).toThrow("Unsafe redirect target");
+    expect(() => redirect("/%5C%5Cevil.test/path")).toThrow("Unsafe redirect target");
+    expect(() => redirect("https://evil.test/path", { allowExternal: true })).toThrow("Unsafe redirect target");
+    expect(() =>
+      redirect("https://evil.test/path", { allowExternal: true, allowedOrigins: ["https://accounts.example"] }),
+    ).toThrow("Unsafe redirect target");
+    expect(() =>
+      redirect("javascript:alert(1)", { allowExternal: true, allowedOrigins: ["https://accounts.example"] }),
+    ).toThrow("Unsafe redirect target");
+
+    expect(
+      redirect("https://accounts.example/callback", {
+        allowExternal: true,
+        allowedOrigins: ["https://accounts.example"],
+      }).headers.get("location"),
+    ).toBe("https://accounts.example/callback");
   });
 
   it("allows sanitizer adapters for production sanitizer backends", () => {
