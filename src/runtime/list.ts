@@ -3,10 +3,14 @@ import { setAttributeValue, setRef, setStyleValue } from "./attr";
 import { setText } from "./text";
 import { bindControl, setControlValue } from "./form";
 
+type ExpressionReader = (scope: Record<string, unknown>) => unknown;
+type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void;
+
 type TextBinding = {
   kind: "text";
   path: number[];
   expression: string;
+  read?: ExpressionReader;
 };
 
 type ClassBinding = {
@@ -14,6 +18,7 @@ type ClassBinding = {
   path: number[];
   className: string;
   expression: string;
+  read?: ExpressionReader;
 };
 
 type EventBinding = {
@@ -21,6 +26,7 @@ type EventBinding = {
   path: number[];
   eventName: string;
   handler: string;
+  read?: ExpressionReader;
 };
 
 type AttributeBinding = {
@@ -28,6 +34,7 @@ type AttributeBinding = {
   path: number[];
   name: string;
   expression: string;
+  read?: ExpressionReader;
 };
 
 type StyleBinding = {
@@ -35,6 +42,7 @@ type StyleBinding = {
   path: number[];
   name: string;
   expression: string;
+  read?: ExpressionReader;
 };
 
 type RefBinding = {
@@ -48,12 +56,16 @@ type ModelBinding = {
   path: number[];
   property: "value" | "checked";
   expression: string;
+  read?: ExpressionReader;
+  write?: ExpressionWriter;
 };
 
 type Binding = TextBinding | ClassBinding | EventBinding | AttributeBinding | StyleBinding | RefBinding | ModelBinding;
 
 type KeyedListOptions = {
+  signature?: string;
   key: string;
+  keyRead?: ExpressionReader;
   itemName: string;
   templateHtml: string;
   bindings: Binding[];
@@ -69,6 +81,7 @@ type RowRecord = {
 
 type ListState = {
   signature: string;
+  options: KeyedListOptions;
   templateHtml: string;
   records: Map<PropertyKey, RowRecord>;
   recordsByElement: WeakMap<Element, RowRecord>;
@@ -93,6 +106,26 @@ const readPath = (scope: Record<string, unknown>, expression: string): unknown =
   }
   return current;
 };
+
+const writePath = (scope: Record<string, unknown>, expression: string, value: unknown): void => {
+  const parts = expression.split(".");
+  const property = parts.pop();
+  let current: unknown = scope;
+  for (const part of parts) {
+    current = current && typeof current === "object" ? (current as Record<string, unknown>)[part] : undefined;
+  }
+  if (property && current && typeof current === "object") {
+    (current as Record<string, unknown>)[property] = value;
+  }
+};
+
+const readBinding = (
+  scope: Record<string, unknown>,
+  binding: { expression: string; read?: ExpressionReader },
+): unknown => (binding.read ? binding.read(scope) : readPath(scope, binding.expression));
+
+const readHandler = (scope: Record<string, unknown>, binding: EventBinding): unknown =>
+  binding.read ? binding.read(scope) : readPath(scope, binding.handler);
 
 const scopedItem = (itemName: string, item: unknown): Record<string, unknown> => ({ [itemName]: item });
 
@@ -120,6 +153,7 @@ const createTemplate = (templateHtml: string): HTMLTemplateElement => {
 };
 
 const optionsSignature = (options: KeyedListOptions): string =>
+  options.signature ??
   JSON.stringify({
     key: options.key,
     itemName: options.itemName,
@@ -166,7 +200,7 @@ const bindListEvents = (container: Element, state: ListState, options: KeyedList
       if (!(event.target instanceof Node) || !(target instanceof Element) || !target.contains(event.target)) {
         return;
       }
-      const handler = record ? readPath(record.scope, binding.handler) : undefined;
+      const handler = record ? readHandler(record.scope, binding) : undefined;
       if (typeof handler === "function") {
         (handler as EventListener)(event);
       }
@@ -178,9 +212,13 @@ const bindListEvents = (container: Element, state: ListState, options: KeyedList
 };
 
 const getListState = (container: Element, options: KeyedListOptions): ListState => {
-  const signature = optionsSignature(options);
   const current = listStates.get(container);
+  if (current && current.options === options) {
+    return current;
+  }
+  const signature = optionsSignature(options);
   if (current && current.signature === signature) {
+    current.options = options;
     return current;
   }
   if (current) {
@@ -188,6 +226,7 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
   }
   const next = {
     signature,
+    options,
     templateHtml: options.templateHtml,
     records: new Map<PropertyKey, RowRecord>(),
     recordsByElement: new WeakMap<Element, RowRecord>(),
@@ -212,28 +251,20 @@ const cleanupRecord = (record: RowRecord): void => {
 const applyRowBindings = (record: RowRecord, scope: Record<string, unknown>, options: KeyedListOptions): void => {
   for (const binding of options.bindings) {
     if (binding.kind === "text") {
-      setText(nodeAtRecord(record, binding.path) as Text, readPath(scope, binding.expression));
+      setText(nodeAtRecord(record, binding.path) as Text, readBinding(scope, binding));
     } else if (binding.kind === "class") {
-      setClassPresence(
-        nodeAtRecord(record, binding.path) as Element,
-        binding.className,
-        readPath(scope, binding.expression),
-      );
+      setClassPresence(nodeAtRecord(record, binding.path) as Element, binding.className, readBinding(scope, binding));
     } else if (binding.kind === "attr") {
-      setAttributeValue(
-        nodeAtRecord(record, binding.path) as Element,
-        binding.name,
-        readPath(scope, binding.expression),
-      );
+      setAttributeValue(nodeAtRecord(record, binding.path) as Element, binding.name, readBinding(scope, binding));
     } else if (binding.kind === "style") {
-      setStyleValue(nodeAtRecord(record, binding.path) as Element, binding.name, readPath(scope, binding.expression));
+      setStyleValue(nodeAtRecord(record, binding.path) as Element, binding.name, readBinding(scope, binding));
     } else if (binding.kind === "ref") {
       setRef(scope, binding.expression, nodeAtRecord(record, binding.path) as Element);
     } else if (binding.kind === "model") {
       setControlValue(
         nodeAtRecord(record, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
         binding.property,
-        readPath(scope, binding.expression),
+        readBinding(scope, binding),
       );
     }
   }
@@ -249,17 +280,13 @@ const bindRowControls = (record: RowRecord, options: KeyedListOptions): void => 
       bindControl(
         element,
         binding.property,
-        () => readPath(record.scope, binding.expression),
+        () => readBinding(record.scope, binding),
         (value) => {
-          const parts = binding.expression.split(".");
-          const property = parts.pop();
-          let current: unknown = record.scope;
-          for (const part of parts) {
-            current = current && typeof current === "object" ? (current as Record<string, unknown>)[part] : undefined;
+          if (binding.write) {
+            binding.write(record.scope, value);
+            return;
           }
-          if (property && current && typeof current === "object") {
-            (current as Record<string, unknown>)[property] = value;
-          }
+          writePath(record.scope, binding.expression, value);
         },
       ),
     );
@@ -267,7 +294,8 @@ const bindRowControls = (record: RowRecord, options: KeyedListOptions): void => 
 };
 
 const keyFor = (item: unknown, options: KeyedListOptions): PropertyKey => {
-  const key = readPath(scopedItem(options.itemName, item), options.key);
+  const scope = scopedItem(options.itemName, item);
+  const key = options.keyRead ? options.keyRead(scope) : readPath(scope, options.key);
   if (typeof key === "string" || typeof key === "number" || typeof key === "symbol") {
     return key;
   }

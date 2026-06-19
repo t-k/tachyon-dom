@@ -54,9 +54,9 @@ In-flight prefetches are aborted when their cache entry is invalidated or when t
 
 Routes can define `action()` and `revalidateOnAction`. `router.submit(href, init)` calls the matched action, invalidates cache entries according to the policy, and re-renders the current route.
 
-## Signal Roadmap
+## Signals
 
-`runtime/signal` intentionally starts with a small `signal`/`effect` surface. It does not yet include batching or computed memo helpers. Multiple sequential writes can therefore trigger multiple effect runs, and effects should avoid writing back to their own dependencies unless the caller guards against loops. `batch()` and `computed()` are planned extension points rather than current guarantees.
+`runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, and `read()`. Effects run once when registered, then subsequent signal notifications are queued. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. `createMemo()` exposes a cached computed accessor that updates before dependent effects observe the next flush.
 
 ## Deferred Data
 

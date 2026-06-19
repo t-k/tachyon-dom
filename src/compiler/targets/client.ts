@@ -333,6 +333,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (reactive || needsEvent || needsModel) {
     lines.push(`  const cleanups = [];`);
   }
+  let listIndex = 0;
   for (const binding of bindings) {
     if (binding.kind === "text") {
       const statement = `setText(textAt(root, ${JSON.stringify(binding.path)}), ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
@@ -363,7 +364,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         );
       }
     } else if (binding.kind === "list") {
-      lines.push(emitListBinding(binding, reactive, sourceName));
+      lines.push(emitListBinding(binding, reactive, sourceName, listIndex++));
     } else {
       lines.push(emitConditionalBinding(binding, reactive, sourceName));
     }
@@ -377,17 +378,69 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   return `${lines.join("\n")}\n`;
 };
 
-const emitListBinding = (binding: ListBinding, reactive: boolean, sourceName: string): string => {
+const listSignature = (binding: ListBinding): string =>
+  `list:${JSON.stringify({
+    path: binding.path,
+    each: binding.each,
+    key: binding.key,
+    itemName: binding.itemName,
+    templateHtml: binding.templateHtml,
+    bindings: binding.bindings.map((child) => {
+      if (child.kind === "list" || child.kind === "if") {
+        return { kind: child.kind };
+      }
+      return child;
+    }),
+  })}`;
+
+const bindingReadExpression = (expression: string): string => expressionToScopeAccess(expression, new Set(), "scope");
+
+const serializeListRowBinding = (binding: ListBinding["bindings"][number]): string => {
+  const fields: string[] = [`kind: ${JSON.stringify(binding.kind)}`, `path: ${JSON.stringify(binding.path)}`];
+  if (binding.kind === "text") {
+    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
+    fields.push(`read: (scope) => ${bindingReadExpression(binding.expression)}`);
+  } else if (binding.kind === "class") {
+    fields.push(`className: ${JSON.stringify(binding.className)}`);
+    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
+    fields.push(`read: (scope) => ${bindingReadExpression(binding.expression)}`);
+  } else if (binding.kind === "event") {
+    fields.push(`eventName: ${JSON.stringify(binding.eventName)}`);
+    fields.push(`handler: ${JSON.stringify(binding.handler)}`);
+    fields.push(`read: (scope) => ${bindingReadExpression(binding.handler)}`);
+  } else if (binding.kind === "attr") {
+    fields.push(`name: ${JSON.stringify(binding.name)}`);
+    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
+    fields.push(`read: (scope) => ${bindingReadExpression(binding.expression)}`);
+  } else if (binding.kind === "style") {
+    fields.push(`name: ${JSON.stringify(binding.name)}`);
+    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
+    fields.push(`read: (scope) => ${bindingReadExpression(binding.expression)}`);
+  } else if (binding.kind === "ref") {
+    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
+  } else if (binding.kind === "model") {
+    fields.push(`property: ${JSON.stringify(binding.property)}`);
+    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
+    fields.push(`read: (scope) => ${bindingReadExpression(binding.expression)}`);
+    fields.push(`write: (scope, value) => { ${bindingReadExpression(binding.expression)} = value; }`);
+  }
+  return `{ ${fields.join(", ")} }`;
+};
+
+const emitListBinding = (binding: ListBinding, reactive: boolean, sourceName: string, index: number): string => {
+  const optionsName = `listOptions${index}`;
   const listOptions = [
-    `{`,
+    `  const ${optionsName} = {`,
+    `    signature: ${JSON.stringify(listSignature(binding))},`,
     `    key: ${JSON.stringify(binding.key)},`,
+    `    keyRead: (scope) => ${bindingReadExpression(binding.key)},`,
     `    itemName: ${JSON.stringify(binding.itemName)},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
-    `    bindings: ${JSON.stringify(binding.bindings)},`,
-    `  }`,
+    `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
+    `  };`,
   ].join("\n");
-  const statement = `mountKeyedList(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.each, reactive, sourceName)}, ${listOptions})`;
-  return reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`;
+  const statement = `mountKeyedList(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.each, reactive, sourceName)}, ${optionsName})`;
+  return reactive ? `${listOptions}\n  cleanups.push(effect(() => ${statement}));` : `${listOptions}\n  ${statement};`;
 };
 
 const emitConditionalBinding = (binding: ConditionalBinding, reactive: boolean, sourceName: string): string => {

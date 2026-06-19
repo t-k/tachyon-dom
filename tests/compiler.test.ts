@@ -342,6 +342,22 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`itemName: "row"`);
   });
 
+  it("generates compiled list binding readers instead of runtime dot parsing", () => {
+    const result = compileTemplate(
+      `<ul><for each={rows} key={row.ids[0]}><li>{row.profile?.name ?? row.name}</li></for></ul>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateClientModule(result.value);
+
+    expect(code).toContain(`const listOptions0 = {`);
+    expect(code).toContain(`keyRead: (scope) => scope.row.ids[0]`);
+    expect(code).toContain(`read: (scope) => (scope.row.profile?.name ?? scope.row.name)`);
+    expect(code).toContain(`mountKeyedList(root, [], scope.rows, listOptions0)`);
+  });
+
   it("fixes the HTML-first syntax surface in an explicit IR", () => {
     const result = compileTemplate(
       `<main><store count={initialCount}/><component name="CounterPanel"><section hydrate:id={islandId}><if test={active}><button on:click={increment}>{count}</button></if><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></section></component></main>`,

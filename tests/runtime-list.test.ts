@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { mountKeyedList } from "../src/runtime/list";
+
+const stringify = JSON.stringify;
+
+afterEach(() => {
+  JSON.stringify = stringify;
+});
 
 describe("mountKeyedList", () => {
   it("mounts rows with direct text and class bindings", () => {
@@ -315,5 +321,58 @@ describe("mountKeyedList", () => {
     expect(root.children[2]).toBe(oneTitle);
     expect(root.children[3]).toBe(oneBody);
     expect(root.innerHTML).toBe(`<h2>Two updated</h2><p>Second updated</p><h2>One updated</h2><p>First updated</p>`);
+  });
+
+  it("uses compiled binding readers for expressions beyond dot paths", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const options = {
+      signature: "compiled-list-readers",
+      key: "item.ids[0]",
+      keyRead: (scope: Record<string, unknown>) => (scope.item as { ids: number[] }).ids[0],
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "item.labels[0] ?? `Guest ${item.name}`",
+          read: (scope: Record<string, unknown>) => {
+            const item = scope.item as { labels: string[]; name: string };
+            return item.labels[0] ?? `Guest ${item.name}`;
+          },
+        },
+      ],
+    };
+
+    mountKeyedList(root, [], [{ ids: [1], labels: [], name: "Ada" }], options);
+
+    expect(root.innerHTML).toBe(`<li><span>Guest Ada</span></li>`);
+  });
+
+  it("reuses a stable options signature without JSON serializing on each mount", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const json = vi.fn(stringify);
+    JSON.stringify = json as typeof JSON.stringify;
+    const options = {
+      signature: "stable-list-options",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [{ kind: "text" as const, path: [0, 0], expression: "item.label" }],
+    };
+
+    mountKeyedList(root, [], [{ id: 1, label: "One" }], options);
+    mountKeyedList(root, [], [{ id: 1, label: "One updated" }], options);
+
+    expect(json).not.toHaveBeenCalled();
+    expect(root.innerHTML).toBe(`<li><span>One updated</span></li>`);
   });
 });

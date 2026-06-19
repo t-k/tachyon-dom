@@ -11,9 +11,15 @@ type EffectRunner = {
 const signalBrand = Symbol("tachyon.signal");
 
 let activeEffect: EffectRunner | undefined;
+let batchDepth = 0;
+let flushing = false;
+const pendingEffects = new Set<EffectRunner>();
 
-export type Signal<T> = (() => T) & {
+export type Accessor<T> = (() => T) & {
   readonly [signalBrand]: true;
+};
+
+export type Signal<T> = Accessor<T> & {
   set: (value: T) => void;
   update: (updater: (value: T) => T) => void;
 };
@@ -45,21 +51,59 @@ const track = (subscribers: SubscriberSet): void => {
   }
 };
 
-const notify = (subscribers: SubscriberSet): void => {
-  const snapshot = Array.from(subscribers);
-  for (const subscriber of snapshot) {
-    subscriber.run();
+const flushPendingEffects = (): void => {
+  if (flushing) {
+    return;
+  }
+  flushing = true;
+  try {
+    while (pendingEffects.size > 0) {
+      const [runner] = pendingEffects;
+      if (!runner) {
+        break;
+      }
+      pendingEffects.delete(runner);
+      runner.run();
+    }
+  } finally {
+    flushing = false;
   }
 };
 
-export const isSignal = (value: unknown): value is Signal<unknown> =>
-  typeof value === "function" && (value as Partial<Signal<unknown>>)[signalBrand] === true;
+const scheduleFlush = (): void => {
+  if (batchDepth === 0 && !activeEffect) {
+    flushPendingEffects();
+  }
+};
 
-export function read<T>(value: Signal<T>): T;
+const notify = (subscribers: SubscriberSet): void => {
+  const snapshot = Array.from(subscribers);
+  for (const subscriber of snapshot) {
+    if (!subscriber.disposed) {
+      pendingEffects.add(subscriber);
+    }
+  }
+  scheduleFlush();
+};
+
+export const isSignal = (value: unknown): value is Accessor<unknown> =>
+  typeof value === "function" && (value as Partial<Accessor<unknown>>)[signalBrand] === true;
+
+export function read<T>(value: Accessor<T>): T;
 export function read<T>(value: T): T;
-export function read<T>(value: T | Signal<T>): T {
-  return isSignal(value) ? (value as Signal<T>)() : (value as T);
+export function read<T>(value: T | Accessor<T>): T {
+  return isSignal(value) ? (value as Accessor<T>)() : (value as T);
 }
+
+export const batch = <T>(fn: () => T): T => {
+  batchDepth++;
+  try {
+    return fn();
+  } finally {
+    batchDepth--;
+    scheduleFlush();
+  }
+};
 
 export const createSignal = <T>(initial: T): Signal<T> => {
   let current = initial;
@@ -78,6 +122,16 @@ export const createSignal = <T>(initial: T): Signal<T> => {
   };
   signal.update = (updater) => signal.set(updater(current));
   return signal;
+};
+
+export const createMemo = <T>(fn: () => T): Accessor<T> => {
+  const value = createSignal<T>(undefined as T);
+  effect(() => {
+    value.set(fn());
+  });
+  const memo = (() => value()) as Accessor<T>;
+  Object.defineProperty(memo, signalBrand, { value: true });
+  return memo;
 };
 
 export const createStore = <T extends Record<PropertyKey, unknown>>(initial: T): T => {
@@ -132,6 +186,9 @@ export const effect = (fn: () => void): (() => void) => {
         fn();
       } finally {
         activeEffect = previous;
+        if (!previous) {
+          scheduleFlush();
+        }
       }
     },
   };
