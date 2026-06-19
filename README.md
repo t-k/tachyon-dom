@@ -50,6 +50,8 @@ Routing is provided as a separate layer instead of being baked into the template
 
 The Vite integration also exposes `tachyonDomRoutes()` for a `virtual:tachyon-dom/routes` module. It emits a manifest plus lazy dynamic imports, which keeps route modules split into separate chunks.
 
+During Vite dev server runs, `tachyonDom()` logs simple request lines such as `GET / 200 4ms` through Vite's logger. Query strings are omitted by default to avoid leaking tokens or other sensitive parameters. Disable request logs with `tachyonDom({ requestLog: false })`, pass `requestLog: { logger }` to route messages to a custom sink, or set `requestLog: { includeQuery: true }` when query strings are explicitly useful.
+
 Server adapters live in `tachyon-dom/adapters` for Node and Cloudflare Workers-style runtimes, with optional static asset serving and security header merging. `tachyon-dom/runtime/form` includes progressive form enhancement, and `tachyon-dom/runtime/hydrate` includes boundary mismatch diagnostics for SSR tests and development builds.
 
 ## Security Notes

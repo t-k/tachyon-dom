@@ -10,7 +10,14 @@ export type TachyonDomViteOptions = {
   reactive?: boolean;
   sourcemap?: boolean;
   productionSourceMap?: boolean;
+  requestLog?: boolean | TachyonDomRequestLogOptions;
   onSourceMap?: (artifact: { id: string; code: string; map: SourceMap; source: string }) => void | Promise<void>;
+};
+
+export type TachyonDomRequestLogOptions = {
+  enabled?: boolean;
+  includeQuery?: boolean;
+  logger?: (message: string) => void;
 };
 
 export type TachyonDomRouteModule = {
@@ -40,6 +47,17 @@ const codeForTarget = (
   return generateClientModule(template, { reactive });
 };
 
+const shouldLogRequests = (options: TachyonDomViteOptions["requestLog"]): boolean =>
+  options === undefined || options === true || (typeof options === "object" && options.enabled !== false);
+
+const requestLogPath = (url: string | undefined, includeQuery: boolean): string => {
+  if (!url) {
+    return "/";
+  }
+  const parsed = new URL(url, "http://tachyon.local");
+  return includeQuery ? `${parsed.pathname}${parsed.search}` : parsed.pathname;
+};
+
 export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
   const include = options.include ?? /\.tachyon\.html$/;
   const target = options.target ?? "client";
@@ -51,6 +69,28 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
     configResolved(config) {
       command = config.command;
       mode = config.mode;
+    },
+    configureServer(server) {
+      if (!shouldLogRequests(options.requestLog)) {
+        return;
+      }
+      const log =
+        typeof options.requestLog === "object" && options.requestLog.logger
+          ? options.requestLog.logger
+          : (message: string) => server.config.logger.info(message, { timestamp: true });
+      server.middlewares.use((request, response, next) => {
+        const startedAt = performance.now();
+        const method = request.method ?? "GET";
+        const path = requestLogPath(
+          request.url,
+          typeof options.requestLog === "object" && options.requestLog.includeQuery === true,
+        );
+        response.once("finish", () => {
+          const durationMs = Math.max(0, Math.round(performance.now() - startedAt));
+          log(`${method} ${path} ${response.statusCode} ${durationMs}ms`);
+        });
+        next();
+      });
     },
     async transform(source, id) {
       if (!include.test(id)) {

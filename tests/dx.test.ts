@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { createServer } from "vite";
 import { buildRouteManifestFile, compileFile } from "../src/cli";
 import { diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
@@ -127,6 +128,43 @@ describe("DX helpers", () => {
     });
     expect(typeof result === "object" && result?.code).toContain(`from "tachyon-dom/runtime/signal"`);
     expect(typeof result === "object" && result?.code).toContain(`sourceMappingURL=data:application/json;base64`);
+  });
+
+  it("logs dev server requests from the Vite plugin", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-vite-log-"));
+    const logs: string[] = [];
+    const server = await createServer({
+      root: dir,
+      logLevel: "silent",
+      plugins: [
+        tachyonDom({
+          requestLog: {
+            logger: (message) => logs.push(message),
+          },
+        }),
+      ],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+      },
+    });
+    try {
+      await writeFile(path.join(dir, "index.html"), `<main>ok</main>`);
+      await server.listen();
+      const localUrl = server.resolvedUrls?.local.find((url) => url.startsWith("http://127.0.0.1"));
+      if (!localUrl) {
+        throw new Error("Missing Vite local URL.");
+      }
+
+      const response = await fetch(`${localUrl}?token=secret`);
+      await response.text();
+
+      expect(logs.some((line) => /^GET \/ 200 \d+ms$/.test(line))).toBe(true);
+      expect(logs.some((line) => line.includes("secret"))).toBe(false);
+    } finally {
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("can disable production source maps and expose artifacts for upload hooks", async () => {
