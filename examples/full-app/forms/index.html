@@ -9,77 +9,66 @@
   </head>
   <body>
     <main id="app">
-      <section class="app-shell" data-testid="app-shell" data-ssr-route="/forms/">
-        <aside class="sidebar" aria-label="Primary">
-          <a class="brand" href="/">Tachyon Full App</a>
-          <nav class="nav-list" aria-label="Pages">
-            <a href="/" data-nav>Overview</a>
-            <a href="/counter/" data-nav>Counter</a>
-            <a href="/lists/" data-nav>Lists</a>
-            <a href="/forms/" data-nav aria-current="true">Forms</a>
-            <a href="/compiler/" data-nav>Compiler</a>
-            <a href="/settings/" data-nav>Settings</a>
-          </nav>
-        </aside>
-        <section class="workspace">
-          <header class="topbar">
-            <div>
-              <p class="eyebrow">Tachyon Full App</p>
-              <h1 data-testid="route-title">Forms</h1>
-            </div>
-            <div class="summary-strip" aria-label="Summary">
-              <span><b data-testid="summary-count">0</b> count</span>
-              <span><b data-testid="summary-rows">3</b> rows</span>
-              <span><b data-testid="summary-profile">Guest operator</b></span>
-            </div>
-          </header>
-          <div id="route-outlet" class="route-outlet">
-            <section class="page-grid">
-              <form class="panel form-panel" action="/profile" method="post" novalidate>
-                <fieldset>
-                  <legend>Forms</legend>
-                  <div class="field">
-                    <label for="display-name">Display name</label>
-                    <input id="display-name" name="displayName" autocomplete="name" required />
-                  </div>
-                  <div class="field">
-                    <label for="email">Email</label>
-                    <input id="email" name="email" type="email" autocomplete="email" required />
-                  </div>
-                  <div class="field">
-                    <label for="role">Role</label>
-                    <select id="role" name="role">
-                      <option selected>Runtime</option>
-                      <option>Router</option>
-                      <option>Design systems</option>
-                    </select>
-                  </div>
-                </fieldset>
-                <button type="submit" data-testid="save-profile">Save profile</button>
-                <p class="status" data-testid="form-status" aria-live="polite"></p>
-              </form>
-              <article class="panel">
-                <h2>Summary</h2>
-                <dl class="profile-summary">
-                  <div>
-                    <dt>Display name</dt>
-                    <dd data-testid="profile-name">Guest operator</dd>
-                  </div>
-                  <div>
-                    <dt>Email</dt>
-                    <dd data-testid="profile-email">guest@example.com</dd>
-                  </div>
-                  <div>
-                    <dt>Role</dt>
-                    <dd data-testid="profile-role">Runtime</dd>
-                  </div>
-                </dl>
-              </article>
-            </section>
+    <section class="app-shell" data-testid="app-shell" data-ssr-route="/forms/">
+      <aside class="sidebar" aria-label="Primary">
+        <a class="brand" href="/">Tachyon Full App</a>
+        <nav class="nav-list" aria-label="Pages">
+          <a href="/" data-nav>Overview</a>
+          <a href="/counter/" data-nav>Counter</a>
+          <a href="/lists/" data-nav>Lists</a>
+          <a href="/forms/" data-nav aria-current="true">Forms</a>
+          <a href="/compiler/" data-nav>Compiler</a>
+          <a href="/settings/" data-nav>Settings</a>
+        </nav>
+      </aside>
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Tachyon Full App</p>
+            <h1 data-testid="route-title">Forms</h1>
           </div>
-          <div id="route-live" class="visually-hidden" aria-live="polite"></div>
-        </section>
+          <div class="summary-strip" aria-label="Summary">
+            <span><b data-testid="summary-count">0</b> count</span>
+            <span><b data-testid="summary-rows">3</b> rows</span>
+            <span><b data-testid="summary-profile">Guest operator</b></span>
+          </div>
+        </header>
+        <div id="route-outlet" class="route-outlet"><section class="page-grid">
+  <form class="panel form-panel" action="/profile" method="post" novalidate>
+    <fieldset>
+      <legend>Forms</legend>
+      <div class="field">
+        <label for="display-name">Display name</label>
+        <input id="display-name" name="displayName" autocomplete="name" required></input>
+      </div>
+      <div class="field">
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="email" required></input>
+      </div>
+      <div class="field">
+        <label for="role">Role</label>
+        <select id="role" name="role">
+          <option value="Runtime">Runtime</option>
+          <option value="Router">Router</option>
+          <option value="Design systems">Design systems</option>
+        </select>
+      </div>
+    </fieldset>
+    <button type="submit" data-testid="save-profile">Save profile</button>
+    <p class="status" data-testid="form-status" aria-live="polite"></p>
+  </form>
+  <article class="panel">
+    <h2>Summary</h2>
+    <dl class="profile-summary">
+      <div><dt>Display name</dt><dd data-testid="profile-name">Guest operator</dd></div>
+      <div><dt>Email</dt><dd data-testid="profile-email">guest@example.com</dd></div>
+      <div><dt>Role</dt><dd data-testid="profile-role">Runtime</dd></div>
+    </dl>
+  </article>
+</section></div>
+        <div id="route-live" class="visually-hidden" aria-live="polite"></div>
       </section>
-    </main>
+    </section>
+  </main>
   </body>
 </html>

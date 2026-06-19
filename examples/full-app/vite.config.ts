@@ -1,8 +1,10 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin, UserConfig } from "vite";
+import { tachyonDom } from "../../src/vite";
 
 const root = dirname(fileURLToPath(import.meta.url));
+const sourceRoot = resolve(root, "../../src");
 
 const pages = {
   compiler: resolve(root, "compiler/index.html"),
@@ -46,5 +48,11 @@ export default {
       input: pages,
     },
   },
-  plugins: [htmlMinifyPlugin()],
+  plugins: [tachyonDom({ reactive: true }), htmlMinifyPlugin()],
+  resolve: {
+    alias: [
+      { find: /^tachyon-dom\/(.+)$/, replacement: `${sourceRoot}/$1.ts` },
+      { find: "tachyon-dom", replacement: resolve(sourceRoot, "index.ts") },
+    ],
+  },
 } satisfies UserConfig;

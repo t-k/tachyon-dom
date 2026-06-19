@@ -1,4 +1,16 @@
 import "./styles.css";
+import * as compilerTemplate from "./compiler/page.td";
+import compilerPageSource from "./compiler/page.td?raw";
+import * as counterTemplate from "./counter/page.td";
+import counterPageSource from "./counter/page.td?raw";
+import * as formsTemplate from "./forms/page.td";
+import formsPageSource from "./forms/page.td?raw";
+import * as listsTemplate from "./lists/page.td";
+import listsPageSource from "./lists/page.td?raw";
+import * as overviewTemplate from "./overview/page.td";
+import overviewPageSource from "./overview/page.td?raw";
+import * as settingsTemplate from "./settings/page.td";
+import settingsPageSource from "./settings/page.td?raw";
 import {
   compileTemplate,
   generateClientModule,
@@ -9,7 +21,6 @@ import { err, ok, type Result } from "../../src/result";
 import { createClientRouter, type ClientRouter, type ClientRouteDefinition } from "../../src/runtime/router";
 import { batch, createMemo, createSignal, effect } from "../../src/runtime/signal";
 import { createStore } from "../../src/runtime/store";
-import { mountKeyedList } from "../../src/runtime/list";
 import { readTextStreamChunks } from "../../src/runtime/stream-client";
 import { renderToReadableStream } from "../../src/server/stream";
 
@@ -46,7 +57,26 @@ type MessageKey =
   | "comfortableMode"
   | "theme"
   | "summary"
-  | "activity";
+  | "activity"
+  | "activityCounter"
+  | "activityRouteState"
+  | "activityRows"
+  | "generatedClient"
+  | "keyedRows"
+  | "memo"
+  | "overviewDescription"
+  | "overviewHeadline"
+  | "projectedHelp"
+  | "roleMetric"
+  | "roleDesignSystems"
+  | "roleRouter"
+  | "roleRuntime"
+  | "selection"
+  | "signalCount"
+  | "step"
+  | "streamOutput"
+  | "template"
+  | "themeLight";
 
 type DemoRow = {
   id: number;
@@ -73,11 +103,24 @@ type StreamModule = {
   stream: (scope: { rows: DemoRow[]; title: string }) => AsyncIterable<string>;
 };
 
+type TachyonTemplateModule = {
+  templateHtml: string;
+  bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
+};
+
+type PageTemplate = {
+  source: string;
+  template: TachyonTemplateModule;
+};
+
 const basePath = "";
 
 const messages: Record<"en", Record<MessageKey, string>> = {
   en: {
     activity: "Activity",
+    activityCounter: "Counters use createSignal, createMemo, and batch.",
+    activityRouteState: "Route state is handled by runtime/router.",
+    activityRows: "Rows use mountKeyedList with compiled readers.",
     addRow: "Add row",
     allRows: "All rows",
     appName: "Tachyon Full App",
@@ -94,27 +137,81 @@ const messages: Record<"en", Record<MessageKey, string>> = {
     emailRequired: "Enter a valid email address.",
     forms: "Forms",
     formsTitle: "Forms",
+    generatedClient: "Generated client",
     increment: "Increment",
+    keyedRows: "keyed rows",
     lists: "Lists",
     listsTitle: "Lists",
+    memo: "Memo",
     nameRequired: "Enter a display name.",
     openOnly: "Open only",
     overview: "Overview",
+    overviewDescription: "The shell stays mounted while the outlet swaps pages through the client router.",
+    overviewHeadline: "Persistent layout with route-level tools",
     overviewTitle: "Overview",
+    projectedHelp: "Projected value is count plus two steps.",
     reset: "Reset",
     role: "Role",
+    roleDesignSystems: "Design systems",
+    roleRouter: "Router",
+    roleRuntime: "Runtime",
+    roleMetric: "role",
     rotateRows: "Rotate rows",
     saveProfile: "Save profile",
     savedProfile: "Saved {name}.",
+    selection: "Selection",
     settings: "Settings",
     settingsTitle: "Settings",
+    signalCount: "signal count",
+    step: "step",
+    streamOutput: "Stream output",
     summary: "Summary",
+    template: "Template",
     theme: "Theme",
+    themeLight: "Theme: light",
   },
 };
 
 const t = (key: MessageKey, values: Record<string, string | number> = {}): string =>
   Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), messages.en[key]);
+
+const copy = (): Record<string, string> => ({
+  activity: t("activity"),
+  activityCounter: t("activityCounter"),
+  activityRouteState: t("activityRouteState"),
+  activityRows: t("activityRows"),
+  addRow: t("addRow"),
+  comfortableMode: t("comfortableMode"),
+  compactMode: t("compactMode"),
+  decrement: t("decrement"),
+  displayName: t("displayName"),
+  doubleStep: t("doubleStep"),
+  email: t("email"),
+  formsTitle: t("formsTitle"),
+  generatedClient: t("generatedClient"),
+  increment: t("increment"),
+  keyedRows: t("keyedRows"),
+  memo: t("memo"),
+  overviewDescription: t("overviewDescription"),
+  overviewHeadline: t("overviewHeadline"),
+  projectedHelp: t("projectedHelp"),
+  reset: t("reset"),
+  role: t("role"),
+  roleDesignSystems: t("roleDesignSystems"),
+  roleMetric: t("roleMetric"),
+  roleRouter: t("roleRouter"),
+  roleRuntime: t("roleRuntime"),
+  rotateRows: t("rotateRows"),
+  saveProfile: t("saveProfile"),
+  selection: t("selection"),
+  settingsTitle: t("settingsTitle"),
+  signalCount: t("signalCount"),
+  step: t("step"),
+  streamOutput: t("streamOutput"),
+  summary: t("summary"),
+  template: t("template"),
+  themeLight: t("themeLight"),
+});
 
 const escapeHtml = (value: string): string =>
   value
@@ -158,139 +255,35 @@ const normalizedPath = (path: string): string => {
   return path.endsWith("/") ? path : `${path}/`;
 };
 
-const renderOverviewHtml = (state: { count: number; rows: DemoRow[]; role: string }): string => `
-  <section class="page-grid overview-grid" data-testid="overview-page">
-    <article class="panel hero-panel">
-      <p class="eyebrow">${t("summary")}</p>
-      <h2>Persistent layout with route-level tools</h2>
-      <p>The shell stays mounted while the outlet swaps pages through the client router.</p>
-      <div class="stat-grid">
-        <span><b>${state.count}</b> signal count</span>
-        <span><b>${state.rows.length}</b> keyed rows</span>
-        <span><b>${escapeHtml(state.role)}</b> role</span>
-      </div>
-    </article>
-    <article class="panel">
-      <h2>${t("activity")}</h2>
-      <ol class="activity-list">
-        <li>Route state is handled by <code>runtime/router</code>.</li>
-        <li>Counters use <code>createSignal</code>, <code>createMemo</code>, and <code>batch</code>.</li>
-        <li>Rows use <code>mountKeyedList</code> with compiled readers.</li>
-      </ol>
-    </article>
-  </section>
-`;
+const pageTemplates = {
+  "/": { source: overviewPageSource, template: overviewTemplate },
+  "/compiler/": { source: compilerPageSource, template: compilerTemplate },
+  "/counter/": { source: counterPageSource, template: counterTemplate },
+  "/forms/": { source: formsPageSource, template: formsTemplate },
+  "/lists/": { source: listsPageSource, template: listsTemplate },
+  "/settings/": { source: settingsPageSource, template: settingsTemplate },
+} satisfies Record<string, PageTemplate>;
 
-const renderCounterHtml = (state: { count: number; step: number }): string => `
-  <section class="page-grid">
-    <article class="panel counter-panel">
-      <div class="counter-readout">
-        <span data-testid="count-value">${state.count}</span>
-        <small>step <b data-testid="step-value">${state.step}</b></small>
-      </div>
-      <div class="toolbar">
-        <button type="button" data-testid="decrement">${t("decrement")}</button>
-        <button type="button" data-testid="increment">${t("increment")}</button>
-        <button type="button" data-testid="double-step">${t("doubleStep")}</button>
-        <button type="button" class="secondary" data-testid="reset-counter">${t("reset")}</button>
-      </div>
-    </article>
-    <article class="panel">
-      <h2>Memo</h2>
-      <p class="metric-large" data-testid="projected-value">${state.count + state.step * 2}</p>
-      <p>Projected value is count plus two steps.</p>
-    </article>
-  </section>
-`;
+const compiledPageCache = new Map<string, ReturnType<typeof compileTemplate>>();
 
-const renderRowHtml = (row: DemoRow): string =>
-  `<li class="row-card${row.status === "done" ? " is-done" : ""}" data-testid="row"><span class="row-status">${row.status}</span><strong data-testid="row-label">${escapeHtml(row.label)}</strong><small>Owner: ${escapeHtml(row.owner)}</small></li>`;
+const renderTemplateHtml = (entry: PageTemplate, scope: Record<string, unknown>): string => {
+  const cached = compiledPageCache.get(entry.source);
+  const compiledPage = cached ?? compileTemplate(entry.source);
+  compiledPageCache.set(entry.source, compiledPage);
+  if (!compiledPage.ok) {
+    throw new Error(compiledPage.error.message);
+  }
+  return renderServerTemplate(compiledPage.value, scope);
+};
 
-const renderListsHtml = (state: { rows: DemoRow[]; openOnly: boolean }): string => `
-  <section class="page-grid">
-    <article class="panel">
-      <div class="toolbar">
-        <button type="button" data-testid="add-row">${t("addRow")}</button>
-        <button type="button" data-testid="rotate-rows">${t("rotateRows")}</button>
-        <button type="button" class="secondary" data-testid="toggle-open-only">${state.openOnly ? t("allRows") : t("openOnly")}</button>
-      </div>
-      <ul class="row-list" data-testid="row-list">${state.rows.map(renderRowHtml).join("")}</ul>
-    </article>
-    <article class="panel">
-      <h2>Selection</h2>
-      <p data-testid="row-mode">${state.openOnly ? t("openOnly") : t("allRows")}</p>
-    </article>
-  </section>
-`;
-
-const renderFormsHtml = (profile: ProfileState): string => `
-  <section class="page-grid">
-    <form class="panel form-panel" action="/profile" method="post" novalidate>
-      <fieldset>
-        <legend>${t("formsTitle")}</legend>
-        <div class="field">
-          <label for="display-name">${t("displayName")}</label>
-          <input id="display-name" name="displayName" autocomplete="name" required />
-        </div>
-        <div class="field">
-          <label for="email">${t("email")}</label>
-          <input id="email" name="email" type="email" autocomplete="email" required />
-        </div>
-        <div class="field">
-          <label for="role">${t("role")}</label>
-          <select id="role" name="role">
-            <option${profile.role === "Runtime" ? " selected" : ""}>Runtime</option>
-            <option${profile.role === "Router" ? " selected" : ""}>Router</option>
-            <option${profile.role === "Design systems" ? " selected" : ""}>Design systems</option>
-          </select>
-        </div>
-      </fieldset>
-      <button type="submit" data-testid="save-profile">${t("saveProfile")}</button>
-      <p class="status" data-testid="form-status" aria-live="polite">${escapeHtml(profile.status)}</p>
-    </form>
-    <article class="panel">
-      <h2>${t("summary")}</h2>
-      <dl class="profile-summary">
-        <div><dt>${t("displayName")}</dt><dd data-testid="profile-name">${escapeHtml(profile.displayName)}</dd></div>
-        <div><dt>${t("email")}</dt><dd data-testid="profile-email">${escapeHtml(profile.email)}</dd></div>
-        <div><dt>${t("role")}</dt><dd data-testid="profile-role">${escapeHtml(profile.role)}</dd></div>
-      </dl>
-    </article>
-  </section>
-`;
-
-const renderCompilerHtml = (state: { rows: DemoRow[] }): string => `
-  <section class="page-grid diagnostics-grid">
-    <article class="panel">
-      <h2>Template</h2>
-      <pre class="code" data-testid="compiled-template">${escapeHtml(templateSource)}</pre>
-    </article>
-    <article class="panel">
-      <h2>Stream output</h2>
-      <pre class="code" data-testid="stream-output">${escapeHtml(renderServerTemplate(compiled, { rows: state.rows, title: "Compiled stream" }))}</pre>
-    </article>
-    <article class="panel wide-panel">
-      <h2>Generated client</h2>
-      <pre class="code" data-testid="generated-client">${escapeHtml(generatedClient)}</pre>
-    </article>
-  </section>
-`;
-
-const renderSettingsHtml = (): string => `
-  <section class="page-grid">
-    <article class="panel">
-      <h2>${t("settingsTitle")}</h2>
-      <div class="segmented" role="group" aria-label="${t("compactMode")}">
-        <button type="button" data-density="compact">${t("compactMode")}</button>
-        <button type="button" data-density="comfortable">${t("comfortableMode")}</button>
-      </div>
-      <label class="switch-row">
-        <input type="checkbox" data-testid="theme-toggle" />
-        <span>${t("theme")}: light</span>
-      </label>
-    </article>
-  </section>
-`;
+const mountTemplate = (
+  entry: PageTemplate,
+  scope: Record<string, unknown>,
+): { element: HTMLElement; cleanup: () => void } => {
+  const element = htmlElement(entry.template.templateHtml);
+  const cleanup = entry.template.bind(element, scope);
+  return { element, cleanup: typeof cleanup === "function" ? cleanup : () => undefined };
+};
 
 const pageTitleForPath = (path: string): MessageKey => {
   switch (normalizedPath(path)) {
@@ -309,23 +302,66 @@ const pageTitleForPath = (path: string): MessageKey => {
   }
 };
 
+const overviewScope = (state: { count: unknown; rowCount: unknown; role: unknown }): Record<string, unknown> => ({
+  count: state.count,
+  copy: copy(),
+  role: state.role,
+  rowCount: state.rowCount,
+});
+
+const compilerScope = (state: { rows: DemoRow[]; streamOutput?: string }): Record<string, unknown> => ({
+  copy: copy(),
+  generatedClient,
+  streamOutput: state.streamOutput ?? renderServerTemplate(compiled, { rows: state.rows, title: "Compiled stream" }),
+  templateSource,
+});
+
 const renderRouteHtml = (
   path: string,
   state: { count: number; step: number; rows: DemoRow[]; openOnly: boolean; profile: ProfileState },
 ): string => {
   switch (normalizedPath(path)) {
     case "/counter/":
-      return renderCounterHtml({ count: state.count, step: state.step });
+      return renderTemplateHtml(pageTemplates["/counter/"], {
+        copy: copy(),
+        count: state.count,
+        decrement: () => undefined,
+        doubleStep: () => undefined,
+        increment: () => undefined,
+        projected: state.count + state.step * 2,
+        resetCounter: () => undefined,
+        step: state.step,
+      });
     case "/lists/":
-      return renderListsHtml({ rows: state.rows, openOnly: state.openOnly });
+      return renderTemplateHtml(pageTemplates["/lists/"], {
+        addRow: () => undefined,
+        copy: copy(),
+        rotateRows: () => undefined,
+        rowMode: state.openOnly ? t("openOnly") : t("allRows"),
+        toggleLabel: state.openOnly ? t("allRows") : t("openOnly"),
+        toggleOpenOnly: () => undefined,
+        visibleRows: state.rows,
+      });
     case "/forms/":
-      return renderFormsHtml(state.profile);
+      return renderTemplateHtml(pageTemplates["/forms/"], {
+        copy: copy(),
+        profile: state.profile,
+        saveProfile: () => undefined,
+      });
     case "/compiler/":
-      return renderCompilerHtml({ rows: state.rows });
+      return renderTemplateHtml(pageTemplates["/compiler/"], compilerScope({ rows: state.rows }));
     case "/settings/":
-      return renderSettingsHtml();
+      return renderTemplateHtml(pageTemplates["/settings/"], {
+        copy: copy(),
+        setComfortable: () => undefined,
+        setCompact: () => undefined,
+        toggleTheme: () => undefined,
+      });
     default:
-      return renderOverviewHtml({ count: state.count, rows: state.rows, role: state.profile.role });
+      return renderTemplateHtml(
+        pageTemplates["/"],
+        overviewScope({ count: state.count, role: state.profile.role, rowCount: state.rows.length }),
+      );
   }
 };
 
@@ -429,48 +465,16 @@ const profileResult = (form: HTMLFormElement): Result<ProfileState, string> => {
   });
 };
 
-const rowListOptions = {
-  signature: "full-app-row-list",
-  key: "row.id",
-  keyRead: (scope: Record<string, unknown>) => (scope.row as DemoRow).id,
-  itemName: "row",
-  templateHtml: `<li class="row-card" data-testid="row"><span class="row-status"> </span><strong data-testid="row-label"> </strong><small> </small></li>`,
-  bindings: [
-    {
-      kind: "text" as const,
-      path: [0, 0],
-      expression: "row.status",
-      read: (scope: Record<string, unknown>) => (scope.row as DemoRow).status,
-    },
-    {
-      kind: "text" as const,
-      path: [1, 0],
-      expression: "row.label",
-      read: (scope: Record<string, unknown>) => (scope.row as DemoRow).label,
-    },
-    {
-      kind: "text" as const,
-      path: [2, 0],
-      expression: "`Owner: ${row.owner}`",
-      read: (scope: Record<string, unknown>) => `Owner: ${(scope.row as DemoRow).owner}`,
-    },
-    {
-      kind: "class" as const,
-      path: [],
-      className: "is-done",
-      expression: "row.status === 'done'",
-      read: (scope: Record<string, unknown>) => (scope.row as DemoRow).status === "done",
-    },
-  ],
-};
-
 export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppInstance> => {
   const count = createSignal(0);
   const step = createSignal(1);
   const projected = createMemo(() => count() + step() * 2);
   const rows = createSignal<DemoRow[]>(initialRows());
+  const rowCount = createMemo(() => rows().length);
   const openOnly = createSignal(false);
   const visibleRows = createMemo(() => rows().filter((row) => !openOnly() || row.status === "open"));
+  const rowMode = createMemo(() => (openOnly() ? t("openOnly") : t("allRows")));
+  const toggleLabel = createMemo(() => (openOnly() ? t("allRows") : t("openOnly")));
   const profile = createStore<ProfileState>(defaultProfile());
   const cleanups: Array<() => void> = [];
   let routeCleanups: Array<() => void> = [];
@@ -532,137 +536,118 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
     return element;
   };
 
+  const mountRouteTemplate = (
+    key: MessageKey,
+    pathname: string,
+    entry: PageTemplate,
+    scope: Record<string, unknown>,
+  ): HTMLElement => {
+    const mounted = mountTemplate(entry, scope);
+    const page = routePage(key, pathname, mounted.element);
+    registerRoute(mounted.cleanup);
+    return page;
+  };
+
   const renderOverview = ({ url }: { url: URL }): HTMLElement =>
-    routePage(
+    mountRouteTemplate(
       "overviewTitle",
       url.pathname,
-      htmlElement(renderOverviewHtml({ count: count(), rows: rows(), role: profile.role })),
+      pageTemplates["/"],
+      overviewScope({ count, role: profile.role, rowCount }),
     );
 
-  const renderCounter = ({ url }: { url: URL }): HTMLElement => {
-    const page = routePage(
-      "counterTitle",
-      url.pathname,
-      htmlElement(renderCounterHtml({ count: count(), step: step() })),
-    );
-    const countValue = page.querySelector("[data-testid='count-value']");
-    const stepValue = page.querySelector("[data-testid='step-value']");
-    const projectedValue = page.querySelector("[data-testid='projected-value']");
-    registerRoute(
-      effect(() => {
-        if (countValue) countValue.textContent = String(count());
-        if (stepValue) stepValue.textContent = String(step());
-        if (projectedValue) projectedValue.textContent = String(projected());
-      }),
-    );
-    page.querySelector<HTMLButtonElement>("[data-testid='decrement']")?.addEventListener("click", () => {
-      count.update((value) => value - step());
-    });
-    page.querySelector<HTMLButtonElement>("[data-testid='increment']")?.addEventListener("click", () => {
-      count.update((value) => value + step());
-    });
-    page.querySelector<HTMLButtonElement>("[data-testid='double-step']")?.addEventListener("click", () => {
-      batch(() => {
-        step.update((value) => value * 2);
-        count.update((value) => value + 0);
-      });
-    });
-    page.querySelector<HTMLButtonElement>("[data-testid='reset-counter']")?.addEventListener("click", () => {
-      batch(() => {
-        count.set(0);
-        step.set(1);
-      });
-    });
-    return page;
-  };
-
-  const renderLists = ({ url }: { url: URL }): HTMLElement => {
-    const page = routePage(
-      "listsTitle",
-      url.pathname,
-      htmlElement(renderListsHtml({ rows: visibleRows(), openOnly: openOnly() })),
-    );
-    const list = page.querySelector(".row-list");
-    const mode = page.querySelector("[data-testid='row-mode']");
-    const toggle = page.querySelector<HTMLButtonElement>("[data-testid='toggle-open-only']");
-    if (list instanceof HTMLElement) {
-      registerRoute(
-        effect(() => {
-          mountKeyedList(list, [], visibleRows(), rowListOptions);
-          if (mode) mode.textContent = openOnly() ? t("openOnly") : t("allRows");
-          if (toggle) toggle.textContent = openOnly() ? t("allRows") : t("openOnly");
+  const renderCounter = ({ url }: { url: URL }): HTMLElement =>
+    mountRouteTemplate("counterTitle", url.pathname, pageTemplates["/counter/"], {
+      copy: copy(),
+      count,
+      decrement: () => count.update((value) => value - step()),
+      doubleStep: () =>
+        batch(() => {
+          step.update((value) => value * 2);
+          count.update((value) => value + 0);
         }),
-      );
-    }
-    page.querySelector<HTMLButtonElement>("[data-testid='add-row']")?.addEventListener("click", () => {
-      const id = Math.max(...rows().map((row) => row.id)) + 1;
-      rows.set([{ id, label: `Inserted row ${id}`, owner: "User", status: "open" }, ...rows()]);
+      increment: () => count.update((value) => value + step()),
+      projected,
+      resetCounter: () =>
+        batch(() => {
+          count.set(0);
+          step.set(1);
+        }),
+      step,
     });
-    page.querySelector<HTMLButtonElement>("[data-testid='rotate-rows']")?.addEventListener("click", () => {
-      const [first, ...rest] = rows();
-      rows.set(first ? [...rest, first] : []);
+
+  const renderLists = ({ url }: { url: URL }): HTMLElement =>
+    mountRouteTemplate("listsTitle", url.pathname, pageTemplates["/lists/"], {
+      addRow: () => {
+        const id = Math.max(...rows().map((row) => row.id)) + 1;
+        rows.set([{ id, label: `Inserted row ${id}`, owner: "User", status: "open" }, ...rows()]);
+      },
+      copy: copy(),
+      rotateRows: () => {
+        const [first, ...rest] = rows();
+        rows.set(first ? [...rest, first] : []);
+      },
+      rowMode,
+      toggleLabel,
+      toggleOpenOnly: () => openOnly.update((value) => !value),
+      visibleRows,
     });
-    toggle?.addEventListener("click", () => openOnly.update((value) => !value));
-    return page;
-  };
 
   const renderForms = ({ url }: { url: URL }): HTMLElement => {
-    const page = routePage("formsTitle", url.pathname, htmlElement(renderFormsHtml(profile)));
-    const form = page.querySelector("form");
-    const status = page.querySelector("[data-testid='form-status']");
-    const profileName = page.querySelector("[data-testid='profile-name']");
-    const profileEmail = page.querySelector("[data-testid='profile-email']");
-    const profileRole = page.querySelector("[data-testid='profile-role']");
-    if (form instanceof HTMLFormElement) {
-      form.addEventListener("submit", (event) => {
-        event.preventDefault();
-        const result = profileResult(form);
-        if (!result.ok) {
-          profile.status = result.error;
-        } else {
-          profile.displayName = result.value.displayName;
-          profile.email = result.value.email;
-          profile.role = result.value.role;
-          profile.status = result.value.status;
-        }
-        if (status) status.textContent = profile.status;
-        if (profileName) profileName.textContent = profile.displayName;
-        if (profileEmail) profileEmail.textContent = profile.email;
-        if (profileRole) profileRole.textContent = profile.role;
-      });
-    }
-    return page;
+    const saveProfile = (event: Event): void => {
+      event.preventDefault();
+      const form = event.currentTarget instanceof HTMLFormElement ? event.currentTarget : undefined;
+      if (!form) {
+        profile.status = t("nameRequired");
+        return;
+      }
+      const result = profileResult(form);
+      if (!result.ok) {
+        profile.status = result.error;
+        return;
+      }
+      profile.displayName = result.value.displayName;
+      profile.email = result.value.email;
+      profile.role = result.value.role;
+      profile.status = result.value.status;
+    };
+    return mountRouteTemplate("formsTitle", url.pathname, pageTemplates["/forms/"], {
+      copy: copy(),
+      profile,
+      saveProfile,
+    });
   };
 
   const renderCompiler = async ({ url }: { url: URL }): Promise<HTMLElement> => {
     const streamOutput = await readGeneratedStream(rows());
-    const page = htmlElement(renderCompilerHtml({ rows: rows() }));
-    const streamOutputElement = page.querySelector("[data-testid='stream-output']");
-    if (streamOutputElement) {
-      streamOutputElement.textContent = streamOutput;
-    }
-    return routePage("compilerTitle", url.pathname, page);
+    return mountRouteTemplate(
+      "compilerTitle",
+      url.pathname,
+      pageTemplates["/compiler/"],
+      compilerScope({ rows: rows(), streamOutput }),
+    );
   };
 
-  const renderSettings = ({ url }: { url: URL }): HTMLElement => {
-    const page = routePage("settingsTitle", url.pathname, htmlElement(renderSettingsHtml()));
-    page.querySelectorAll<HTMLButtonElement>("[data-density]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const density = button.dataset.density === "compact" ? "compact" : "comfortable";
-        profile.density = density;
-        root.dataset.density = density;
-      });
+  const renderSettings = ({ url }: { url: URL }): HTMLElement =>
+    mountRouteTemplate("settingsTitle", url.pathname, pageTemplates["/settings/"], {
+      copy: copy(),
+      setComfortable: () => {
+        profile.density = "comfortable";
+        root.dataset.density = "comfortable";
+      },
+      setCompact: () => {
+        profile.density = "compact";
+        root.dataset.density = "compact";
+      },
+      toggleTheme: (event: Event) => {
+        const input = event.currentTarget;
+        if (!(input instanceof HTMLInputElement)) {
+          return;
+        }
+        profile.theme = input.checked ? "light" : "system";
+        root.dataset.theme = profile.theme;
+      },
     });
-    page.querySelector<HTMLInputElement>("[data-testid='theme-toggle']")?.addEventListener("change", (event) => {
-      const input = event.currentTarget;
-      if (!(input instanceof HTMLInputElement)) {
-        return;
-      }
-      profile.theme = input.checked ? "light" : "system";
-      root.dataset.theme = profile.theme;
-    });
-    return page;
-  };
 
   const target = "#route-outlet";
   const routes: ClientRouteDefinition[] = [

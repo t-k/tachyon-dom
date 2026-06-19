@@ -64,6 +64,16 @@ describe("full app example", () => {
     }
   });
 
+  it("keeps page markup in short route-local template files", () => {
+    const templates = ["overview", "counter", "lists", "forms", "compiler", "settings"];
+
+    for (const page of templates) {
+      const template = join(process.cwd(), "examples", "full-app", page, "page.td");
+      expect(existsSync(template)).toBe(true);
+      expect(readFileSync(template, "utf8")).toContain("<section");
+    }
+  });
+
   it("builds every SSR page entry and minifies production HTML", async () => {
     const outDir = mkdtempSync(join(tmpdir(), "tachyon-full-app-build-"));
     try {

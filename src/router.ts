@@ -547,7 +547,7 @@ const idSegmentFromFile = (segment: string): string => {
 };
 
 const routeKindForFile = (file: string): FileRouteManifestEntry["kind"] | undefined => {
-  if (file.endsWith(".tachyon.html")) {
+  if (/\.(?:td|tachyon(?:\.html)?)$/.test(file)) {
     return "template";
   }
   if (/\/route\.[tj]s$/.test(file)) {
@@ -569,7 +569,7 @@ export const createFileRouteManifest = (
       return [];
     }
     const relative = path.relative(options.rootDir, file).replaceAll(path.sep, "/");
-    const withoutExtension = relative.replace(/\.tachyon\.html$/, "").replace(/\.[tj]s$/, "");
+    const withoutExtension = relative.replace(/\.(?:td|tachyon(?:\.html)?)$/, "").replace(/\.[tj]s$/, "");
     const parts = withoutExtension.split("/");
     const fileName = parts.at(-1) ?? "";
     const routeParts = kind === "module" || kind === "layout" ? parts.slice(0, -1) : parts;

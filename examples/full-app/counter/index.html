@@ -9,54 +9,52 @@
   </head>
   <body>
     <main id="app">
-      <section class="app-shell" data-testid="app-shell" data-ssr-route="/counter/">
-        <aside class="sidebar" aria-label="Primary">
-          <a class="brand" href="/">Tachyon Full App</a>
-          <nav class="nav-list" aria-label="Pages">
-            <a href="/" data-nav>Overview</a>
-            <a href="/counter/" data-nav aria-current="true">Counter</a>
-            <a href="/lists/" data-nav>Lists</a>
-            <a href="/forms/" data-nav>Forms</a>
-            <a href="/compiler/" data-nav>Compiler</a>
-            <a href="/settings/" data-nav>Settings</a>
-          </nav>
-        </aside>
-        <section class="workspace">
-          <header class="topbar">
-            <div>
-              <p class="eyebrow">Tachyon Full App</p>
-              <h1 data-testid="route-title">Counter</h1>
-            </div>
-            <div class="summary-strip" aria-label="Summary">
-              <span><b data-testid="summary-count">0</b> count</span>
-              <span><b data-testid="summary-rows">3</b> rows</span>
-              <span><b data-testid="summary-profile">Guest operator</b></span>
-            </div>
-          </header>
-          <div id="route-outlet" class="route-outlet">
-            <section class="page-grid">
-              <article class="panel counter-panel">
-                <div class="counter-readout">
-                  <span data-testid="count-value">0</span>
-                  <small>step <b data-testid="step-value">1</b></small>
-                </div>
-                <div class="toolbar">
-                  <button type="button" data-testid="decrement">Decrement</button>
-                  <button type="button" data-testid="increment">Increment</button>
-                  <button type="button" data-testid="double-step">Double step</button>
-                  <button type="button" class="secondary" data-testid="reset-counter">Reset</button>
-                </div>
-              </article>
-              <article class="panel">
-                <h2>Memo</h2>
-                <p class="metric-large" data-testid="projected-value">2</p>
-                <p>Projected value is count plus two steps.</p>
-              </article>
-            </section>
+    <section class="app-shell" data-testid="app-shell" data-ssr-route="/counter/">
+      <aside class="sidebar" aria-label="Primary">
+        <a class="brand" href="/">Tachyon Full App</a>
+        <nav class="nav-list" aria-label="Pages">
+          <a href="/" data-nav>Overview</a>
+          <a href="/counter/" data-nav aria-current="true">Counter</a>
+          <a href="/lists/" data-nav>Lists</a>
+          <a href="/forms/" data-nav>Forms</a>
+          <a href="/compiler/" data-nav>Compiler</a>
+          <a href="/settings/" data-nav>Settings</a>
+        </nav>
+      </aside>
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Tachyon Full App</p>
+            <h1 data-testid="route-title">Counter</h1>
           </div>
-          <div id="route-live" class="visually-hidden" aria-live="polite"></div>
-        </section>
+          <div class="summary-strip" aria-label="Summary">
+            <span><b data-testid="summary-count">0</b> count</span>
+            <span><b data-testid="summary-rows">3</b> rows</span>
+            <span><b data-testid="summary-profile">Guest operator</b></span>
+          </div>
+        </header>
+        <div id="route-outlet" class="route-outlet"><section class="page-grid">
+  <article class="panel counter-panel">
+    <div class="counter-readout">
+      <span data-testid="count-value">0</span>
+      <small>step <b data-testid="step-value">1</b></small>
+    </div>
+    <div class="toolbar">
+      <button type="button" data-testid="decrement">Decrement</button>
+      <button type="button" data-testid="increment">Increment</button>
+      <button type="button" data-testid="double-step">Double step</button>
+      <button class="secondary" type="button" data-testid="reset-counter">Reset</button>
+    </div>
+  </article>
+  <article class="panel">
+    <h2>Memo</h2>
+    <p class="metric-large" data-testid="projected-value">2</p>
+    <p>Projected value is count plus two steps.</p>
+  </article>
+</section></div>
+        <div id="route-live" class="visually-hidden" aria-live="polite"></div>
       </section>
-    </main>
+    </section>
+  </main>
   </body>
 </html>

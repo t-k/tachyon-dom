@@ -30,18 +30,18 @@ describe("advanced router features", () => {
   it("creates file-based route manifests from route files", async () => {
     const files = [
       "/app/src/routes/index.tachyon.html",
-      "/app/src/routes/about.tachyon.html",
+      "/app/src/routes/about.td",
       "/app/src/routes/users/[id].tachyon.html",
-      "/app/src/routes/blog/[...slug].tachyon.html",
+      "/app/src/routes/blog/[...slug].td",
       "/app/src/routes/admin/route.ts",
       "/app/src/routes/admin/layout.ts",
     ];
 
     expect(createFileRouteManifest(files, { rootDir: "/app/src/routes" })).toEqual([
       { id: "index", path: "/", file: "/app/src/routes/index.tachyon.html", kind: "template" },
-      { id: "about", path: "/about", file: "/app/src/routes/about.tachyon.html", kind: "template" },
+      { id: "about", path: "/about", file: "/app/src/routes/about.td", kind: "template" },
       { id: "users-id", path: "/users/:id", file: "/app/src/routes/users/[id].tachyon.html", kind: "template" },
-      { id: "blog-slug", path: "/blog/*slug", file: "/app/src/routes/blog/[...slug].tachyon.html", kind: "template" },
+      { id: "blog-slug", path: "/blog/*slug", file: "/app/src/routes/blog/[...slug].td", kind: "template" },
       { id: "admin-route", path: "/admin", file: "/app/src/routes/admin/route.ts", kind: "module" },
       { id: "admin-layout", path: "/admin", file: "/app/src/routes/admin/layout.ts", kind: "layout" },
     ]);
@@ -49,8 +49,8 @@ describe("advanced router features", () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-routes-"));
     try {
       await mkdir(path.join(dir, "users"), { recursive: true });
-      await writeFile(path.join(dir, "index.tachyon.html"), `<main>Home</main>`);
-      await writeFile(path.join(dir, "users", "[id].tachyon.html"), `<main>User</main>`);
+      await writeFile(path.join(dir, "index.td"), `<main>Home</main>`);
+      await writeFile(path.join(dir, "users", "[id].td"), `<main>User</main>`);
       expect((await scanFileRoutes(dir)).map((route) => route.path)).toEqual(["/", "/users/:id"]);
     } finally {
       await rm(dir, { recursive: true, force: true });

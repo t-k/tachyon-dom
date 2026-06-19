@@ -80,11 +80,13 @@ pnpm bench:local:smoke
 The package CLI also exposes:
 
 ```sh
-tachyon-dom compile view.tachyon.html --target client --out view.js
+tachyon-dom compile view.td --target client --out view.js
 tachyon-dom routes src/routes --out route-manifest.json
 tachyon-dom dev --host 127.0.0.1 --port 5173
 tachyon-dom preview --host 127.0.0.1 --port 4173
 ```
+
+Template files use the short `.td` extension. The Vite plugin and file router also accept `.tachyon` and `.tachyon.html` for compatibility.
 
 `pnpm bench:local` starts a temporary Vite server, measures Tachyon DOM against local copies of the keyed vanilla benchmark implementations in Playwright Chromium, prints ratio tables, and writes JSON results under `benchmark/local-compare/results/`.
 

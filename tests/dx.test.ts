@@ -68,7 +68,7 @@ describe("DX helpers", () => {
   it("compiles template files through the CLI helper", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-"));
     try {
-      const input = path.join(dir, "view.tachyon.html");
+      const input = path.join(dir, "view.td");
       const output = path.join(dir, "view.js");
       await writeFile(input, `<main>{title}</main>`);
 
@@ -87,18 +87,18 @@ describe("DX helpers", () => {
       const routesDir = path.join(dir, "routes");
       const output = path.join(dir, "route-manifest.json");
       await mkdir(path.join(routesDir, "users"), { recursive: true });
-      await writeFile(path.join(routesDir, "index.tachyon.html"), `<main>Home</main>`);
-      await writeFile(path.join(routesDir, "users", "[id].tachyon.html"), `<main>User</main>`);
+      await writeFile(path.join(routesDir, "index.td"), `<main>Home</main>`);
+      await writeFile(path.join(routesDir, "users", "[id].td"), `<main>User</main>`);
 
       const result = await buildRouteManifestFile({ routesDir, output });
 
       expect(result.ok).toBe(true);
       expect(JSON.parse(await readFile(output, "utf8"))).toEqual([
-        { id: "index", path: "/", file: path.join(routesDir, "index.tachyon.html"), kind: "template" },
+        { id: "index", path: "/", file: path.join(routesDir, "index.td"), kind: "template" },
         {
           id: "users-id",
           path: "/users/:id",
-          file: path.join(routesDir, "users", "[id].tachyon.html"),
+          file: path.join(routesDir, "users", "[id].td"),
           kind: "template",
         },
       ]);
@@ -120,7 +120,7 @@ describe("DX helpers", () => {
         },
       } as never,
       `<button>{label}</button>`,
-      "/src/button.tachyon.html",
+      "/src/button.td",
     );
 
     expect(result).toMatchObject({
@@ -204,10 +204,10 @@ describe("DX helpers", () => {
   it("generates a virtual route manifest with lazy route modules", async () => {
     const plugin = tachyonDomRoutes({
       routes: [
-        { id: "home", path: "/", module: "/src/routes/index.tachyon.html" },
+        { id: "home", path: "/", module: "/src/routes/index.td" },
         { id: "user", path: "/users/:id", module: "/src/routes/users/[id].tachyon.html" },
       ],
-      files: ["/src/routes/about.tachyon.html"],
+      files: ["/src/routes/about.td"],
       rootDir: "/src/routes",
     });
     if (typeof plugin.resolveId !== "function" || typeof plugin.load !== "function") {
@@ -220,12 +220,13 @@ describe("DX helpers", () => {
     expect(resolved).toBe("\0virtual:tachyon-dom/routes");
     expect(code).toContain(`export const manifest = routes.map`);
     expect(code).toContain(`module: () => import("/src/routes/users/[id].tachyon.html")`);
+    expect(code).toContain(`module: () => import("/src/routes/index.td")`);
     expect(code).toContain(`path: "/about"`);
   });
 
   it("sends route HMR updates for changed route modules", () => {
     const plugin = tachyonDomRoutes({
-      routes: [{ id: "home", path: "/", module: "/src/routes/index.tachyon.html" }],
+      routes: [{ id: "home", path: "/", module: "/src/routes/index.td" }],
     });
     if (typeof plugin.handleHotUpdate !== "function") {
       throw new Error("Missing HMR hook.");
@@ -236,8 +237,8 @@ describe("DX helpers", () => {
     const result = plugin.handleHotUpdate.call(
       {} as never,
       {
-        file: "/src/routes/index.tachyon.html",
-        modules: [{ id: "/src/routes/index.tachyon.html" }],
+        file: "/src/routes/index.td",
+        modules: [{ id: "/src/routes/index.td" }],
         server: {
           ws: {
             send: (payload: unknown) => sent.push(payload),
@@ -250,7 +251,7 @@ describe("DX helpers", () => {
       } as never,
     );
 
-    expect(result).toEqual([module, { id: "/src/routes/index.tachyon.html" }]);
+    expect(result).toEqual([module, { id: "/src/routes/index.td" }]);
     expect(sent).toContainEqual({
       type: "custom",
       event: "tachyon-dom:routes-update",

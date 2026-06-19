@@ -59,7 +59,7 @@ const requestLogPath = (url: string | undefined, includeQuery: boolean): string 
 };
 
 export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
-  const include = options.include ?? /\.tachyon\.html$/;
+  const include = options.include ?? /\.(?:td|tachyon(?:\.html)?)$/;
   const target = options.target ?? "client";
   let command = "serve";
   let mode = "development";
