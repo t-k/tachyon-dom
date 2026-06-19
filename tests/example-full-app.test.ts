@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { build } from "vite";
-import { mountFullAppExample, renderFullAppDocument, renderFullAppShellHtml } from "../examples/full-app/main";
+import { mountFullAppExample } from "../examples/full-app/main";
+import { renderFullAppDocument, renderFullAppShellHtml } from "../examples/full-app/ssr";
 
 const rootForTest = (): HTMLElement => {
   document.body.innerHTML = `<main id="app"></main>`;
@@ -32,35 +33,33 @@ describe("full app example", () => {
       },
       {
         path: "/counter/",
-        file: "counter/index.html",
         prefix: "..",
         title: "Counter",
         marker: "Projected value is count plus two steps.",
       },
-      { path: "/lists/", file: "lists/index.html", prefix: "..", title: "Lists", marker: "Compiler bindings" },
-      { path: "/forms/", file: "forms/index.html", prefix: "..", title: "Forms", marker: "guest@example.com" },
-      { path: "/compiler/", file: "compiler/index.html", prefix: "..", title: "Compiler", marker: "mountKeyedList" },
-      { path: "/settings/", file: "settings/index.html", prefix: "..", title: "Settings", marker: "Comfortable" },
+      { path: "/lists/", prefix: "..", title: "Lists", marker: "Compiler bindings" },
+      { path: "/forms/", prefix: "..", title: "Forms", marker: "guest@example.com" },
+      { path: "/compiler/", prefix: "..", title: "Compiler", marker: "mountKeyedList" },
+      { path: "/settings/", prefix: "..", title: "Settings", marker: "Comfortable" },
     ];
 
     for (const page of pages) {
-      const html = readFileSync(join(process.cwd(), "examples", "full-app", page.file), "utf8");
+      const html = renderFullAppDocument(page.path, page.prefix);
       expect(html).toContain(`data-ssr-route="${page.path}"`);
       expect(html).toContain('data-testid="app-shell"');
       expect(html).toContain(`<h1 data-testid="route-title">${page.title}</h1>`);
       expect(html).toContain(page.marker);
-      expect(renderFullAppDocument(page.path, page.prefix)).toContain(page.marker);
       expect(renderFullAppShellHtml(page.path)).toContain(`data-ssr-route="${page.path}"`);
     }
   });
 
-  it("provides direct Vite entrypoints for every example page", () => {
+  it("does not keep generated HTML entry files in source", () => {
     const pages = ["counter", "lists", "forms", "compiler", "settings"];
 
+    expect(existsSync(join(process.cwd(), "examples", "full-app", "index.html"))).toBe(false);
     for (const page of pages) {
       const entry = join(process.cwd(), "examples", "full-app", page, "index.html");
-      expect(existsSync(entry)).toBe(true);
-      expect(readFileSync(entry, "utf8")).toContain('src="../main.ts"');
+      expect(existsSync(entry)).toBe(false);
     }
   });
 

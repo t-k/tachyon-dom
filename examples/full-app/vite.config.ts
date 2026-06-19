@@ -2,18 +2,26 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin, UserConfig } from "vite";
 import { tachyonDom } from "../../src/vite";
+import { normalizedFullAppPath, renderFullAppDocument, type FullAppDocumentAssets } from "./ssr";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = resolve(root, "../../src");
 
-const pages = {
-  compiler: resolve(root, "compiler/index.html"),
-  counter: resolve(root, "counter/index.html"),
-  forms: resolve(root, "forms/index.html"),
-  index: resolve(root, "index.html"),
-  lists: resolve(root, "lists/index.html"),
-  settings: resolve(root, "settings/index.html"),
+const pages = [
+  { path: "/", fileName: "index.html", prefix: "." },
+  { path: "/counter/", fileName: "counter/index.html", prefix: ".." },
+  { path: "/lists/", fileName: "lists/index.html", prefix: ".." },
+  { path: "/forms/", fileName: "forms/index.html", prefix: ".." },
+  { path: "/compiler/", fileName: "compiler/index.html", prefix: ".." },
+  { path: "/settings/", fileName: "settings/index.html", prefix: ".." },
+] as const;
+
+const pageForPath = (url: string | undefined): (typeof pages)[number] | undefined => {
+  const path = normalizedFullAppPath(new URL(url ?? "/", "http://tachyon.local").pathname);
+  return pages.find((page) => page.path === path);
 };
+
+const prefixed = (prefix: string, fileName: string): string => `${prefix}/${fileName}`;
 
 const minifyHtml = (html: string): string => {
   const preserved: string[] = [];
@@ -32,12 +40,42 @@ const minifyHtml = (html: string): string => {
   return `${minified}\n`;
 };
 
-const htmlMinifyPlugin = (): Plugin => ({
-  name: "tachyon-full-app-html-minify",
-  apply: "build",
-  transformIndexHtml: {
-    order: "post",
-    handler: minifyHtml,
+const fullAppHtmlPlugin = (): Plugin => ({
+  name: "tachyon-full-app-html",
+  configureServer(server) {
+    server.middlewares.use((request, response, next) => {
+      const page = pageForPath(request.url);
+      if (!page) {
+        next();
+        return;
+      }
+      response.statusCode = 200;
+      response.setHeader("Content-Type", "text/html; charset=utf-8");
+      response.end(renderFullAppDocument(page.path, page.prefix));
+    });
+  },
+  generateBundle(_options, bundle) {
+    const entry = Object.values(bundle).find(
+      (item) => item.type === "chunk" && item.isEntry && item.facadeModuleId === resolve(root, "main.ts"),
+    );
+    if (!entry || entry.type !== "chunk") {
+      this.error("Unable to find the full-app entry chunk.");
+      return;
+    }
+    const cssFiles = Object.values(bundle).flatMap((item) =>
+      item.type === "asset" && item.fileName.endsWith(".css") ? [item.fileName] : [],
+    );
+    for (const page of pages) {
+      const assets: FullAppDocumentAssets = {
+        scripts: [prefixed(page.prefix, entry.fileName)],
+        styles: cssFiles.map((fileName) => prefixed(page.prefix, fileName)),
+      };
+      this.emitFile({
+        fileName: page.fileName,
+        source: minifyHtml(renderFullAppDocument(page.path, page.prefix, assets)),
+        type: "asset",
+      });
+    }
   },
 });
 
@@ -45,10 +83,12 @@ export default {
   root,
   build: {
     rollupOptions: {
-      input: pages,
+      input: {
+        main: resolve(root, "main.ts"),
+      },
     },
   },
-  plugins: [tachyonDom({ reactive: true }), htmlMinifyPlugin()],
+  plugins: [tachyonDom({ reactive: true }), fullAppHtmlPlugin()],
   resolve: {
     alias: [
       { find: /^tachyon-dom\/(.+)$/, replacement: `${sourceRoot}/$1.ts` },
