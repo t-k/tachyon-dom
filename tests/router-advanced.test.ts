@@ -222,6 +222,33 @@ describe("advanced router features", () => {
     });
   });
 
+  it("preserves streaming route redirects without emitting fallbacks", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        id: "private",
+        path: "/private",
+        fallback: "<p>Loading</p>",
+        loader: () => redirect("/login"),
+        render: () => "<h1>Private</h1>",
+      },
+    ];
+
+    const result = await renderRouteStream(routes, "https://example.com/private");
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+    const chunks: string[] = [];
+    for await (const chunk of result.value.chunks) {
+      chunks.push(chunk);
+    }
+
+    expect(result.value.status).toBe(302);
+    expect(result.value.headers.get("location")).toBe("/login");
+    expect(chunks).toEqual([]);
+    await expect(result.value.final).resolves.toMatchObject({ status: 302 });
+  });
+
   it("applies security headers and route test utilities", async () => {
     const headers = createSecurityHeaders({ nonce: "abc123", csp: true, hsts: true });
     expect(headers.get("content-security-policy")).toContain(`script-src 'nonce-abc123' 'strict-dynamic'`);

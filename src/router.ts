@@ -1177,43 +1177,72 @@ export const renderRouteStream = async (
       }),
     });
   }
-  const renderedPromise = renderRoute(routes, request, options);
+  const rendered = await renderRoute(routes, request, options);
+  if (!rendered.ok) {
+    return ok({
+      status: rendered.error.status,
+      chunks: (async function* () {
+        yield rendered.error.message;
+      })(),
+      headHtml: "",
+      resourceHints: renderResourceHints(collectRouteResources(match.value.branch)),
+      stateScript: "",
+      headers: new Headers(),
+      final: Promise.resolve({
+        status: rendered.error.status,
+        headHtml: "",
+        resourceHints: "",
+        stateScript: "",
+        headers: new Headers(),
+      }),
+    });
+  }
+  if (rendered.value.status !== 200 || rendered.value.responseBody !== undefined) {
+    return ok({
+      status: rendered.value.status,
+      chunks: (async function* () {
+        const body = rendered.value.responseBody ?? rendered.value.html;
+        if (body) {
+          yield body;
+        }
+      })(),
+      headHtml: rendered.value.headHtml,
+      resourceHints: rendered.value.resourceHints,
+      stateScript: rendered.value.stateScript,
+      headers: rendered.value.headers,
+      final: Promise.resolve({
+        status: rendered.value.status,
+        headHtml: rendered.value.headHtml,
+        resourceHints: rendered.value.resourceHints,
+        stateScript: rendered.value.stateScript,
+        headers: rendered.value.headers,
+      }),
+    });
+  }
   const chunks = async function* (): AsyncIterable<string> {
     for (const entry of match.value.branch) {
       if (entry.route.fallback) {
         yield entry.route.fallback;
       }
     }
-    const rendered = await renderedPromise;
-    if (rendered.ok) {
+    if (rendered.value.html) {
       yield rendered.value.html;
     }
   };
-  const final = renderedPromise.then((rendered) => {
-    if (!rendered.ok) {
-      return {
-        status: rendered.error.status,
-        headHtml: "",
-        resourceHints: "",
-        stateScript: "",
-        headers: new Headers(),
-      };
-    }
-    return {
-      status: rendered.value.status,
-      headHtml: rendered.value.headHtml,
-      resourceHints: rendered.value.resourceHints,
-      stateScript: rendered.value.stateScript,
-      headers: rendered.value.headers,
-    };
+  const final = Promise.resolve({
+    status: rendered.value.status,
+    headHtml: rendered.value.headHtml,
+    resourceHints: rendered.value.resourceHints,
+    stateScript: rendered.value.stateScript,
+    headers: rendered.value.headers,
   });
   return ok({
-    status: 200,
+    status: rendered.value.status,
     chunks: chunks(),
-    headHtml: "",
-    resourceHints: renderResourceHints(collectRouteResources(match.value.branch)),
-    stateScript: "",
-    headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+    headHtml: rendered.value.headHtml,
+    resourceHints: rendered.value.resourceHints,
+    stateScript: rendered.value.stateScript,
+    headers: rendered.value.headers,
     final,
   });
 };

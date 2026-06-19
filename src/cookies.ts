@@ -32,6 +32,14 @@ const encodeCookiePart = (value: string): string => encodeURIComponent(value).re
 
 const decodeCookiePart = (value: string): string => decodeURIComponent(value.replaceAll("+", "%20"));
 
+const tryDecodeCookiePart = (value: string): string | undefined => {
+  try {
+    return decodeCookiePart(value);
+  } catch {
+    return undefined;
+  }
+};
+
 const sessionId = (): string => {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -84,7 +92,12 @@ export const parseCookies = (header: string | null | undefined): Record<string, 
     if (!rawName) {
       continue;
     }
-    cookies[decodeCookiePart(rawName)] = decodeCookiePart(rawValue.join("="));
+    const name = tryDecodeCookiePart(rawName);
+    const value = tryDecodeCookiePart(rawValue.join("="));
+    if (name === undefined || value === undefined) {
+      continue;
+    }
+    cookies[name] = value;
   }
   return cookies;
 };

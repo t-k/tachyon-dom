@@ -1,7 +1,10 @@
 import { Readable } from "node:stream";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createNodeHandler, createWorkersHandler } from "../src/adapters";
-import { createSecurityHeaders, type RouteDefinition } from "../src/router";
+import { createSecurityHeaders, redirect, type RouteDefinition } from "../src/router";
 
 describe("server adapters", () => {
   it("creates a Workers fetch handler with security headers", async () => {
@@ -92,6 +95,50 @@ describe("server adapters", () => {
     expect(render).not.toHaveBeenCalled();
     expect(response.headers.get("content-length")).toBe("15");
     expect(await response.text()).toBe("<h1>Static</h1>");
+  });
+
+  it("preserves streaming redirects through Workers responses", async () => {
+    const handler = createWorkersHandler({
+      routes: [
+        {
+          path: "/private",
+          fallback: "<p>Loading</p>",
+          loader: () => redirect("/login"),
+          render: () => "<h1>Private</h1>",
+        },
+      ],
+      streaming: true,
+    });
+
+    const response = await handler.fetch(new Request("https://example.com/private"));
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("/login");
+    expect(await response.text()).toBe("");
+  });
+
+  it("applies method guards and security headers to static assets", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-adapter-assets-"));
+    try {
+      await writeFile(path.join(dir, "app.js"), `console.log("ok");`);
+      const handler = createWorkersHandler({
+        routes: [{ path: "/", render: () => "<h1>Home</h1>" }],
+        staticAssets: { rootDir: dir, basePath: "/assets" },
+        securityHeaders: createSecurityHeaders({ csp: true, nonce: "asset-nonce" }),
+      });
+
+      const getResponse = await handler.fetch(new Request("https://example.com/assets/app.js"));
+      expect(getResponse.status).toBe(200);
+      expect(getResponse.headers.get("content-security-policy")).toContain("'nonce-asset-nonce'");
+      expect(await getResponse.text()).toBe(`console.log("ok");`);
+
+      const postResponse = await handler.fetch(new Request("https://example.com/assets/app.js", { method: "POST" }));
+      expect(postResponse.status).toBe(405);
+      expect(postResponse.headers.get("allow")).toBe("GET, HEAD");
+      expect(postResponse.headers.get("content-security-policy")).toContain("'nonce-asset-nonce'");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("pipes Node streaming responses without buffering through end text", async () => {

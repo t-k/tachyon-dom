@@ -95,6 +95,7 @@ describe("router security helpers", () => {
 
   it("parses cookies and commits in-memory sessions", async () => {
     expect(parseCookies("theme=dark; sid=abc")).toEqual({ theme: "dark", sid: "abc" });
+    expect(parseCookies("theme=dark; bad=%E0%A4%A; sid=abc")).toEqual({ theme: "dark", sid: "abc" });
     expect(serializeCookie("sid", "abc", { httpOnly: true, sameSite: "Lax", path: "/" })).toBe(
       "sid=abc; Path=/; HttpOnly; SameSite=Lax",
     );

@@ -86,6 +86,17 @@ const responseForStaticRoute = (route: StaticRouteDefinition, request: Request, 
     headers: headersForStaticRoute(route, securityHeaders),
   });
 
+const withSecurityHeaders = (response: Response, securityHeaders?: Headers): Response => {
+  if (!securityHeaders) {
+    return response;
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: mergeHeaders(response.headers, securityHeaders),
+  });
+};
+
 const writeNodeStaticRoute = (
   route: StaticRouteDefinition,
   request: IncomingMessage,
@@ -104,6 +115,9 @@ export const createStaticAssetHandler =
     const url = new URL(request.url);
     if (basePath !== "/" && url.pathname !== basePath && !url.pathname.startsWith(`${basePath}/`)) {
       return undefined;
+    }
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, HEAD" } });
     }
     const relativePath = decodeURIComponent(url.pathname.slice(basePath.length)).replace(/^\/+/, "");
     if (!relativePath || relativePath.split("/").includes("..")) {
@@ -124,7 +138,7 @@ export const createStaticAssetHandler =
         headers.set("content-type", contentTypeFor(file));
       }
       headers.set("content-length", String(info.size));
-      return new Response(await readFile(file), { status: 200, headers });
+      return new Response(request.method === "HEAD" ? null : await readFile(file), { status: 200, headers });
     } catch {
       return new Response("Not Found", { status: 404 });
     }
@@ -138,7 +152,7 @@ const responseFor = async (options: HandlerOptions, request: Request): Promise<R
   if (options.staticAssets) {
     const asset = await createStaticAssetHandler(options.staticAssets)(request);
     if (asset) {
-      return asset;
+      return withSecurityHeaders(asset, options.securityHeaders);
     }
   }
   if (options.streaming) {
