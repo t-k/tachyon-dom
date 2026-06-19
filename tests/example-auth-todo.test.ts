@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mountAuthTodoExample } from "../examples/auth-todo/main";
 
@@ -33,6 +35,15 @@ const addTodo = async (app: HTMLElement, title: string): Promise<void> => {
 };
 
 describe("authenticated todo example", () => {
+  it("uses template files without a hand-written index file", () => {
+    const root = join(process.cwd(), "examples", "auth-todo");
+
+    expect(existsSync(join(root, "auth-view.td"))).toBe(true);
+    expect(existsSync(join(root, "shell.td"))).toBe(true);
+    expect(existsSync(join(root, "todo-view.td"))).toBe(true);
+    expect(existsSync(join(root, "index.html"))).toBe(false);
+  });
+
   it("keeps todo controls unavailable until the user signs in", async () => {
     const app = rootForTest();
 

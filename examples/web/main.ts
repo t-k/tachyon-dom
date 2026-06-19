@@ -1,8 +1,11 @@
 import "./styles.css";
+import templateSource from "./demo.td?raw";
+import shellSource from "./shell.td?raw";
 import {
   compileTemplate,
   generateClientModule,
   generateServerStreamModule,
+  renderServerTemplate,
   type ListBinding,
 } from "../../src/compiler";
 import { createHydrationBoundary, readHydrationState, serializeHydrationState } from "../../src/runtime/hydrate";
@@ -37,8 +40,6 @@ type HydratedDemoState = {
   rows: DemoRow[];
 };
 
-const templateSource = `<main><store count={initialCount}/><h1>{title}</h1><component name="CounterPanel"><section hydrate:id={islandId} class:active={active}><if test={active}><button id="boundary-button" data-testid="boundary-button" on:click={increment}>{count}</button></if><ul><for each={rows} key={row.id}><li class:active={row.active}>{row.label}</li></for></ul></section></component></main>`;
-
 const initialRows = (): DemoRow[] => [
   { id: 1, label: "Compiled template", active: true },
   { id: 2, label: "Chunk stream", active: false },
@@ -71,6 +72,11 @@ const rowBindings = listBinding.bindings.filter(
 
 const generatedServerStreamModule = generateServerStreamModule(compiled);
 const generatedClientModule = generateClientModule(compiled, { reactive: true });
+const shellResult = compileTemplate(shellSource);
+if (!shellResult.ok) {
+  throw new Error(shellResult.error.message);
+}
+const shellTemplate = shellResult.value;
 
 const encodeBase64 = (value: string): string => btoa(value);
 
@@ -79,61 +85,24 @@ const importGeneratedServerModule = async (): Promise<GeneratedServerModule> =>
     /* @vite-ignore */ `data:text/javascript;base64,${encodeBase64(generatedServerStreamModule)}`
   )) as GeneratedServerModule;
 
-const escapeText = (value: string): string =>
-  value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-
 const renderChunkList = (chunks: readonly string[]): string =>
-  chunks.map((chunk, index) => `<div class="chunk"><strong>${index + 1}</strong> ${escapeText(chunk)}</div>`).join("");
+  chunks
+    .map((chunk, index) => {
+      const element = document.createElement("div");
+      const indexElement = document.createElement("strong");
+      element.className = "chunk";
+      indexElement.textContent = String(index + 1);
+      element.append(indexElement, " ", chunk);
+      return element.outerHTML;
+    })
+    .join("");
 
-const renderShell = (): string => `
-  <div class="shell">
-    <header class="topbar">
-      <div>
-        <h1>Tachyon DOM</h1>
-        <p>HTML-first compiler, store state, hydrate boundary markers, keyed list updates, and chunk streaming.</p>
-      </div>
-      <button id="rerender" class="secondary">Re-stream SSR</button>
-    </header>
-    <section class="grid">
-      <article class="panel">
-        <h2>Browser Preview</h2>
-        <div id="preview" class="preview" data-testid="preview"></div>
-        <div class="controls">
-          <button id="increment" data-testid="increment">Increment store</button>
-          <button id="hydrate" class="secondary" data-testid="hydrate">Hydrate boundary</button>
-          <button id="prepend" class="secondary" data-testid="prepend">Prepend row</button>
-          <button id="rotate" class="secondary" data-testid="rotate">Rotate rows</button>
-          <button id="toggle" class="secondary" data-testid="toggle">Toggle active</button>
-        </div>
-      </article>
-      <aside class="panel">
-        <h2>Runtime State</h2>
-        <div class="metrics">
-          <div class="metric"><span>Count</span><strong id="metric-count" data-testid="metric-count">0</strong></div>
-          <div class="metric"><span>Rows</span><strong id="metric-rows" data-testid="metric-rows">0</strong></div>
-          <div class="metric"><span>Hydrate</span><strong id="metric-hydrate" data-testid="metric-hydrate">0</strong></div>
-          <div class="metric"><span>Hydrated</span><strong id="metric-hydrated" data-testid="metric-hydrated">no</strong></div>
-        </div>
-        <h2>Stream Chunks</h2>
-        <div id="chunks" class="chunk-list" data-testid="stream-chunks"></div>
-      </aside>
-    </section>
-    <section class="grid">
-      <article class="panel">
-        <h2>Template</h2>
-        <pre class="code">${escapeText(templateSource)}</pre>
-      </article>
-      <article class="panel">
-        <h2>Compiler IR</h2>
-        <pre class="code" data-testid="compiler-ir">${escapeText(JSON.stringify(compiled.ir.directives, null, 2))}</pre>
-      </article>
-      <article class="panel">
-        <h2>Generated Client Shape</h2>
-        <pre class="code" data-testid="generated-client">${escapeText(generatedClientModule)}</pre>
-      </article>
-    </section>
-  </div>
-`;
+const renderShell = (): string =>
+  renderServerTemplate(shellTemplate, {
+    compilerIr: JSON.stringify(compiled.ir.directives, null, 2),
+    generatedClientModule,
+    templateSource,
+  });
 
 const bindPreview = (preview: HTMLElement, scope: DemoScope): void => {
   const root = preview.querySelector("main");

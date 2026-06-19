@@ -1,7 +1,17 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mountWebExample } from "../examples/web/main";
 
 describe("browser web example", () => {
+  it("uses route-local template files without a hand-written index file", () => {
+    const root = join(process.cwd(), "examples", "web");
+
+    expect(existsSync(join(root, "demo.td"))).toBe(true);
+    expect(existsSync(join(root, "shell.td"))).toBe(true);
+    expect(existsSync(join(root, "index.html"))).toBe(false);
+  });
+
   it("mounts the full feature demo and updates store/list state", async () => {
     document.body.innerHTML = `<div id="app"></div>`;
     const app = document.querySelector("#app");

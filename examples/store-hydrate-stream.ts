@@ -1,4 +1,6 @@
 import { Buffer } from "node:buffer";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { compileTemplate, generateClientModule, generateServerStreamModule } from "../src/compiler";
 import { renderToResponse } from "../src/server/stream";
@@ -13,7 +15,7 @@ type GeneratedServerModule = {
   stream: (scope: ExampleScope) => AsyncIterable<string>;
 };
 
-const source = `<main><store count={initialCount}/><h1>Tachyon streaming example</h1><section hydrate:id={islandId}><button>{count}</button></section></main>`;
+const source = readFileSync(join(process.cwd(), "examples", "store-hydrate-stream.td"), "utf8").trim();
 const compiledResult = compileTemplate(source);
 
 if (!compiledResult.ok) {

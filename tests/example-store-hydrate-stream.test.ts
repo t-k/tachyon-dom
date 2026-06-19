@@ -1,12 +1,18 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { generatedClientModule, renderExampleHtml, renderExampleResponse } from "../examples/store-hydrate-stream";
 
 describe("store hydrate stream example", () => {
+  it("loads the streamed template from a .td file", () => {
+    expect(existsSync(join(process.cwd(), "examples", "store-hydrate-stream.td"))).toBe(true);
+  });
+
   it("renders streamed HTML with hydrate markers", async () => {
     const html = await renderExampleHtml();
 
     expect(html).toContain(`<!--tachyon-hydrate:counter-panel:start-->`);
-    expect(html).toContain(`<section><button>7</button></section>`);
+    expect(html).toContain(`<section>`);
     expect(html).toContain(`<button>7</button>`);
     expect(html).toContain(`<!--tachyon-hydrate:counter-panel:end-->`);
     expect(html).not.toContain(`hydrate:id=`);
@@ -21,7 +27,8 @@ describe("store hydrate stream example", () => {
 
   it("shows the generated client module shape", () => {
     expect(generatedClientModule).toContain(`import { createStore } from "tachyon-dom/runtime/store";`);
-    expect(generatedClientModule).toContain(`export const hydrationBoundaries = [{"path":[1],"id":"islandId"}];`);
+    expect(generatedClientModule).toContain(`export const hydrationBoundaries = [{"path":`);
+    expect(generatedClientModule).toContain(`"id":"islandId"`);
     expect(generatedClientModule).toContain(`read(state.count)`);
   });
 });

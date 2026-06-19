@@ -1,4 +1,8 @@
 import "./styles.css";
+import authViewSource from "./auth-view.td?raw";
+import shellSource from "./shell.td?raw";
+import todoViewSource from "./todo-view.td?raw";
+import { compileTemplate, renderServerTemplate, type CompiledTemplate } from "../../src/compiler";
 import { enhanceForm, validateFormData } from "../../src/runtime/form";
 import { err, ok, type Result } from "../../src/result";
 
@@ -22,6 +26,10 @@ type AuthTodoState = {
 
 type AuthTodoError = {
   message: string;
+};
+
+type TodoViewModel = Todo & {
+  toggleLabel: string;
 };
 
 type MessageKey =
@@ -86,18 +94,41 @@ const messages: Record<"en", Record<MessageKey, string>> = {
 const t = (key: MessageKey, values: Record<string, string | number> = {}): string =>
   Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), messages.en[key]);
 
+const copy = (): Record<string, string> => ({
+  addTodo: t("addTodo"),
+  appSummary: t("appSummary"),
+  appTitle: t("appTitle"),
+  deleteTodo: t("deleteTodo"),
+  emailHint: t("emailHint"),
+  emailLabel: t("emailLabel"),
+  emptyTodos: t("emptyTodos"),
+  localOnlyNotice: t("localOnlyNotice"),
+  newTodoLabel: t("newTodoLabel"),
+  passphraseHint: t("passphraseHint"),
+  passphraseLabel: t("passphraseLabel"),
+  signIn: t("signIn"),
+  signOut: t("signOut"),
+  signedIn: t("signedIn"),
+  todoPlaceholder: t("todoPlaceholder"),
+  todoTitle: t("todoTitle"),
+});
+
 const sessionStorageKey = "tachyon-auth-todo:session";
 const todoStoragePrefix = "tachyon-auth-todo:todos:";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const escapeHtml = (value: string): string =>
-  value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+const compileView = (source: string): CompiledTemplate => {
+  const result = compileTemplate(source);
+  if (!result.ok) {
+    throw new Error(result.error.message);
+  }
+  return result.value;
+};
+
+const authViewTemplate = compileView(authViewSource);
+const shellTemplate = compileView(shellSource);
+const todoViewTemplate = compileView(todoViewSource);
 
 const storageResult = <T>(read: () => T): Result<T, AuthTodoError> => {
   try {
@@ -190,107 +221,33 @@ const createTodo = (title: string, now = Date.now()): Result<Todo, AuthTodoError
   });
 };
 
-const renderAuthForm = (state: AuthTodoState): string => `
-  <section class="auth-panel" aria-labelledby="auth-title">
-    <div>
-      <h2 id="auth-title" data-testid="auth-title">${t("signIn")}</h2>
-      <p>${t("localOnlyNotice")}</p>
-    </div>
-    <form data-testid="auth-form" novalidate>
-      <div class="field">
-        <label for="auth-email">${t("emailLabel")}</label>
-        <span id="auth-email-hint">${t("emailHint")}</span>
-        <input id="auth-email" name="email" type="email" autocomplete="email" aria-describedby="auth-email-hint" required />
-      </div>
-      <div class="field">
-        <label for="auth-passphrase">${t("passphraseLabel")}</label>
-        <span id="auth-passphrase-hint">${t("passphraseHint")}</span>
-        <input
-          id="auth-passphrase"
-          name="passphrase"
-          type="password"
-          autocomplete="current-password"
-          aria-describedby="auth-passphrase-hint"
-          minlength="8"
-          required
-        />
-      </div>
-      <button type="submit">${t("signIn")}</button>
-    </form>
-    <p class="status" data-testid="auth-status" aria-live="polite">${escapeHtml(state.status)}</p>
-  </section>
-`;
+const renderAuthForm = (state: AuthTodoState): string =>
+  renderServerTemplate(authViewTemplate, { copy: copy(), status: state.status });
 
 const openTodoText = (todos: readonly Todo[]): string => {
   const openCount = todos.filter((todo) => !todo.completed).length;
   return openCount === 1 ? t("openCountOne") : t("openCountMany", { count: openCount });
 };
 
-const renderTodoList = (todos: readonly Todo[]): string => {
-  if (todos.length === 0) {
-    return `<p class="empty" data-testid="todo-empty">${t("emptyTodos")}</p>`;
-  }
-  return `
-    <ul class="todo-list" data-testid="todo-list" role="list">
-      ${todos
-        .map(
-          (todo) => `
-            <li class="todo-item${todo.completed ? " completed" : ""}">
-              <span>${escapeHtml(todo.title)}</span>
-              <div class="todo-actions">
-                <button type="button" class="secondary" data-action="toggle" data-id="${escapeHtml(todo.id)}" data-testid="toggle-todo">
-                  ${todo.completed ? t("markOpen") : t("markComplete")}
-                </button>
-                <button type="button" class="danger" data-action="delete" data-id="${escapeHtml(todo.id)}">
-                  ${t("deleteTodo")}
-                </button>
-              </div>
-            </li>
-          `,
-        )
-        .join("")}
-    </ul>
-  `;
-};
+const todoViewModels = (todos: readonly Todo[]): TodoViewModel[] =>
+  todos.map((todo) => ({ ...todo, toggleLabel: todo.completed ? t("markOpen") : t("markComplete") }));
 
-const renderTodoApp = (state: AuthTodoState, session: Session): string => `
-  <section class="todo-panel" aria-labelledby="todo-title">
-    <header class="session-bar">
-      <div>
-        <span class="eyebrow">${t("signedIn")}</span>
-        <strong data-testid="session-email">${escapeHtml(session.email)}</strong>
-      </div>
-      <button type="button" class="secondary" data-testid="sign-out">${t("signOut")}</button>
-    </header>
-    <div class="todo-heading">
-      <h2 id="todo-title">${t("todoTitle")}</h2>
-      <span class="count" data-testid="todo-count">${openTodoText(state.todos)}</span>
-    </div>
-    <form class="todo-form" data-testid="todo-form" novalidate>
-      <label for="todo-title-input">${t("newTodoLabel")}</label>
-      <div class="todo-entry">
-        <input id="todo-title-input" name="title" type="text" autocomplete="off" maxlength="120" placeholder="${t(
-          "todoPlaceholder",
-        )}" required />
-        <button type="submit">${t("addTodo")}</button>
-      </div>
-    </form>
-    ${renderTodoList(state.todos)}
-    <p class="status" data-testid="todo-status" aria-live="polite">${escapeHtml(state.status)}</p>
-  </section>
-`;
+const renderTodoApp = (state: AuthTodoState, session: Session): string =>
+  renderServerTemplate(todoViewTemplate, {
+    copy: copy(),
+    hasTodos: state.todos.length > 0,
+    isEmpty: state.todos.length === 0,
+    openCount: openTodoText(state.todos),
+    session,
+    status: state.status,
+    todos: todoViewModels(state.todos),
+  });
 
-const renderShell = (state: AuthTodoState): string => `
-  <div class="shell">
-    <header class="topbar">
-      <div>
-        <h1>${t("appTitle")}</h1>
-        <p>${t("appSummary")}</p>
-      </div>
-    </header>
-    ${state.session ? renderTodoApp(state, state.session) : renderAuthForm(state)}
-  </div>
-`;
+const renderShell = (state: AuthTodoState): string =>
+  renderServerTemplate(shellTemplate, {
+    copy: copy(),
+    outlet: state.session ? renderTodoApp(state, state.session) : renderAuthForm(state),
+  });
 
 const initialStatus = (
   sessionResult: Result<Session | undefined, AuthTodoError>,
