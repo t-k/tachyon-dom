@@ -44,7 +44,7 @@ The first server streaming adapter, `tachyon-dom/server/stream`, accepts sync or
 
 The first list runtime path, `tachyon-dom/runtime/list`, preserves keyed row elements across updates, moves reused elements into order, patches text/class bindings, removes stale rows, and keeps event handlers current through a mutable row scope. Row events are delegated through the list container so reused rows do not need one listener per row.
 
-`examples/full-app` is a multi-page browser example with a persistent layout, client-side routing, counters, keyed lists, forms, settings, and compiler/stream diagnostics. Run it with `pnpm example:full-app`, then open `/examples/full-app/` on the Vite dev server.
+`examples/full-app` is a multi-page browser example with SSR initial HTML, a persistent layout, client-side routing, counters, keyed lists, forms, settings, and compiler/stream diagnostics. Run it with `pnpm example:full-app`, then open the Vite dev server root.
 
 ## Routing
 

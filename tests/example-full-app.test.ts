@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { mountFullAppExample } from "../examples/full-app/main";
+import { mountFullAppExample, renderFullAppShellHtml } from "../examples/full-app/main";
 
 const rootForTest = (): HTMLElement => {
   document.body.innerHTML = `<main id="app"></main>`;
-  history.replaceState({}, "", "/examples/full-app/");
+  history.replaceState({}, "", "/");
   const app = document.querySelector("#app");
   if (!(app instanceof HTMLElement)) {
     throw new Error("Missing app root.");
@@ -19,6 +19,18 @@ const settled = async (): Promise<void> => {
 };
 
 describe("full app example", () => {
+  it("ships server-rendered initial HTML for the Vite root", () => {
+    const html = readFileSync(join(process.cwd(), "examples", "full-app", "index.html"), "utf8");
+    const ssr = renderFullAppShellHtml();
+
+    expect(html).toContain('data-ssr-route="/"');
+    expect(html).toContain('data-testid="app-shell"');
+    expect(html).toContain("Persistent layout with route-level tools");
+    expect(html).toContain("3</b> keyed rows");
+    expect(ssr).toContain('data-ssr-route="/"');
+    expect(ssr).toContain('href="/counter/"');
+  });
+
   it("provides direct Vite entrypoints for every example page", () => {
     const pages = ["counter", "lists", "forms", "compiler", "settings"];
 
@@ -36,10 +48,10 @@ describe("full app example", () => {
     expect(app.querySelector("[data-testid='app-shell']")).toBeInstanceOf(HTMLElement);
     expect(app.querySelector("[data-testid='route-title']")?.textContent).toBe("Overview");
 
-    await instance.router.navigate("/examples/full-app/counter");
+    await instance.router.navigate("/counter/");
     expect(app.querySelector("[data-testid='route-title']")?.textContent).toBe("Counter");
 
-    await instance.router.navigate("/examples/full-app/lists");
+    await instance.router.navigate("/lists/");
     expect(app.querySelector("[data-testid='route-title']")?.textContent).toBe("Lists");
 
     instance.dispose();
@@ -49,7 +61,7 @@ describe("full app example", () => {
     const app = rootForTest();
     const instance = await mountFullAppExample(app);
 
-    await instance.router.navigate("/examples/full-app/counter");
+    await instance.router.navigate("/counter/");
     app.querySelector<HTMLButtonElement>("[data-testid='increment']")?.click();
     app.querySelector<HTMLButtonElement>("[data-testid='increment']")?.click();
     app.querySelector<HTMLButtonElement>("[data-testid='double-step']")?.click();
@@ -66,7 +78,7 @@ describe("full app example", () => {
     const app = rootForTest();
     const instance = await mountFullAppExample(app);
 
-    await instance.router.navigate("/examples/full-app/lists");
+    await instance.router.navigate("/lists/");
     const firstBefore = app.querySelector("[data-testid='row-label']");
     app.querySelector<HTMLButtonElement>("[data-testid='rotate-rows']")?.click();
     app.querySelector<HTMLButtonElement>("[data-testid='add-row']")?.click();
@@ -84,7 +96,7 @@ describe("full app example", () => {
     const app = rootForTest();
     const instance = await mountFullAppExample(app);
 
-    await instance.router.navigate("/examples/full-app/forms");
+    await instance.router.navigate("/forms/");
     app.querySelector<HTMLButtonElement>("[data-testid='save-profile']")?.click();
     expect(app.querySelector("[data-testid='form-status']")?.textContent).toContain("Enter a display name");
 
@@ -105,7 +117,7 @@ describe("full app example", () => {
     const app = rootForTest();
     const instance = await mountFullAppExample(app);
 
-    await instance.router.navigate("/examples/full-app/compiler");
+    await instance.router.navigate("/compiler/");
 
     expect(app.querySelector("[data-testid='compiled-template']")?.textContent).toContain("<for each={rows}");
     expect(app.querySelector("[data-testid='stream-output']")?.textContent).toContain("<section");

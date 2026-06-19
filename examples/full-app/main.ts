@@ -68,7 +68,7 @@ type StreamModule = {
   stream: (scope: { rows: DemoRow[]; title: string }) => AsyncIterable<string>;
 };
 
-const basePath = "/examples/full-app";
+const basePath = "";
 
 const messages: Record<"en", Record<MessageKey, string>> = {
   en: {
@@ -136,6 +136,63 @@ const initialRows = (): DemoRow[] => [
   { id: 2, label: "Client router", owner: "Router", status: "open" },
   { id: 3, label: "Stream chunks", owner: "Server", status: "done" },
 ];
+
+const renderOverviewHtml = (state: { count: number; rows: DemoRow[]; role: string }): string => `
+  <section class="page-grid overview-grid" data-testid="overview-page">
+    <article class="panel hero-panel">
+      <p class="eyebrow">${t("summary")}</p>
+      <h2>Persistent layout with route-level tools</h2>
+      <p>The shell stays mounted while the outlet swaps pages through the client router.</p>
+      <div class="stat-grid">
+        <span><b>${state.count}</b> signal count</span>
+        <span><b>${state.rows.length}</b> keyed rows</span>
+        <span><b>${escapeHtml(state.role)}</b> role</span>
+      </div>
+    </article>
+    <article class="panel">
+      <h2>${t("activity")}</h2>
+      <ol class="activity-list">
+        <li>Route state is handled by <code>runtime/router</code>.</li>
+        <li>Counters use <code>createSignal</code>, <code>createMemo</code>, and <code>batch</code>.</li>
+        <li>Rows use <code>mountKeyedList</code> with compiled readers.</li>
+      </ol>
+    </article>
+  </section>
+`;
+
+export const renderFullAppShellHtml = (): string => {
+  const rows = initialRows();
+  return `
+    <section class="app-shell" data-testid="app-shell" data-ssr-route="/">
+      <aside class="sidebar" aria-label="Primary">
+        <a class="brand" href="${fullPath("/")}">${t("appName")}</a>
+        <nav class="nav-list" aria-label="Pages">
+          <a href="${fullPath("/")}" data-nav aria-current="true">${t("overview")}</a>
+          <a href="${fullPath("/counter/")}" data-nav>${t("counter")}</a>
+          <a href="${fullPath("/lists/")}" data-nav>${t("lists")}</a>
+          <a href="${fullPath("/forms/")}" data-nav>${t("forms")}</a>
+          <a href="${fullPath("/compiler/")}" data-nav>${t("compiler")}</a>
+          <a href="${fullPath("/settings/")}" data-nav>${t("settings")}</a>
+        </nav>
+      </aside>
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">${t("appName")}</p>
+            <h1 data-testid="route-title">${t("overviewTitle")}</h1>
+          </div>
+          <div class="summary-strip" aria-label="${t("summary")}">
+            <span><b data-testid="summary-count">0</b> count</span>
+            <span><b data-testid="summary-rows">${rows.length}</b> rows</span>
+            <span><b data-testid="summary-profile">Guest operator</b></span>
+          </div>
+        </header>
+        <div id="route-outlet" class="route-outlet">${renderOverviewHtml({ count: 0, rows, role: "Runtime" })}</div>
+        <div id="route-live" class="visually-hidden" aria-live="polite"></div>
+      </section>
+    </section>
+  `;
+};
 
 const templateSource = `<section><h2>{title}</h2><ul><for each={rows} key={row.id}><li class:done={row.status === "done"}>{row.label}</li></for></ul></section>`;
 const compiledResult = compileTemplate(templateSource);
@@ -252,36 +309,9 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
     routeCleanups.push(cleanup);
   };
 
-  root.innerHTML = `
-    <section class="app-shell" data-testid="app-shell">
-      <aside class="sidebar" aria-label="Primary">
-        <a class="brand" href="${fullPath("/")}">${t("appName")}</a>
-        <nav class="nav-list" aria-label="Pages">
-          <a href="${fullPath("/")}" data-nav>${t("overview")}</a>
-          <a href="${fullPath("/counter")}" data-nav>${t("counter")}</a>
-          <a href="${fullPath("/lists")}" data-nav>${t("lists")}</a>
-          <a href="${fullPath("/forms")}" data-nav>${t("forms")}</a>
-          <a href="${fullPath("/compiler")}" data-nav>${t("compiler")}</a>
-          <a href="${fullPath("/settings")}" data-nav>${t("settings")}</a>
-        </nav>
-      </aside>
-      <section class="workspace">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">${t("appName")}</p>
-            <h1 data-testid="route-title">${t("overviewTitle")}</h1>
-          </div>
-          <div class="summary-strip" aria-label="${t("summary")}">
-            <span><b data-testid="summary-count">0</b> count</span>
-            <span><b data-testid="summary-rows">0</b> rows</span>
-            <span><b data-testid="summary-profile">Guest operator</b></span>
-          </div>
-        </header>
-        <div id="route-outlet" class="route-outlet"></div>
-        <div id="route-live" class="visually-hidden" aria-live="polite"></div>
-      </section>
-    </section>
-  `;
+  if (!(root.querySelector("[data-testid='app-shell']") instanceof HTMLElement)) {
+    root.innerHTML = renderFullAppShellHtml();
+  }
 
   const title = root.querySelector("[data-testid='route-title']");
   const summaryCount = root.querySelector("[data-testid='summary-count']");
@@ -327,28 +357,7 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
     routePage(
       "overviewTitle",
       url.pathname,
-      htmlElement(`
-        <section class="page-grid overview-grid">
-          <article class="panel hero-panel">
-            <p class="eyebrow">${t("summary")}</p>
-            <h2>Persistent layout with route-level tools</h2>
-            <p>The shell stays mounted while the outlet swaps pages through the client router.</p>
-            <div class="stat-grid">
-              <span><b>${count()}</b> signal count</span>
-              <span><b>${rows().length}</b> keyed rows</span>
-              <span><b>${escapeHtml(profile.role)}</b> role</span>
-            </div>
-          </article>
-          <article class="panel">
-            <h2>${t("activity")}</h2>
-            <ol class="activity-list">
-              <li>Route state is handled by <code>runtime/router</code>.</li>
-              <li>Counters use <code>createSignal</code>, <code>createMemo</code>, and <code>batch</code>.</li>
-              <li>Rows use <code>mountKeyedList</code> with compiled readers.</li>
-            </ol>
-          </article>
-        </section>
-      `),
+      htmlElement(renderOverviewHtml({ count: count(), rows: rows(), role: profile.role })),
     );
 
   const renderCounter = ({ url }: { url: URL }): HTMLElement => {
