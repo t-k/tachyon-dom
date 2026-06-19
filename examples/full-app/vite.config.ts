@@ -2,23 +2,15 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin, UserConfig } from "vite";
 import { tachyonDom } from "../../src/vite";
-import { normalizedFullAppPath, renderFullAppDocument, type FullAppDocumentAssets } from "./ssr";
+import { fullAppPages, normalizedFullAppPath } from "./app";
+import { renderFullAppDocument, type FullAppDocumentAssets } from "./ssr";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = resolve(root, "../../src");
 
-const pages = [
-  { path: "/", fileName: "index.html", prefix: "." },
-  { path: "/counter/", fileName: "counter/index.html", prefix: ".." },
-  { path: "/lists/", fileName: "lists/index.html", prefix: ".." },
-  { path: "/forms/", fileName: "forms/index.html", prefix: ".." },
-  { path: "/compiler/", fileName: "compiler/index.html", prefix: ".." },
-  { path: "/settings/", fileName: "settings/index.html", prefix: ".." },
-] as const;
-
-const pageForPath = (url: string | undefined): (typeof pages)[number] | undefined => {
+const pageForPath = (url: string | undefined): (typeof fullAppPages)[number] | undefined => {
   const path = normalizedFullAppPath(new URL(url ?? "/", "http://tachyon.local").pathname);
-  return pages.find((page) => page.path === path);
+  return fullAppPages.find((page) => page.path === path);
 };
 
 const prefixed = (prefix: string, fileName: string): string => `${prefix}/${fileName}`;
@@ -65,7 +57,7 @@ const fullAppHtmlPlugin = (): Plugin => ({
     const cssFiles = Object.values(bundle).flatMap((item) =>
       item.type === "asset" && item.fileName.endsWith(".css") ? [item.fileName] : [],
     );
-    for (const page of pages) {
+    for (const page of fullAppPages) {
       const assets: FullAppDocumentAssets = {
         scripts: [prefixed(page.prefix, entry.fileName)],
         styles: cssFiles.map((fileName) => prefixed(page.prefix, fileName)),
