@@ -19,6 +19,10 @@
       "types": "./dist/compiler.d.ts",
       "import": "./dist/compiler.js"
     },
+    "./app": {
+      "types": "./dist/app.d.ts",
+      "import": "./dist/app.js"
+    },
     "./cookies": {
       "types": "./dist/cookies.d.ts",
       "import": "./dist/cookies.js"

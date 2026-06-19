@@ -44,6 +44,32 @@ The first server streaming adapter, `tachyon-dom/server/stream`, accepts sync or
 
 The first list runtime path, `tachyon-dom/runtime/list`, preserves keyed row elements across updates, moves reused elements into order, patches text/class bindings, removes stale rows, and keeps event handlers current through a mutable row scope. Row events are delegated through the list container so reused rows do not need one listener per row.
 
+## App Layer
+
+`tachyon-dom/app` provides a small app definition layer for examples and applications that should not need duplicated `main.ts`, `ssr.ts`, and HTML entry files. Define pages once, render SSR documents from the same definition, and let the Vite preset serve generated HTML in development and emit minified HTML in production:
+
+```ts
+import { defineApp } from "tachyon-dom/app";
+import { tachyonApp, tachyonDom } from "tachyon-dom/vite";
+
+export const app = defineApp({
+  pages: [
+    {
+      path: "/",
+      fileName: "index.html",
+      template: "<section><h1>{title}</h1></section>",
+      scope: { title: "Home" },
+    },
+  ],
+});
+
+export default {
+  plugins: [tachyonDom({ reactive: true }), tachyonApp(app)],
+};
+```
+
+Route-local template conventions are available through `pagesFromRouteFiles()`: `src/routes/index/page.td` maps to `/`, `src/routes/counter/page.td` maps to `/counter/`, `[id]` maps to `:id`, and `[...slug]` maps to a named wildcard. `generateTemplateTypes()` can emit a first-pass scope type from a template's text, class, event, conditional, and list bindings.
+
 `examples/full-app` is a multi-page browser example with SSR initial HTML for every page, a persistent layout, client-side routing, counters, keyed lists, forms, settings, and compiler/stream diagnostics. Run it with `pnpm example:full-app`, then open the Vite dev server root. Source pages are route-local `.td` templates, and the example Vite config generates dev/build HTML entries instead of keeping `index.html` files in source. Production output is available with `pnpm example:full-app:build`; the example config builds every generated page entry and minifies HTML during build.
 
 ## Routing
@@ -82,7 +108,11 @@ The package CLI also exposes:
 ```sh
 tachyon-dom compile view.td --target client --out view.js
 tachyon-dom routes src/routes --out route-manifest.json
+tachyon-dom typegen src/routes/index/page.td --out src/routes/index/page.td.ts
+tachyon-dom add page settings/profile --routes-dir src/routes
+tachyon-dom init --template basic --out my-app
 tachyon-dom dev --host 127.0.0.1 --port 5173
+tachyon-dom build
 tachyon-dom preview --host 127.0.0.1 --port 4173
 ```
 

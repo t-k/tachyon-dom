@@ -1,4 +1,5 @@
 import { err, ok, type Result } from "./result";
+export * from "./app";
 export { textAt } from "./runtime/text";
 
 export type RowKey = number | string;

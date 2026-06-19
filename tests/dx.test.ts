@@ -3,11 +3,19 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createServer } from "vite";
-import { buildRouteManifestFile, compileFile } from "../src/cli";
+import {
+  addPageFiles,
+  buildRouteManifestFile,
+  createStarterFiles,
+  compileFile,
+  generateTemplateTypesFile,
+  serverCommandMessage,
+} from "../src/cli";
+import { defineApp, generateTemplateTypes, pagesFromRouteFiles, renderAppDocument } from "../src/app";
 import { diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
-import { tachyonDom, tachyonDomRoutes } from "../src/vite";
+import { tachyonApp, tachyonDom, tachyonDomRoutes } from "../src/vite";
 
 type PanelScope = {
   title: string;
@@ -107,6 +115,103 @@ describe("DX helpers", () => {
     }
   });
 
+  it("defines an SSR app from page templates without hand-written entry files", () => {
+    const app = defineApp({
+      title: "Docs",
+      pages: [
+        { path: "/", fileName: "index.html", template: `<section><h1>{title}</h1></section>`, scope: { title: "Home" } },
+        {
+          path: "/counter/",
+          fileName: "counter/index.html",
+          template: `<section><h1>{title}</h1><p>{count}</p></section>`,
+          scope: { count: 1, title: "Counter" },
+        },
+      ],
+      shell: ({ routeHtml }) => `<main id="app">${routeHtml}</main>`,
+    });
+
+    expect(renderAppDocument(app, "/counter/")).toContain(`<main id="app"><section><h1>Counter</h1><p>1</p></section></main>`);
+    expect(app.entries({ minify: true }).map((entry) => entry.fileName)).toEqual(["index.html", "counter/index.html"]);
+    expect(app.entries({ minify: true })[1]?.source).not.toContain("\n  <");
+  });
+
+  it("creates page definitions from route-local template files", () => {
+    const pages = pagesFromRouteFiles(
+      ["/repo/src/routes/index/page.td", "/repo/src/routes/counter/page.td", "/repo/src/routes/blog/[...slug]/page.td"],
+      {
+        rootDir: "/repo/src/routes",
+      },
+    );
+
+    expect(pages).toEqual([
+      { assetPrefix: ".", file: "/repo/src/routes/index/page.td", fileName: "index.html", path: "/" },
+      { assetPrefix: "..", file: "/repo/src/routes/counter/page.td", fileName: "counter/index.html", path: "/counter/" },
+      {
+        assetPrefix: "../..",
+        file: "/repo/src/routes/blog/[...slug]/page.td",
+        fileName: "blog/[...slug]/index.html",
+        path: "/blog/*slug/",
+      },
+    ]);
+  });
+
+  it("generates scope types from template bindings", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-typegen-"));
+    try {
+      const input = path.join(dir, "page.td");
+      const output = path.join(dir, "page.td.ts");
+      await writeFile(input, `<button on:click={increment} class:active={selected}>{count}</button>`);
+
+      const inline = generateTemplateTypes(`<main>{title}</main>`, { typeName: "HomeScope" });
+      const result = await generateTemplateTypesFile({ input, output, typeName: "CounterScope" });
+
+      expect(inline.ok && inline.value).toContain("export type HomeScope");
+      expect(result.ok).toBe(true);
+      expect(await readFile(output, "utf8")).toContain("increment: unknown;");
+      expect(await readFile(output, "utf8")).toContain("selected: unknown;");
+      expect(await readFile(output, "utf8")).toContain("count: unknown;");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("adds route-local page files through the CLI helper", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-add-page-"));
+    try {
+      const routesDir = path.join(dir, "src", "routes");
+      const result = await addPageFiles({ name: "settings/profile", routesDir });
+
+      expect(result.ok).toBe(true);
+      expect(await readFile(path.join(routesDir, "settings", "profile", "page.td"), "utf8")).toContain(
+        "<h1>{title}</h1>",
+      );
+      expect(await readFile(path.join(routesDir, "settings", "profile", "route.ts"), "utf8")).toContain(
+        `title: "Settings Profile"`,
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates starter files for new apps", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-starter-"));
+    try {
+      const result = await createStarterFiles({ outDir: dir, template: "basic" });
+
+      expect(result.ok).toBe(true);
+      expect(await readFile(path.join(dir, "src", "routes", "index", "page.td"), "utf8")).toContain("<h1>{title}</h1>");
+      expect(await readFile(path.join(dir, "src", "routes", "index", "route.ts"), "utf8")).toContain("Welcome");
+      expect(await readFile(path.join(dir, "vite.config.ts"), "utf8")).toContain("tachyonApp");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("describes real dev and preview CLI commands", () => {
+    expect(serverCommandMessage({ command: "dev", host: "127.0.0.1", port: 5173 })).toContain("Vite dev server");
+    expect(serverCommandMessage({ command: "preview", host: "127.0.0.1", port: 4173 })).toContain("Vite preview server");
+  });
+
   it("transforms tachyon html files through the Vite plugin", async () => {
     const plugin = tachyonDom({ reactive: true });
     if (typeof plugin.transform !== "function") {
@@ -161,6 +266,39 @@ describe("DX helpers", () => {
 
       expect(logs.some((line) => /^GET \/ 200 \d+ms$/.test(line))).toBe(true);
       expect(logs.some((line) => line.includes("secret"))).toBe(false);
+    } finally {
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("serves SSR app HTML through the Vite app preset", async () => {
+    const app = defineApp({
+      pages: [{ path: "/", fileName: "index.html", template: `<section><h1>{title}</h1></section>`, scope: { title: "Home" } }],
+    });
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-vite-app-"));
+    const server = await createServer({
+      root: dir,
+      logLevel: "silent",
+      plugins: [tachyonApp(app)],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+      },
+    });
+    try {
+      await server.listen();
+      const localUrl = server.resolvedUrls?.local.find((url) => url.startsWith("http://127.0.0.1"));
+      if (!localUrl) {
+        throw new Error("Missing Vite local URL.");
+      }
+
+      const response = await fetch(localUrl);
+      const html = await response.text();
+
+      expect(response.status).toBe(200);
+      expect(html).toContain("<h1>Home</h1>");
+      expect(html).toContain('<main id="app">');
     } finally {
       await server.close();
       await rm(dir, { recursive: true, force: true });

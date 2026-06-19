@@ -1,3 +1,4 @@
+import type { TachyonApp } from "./app";
 import { renderRoute, type RouteDefinition, type RouteRenderOptions, type RouteRenderResult } from "./router";
 
 export const renderRouteForTest = async (
@@ -29,5 +30,15 @@ export const assertRouteParity = async (
         `Route parity mismatch for ${testCase.path}: expected ${rendered.html}, received ${testCase.clientHtml}`,
       );
     }
+  }
+};
+
+export const renderAppForTest = (app: TachyonApp, path: string): string => app.renderDocument(path);
+
+export const assertAppHtml = (app: TachyonApp, path: string, expectedFragments: readonly string[]): void => {
+  const html = renderAppForTest(app, path);
+  const missing = expectedFragments.filter((fragment) => !html.includes(fragment));
+  if (missing.length > 0) {
+    throw new Error(`App HTML assertion failed for ${path}: missing ${missing.join(", ")}`);
   }
 };

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { assertRouteParity, renderRouteForTest } from "../src/testing";
+import { defineApp } from "../src/app";
+import { assertAppHtml, assertRouteParity, renderAppForTest, renderRouteForTest } from "../src/testing";
 
 describe("testing utilities", () => {
   it("renders routes for tests and checks server/client parity", async () => {
@@ -10,5 +11,15 @@ describe("testing utilities", () => {
     await expect(assertRouteParity([route], [{ path: "/", clientHtml: "<h1>Other</h1>" }])).rejects.toThrow(
       "Route parity mismatch",
     );
+  });
+
+  it("renders app definitions for SSR tests", () => {
+    const app = defineApp({
+      pages: [{ path: "/", fileName: "index.html", template: `<section><h1>{title}</h1></section>`, scope: { title: "Home" } }],
+    });
+
+    expect(renderAppForTest(app, "/")).toContain("<h1>Home</h1>");
+    expect(() => assertAppHtml(app, "/", ["<main", "<h1>Home</h1>"])).not.toThrow();
+    expect(() => assertAppHtml(app, "/", ["Missing"])).toThrow("App HTML assertion failed");
   });
 });
