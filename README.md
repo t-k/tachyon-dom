@@ -44,6 +44,8 @@ The first server streaming adapter, `tachyon-dom/server/stream`, accepts sync or
 
 The first list runtime path, `tachyon-dom/runtime/list`, preserves keyed row elements across updates, moves reused elements into order, patches text/class bindings, removes stale rows, and keeps event handlers current through a mutable row scope. Row events are delegated through the list container so reused rows do not need one listener per row.
 
+`examples/full-app` is a multi-page browser example with a persistent layout, client-side routing, counters, keyed lists, forms, settings, and compiler/stream diagnostics. Run it with `pnpm example:full-app`, then open `/examples/full-app/` on the Vite dev server.
+
 ## Routing
 
 Routing is provided as a separate layer instead of being baked into the template compiler. The server router in `tachyon-dom/router` supports static routes, `:param` routes, wildcard routes, nested layouts through `outlet`, route loaders, form actions, auth guards, 404/error boundaries, head descriptor rendering, route hydration state scripts, trusted HTML responses, backend HTML sanitization helpers and adapters, CSRF guards, signed cookie sessions, middleware, observability hooks, deferred data helpers, CSP nonce propagation, resource hints, streaming finalization, build manifests, typed href builders, route preload plans, and route type generation. The client router in `tachyon-dom/runtime/router` supports same-origin link interception, History API navigation, `popstate`, abortable route loaders/actions, action-driven revalidation, loader cache/prefetch/invalidation, Vite route HMR revalidation, scroll-to-top hooks, focus restoration, navigation announcements, title updates, and 404/error rendering.
