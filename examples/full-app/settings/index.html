@@ -8,6 +8,49 @@
     <script type="module" src="../main.ts"></script>
   </head>
   <body>
-    <main id="app"></main>
+    <main id="app">
+      <section class="app-shell" data-testid="app-shell" data-ssr-route="/settings/">
+        <aside class="sidebar" aria-label="Primary">
+          <a class="brand" href="/">Tachyon Full App</a>
+          <nav class="nav-list" aria-label="Pages">
+            <a href="/" data-nav>Overview</a>
+            <a href="/counter/" data-nav>Counter</a>
+            <a href="/lists/" data-nav>Lists</a>
+            <a href="/forms/" data-nav>Forms</a>
+            <a href="/compiler/" data-nav>Compiler</a>
+            <a href="/settings/" data-nav aria-current="true">Settings</a>
+          </nav>
+        </aside>
+        <section class="workspace">
+          <header class="topbar">
+            <div>
+              <p class="eyebrow">Tachyon Full App</p>
+              <h1 data-testid="route-title">Settings</h1>
+            </div>
+            <div class="summary-strip" aria-label="Summary">
+              <span><b data-testid="summary-count">0</b> count</span>
+              <span><b data-testid="summary-rows">3</b> rows</span>
+              <span><b data-testid="summary-profile">Guest operator</b></span>
+            </div>
+          </header>
+          <div id="route-outlet" class="route-outlet">
+            <section class="page-grid">
+              <article class="panel">
+                <h2>Settings</h2>
+                <div class="segmented" role="group" aria-label="Compact">
+                  <button type="button" data-density="compact">Compact</button>
+                  <button type="button" data-density="comfortable">Comfortable</button>
+                </div>
+                <label class="switch-row">
+                  <input type="checkbox" data-testid="theme-toggle" />
+                  <span>Theme: light</span>
+                </label>
+              </article>
+            </section>
+          </div>
+          <div id="route-live" class="visually-hidden" aria-live="polite"></div>
+        </section>
+      </section>
+    </main>
   </body>
 </html>

@@ -1,5 +1,10 @@
 import "./styles.css";
-import { compileTemplate, generateClientModule, generateServerStreamModule } from "../../src/compiler";
+import {
+  compileTemplate,
+  generateClientModule,
+  generateServerStreamModule,
+  renderServerTemplate,
+} from "../../src/compiler";
 import { err, ok, type Result } from "../../src/result";
 import { createClientRouter, type ClientRouter, type ClientRouteDefinition } from "../../src/runtime/router";
 import { batch, createMemo, createSignal, effect } from "../../src/runtime/signal";
@@ -137,6 +142,22 @@ const initialRows = (): DemoRow[] => [
   { id: 3, label: "Stream chunks", owner: "Server", status: "done" },
 ];
 
+const defaultProfile = (): ProfileState => ({
+  density: "comfortable",
+  displayName: "Guest operator",
+  email: "guest@example.com",
+  role: "Runtime",
+  status: "",
+  theme: "system",
+});
+
+const normalizedPath = (path: string): string => {
+  if (path === "" || path === "/") {
+    return "/";
+  }
+  return path.endsWith("/") ? path : `${path}/`;
+};
+
 const renderOverviewHtml = (state: { count: number; rows: DemoRow[]; role: string }): string => `
   <section class="page-grid overview-grid" data-testid="overview-page">
     <article class="panel hero-panel">
@@ -160,39 +181,204 @@ const renderOverviewHtml = (state: { count: number; rows: DemoRow[]; role: strin
   </section>
 `;
 
-export const renderFullAppShellHtml = (): string => {
+const renderCounterHtml = (state: { count: number; step: number }): string => `
+  <section class="page-grid">
+    <article class="panel counter-panel">
+      <div class="counter-readout">
+        <span data-testid="count-value">${state.count}</span>
+        <small>step <b data-testid="step-value">${state.step}</b></small>
+      </div>
+      <div class="toolbar">
+        <button type="button" data-testid="decrement">${t("decrement")}</button>
+        <button type="button" data-testid="increment">${t("increment")}</button>
+        <button type="button" data-testid="double-step">${t("doubleStep")}</button>
+        <button type="button" class="secondary" data-testid="reset-counter">${t("reset")}</button>
+      </div>
+    </article>
+    <article class="panel">
+      <h2>Memo</h2>
+      <p class="metric-large" data-testid="projected-value">${state.count + state.step * 2}</p>
+      <p>Projected value is count plus two steps.</p>
+    </article>
+  </section>
+`;
+
+const renderRowHtml = (row: DemoRow): string =>
+  `<li class="row-card${row.status === "done" ? " is-done" : ""}" data-testid="row"><span class="row-status">${row.status}</span><strong data-testid="row-label">${escapeHtml(row.label)}</strong><small>Owner: ${escapeHtml(row.owner)}</small></li>`;
+
+const renderListsHtml = (state: { rows: DemoRow[]; openOnly: boolean }): string => `
+  <section class="page-grid">
+    <article class="panel">
+      <div class="toolbar">
+        <button type="button" data-testid="add-row">${t("addRow")}</button>
+        <button type="button" data-testid="rotate-rows">${t("rotateRows")}</button>
+        <button type="button" class="secondary" data-testid="toggle-open-only">${state.openOnly ? t("allRows") : t("openOnly")}</button>
+      </div>
+      <ul class="row-list" data-testid="row-list">${state.rows.map(renderRowHtml).join("")}</ul>
+    </article>
+    <article class="panel">
+      <h2>Selection</h2>
+      <p data-testid="row-mode">${state.openOnly ? t("openOnly") : t("allRows")}</p>
+    </article>
+  </section>
+`;
+
+const renderFormsHtml = (profile: ProfileState): string => `
+  <section class="page-grid">
+    <form class="panel form-panel" action="/profile" method="post" novalidate>
+      <fieldset>
+        <legend>${t("formsTitle")}</legend>
+        <div class="field">
+          <label for="display-name">${t("displayName")}</label>
+          <input id="display-name" name="displayName" autocomplete="name" required />
+        </div>
+        <div class="field">
+          <label for="email">${t("email")}</label>
+          <input id="email" name="email" type="email" autocomplete="email" required />
+        </div>
+        <div class="field">
+          <label for="role">${t("role")}</label>
+          <select id="role" name="role">
+            <option${profile.role === "Runtime" ? " selected" : ""}>Runtime</option>
+            <option${profile.role === "Router" ? " selected" : ""}>Router</option>
+            <option${profile.role === "Design systems" ? " selected" : ""}>Design systems</option>
+          </select>
+        </div>
+      </fieldset>
+      <button type="submit" data-testid="save-profile">${t("saveProfile")}</button>
+      <p class="status" data-testid="form-status" aria-live="polite">${escapeHtml(profile.status)}</p>
+    </form>
+    <article class="panel">
+      <h2>${t("summary")}</h2>
+      <dl class="profile-summary">
+        <div><dt>${t("displayName")}</dt><dd data-testid="profile-name">${escapeHtml(profile.displayName)}</dd></div>
+        <div><dt>${t("email")}</dt><dd data-testid="profile-email">${escapeHtml(profile.email)}</dd></div>
+        <div><dt>${t("role")}</dt><dd data-testid="profile-role">${escapeHtml(profile.role)}</dd></div>
+      </dl>
+    </article>
+  </section>
+`;
+
+const renderCompilerHtml = (state: { rows: DemoRow[] }): string => `
+  <section class="page-grid diagnostics-grid">
+    <article class="panel">
+      <h2>Template</h2>
+      <pre class="code" data-testid="compiled-template">${escapeHtml(templateSource)}</pre>
+    </article>
+    <article class="panel">
+      <h2>Stream output</h2>
+      <pre class="code" data-testid="stream-output">${escapeHtml(renderServerTemplate(compiled, { rows: state.rows, title: "Compiled stream" }))}</pre>
+    </article>
+    <article class="panel wide-panel">
+      <h2>Generated client</h2>
+      <pre class="code" data-testid="generated-client">${escapeHtml(generatedClient)}</pre>
+    </article>
+  </section>
+`;
+
+const renderSettingsHtml = (): string => `
+  <section class="page-grid">
+    <article class="panel">
+      <h2>${t("settingsTitle")}</h2>
+      <div class="segmented" role="group" aria-label="${t("compactMode")}">
+        <button type="button" data-density="compact">${t("compactMode")}</button>
+        <button type="button" data-density="comfortable">${t("comfortableMode")}</button>
+      </div>
+      <label class="switch-row">
+        <input type="checkbox" data-testid="theme-toggle" />
+        <span>${t("theme")}: light</span>
+      </label>
+    </article>
+  </section>
+`;
+
+const pageTitleForPath = (path: string): MessageKey => {
+  switch (normalizedPath(path)) {
+    case "/counter/":
+      return "counterTitle";
+    case "/lists/":
+      return "listsTitle";
+    case "/forms/":
+      return "formsTitle";
+    case "/compiler/":
+      return "compilerTitle";
+    case "/settings/":
+      return "settingsTitle";
+    default:
+      return "overviewTitle";
+  }
+};
+
+const renderRouteHtml = (
+  path: string,
+  state: { count: number; step: number; rows: DemoRow[]; openOnly: boolean; profile: ProfileState },
+): string => {
+  switch (normalizedPath(path)) {
+    case "/counter/":
+      return renderCounterHtml({ count: state.count, step: state.step });
+    case "/lists/":
+      return renderListsHtml({ rows: state.rows, openOnly: state.openOnly });
+    case "/forms/":
+      return renderFormsHtml(state.profile);
+    case "/compiler/":
+      return renderCompilerHtml({ rows: state.rows });
+    case "/settings/":
+      return renderSettingsHtml();
+    default:
+      return renderOverviewHtml({ count: state.count, rows: state.rows, role: state.profile.role });
+  }
+};
+
+export const renderFullAppShellHtml = (path = "/"): string => {
   const rows = initialRows();
+  const profile = defaultProfile();
+  const activePath = normalizedPath(path);
   return `
-    <section class="app-shell" data-testid="app-shell" data-ssr-route="/">
+    <section class="app-shell" data-testid="app-shell" data-ssr-route="${escapeHtml(activePath)}">
       <aside class="sidebar" aria-label="Primary">
         <a class="brand" href="${fullPath("/")}">${t("appName")}</a>
         <nav class="nav-list" aria-label="Pages">
-          <a href="${fullPath("/")}" data-nav aria-current="true">${t("overview")}</a>
-          <a href="${fullPath("/counter/")}" data-nav>${t("counter")}</a>
-          <a href="${fullPath("/lists/")}" data-nav>${t("lists")}</a>
-          <a href="${fullPath("/forms/")}" data-nav>${t("forms")}</a>
-          <a href="${fullPath("/compiler/")}" data-nav>${t("compiler")}</a>
-          <a href="${fullPath("/settings/")}" data-nav>${t("settings")}</a>
+          <a href="${fullPath("/")}" data-nav${activePath === "/" ? ' aria-current="true"' : ""}>${t("overview")}</a>
+          <a href="${fullPath("/counter/")}" data-nav${activePath === "/counter/" ? ' aria-current="true"' : ""}>${t("counter")}</a>
+          <a href="${fullPath("/lists/")}" data-nav${activePath === "/lists/" ? ' aria-current="true"' : ""}>${t("lists")}</a>
+          <a href="${fullPath("/forms/")}" data-nav${activePath === "/forms/" ? ' aria-current="true"' : ""}>${t("forms")}</a>
+          <a href="${fullPath("/compiler/")}" data-nav${activePath === "/compiler/" ? ' aria-current="true"' : ""}>${t("compiler")}</a>
+          <a href="${fullPath("/settings/")}" data-nav${activePath === "/settings/" ? ' aria-current="true"' : ""}>${t("settings")}</a>
         </nav>
       </aside>
       <section class="workspace">
         <header class="topbar">
           <div>
             <p class="eyebrow">${t("appName")}</p>
-            <h1 data-testid="route-title">${t("overviewTitle")}</h1>
+            <h1 data-testid="route-title">${t(pageTitleForPath(activePath))}</h1>
           </div>
           <div class="summary-strip" aria-label="${t("summary")}">
             <span><b data-testid="summary-count">0</b> count</span>
             <span><b data-testid="summary-rows">${rows.length}</b> rows</span>
-            <span><b data-testid="summary-profile">Guest operator</b></span>
+            <span><b data-testid="summary-profile">${escapeHtml(profile.displayName)}</b></span>
           </div>
         </header>
-        <div id="route-outlet" class="route-outlet">${renderOverviewHtml({ count: 0, rows, role: "Runtime" })}</div>
+        <div id="route-outlet" class="route-outlet">${renderRouteHtml(activePath, { count: 0, step: 1, rows, openOnly: false, profile })}</div>
         <div id="route-live" class="visually-hidden" aria-live="polite"></div>
       </section>
     </section>
   `;
 };
+
+export const renderFullAppDocument = (path = "/", assetPrefix = "."): string => `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tachyon DOM Full App Example</title>
+    <link rel="stylesheet" href="${assetPrefix}/styles.css" />
+    <script type="module" src="${assetPrefix}/main.ts"></script>
+  </head>
+  <body>
+    <main id="app">${renderFullAppShellHtml(path)}</main>
+  </body>
+</html>
+`;
 
 const templateSource = `<section><h2>{title}</h2><ul><for each={rows} key={row.id}><li class:done={row.status === "done"}>{row.label}</li></for></ul></section>`;
 const compiledResult = compileTemplate(templateSource);
@@ -285,14 +471,7 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
   const rows = createSignal<DemoRow[]>(initialRows());
   const openOnly = createSignal(false);
   const visibleRows = createMemo(() => rows().filter((row) => !openOnly() || row.status === "open"));
-  const profile = createStore<ProfileState>({
-    density: "comfortable",
-    displayName: "Guest operator",
-    email: "guest@example.com",
-    role: "Runtime",
-    status: "",
-    theme: "system",
-  });
+  const profile = createStore<ProfileState>(defaultProfile());
   const cleanups: Array<() => void> = [];
   let routeCleanups: Array<() => void> = [];
 
@@ -364,27 +543,7 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
     const page = routePage(
       "counterTitle",
       url.pathname,
-      htmlElement(`
-        <section class="page-grid">
-          <article class="panel counter-panel">
-            <div class="counter-readout">
-              <span data-testid="count-value">0</span>
-              <small>step <b data-testid="step-value">1</b></small>
-            </div>
-            <div class="toolbar">
-              <button type="button" data-testid="decrement">${t("decrement")}</button>
-              <button type="button" data-testid="increment">${t("increment")}</button>
-              <button type="button" data-testid="double-step">${t("doubleStep")}</button>
-              <button type="button" class="secondary" data-testid="reset-counter">${t("reset")}</button>
-            </div>
-          </article>
-          <article class="panel">
-            <h2>Memo</h2>
-            <p class="metric-large" data-testid="projected-value">0</p>
-            <p>Projected value is count plus two steps.</p>
-          </article>
-        </section>
-      `),
+      htmlElement(renderCounterHtml({ count: count(), step: step() })),
     );
     const countValue = page.querySelector("[data-testid='count-value']");
     const stepValue = page.querySelector("[data-testid='step-value']");
@@ -421,22 +580,7 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
     const page = routePage(
       "listsTitle",
       url.pathname,
-      htmlElement(`
-        <section class="page-grid">
-          <article class="panel">
-            <div class="toolbar">
-              <button type="button" data-testid="add-row">${t("addRow")}</button>
-              <button type="button" data-testid="rotate-rows">${t("rotateRows")}</button>
-              <button type="button" class="secondary" data-testid="toggle-open-only">${t("openOnly")}</button>
-            </div>
-            <ul class="row-list" data-testid="row-list"></ul>
-          </article>
-          <article class="panel">
-            <h2>Selection</h2>
-            <p data-testid="row-mode">${t("allRows")}</p>
-          </article>
-        </section>
-      `),
+      htmlElement(renderListsHtml({ rows: visibleRows(), openOnly: openOnly() })),
     );
     const list = page.querySelector(".row-list");
     const mode = page.querySelector("[data-testid='row-mode']");
@@ -463,45 +607,7 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
   };
 
   const renderForms = ({ url }: { url: URL }): HTMLElement => {
-    const page = routePage(
-      "formsTitle",
-      url.pathname,
-      htmlElement(`
-        <section class="page-grid">
-          <form class="panel form-panel" action="/profile" method="post" novalidate>
-            <fieldset>
-              <legend>${t("formsTitle")}</legend>
-              <div class="field">
-                <label for="display-name">${t("displayName")}</label>
-                <input id="display-name" name="displayName" autocomplete="name" required />
-              </div>
-              <div class="field">
-                <label for="email">${t("email")}</label>
-                <input id="email" name="email" type="email" autocomplete="email" required />
-              </div>
-              <div class="field">
-                <label for="role">${t("role")}</label>
-                <select id="role" name="role">
-                  <option>Runtime</option>
-                  <option>Router</option>
-                  <option>Design systems</option>
-                </select>
-              </div>
-            </fieldset>
-            <button type="submit" data-testid="save-profile">${t("saveProfile")}</button>
-            <p class="status" data-testid="form-status" aria-live="polite">${escapeHtml(profile.status)}</p>
-          </form>
-          <article class="panel">
-            <h2>${t("summary")}</h2>
-            <dl class="profile-summary">
-              <div><dt>${t("displayName")}</dt><dd data-testid="profile-name">${escapeHtml(profile.displayName)}</dd></div>
-              <div><dt>${t("email")}</dt><dd data-testid="profile-email">${escapeHtml(profile.email)}</dd></div>
-              <div><dt>${t("role")}</dt><dd data-testid="profile-role">${escapeHtml(profile.role)}</dd></div>
-            </dl>
-          </article>
-        </section>
-      `),
-    );
+    const page = routePage("formsTitle", url.pathname, htmlElement(renderFormsHtml(profile)));
     const form = page.querySelector("form");
     const status = page.querySelector("[data-testid='form-status']");
     const profileName = page.querySelector("[data-testid='profile-name']");
@@ -530,48 +636,16 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
 
   const renderCompiler = async ({ url }: { url: URL }): Promise<HTMLElement> => {
     const streamOutput = await readGeneratedStream(rows());
-    return routePage(
-      "compilerTitle",
-      url.pathname,
-      htmlElement(`
-        <section class="page-grid diagnostics-grid">
-          <article class="panel">
-            <h2>Template</h2>
-            <pre class="code" data-testid="compiled-template">${escapeHtml(templateSource)}</pre>
-          </article>
-          <article class="panel">
-            <h2>Stream output</h2>
-            <pre class="code" data-testid="stream-output">${escapeHtml(streamOutput)}</pre>
-          </article>
-          <article class="panel wide-panel">
-            <h2>Generated client</h2>
-            <pre class="code" data-testid="generated-client">${escapeHtml(generatedClient)}</pre>
-          </article>
-        </section>
-      `),
-    );
+    const page = htmlElement(renderCompilerHtml({ rows: rows() }));
+    const streamOutputElement = page.querySelector("[data-testid='stream-output']");
+    if (streamOutputElement) {
+      streamOutputElement.textContent = streamOutput;
+    }
+    return routePage("compilerTitle", url.pathname, page);
   };
 
   const renderSettings = ({ url }: { url: URL }): HTMLElement => {
-    const page = routePage(
-      "settingsTitle",
-      url.pathname,
-      htmlElement(`
-        <section class="page-grid">
-          <article class="panel">
-            <h2>${t("settingsTitle")}</h2>
-            <div class="segmented" role="group" aria-label="${t("compactMode")}">
-              <button type="button" data-density="compact">${t("compactMode")}</button>
-              <button type="button" data-density="comfortable">${t("comfortableMode")}</button>
-            </div>
-            <label class="switch-row">
-              <input type="checkbox" data-testid="theme-toggle" />
-              <span>${t("theme")}: light</span>
-            </label>
-          </article>
-        </section>
-      `),
-    );
+    const page = routePage("settingsTitle", url.pathname, htmlElement(renderSettingsHtml()));
     page.querySelectorAll<HTMLButtonElement>("[data-density]").forEach((button) => {
       button.addEventListener("click", () => {
         const density = button.dataset.density === "compact" ? "compact" : "comfortable";
@@ -629,7 +703,9 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
   };
 };
 
-const app = document.querySelector("#app");
-if (app instanceof HTMLElement) {
-  void mountFullAppExample(app);
+if (typeof document !== "undefined") {
+  const app = document.querySelector("#app");
+  if (app instanceof HTMLElement) {
+    void mountFullAppExample(app);
+  }
 }

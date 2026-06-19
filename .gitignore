@@ -13,3 +13,4 @@ benchmark/web-framework/fixtures/*/.vinxi/
 benchmark/web-framework/fixtures/*/dist/
 benchmark/web-framework/fixtures/*/node_modules/
 benchmark/web-framework/fixtures/*/src/routeTree.gen.ts
+examples/*/dist/

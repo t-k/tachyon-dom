@@ -1,7 +1,9 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { mountFullAppExample, renderFullAppShellHtml } from "../examples/full-app/main";
+import { build } from "vite";
+import { mountFullAppExample, renderFullAppDocument, renderFullAppShellHtml } from "../examples/full-app/main";
 
 const rootForTest = (): HTMLElement => {
   document.body.innerHTML = `<main id="app"></main>`;
@@ -19,16 +21,37 @@ const settled = async (): Promise<void> => {
 };
 
 describe("full app example", () => {
-  it("ships server-rendered initial HTML for the Vite root", () => {
-    const html = readFileSync(join(process.cwd(), "examples", "full-app", "index.html"), "utf8");
-    const ssr = renderFullAppShellHtml();
+  it("ships server-rendered initial HTML for every example page", () => {
+    const pages = [
+      {
+        path: "/",
+        file: "index.html",
+        prefix: ".",
+        title: "Overview",
+        marker: "Persistent layout with route-level tools",
+      },
+      {
+        path: "/counter/",
+        file: "counter/index.html",
+        prefix: "..",
+        title: "Counter",
+        marker: "Projected value is count plus two steps.",
+      },
+      { path: "/lists/", file: "lists/index.html", prefix: "..", title: "Lists", marker: "Compiler bindings" },
+      { path: "/forms/", file: "forms/index.html", prefix: "..", title: "Forms", marker: "guest@example.com" },
+      { path: "/compiler/", file: "compiler/index.html", prefix: "..", title: "Compiler", marker: "mountKeyedList" },
+      { path: "/settings/", file: "settings/index.html", prefix: "..", title: "Settings", marker: "Comfortable" },
+    ];
 
-    expect(html).toContain('data-ssr-route="/"');
-    expect(html).toContain('data-testid="app-shell"');
-    expect(html).toContain("Persistent layout with route-level tools");
-    expect(html).toContain("3</b> keyed rows");
-    expect(ssr).toContain('data-ssr-route="/"');
-    expect(ssr).toContain('href="/counter/"');
+    for (const page of pages) {
+      const html = readFileSync(join(process.cwd(), "examples", "full-app", page.file), "utf8");
+      expect(html).toContain(`data-ssr-route="${page.path}"`);
+      expect(html).toContain('data-testid="app-shell"');
+      expect(html).toContain(`<h1 data-testid="route-title">${page.title}</h1>`);
+      expect(html).toContain(page.marker);
+      expect(renderFullAppDocument(page.path, page.prefix)).toContain(page.marker);
+      expect(renderFullAppShellHtml(page.path)).toContain(`data-ssr-route="${page.path}"`);
+    }
   });
 
   it("provides direct Vite entrypoints for every example page", () => {
@@ -40,6 +63,38 @@ describe("full app example", () => {
       expect(readFileSync(entry, "utf8")).toContain('src="../main.ts"');
     }
   });
+
+  it("builds every SSR page entry and minifies production HTML", async () => {
+    const outDir = mkdtempSync(join(tmpdir(), "tachyon-full-app-build-"));
+    try {
+      await build({
+        build: {
+          emptyOutDir: true,
+          outDir,
+        },
+        configFile: join(process.cwd(), "examples", "full-app", "vite.config.ts"),
+        logLevel: "silent",
+      });
+
+      const pages = [
+        "index.html",
+        "counter/index.html",
+        "lists/index.html",
+        "forms/index.html",
+        "compiler/index.html",
+        "settings/index.html",
+      ];
+      for (const page of pages) {
+        expect(existsSync(join(outDir, page))).toBe(true);
+      }
+      const html = readFileSync(join(outDir, "counter", "index.html"), "utf8");
+      expect(html).toContain('data-ssr-route="/counter/"');
+      expect(html).toContain("Projected value is count plus two steps.");
+      expect(html).not.toContain("\n  <");
+    } finally {
+      rmSync(outDir, { force: true, recursive: true });
+    }
+  }, 30000);
 
   it("mounts a persistent layout and navigates between pages", async () => {
     const app = rootForTest();

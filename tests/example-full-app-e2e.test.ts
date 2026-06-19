@@ -35,15 +35,28 @@ describe("full app browser example", () => {
     await server?.close();
   });
 
-  it("serves SSR HTML at the dev server root and keeps the hydrated shell mounted", async () => {
+  it("serves SSR HTML for every page and keeps the hydrated shell mounted", async () => {
     if (!page) {
       throw new Error("Missing page.");
     }
-    const response = await fetch(`${baseUrl()}/`);
-    const html = await response.text();
-    expect(html).toContain('data-ssr-route="/"');
-    expect(html).toContain("Persistent layout with route-level tools");
-    expect(html).not.toContain('<main id="app"></main>');
+    const pages = [
+      { path: "/", title: "Overview", marker: "Persistent layout with route-level tools" },
+      { path: "/counter/", title: "Counter", marker: "Projected value is count plus two steps." },
+      { path: "/lists/", title: "Lists", marker: "Compiler bindings" },
+      { path: "/forms/", title: "Forms", marker: "guest@example.com" },
+      { path: "/compiler/", title: "Compiler", marker: "mountKeyedList" },
+      { path: "/settings/", title: "Settings", marker: "Comfortable" },
+    ];
+
+    for (const route of pages) {
+      const response = await fetch(`${baseUrl()}${route.path}`);
+      const html = await response.text();
+      expect(response.status).toBe(200);
+      expect(html).toContain(`data-ssr-route="${route.path}"`);
+      expect(html).toContain(`<h1 data-testid="route-title">${route.title}</h1>`);
+      expect(html).toContain(route.marker);
+      expect(html).not.toContain('<main id="app"></main>');
+    }
 
     await page.addInitScript(() => {
       const hits: number[] = [];
@@ -90,5 +103,25 @@ describe("full app browser example", () => {
     await page.getByRole("link", { name: "Compiler" }).click();
     expect(await page.getByTestId("stream-output").textContent()).toContain("<section");
     expect(await page.getByTestId("generated-client").textContent()).toContain("mountKeyedList");
+  }, 30000);
+
+  it("hydrates each directly served SSR page without losing the route", async () => {
+    if (!page) {
+      throw new Error("Missing page.");
+    }
+    const pages = [
+      { path: "/", title: "Overview", marker: "Persistent layout" },
+      { path: "/counter/", title: "Counter", marker: "Projected value" },
+      { path: "/lists/", title: "Lists", marker: "Compiler bindings" },
+      { path: "/forms/", title: "Forms", marker: "guest@example.com" },
+      { path: "/compiler/", title: "Compiler", marker: "mountKeyedList" },
+      { path: "/settings/", title: "Settings", marker: "Comfortable" },
+    ];
+
+    for (const route of pages) {
+      await page.goto(`${baseUrl()}${route.path}`, { waitUntil: "networkidle" });
+      expect(await page.getByTestId("route-title").textContent()).toBe(route.title);
+      expect(await page.locator("#route-outlet").textContent()).toContain(route.marker);
+    }
   }, 30000);
 });
