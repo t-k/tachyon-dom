@@ -1,5 +1,5 @@
 import { compileTemplate, renderServerTemplate } from "./compiler/index";
-import { compileTachyonSfc } from "./compiler/sfc";
+import { compileTachyonSfc, generateSfcScriptDeclarations } from "./compiler/sfc";
 import type { ClientBinding, CompiledTemplate } from "./compiler/types";
 import { err, ok, type Result } from "./result";
 
@@ -299,4 +299,34 @@ export const generateTemplateTypes = (source: string, options: TemplateTypeOptio
     .map((name) => `  ${name}: unknown;`)
     .join("\n");
   return ok(`export type ${typeName} = {\n${fields ? `${fields}\n` : ""}};\n`);
+};
+
+export const generateTachyonModuleTypes = (
+  source: string,
+  options: TemplateTypeOptions = {},
+): Result<string, string> => {
+  const result = compileTachyonSfc(source);
+  if (!result.ok) {
+    return err(result.error.message);
+  }
+  const scopeTypes = generateTemplateTypes(source, options);
+  if (!scopeTypes.ok) {
+    return err(scopeTypes.error);
+  }
+  const scriptTypes = generateSfcScriptDeclarations(result.value.descriptor.script);
+  if (!scriptTypes.ok) {
+    return err(scriptTypes.error);
+  }
+  const typeName = options.typeName ?? "TemplateScope";
+  const templateExports = [
+    `export declare const templateHtml: string;`,
+    `export declare const hydrationBoundaries: unknown[];`,
+    `export declare const componentBoundaries: unknown[];`,
+    `export declare const bind: (root: Element, scope: ${typeName} & Record<string, unknown>) => void | (() => void);`,
+  ].join("\n");
+  return ok(
+    [scriptTypes.value, scopeTypes.value.trim(), templateExports]
+      .filter((part) => part.length > 0)
+      .join("\n\n") + "\n",
+  );
 };

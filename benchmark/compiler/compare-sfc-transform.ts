@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { compileTemplate, generateClientModule } from "../../src/compiler";
-import { compileTachyonSfc, sfcDefaultScopeName, transformSfcScript } from "../../src/compiler/sfc";
+import { compileTachyonSfc, transformSfcScript } from "../../src/compiler/sfc";
 
 type CaseGroup = {
   name: string;
@@ -37,9 +37,12 @@ const compileSfcTemplateOnly = (): void => {
     throw new Error(compiled.error.message);
   }
   const script = transformSfcScript(compiled.value.descriptor.script);
+  if (!script.ok) {
+    throw new Error(script.error.message);
+  }
   generateClientModule(compiled.value.template, {
     reactive: true,
-    ...(script.defaultScopeName ? { defaultScopeName: sfcDefaultScopeName } : {}),
+    ...(script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {}),
   });
 };
 
@@ -49,9 +52,12 @@ const compileSfcWithScript = (): void => {
     throw new Error(compiled.error.message);
   }
   const script = transformSfcScript(compiled.value.descriptor.script);
-  const moduleCode = `${script.code}${generateClientModule(compiled.value.template, {
+  if (!script.ok) {
+    throw new Error(script.error.message);
+  }
+  const moduleCode = `${script.value.code}${generateClientModule(compiled.value.template, {
     reactive: true,
-    ...(script.defaultScopeName ? { defaultScopeName: sfcDefaultScopeName } : {}),
+    ...(script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {}),
   })}`;
   if (moduleCode.length === 0) {
     throw new Error("Expected generated module code.");

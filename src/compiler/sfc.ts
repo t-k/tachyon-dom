@@ -1,9 +1,11 @@
+import * as ts from "typescript";
 import { err, ok, type Result } from "../result";
 import { compileTemplate } from "./index";
 import type { CompiledTemplate, CompilerError } from "./types";
 
 export const sfcDefaultScopeName = "__tachyonSfcDefaultScope";
 export const sfcNamedScopeName = "__tachyonSfcScope";
+export const sfcSetupScopeName = "__tachyonSfcSetupScope";
 
 export type TachyonSfcScript = {
   attrs: string;
@@ -32,9 +34,28 @@ export type CompiledTachyonSfc = {
 export type TransformedSfcScript = {
   code: string;
   defaultScopeName?: string;
+  setupBindings: string[];
 };
 
 const scriptOpenPattern = /<script\b([^>]*)>/gi;
+const autoImports: Record<string, string> = {
+  batch: "tachyon-dom",
+  compileTachyonSfc: "tachyon-dom",
+  createClientRouter: "tachyon-dom",
+  createMemo: "tachyon-dom",
+  createSignal: "tachyon-dom",
+  createStore: "tachyon-dom",
+  effect: "tachyon-dom",
+  enhanceForm: "tachyon-dom",
+  err: "tachyon-dom",
+  generateClientModule: "tachyon-dom",
+  generateServerStreamModule: "tachyon-dom",
+  ok: "tachyon-dom",
+  readTextStreamChunks: "tachyon-dom",
+  renderServerTemplate: "tachyon-dom",
+  renderToReadableStream: "tachyon-dom",
+  validateFormData: "tachyon-dom",
+};
 
 const mapGeneratedOffset = (ranges: readonly TemplateRange[], sourceLength: number, offset: number): number => {
   for (const range of ranges) {
@@ -62,6 +83,167 @@ const emptyTemplate = (source: string): CompiledTemplate => ({
     templateHtml: "",
   },
 });
+
+const attrValue = (attrs: string, name: string): string | undefined => {
+  const pattern = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s"'>]+))`, "i");
+  const match = pattern.exec(attrs);
+  return match?.[1] ?? match?.[2] ?? match?.[3];
+};
+
+const hasBooleanAttr = (attrs: string, name: string): boolean =>
+  new RegExp(`(?:^|\\s)${name}(?:\\s|=|$)`, "i").test(attrs);
+
+export const sfcScriptLanguage = (script: TachyonSfcScript | undefined): "js" | "ts" => {
+  const lang = attrValue(script?.attrs ?? "", "lang")?.toLowerCase();
+  return lang === "ts" || lang === "typescript" ? "ts" : "js";
+};
+
+export const isSfcSetupScript = (script: TachyonSfcScript | undefined): boolean =>
+  hasBooleanAttr(script?.attrs ?? "", "setup");
+
+const sourceFileFor = (source: string, script: TachyonSfcScript | undefined): ts.SourceFile =>
+  ts.createSourceFile(
+    sfcScriptLanguage(script) === "ts" ? "component.td.ts" : "component.td.js",
+    source,
+    ts.ScriptTarget.ES2022,
+    true,
+    sfcScriptLanguage(script) === "ts" ? ts.ScriptKind.TS : ts.ScriptKind.JS,
+  );
+
+const compilerErrorFromDiagnostic = (diagnostic: ts.Diagnostic, script: TachyonSfcScript): CompilerError => {
+  const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
+  return {
+    message,
+    offset: script.offset + (typeof diagnostic.start === "number" ? diagnostic.start : 0),
+  };
+};
+
+const transpileScriptContent = (script: TachyonSfcScript): Result<string, CompilerError> => {
+  const language = sfcScriptLanguage(script);
+  if (language === "js") {
+    return ok(script.content.trim());
+  }
+  const result = ts.transpileModule(script.content, {
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+      useDefineForClassFields: true,
+      verbatimModuleSyntax: true,
+    },
+    fileName: "component.td.ts",
+    reportDiagnostics: true,
+  });
+  const diagnostic = result.diagnostics?.find((item) => item.category === ts.DiagnosticCategory.Error);
+  if (diagnostic) {
+    return err(compilerErrorFromDiagnostic(diagnostic, script));
+  }
+  return ok(result.outputText.trim());
+};
+
+const addBindingNames = (name: ts.BindingName, names: Set<string>): void => {
+  if (ts.isIdentifier(name)) {
+    names.add(name.text);
+    return;
+  }
+  for (const element of name.elements) {
+    if (ts.isBindingElement(element)) {
+      addBindingNames(element.name, names);
+    }
+  }
+};
+
+const topLevelBindings = (script: TachyonSfcScript | undefined): string[] => {
+  if (!script) {
+    return [];
+  }
+  const names = new Set<string>();
+  const sourceFile = sourceFileFor(script.content, script);
+  for (const statement of sourceFile.statements) {
+    if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        addBindingNames(declaration.name, names);
+      }
+    } else if (ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) {
+      if (statement.name) {
+        names.add(statement.name.text);
+      }
+    }
+  }
+  return Array.from(names).sort();
+};
+
+const isDeclarationName = (node: ts.Identifier): boolean => {
+  const parent = node.parent;
+  return (
+    (ts.isVariableDeclaration(parent) && parent.name === node) ||
+    (ts.isFunctionDeclaration(parent) && parent.name === node) ||
+    (ts.isClassDeclaration(parent) && parent.name === node) ||
+    (ts.isParameter(parent) && parent.name === node) ||
+    (ts.isImportSpecifier(parent) && parent.name === node) ||
+    (ts.isImportClause(parent) && parent.name === node) ||
+    (ts.isNamespaceImport(parent) && parent.name === node) ||
+    (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+    (ts.isPropertyAssignment(parent) && parent.name === node && !parent.name.getText().startsWith("{")) ||
+    (ts.isShorthandPropertyAssignment(parent) && parent.name === node)
+  );
+};
+
+const collectScriptIdentifiers = (
+  source: string,
+  script: TachyonSfcScript | undefined,
+): { declared: Set<string>; referenced: Set<string> } => {
+  const declared = new Set<string>();
+  const referenced = new Set<string>();
+  const sourceFile = sourceFileFor(source, script);
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node)) {
+      const clause = node.importClause;
+      if (clause?.name) {
+        declared.add(clause.name.text);
+      }
+      if (clause?.namedBindings) {
+        if (ts.isNamespaceImport(clause.namedBindings)) {
+          declared.add(clause.namedBindings.name.text);
+        } else {
+          for (const specifier of clause.namedBindings.elements) {
+            declared.add(specifier.name.text);
+          }
+        }
+      }
+      return;
+    }
+    if (ts.isVariableDeclaration(node)) {
+      addBindingNames(node.name, declared);
+    } else if (ts.isParameter(node)) {
+      addBindingNames(node.name, declared);
+    } else if ((ts.isFunctionDeclaration(node) || ts.isClassDeclaration(node)) && node.name) {
+      declared.add(node.name.text);
+    } else if (ts.isIdentifier(node) && !isDeclarationName(node)) {
+      referenced.add(node.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return { declared, referenced };
+};
+
+const autoImportScriptHelpers = (code: string, script: TachyonSfcScript | undefined): string => {
+  const identifiers = collectScriptIdentifiers(code, script);
+  const importsByModule = new Map<string, string[]>();
+  for (const [name, module] of Object.entries(autoImports)) {
+    if (!identifiers.referenced.has(name) || identifiers.declared.has(name)) {
+      continue;
+    }
+    importsByModule.set(module, [...(importsByModule.get(module) ?? []), name]);
+  }
+  if (importsByModule.size === 0) {
+    return code;
+  }
+  const imports = Array.from(importsByModule)
+    .map(([module, names]) => `import { ${names.sort().join(", ")} } from ${JSON.stringify(module)};`)
+    .join("\n");
+  return `${imports}\n${code}`;
+};
 
 export const parseTachyonSfc = (source: string): Result<TachyonSfcDescriptor, CompilerError> => {
   const matches = Array.from(source.matchAll(scriptOpenPattern));
@@ -148,25 +330,64 @@ export const generateScriptOnlyModule = (target: "client" | "server" | "stream")
   ].join("\n");
 };
 
-export const transformSfcScript = (script: TachyonSfcScript | undefined): TransformedSfcScript => {
+export const transformSfcScript = (script: TachyonSfcScript | undefined): Result<TransformedSfcScript, CompilerError> => {
   if (!script || script.content.trim().length === 0) {
-    return { code: "" };
+    return ok({ code: "", setupBindings: [] });
+  }
+  const transpiled = transpileScriptContent(script);
+  if (!transpiled.ok) {
+    return err(transpiled.error);
+  }
+  const setupBindings = isSfcSetupScript(script) ? topLevelBindings(script) : [];
+  const content = autoImportScriptHelpers(transpiled.value, script);
+  if (isSfcSetupScript(script)) {
+    const scopeEntries = setupBindings.map((name) => `${name}: ${name}`).join(", ");
+    return ok({
+      code: `${content}\nconst ${sfcSetupScopeName} = { ${scopeEntries} };\n`,
+      defaultScopeName: sfcSetupScopeName,
+      setupBindings,
+    });
   }
   const namedScopeExport = /\bexport\s+const\s+scope\s*=/;
-  if (namedScopeExport.test(script.content)) {
-    const code = script.content.replace(namedScopeExport, `const ${sfcNamedScopeName} =`).trim();
-    return {
+  const defaultExport = /\bexport\s+default\b/;
+  if (namedScopeExport.test(content) && defaultExport.test(content)) {
+    return err({ message: "Use either export const scope or export default, not both.", offset: script.offset });
+  }
+  if (namedScopeExport.test(content)) {
+    const code = content.replace(namedScopeExport, `const ${sfcNamedScopeName} =`).trim();
+    return ok({
       code: `${code}\nexport { ${sfcNamedScopeName} as scope };\n`,
       defaultScopeName: sfcNamedScopeName,
-    };
+      setupBindings,
+    });
   }
-  const defaultExport = /\bexport\s+default\b/;
-  if (!defaultExport.test(script.content)) {
-    return { code: `${script.content.trim()}\n` };
+  if (!defaultExport.test(content)) {
+    return ok({ code: `${content.trim()}\n`, setupBindings });
   }
-  const code = script.content.replace(defaultExport, `const ${sfcDefaultScopeName} =`).trim();
-  return {
+  const code = content.replace(defaultExport, `const ${sfcDefaultScopeName} =`).trim();
+  return ok({
     code: `${code}\nexport { ${sfcDefaultScopeName} as default };\n`,
     defaultScopeName: sfcDefaultScopeName,
-  };
+    setupBindings,
+  });
+};
+
+export const generateSfcScriptDeclarations = (script: TachyonSfcScript | undefined): Result<string, string> => {
+  if (!script || script.content.trim().length === 0) {
+    return ok("");
+  }
+  const result = ts.transpileDeclaration(script.content, {
+    compilerOptions: {
+      allowJs: true,
+      declaration: true,
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: sfcScriptLanguage(script) === "ts" ? "component.td.ts" : "component.td.js",
+  });
+  if (result.outputText.trim().length === 0) {
+    const diagnostic = result.diagnostics?.find((item) => item.category === ts.DiagnosticCategory.Error);
+    return err(diagnostic ? ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n") : "Unable to emit script declarations.");
+  }
+  return ok(result.outputText.trim());
 };

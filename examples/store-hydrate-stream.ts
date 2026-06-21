@@ -27,10 +27,13 @@ const compiled = compiledResult.value.template;
 
 const importExampleScope = async (): Promise<ExampleScope> => {
   const script = transformSfcScript(compiledResult.value.descriptor.script);
-  if (!script.code) {
+  if (!script.ok) {
+    throw new Error(script.error.message);
+  }
+  if (!script.value.code) {
     return { count: 7, initialCount: 7, islandId: "counter-panel" };
   }
-  const encoded = Buffer.from(script.code).toString("base64");
+  const encoded = Buffer.from(script.value.code).toString("base64");
   const module = (await import(`data:text/javascript;base64,${encoded}`)) as {
     default?: ExampleScope;
     scope?: ExampleScope;

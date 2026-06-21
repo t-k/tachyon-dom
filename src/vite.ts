@@ -2,7 +2,7 @@ import type { Plugin } from "vite";
 import type { TachyonApp, TachyonAppAssets } from "./app";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index";
-import { diagnoseTachyonSfc, formatDiagnostic } from "./diagnostics";
+import { diagnoseTachyonSfc, formatDiagnostic, locateOffset } from "./diagnostics";
 import { createFileRouteManifest } from "./router";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "./source-map";
 
@@ -59,6 +59,45 @@ const codeForTarget = (
   return generateClientModule(template, { reactive, ...(defaultScopeName ? { defaultScopeName } : {}) });
 };
 
+const cleanId = (id: string): string => id.split("?", 1)[0] ?? id;
+
+const queryForId = (id: string): URLSearchParams => new URLSearchParams(id.split("?")[1] ?? "");
+
+const targetForId = (
+  id: string,
+  fallback: NonNullable<TachyonDomViteOptions["target"]>,
+): NonNullable<TachyonDomViteOptions["target"]> => {
+  const query = queryForId(id);
+  if (query.has("server")) {
+    return "server";
+  }
+  if (query.has("stream")) {
+    return "stream";
+  }
+  if (query.has("client")) {
+    return "client";
+  }
+  return fallback;
+};
+
+const isEntryRequest = (id: string): boolean => queryForId(id).has("entry");
+
+const entryCodeFor = (id: string): string => {
+  const moduleId = cleanId(id);
+  const query = queryForId(id);
+  const mountName = query.get("mount") ?? "mount";
+  return [
+    `import * as module from ${JSON.stringify(moduleId)};`,
+    `export * from ${JSON.stringify(moduleId)};`,
+    `export default module;`,
+    `const root = typeof document === "undefined" ? null : document.querySelector(${JSON.stringify(query.get("root") ?? "#app")});`,
+    `const mount = module[${JSON.stringify(mountName)}] ?? module.mountApp ?? module.mountWebExample ?? module.mountAuthTodoExample ?? module.mountFullAppExample ?? module.default;`,
+    `if (root instanceof HTMLElement && typeof mount === "function") {`,
+    `  void mount(root);`,
+    `}`,
+  ].join("\n");
+};
+
 const shouldLogRequests = (options: TachyonDomViteOptions["requestLog"]): boolean =>
   options === undefined || options === true || (typeof options === "object" && options.enabled !== false);
 
@@ -105,20 +144,27 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       });
     },
     async transform(source, id) {
-      if (!include.test(id)) {
+      if (isEntryRequest(id)) {
         return null;
       }
+      if (!include.test(cleanId(id))) {
+        return null;
+      }
+      const resolvedTarget = targetForId(id, target);
       const result = diagnoseTachyonSfc(source);
       if (!result.ok) {
         this.error(formatDiagnostic(result.error, id));
       }
       const script = transformSfcScript(result.value.descriptor.script);
-      const code = `${script.code}${codeForTarget(
-        target,
+      if (!script.ok) {
+        this.error(formatDiagnostic({ ...script.error, ...locateOffset(source, script.error.offset) }, id));
+      }
+      const code = `${script.value.code}${codeForTarget(
+        resolvedTarget,
         result.value.template,
         options.reactive === true,
         result.value.scriptOnly,
-        target === "client" && script.defaultScopeName ? script.defaultScopeName : undefined,
+        resolvedTarget === "client" && script.value.defaultScopeName ? script.value.defaultScopeName : undefined,
       )}`;
       const emitSourceMap = shouldEmitSourceMap({
         sourcemap: options.sourcemap,
@@ -138,6 +184,12 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         code: emitSourceMap ? appendInlineSourceMap(code, map) : code,
         map: null,
       };
+    },
+    load(id) {
+      if (!include.test(cleanId(id)) || !isEntryRequest(id)) {
+        return null;
+      }
+      return entryCodeFor(id);
     },
   };
 };

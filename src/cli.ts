@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { generateTemplateTypes } from "./app";
+import { generateTachyonModuleTypes, generateTemplateTypes } from "./app";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc";
-import { diagnoseTachyonSfc, formatDiagnostic } from "./diagnostics";
+import { diagnoseTachyonSfc, formatDiagnostic, locateOffset } from "./diagnostics";
 import { scanFileRoutes } from "./router";
 import { appendInlineSourceMap, createSourceMap } from "./source-map";
 import { err, ok, type Result } from "./result";
@@ -40,6 +40,7 @@ export type CliTypegenOptions = {
   command: "typegen";
   input: string;
   output?: string;
+  module?: boolean;
   typeName?: string;
 };
 
@@ -163,9 +164,9 @@ const parseAddArgs = (kind: string, name: string, rest: readonly string[]): Resu
 
 const parseTypegenArgs = (input: string, rest: readonly string[]): Result<CliTypegenOptions, string> => {
   if (!input) {
-    return err("Usage: tachyon-dom typegen <input> [--out file] [--type TemplateScope]");
+    return err("Usage: tachyon-dom typegen <input> [--out file] [--type TemplateScope] [--module]");
   }
-  const options: CliTypegenOptions = { command: "typegen", input };
+  const options: CliTypegenOptions = { command: "typegen", input, module: false };
   for (let index = 0; index < rest.length; index++) {
     const arg = rest[index];
     if (arg === "--out") {
@@ -180,6 +181,8 @@ const parseTypegenArgs = (input: string, rest: readonly string[]): Result<CliTyp
         return err("--type requires a type name.");
       }
       options.typeName = typeName;
+    } else if (arg === "--module") {
+      options.module = true;
     } else {
       return err(`Unknown argument: ${arg}`);
     }
@@ -245,6 +248,9 @@ export const compileFile = async (options: Omit<CliCompileOptions, "command">): 
     return err(formatDiagnostic(result.error, options.input));
   }
   const script = transformSfcScript(result.value.descriptor.script);
+  if (!script.ok) {
+    return err(formatDiagnostic({ ...script.error, ...locateOffset(source, script.error.offset) }, options.input));
+  }
   const code = result.value.scriptOnly
     ? generateScriptOnlyModule(options.target)
     : options.target === "server"
@@ -253,9 +259,9 @@ export const compileFile = async (options: Omit<CliCompileOptions, "command">): 
         ? generateServerStreamModule(result.value.template)
         : generateClientModule(result.value.template, {
             reactive: options.reactive,
-            ...(script.defaultScopeName ? { defaultScopeName: script.defaultScopeName } : {}),
+            ...(script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {}),
           });
-  const moduleCode = `${script.code}${code}`;
+  const moduleCode = `${script.value.code}${code}`;
   const output = options.sourcemap
     ? appendInlineSourceMap(moduleCode, createSourceMap(source, options.input, options.output))
     : moduleCode;
@@ -302,7 +308,9 @@ export const generateTemplateTypesFile = async (
   options: Omit<CliTypegenOptions, "command">,
 ): Promise<Result<string, string>> => {
   const source = await readFile(options.input, "utf8");
-  const result = generateTemplateTypes(source, options.typeName ? { typeName: options.typeName } : {});
+  const result = options.module === true
+    ? generateTachyonModuleTypes(source, options.typeName ? { typeName: options.typeName } : {})
+    : generateTemplateTypes(source, options.typeName ? { typeName: options.typeName } : {});
   if (!result.ok) {
     return result;
   }

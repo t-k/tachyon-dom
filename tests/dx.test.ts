@@ -175,6 +175,80 @@ export const createMessage = (name) => "Hello " + name;
     }
   });
 
+  it("compiles TypeScript SFC scripts and preserves typed module declarations", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-ts-"));
+    try {
+      const input = path.join(dir, "app.td");
+      const output = path.join(dir, "app.js");
+      const types = path.join(dir, "app.td.d.ts");
+      await writeFile(
+        input,
+        `<script lang="ts">
+export type AppState = { count: number };
+export const mount = (root: HTMLElement, state: AppState): void => {
+  root.textContent = String(state.count);
+};
+export const scope = (input: Partial<AppState> = {}) => ({
+  count: input.count ?? 1,
+});
+</script>
+<button>{count}</button>`,
+      );
+
+      const compiled = await compileFile({ input, output, target: "client", reactive: true, sourcemap: false });
+      const generatedTypes = await generateTemplateTypesFile({
+        input,
+        module: true,
+        output: types,
+        typeName: "AppTemplateScope",
+      });
+
+      expect(compiled.ok).toBe(true);
+      const code = await readFile(output, "utf8");
+      expect(code).toContain(`export const mount = (root, state) => {`);
+      expect(code).toContain(`const __tachyonSfcScope = (input = {}) => ({`);
+      expect(code).not.toContain(`AppState`);
+
+      expect(generatedTypes.ok).toBe(true);
+      const dts = await readFile(types, "utf8");
+      expect(dts).toContain(`export type AppState = {`);
+      expect(dts).toContain(`export declare const mount:`);
+      expect(dts).toContain(`export type AppTemplateScope = {`);
+      expect(dts).toContain(`export declare const bind:`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("supports script setup bindings and auto-imported Tachyon helpers", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-setup-"));
+    try {
+      const input = path.join(dir, "counter.td");
+      const output = path.join(dir, "counter.js");
+      await writeFile(
+        input,
+        `<script setup lang="ts">
+const count = createSignal(1);
+const increment = (): void => {
+  count.set(count() + 1);
+};
+</script>
+<button on:click={increment}>{count}</button>`,
+      );
+
+      const result = await compileFile({ input, output, target: "client", reactive: true, sourcemap: false });
+
+      expect(result.ok).toBe(true);
+      const code = await readFile(output, "utf8");
+      expect(code).toContain(`import { createSignal } from "tachyon-dom";`);
+      expect(code).toContain(`const __tachyonSfcSetupScope = { count: count, increment: increment };`);
+      expect(code).toContain(`typeof __tachyonSfcSetupScope === "function"`);
+      expect(code).toContain(`scope.increment`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("builds a file route manifest through the CLI helper", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-routes-"));
     try {
@@ -403,6 +477,40 @@ export const bindRows = (root, rows, options) => effect(() => {
       `import { effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
     );
     expect(code).toContain(`__tachyonMountKeyedList(root, [], __tachyonRead(scope.rows)`);
+  });
+
+  it("transforms target-specific .td query modules", async () => {
+    const plugin = tachyonDom({ reactive: true });
+    if (typeof plugin.transform !== "function") {
+      throw new Error("Missing transform hook.");
+    }
+    const context = {
+      error(error: string): never {
+        throw new Error(error);
+      },
+    } as never;
+
+    const server = await plugin.transform.call(context, `<main>{title}</main>`, "/src/page.td?server");
+    const stream = await plugin.transform.call(context, `<main>{title}</main>`, "/src/page.td?stream");
+    const client = await plugin.transform.call(context, `<main>{title}</main>`, "/src/page.td?client");
+
+    expect(typeof server === "object" && server?.code).toContain(`export const render = (scope) =>`);
+    expect(typeof stream === "object" && stream?.code).toContain(`export const stream = async function*`);
+    expect(typeof client === "object" && client?.code).toContain(`export const bind = (root, scope) =>`);
+  });
+
+  it("loads .td entry modules that auto-mount exported mount functions", async () => {
+    const plugin = tachyonDom({ reactive: true });
+    if (typeof plugin.load !== "function") {
+      throw new Error("Missing load hook.");
+    }
+
+    const code = await plugin.load.call({} as never, "/src/app.td?entry&mount=start&root=%23root", {} as never);
+
+    expect(code).toContain(`import * as module from "/src/app.td";`);
+    expect(code).toContain(`document.querySelector("#root")`);
+    expect(code).toContain(`module["start"]`);
+    expect(code).toContain(`void mount(root);`);
   });
 
   it("logs dev server requests from the Vite plugin", async () => {
