@@ -314,7 +314,41 @@ export default {
     expect(code).toContain(`export const pageTitle = "Counter";`);
     expect(code).toContain(`const __tachyonSfcDefaultScope = {`);
     expect(code).toContain(`const scope = __tachyonCreateScope(inputScope);`);
-    expect(code).toContain(`cleanups.push(delegate(root, "click", [], scope.increment));`);
+    expect(code).toContain(`cleanups.push(__tachyonDelegate(root, "click", [], scope.increment));`);
+  });
+
+  it("aliases generated runtime imports so SFC scripts can use named runtime imports", async () => {
+    const plugin = tachyonDom({ reactive: true });
+    if (typeof plugin.transform !== "function") {
+      throw new Error("Missing transform hook.");
+    }
+
+    const result = await plugin.transform.call(
+      {
+        error(error: string): never {
+          throw new Error(error);
+        },
+      } as never,
+      `<script>
+import { mountKeyedList } from "tachyon-dom/runtime/list";
+import { effect } from "tachyon-dom/runtime/signal";
+
+export const bindRows = (root, rows, options) => effect(() => {
+  mountKeyedList(root, [], rows(), options);
+});
+</script>
+<ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul>`,
+      "/src/rows.td",
+    );
+
+    const code = typeof result === "object" ? result?.code : "";
+    expect(code).toContain(`import { mountKeyedList } from "tachyon-dom/runtime/list";`);
+    expect(code).toContain(`import { effect } from "tachyon-dom/runtime/signal";`);
+    expect(code).toContain(`import { mountKeyedList as __tachyonMountKeyedList } from "tachyon-dom/runtime/list";`);
+    expect(code).toContain(
+      `import { effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
+    );
+    expect(code).toContain(`__tachyonMountKeyedList(root, [], __tachyonRead(scope.rows)`);
   });
 
   it("logs dev server requests from the Vite plugin", async () => {

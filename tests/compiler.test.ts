@@ -102,11 +102,11 @@ describe("HTML-first compiler", () => {
     const code = generateClientModule(result.value);
     expect(code).toContain(`from "tachyon-dom/runtime/attr"`);
     expect(code).toContain(`from "tachyon-dom/runtime/form"`);
-    expect(code).toContain(`setAttributeValue(root, "data-count", (scope.count + 1));`);
-    expect(code).toContain(`setStyleValue(root, "width", (scope.size + "px"));`);
-    expect(code).toContain(`setRef(scope, "refs.panel", root);`);
-    expect(code).toContain(`bindControl(elementAt(root, [0]), "value"`);
-    expect(code).toContain(`bindControl(elementAt(root, [1,0]), "checked"`);
+    expect(code).toContain(`__tachyonSetAttributeValue(root, "data-count", (scope.count + 1));`);
+    expect(code).toContain(`__tachyonSetStyleValue(root, "width", (scope.size + "px"));`);
+    expect(code).toContain(`__tachyonSetRef(scope, "refs.panel", root);`);
+    expect(code).toContain(`__tachyonBindControl(__tachyonElementAt(root, [0]), "value"`);
+    expect(code).toContain(`__tachyonBindControl(__tachyonElementAt(root, [1,0]), "checked"`);
   });
 
   it("generates modular client code that imports only needed runtime helpers", () => {
@@ -121,9 +121,9 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`from "tachyon-dom/runtime/class"`);
     expect(code).toContain(`from "tachyon-dom/runtime/event"`);
     expect(code).toContain(`export const templateHtml = "<button> </button>";`);
-    expect(code).toContain(`setText(textAt(root, [0]), scope.label);`);
-    expect(code).toContain(`setClassPresence(root, "danger", scope.selected);`);
-    expect(code).toContain(`cleanups.push(delegate(root, "click", [], scope.select));`);
+    expect(code).toContain(`__tachyonSetText(__tachyonTextAt(root, [0]), scope.label);`);
+    expect(code).toContain(`__tachyonSetClassPresence(root, "danger", scope.selected);`);
+    expect(code).toContain(`cleanups.push(__tachyonDelegate(root, "click", [], scope.select));`);
   });
 
   it("generates class bindings against nested element paths", () => {
@@ -134,8 +134,10 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value);
 
-    expect(code).toContain(`import { elementAt, setClassPresence } from "tachyon-dom/runtime/class";`);
-    expect(code).toContain(`setClassPresence(elementAt(root, [0]), "active", scope.selected);`);
+    expect(code).toContain(
+      `import { elementAt as __tachyonElementAt, setClassPresence as __tachyonSetClassPresence } from "tachyon-dom/runtime/class";`,
+    );
+    expect(code).toContain(`__tachyonSetClassPresence(__tachyonElementAt(root, [0]), "active", scope.selected);`);
   });
 
   it("can generate reactive client bindings with modular signal imports", () => {
@@ -148,10 +150,16 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value, { reactive: true });
 
-    expect(code).toContain(`import { effect, read } from "tachyon-dom/runtime/signal";`);
+    expect(code).toContain(
+      `import { effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
+    );
     expect(code).toContain(`const cleanups = [];`);
-    expect(code).toContain(`cleanups.push(effect(() => setText(textAt(root, [0,0]), read(scope.title))));`);
-    expect(code).toContain(`cleanups.push(effect(() => mountKeyedList(root, [1], read(scope.rows)`);
+    expect(code).toContain(
+      `cleanups.push(__tachyonEffect(() => __tachyonSetText(__tachyonTextAt(root, [0,0]), __tachyonRead(scope.title))));`,
+    );
+    expect(code).toContain(
+      `cleanups.push(__tachyonEffect(() => __tachyonMountKeyedList(root, [1], __tachyonRead(scope.rows)`,
+    );
     expect(code).toContain(`return () => {`);
   });
 
@@ -166,9 +174,9 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value, { reactive: true });
 
-    expect(code).toContain(`import { createStore } from "tachyon-dom/runtime/store";`);
-    expect(code).toContain(`const state = createStore({ ...scope, count: scope.initialCount });`);
-    expect(code).toContain(`setText(textAt(root, [0,0]), read(state.count))`);
+    expect(code).toContain(`import { createStore as __tachyonCreateStore } from "tachyon-dom/runtime/store";`);
+    expect(code).toContain(`const state = __tachyonCreateStore({ ...scope, count: scope.initialCount });`);
+    expect(code).toContain(`__tachyonSetText(__tachyonTextAt(root, [0,0]), __tachyonRead(state.count))`);
 
     const withoutStore = compileTemplate(`<section><button>{count}</button></section>`);
     if (!withoutStore.ok) {
@@ -337,7 +345,7 @@ describe("HTML-first compiler", () => {
     const code = generateClientModule(result.value);
 
     expect(code).toContain(`from "tachyon-dom/runtime/list"`);
-    expect(code).toContain(`mountKeyedList(root, [], scope.rows`);
+    expect(code).toContain(`__tachyonMountKeyedList(root, [], scope.rows`);
     expect(code).toContain(`key: "row.id"`);
     expect(code).toContain(`itemName: "row"`);
   });
@@ -355,7 +363,7 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`const listOptions0 = {`);
     expect(code).toContain(`keyRead: (scope) => scope.row.ids[0]`);
     expect(code).toContain(`read: (scope) => (scope.row.profile?.name ?? scope.row.name)`);
-    expect(code).toContain(`mountKeyedList(root, [], scope.rows, listOptions0)`);
+    expect(code).toContain(`__tachyonMountKeyedList(root, [], scope.rows, listOptions0)`);
   });
 
   it("fixes the HTML-first syntax surface in an explicit IR", () => {
@@ -404,7 +412,7 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value, { reactive: true });
     expect(code).toContain(`from "tachyon-dom/runtime/conditional"`);
-    expect(code).toContain(`mountConditional(root, [0,0], read(scope.active), scope, {`);
+    expect(code).toContain(`__tachyonMountConditional(root, [0,0], __tachyonRead(scope.active), scope, {`);
   });
 
   it("rejects unsupported syntax before target generation", () => {

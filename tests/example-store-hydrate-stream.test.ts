@@ -28,9 +28,9 @@ describe("store hydrate stream example", () => {
   });
 
   it("shows the generated client module shape", () => {
-    expect(generatedClientModule).toContain(`import { createStore } from "tachyon-dom/runtime/store";`);
+    expect(generatedClientModule).toContain(`import { createStore as __tachyonCreateStore } from "tachyon-dom/runtime/store";`);
     expect(generatedClientModule).toContain(`export const hydrationBoundaries = [{"path":`);
     expect(generatedClientModule).toContain(`"id":"islandId"`);
-    expect(generatedClientModule).toContain(`read(state.count)`);
+    expect(generatedClientModule).toContain(`__tachyonRead(state.count)`);
   });
 });

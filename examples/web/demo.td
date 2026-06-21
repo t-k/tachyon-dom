@@ -1,8 +1,8 @@
 <script>
-import * as hydrateRuntime from "../../src/runtime/hydrate";
-import * as listRuntime from "../../src/runtime/list";
-import * as signalRuntime from "../../src/runtime/signal";
-import * as storeRuntime from "../../src/runtime/store";
+import { createHydrationBoundary, readHydrationState } from "../../src/runtime/hydrate";
+import { mountKeyedList } from "../../src/runtime/list";
+import { effect } from "../../src/runtime/signal";
+import { createStore } from "../../src/runtime/store";
 
 export const initialRows = () => [
   { id: 1, label: "Compiled template", active: true },
@@ -26,9 +26,9 @@ export const bindPreview = (preview, scope, options) => {
     throw new Error("Missing streamed root.");
   }
 
-  const hydrationState = hydrateRuntime.readHydrationState(preview, scope.islandId);
+  const hydrationState = readHydrationState(preview, scope.islandId);
   const initialState = hydrationState.ok ? hydrationState.value : { count: scope.count, rows: scope.rows };
-  const state = storeRuntime.createStore({ ...scope, count: initialState.count, rows: [...initialState.rows] });
+  const state = createStore({ ...scope, count: initialState.count, rows: [...initialState.rows] });
   const countMetric = document.querySelector("#metric-count");
   const rowsMetric = document.querySelector("#metric-rows");
   const hydrateMetric = document.querySelector("#metric-hydrate");
@@ -52,7 +52,7 @@ export const bindPreview = (preview, scope, options) => {
   const prepend = document.querySelector("#prepend");
   const rotate = document.querySelector("#rotate");
   const toggle = document.querySelector("#toggle");
-  const hydrateResult = hydrateRuntime.createHydrationBoundary(root, scope.islandId, (element) => {
+  const hydrateResult = createHydrationBoundary(root, scope.islandId, (element) => {
     const button = element.querySelector("#boundary-button");
     const cleanups = [];
     const onBoundaryClick = () => {
@@ -62,7 +62,7 @@ export const bindPreview = (preview, scope, options) => {
     cleanups.push(() => button?.removeEventListener("click", onBoundaryClick));
 
     cleanups.push(
-      signalRuntime.effect(() => {
+      effect(() => {
         if (button) {
           button.textContent = String(state.count);
         }
@@ -72,13 +72,13 @@ export const bindPreview = (preview, scope, options) => {
       }),
     );
     cleanups.push(
-      signalRuntime.effect(() => {
+      effect(() => {
         element.classList.toggle("active", state.active);
       }),
     );
     cleanups.push(
-      signalRuntime.effect(() => {
-        listRuntime.mountKeyedList(element, [1], state.rows, {
+      effect(() => {
+        mountKeyedList(element, [1], state.rows, {
           key: options.listBinding.key,
           itemName: options.listBinding.itemName,
           templateHtml: options.listBinding.templateHtml,

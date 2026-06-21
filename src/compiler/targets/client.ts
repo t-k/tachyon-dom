@@ -265,12 +265,30 @@ export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client
 
 const scopeName = (usesStore: boolean): string => (usesStore ? "state" : "scope");
 
+const runtimeNames = {
+  bindControl: "__tachyonBindControl",
+  createStore: "__tachyonCreateStore",
+  delegate: "__tachyonDelegate",
+  effect: "__tachyonEffect",
+  elementAt: "__tachyonElementAt",
+  mountConditional: "__tachyonMountConditional",
+  mountKeyedList: "__tachyonMountKeyedList",
+  read: "__tachyonRead",
+  setAttributeValue: "__tachyonSetAttributeValue",
+  setClassPresence: "__tachyonSetClassPresence",
+  setControlValue: "__tachyonSetControlValue",
+  setRef: "__tachyonSetRef",
+  setStyleValue: "__tachyonSetStyleValue",
+  setText: "__tachyonSetText",
+  textAt: "__tachyonTextAt",
+} as const;
+
 const elementExpression = (path: readonly number[]): string =>
-  path.length === 0 ? "root" : `elementAt(root, ${JSON.stringify(path)})`;
+  path.length === 0 ? "root" : `${runtimeNames.elementAt}(root, ${JSON.stringify(path)})`;
 
 const runtimeValueExpression = (expression: string, reactive: boolean, sourceName: string): string => {
   const value = expressionToScopeAccess(expression, new Set(), sourceName);
-  return reactive ? `read(${value})` : value;
+  return reactive ? `${runtimeNames.read}(${value})` : value;
 };
 
 export const generateClientModule = (template: CompiledTemplate, options: GenerateClientModuleOptions = {}): string => {
@@ -291,35 +309,45 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const lines: string[] = [];
   if (needsText) {
-    lines.push(`import { setText, textAt } from "tachyon-dom/runtime/text";`);
+    lines.push(
+      `import { setText as ${runtimeNames.setText}, textAt as ${runtimeNames.textAt} } from "tachyon-dom/runtime/text";`,
+    );
   }
   if (needsClass || needsAttr || needsModel) {
     lines.push(
       needsClass
-        ? `import { elementAt, setClassPresence } from "tachyon-dom/runtime/class";`
-        : `import { elementAt } from "tachyon-dom/runtime/class";`,
+        ? `import { elementAt as ${runtimeNames.elementAt}, setClassPresence as ${runtimeNames.setClassPresence} } from "tachyon-dom/runtime/class";`
+        : `import { elementAt as ${runtimeNames.elementAt} } from "tachyon-dom/runtime/class";`,
     );
   }
   if (needsAttr) {
-    lines.push(`import { setAttributeValue, setRef, setStyleValue } from "tachyon-dom/runtime/attr";`);
+    lines.push(
+      `import { setAttributeValue as ${runtimeNames.setAttributeValue}, setRef as ${runtimeNames.setRef}, setStyleValue as ${runtimeNames.setStyleValue} } from "tachyon-dom/runtime/attr";`,
+    );
   }
   if (needsModel) {
-    lines.push(`import { bindControl, setControlValue } from "tachyon-dom/runtime/form";`);
+    lines.push(
+      `import { bindControl as ${runtimeNames.bindControl}, setControlValue as ${runtimeNames.setControlValue} } from "tachyon-dom/runtime/form";`,
+    );
   }
   if (needsEvent) {
-    lines.push(`import { delegate } from "tachyon-dom/runtime/event";`);
+    lines.push(`import { delegate as ${runtimeNames.delegate} } from "tachyon-dom/runtime/event";`);
   }
   if (needsList) {
-    lines.push(`import { mountKeyedList } from "tachyon-dom/runtime/list";`);
+    lines.push(`import { mountKeyedList as ${runtimeNames.mountKeyedList} } from "tachyon-dom/runtime/list";`);
   }
   if (needsConditional) {
-    lines.push(`import { mountConditional } from "tachyon-dom/runtime/conditional";`);
+    lines.push(
+      `import { mountConditional as ${runtimeNames.mountConditional} } from "tachyon-dom/runtime/conditional";`,
+    );
   }
   if (needsSignal) {
-    lines.push(`import { effect, read } from "tachyon-dom/runtime/signal";`);
+    lines.push(
+      `import { effect as ${runtimeNames.effect}, read as ${runtimeNames.read} } from "tachyon-dom/runtime/signal";`,
+    );
   }
   if (needsStore) {
-    lines.push(`import { createStore } from "tachyon-dom/runtime/store";`);
+    lines.push(`import { createStore as ${runtimeNames.createStore} } from "tachyon-dom/runtime/store";`);
   }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
@@ -344,7 +372,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     const fields = template.client.stores
       .map((store) => `${store.name}: ${expressionToScopeAccess(store.initial)}`)
       .join(", ");
-    lines.push(`  const state = createStore({ ...scope, ${fields} });`);
+    lines.push(`  const state = ${runtimeNames.createStore}({ ...scope, ${fields} });`);
   }
   if (reactive || needsEvent || needsModel) {
     lines.push(`  const cleanups = [];`);
@@ -352,31 +380,33 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   let listIndex = 0;
   for (const binding of bindings) {
     if (binding.kind === "text") {
-      const statement = `setText(textAt(root, ${JSON.stringify(binding.path)}), ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
-      lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
+      const statement = `${runtimeNames.setText}(${runtimeNames.textAt}(root, ${JSON.stringify(binding.path)}), ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
+      lines.push(reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`);
     } else if (binding.kind === "class") {
-      const statement = `setClassPresence(${elementExpression(binding.path)}, ${JSON.stringify(binding.className)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
-      lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
+      const statement = `${runtimeNames.setClassPresence}(${elementExpression(binding.path)}, ${JSON.stringify(binding.className)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
+      lines.push(reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`);
     } else if (binding.kind === "event") {
-      const statement = `delegate(root, ${JSON.stringify(binding.eventName)}, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.handler, new Set(), scopeName(needsStore))})`;
+      const statement = `${runtimeNames.delegate}(root, ${JSON.stringify(binding.eventName)}, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.handler, new Set(), scopeName(needsStore))})`;
       lines.push(`  cleanups.push(${statement});`);
     } else if (binding.kind === "attr") {
-      const statement = `setAttributeValue(${elementExpression(binding.path)}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
-      lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
+      const statement = `${runtimeNames.setAttributeValue}(${elementExpression(binding.path)}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
+      lines.push(reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`);
     } else if (binding.kind === "style") {
-      const statement = `setStyleValue(${elementExpression(binding.path)}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
-      lines.push(reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`);
+      const statement = `${runtimeNames.setStyleValue}(${elementExpression(binding.path)}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
+      lines.push(reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`);
     } else if (binding.kind === "ref") {
-      lines.push(`  setRef(${sourceName}, ${JSON.stringify(binding.expression)}, ${elementExpression(binding.path)});`);
+      lines.push(
+        `  ${runtimeNames.setRef}(${sourceName}, ${JSON.stringify(binding.expression)}, ${elementExpression(binding.path)});`,
+      );
     } else if (binding.kind === "model") {
       const target = elementExpression(binding.path);
       const value = runtimeValueExpression(binding.expression, false, sourceName);
       lines.push(
-        `  cleanups.push(bindControl(${target}, ${JSON.stringify(binding.property)}, () => ${value}, (value) => { ${expressionToScopeAccess(binding.expression, new Set(), sourceName)} = value; }));`,
+        `  cleanups.push(${runtimeNames.bindControl}(${target}, ${JSON.stringify(binding.property)}, () => ${value}, (value) => { ${expressionToScopeAccess(binding.expression, new Set(), sourceName)} = value; }));`,
       );
       if (reactive) {
         lines.push(
-          `  cleanups.push(effect(() => setControlValue(${target}, ${JSON.stringify(binding.property)}, ${runtimeValueExpression(binding.expression, true, sourceName)})));`,
+          `  cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setControlValue}(${target}, ${JSON.stringify(binding.property)}, ${runtimeValueExpression(binding.expression, true, sourceName)})));`,
         );
       }
     } else if (binding.kind === "list") {
@@ -455,8 +485,10 @@ const emitListBinding = (binding: ListBinding, reactive: boolean, sourceName: st
     `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
     `  };`,
   ].join("\n");
-  const statement = `mountKeyedList(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.each, reactive, sourceName)}, ${optionsName})`;
-  return reactive ? `${listOptions}\n  cleanups.push(effect(() => ${statement}));` : `${listOptions}\n  ${statement};`;
+  const statement = `${runtimeNames.mountKeyedList}(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.each, reactive, sourceName)}, ${optionsName})`;
+  return reactive
+    ? `${listOptions}\n  cleanups.push(${runtimeNames.effect}(() => ${statement}));`
+    : `${listOptions}\n  ${statement};`;
 };
 
 const emitConditionalBinding = (binding: ConditionalBinding, reactive: boolean, sourceName: string): string => {
@@ -466,6 +498,6 @@ const emitConditionalBinding = (binding: ConditionalBinding, reactive: boolean, 
     `    bindings: ${JSON.stringify(binding.bindings)},`,
     `  }`,
   ].join("\n");
-  const statement = `mountConditional(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.test, reactive, sourceName)}, ${sourceName}, ${conditionalOptions})`;
-  return reactive ? `  cleanups.push(effect(() => ${statement}));` : `  ${statement};`;
+  const statement = `${runtimeNames.mountConditional}(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.test, reactive, sourceName)}, ${sourceName}, ${conditionalOptions})`;
+  return reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`;
 };
