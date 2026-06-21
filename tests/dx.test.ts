@@ -150,6 +150,31 @@ export const scope = () => ({
     }
   });
 
+  it("compiles script-only .td modules without requiring a template root", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-script-only-"));
+    try {
+      const input = path.join(dir, "app.td");
+      const output = path.join(dir, "app.js");
+      await writeFile(
+        input,
+        `<script>
+export const createMessage = (name) => "Hello " + name;
+</script>`,
+      );
+
+      const result = await compileFile({ input, output, target: "client", reactive: true, sourcemap: false });
+
+      expect(result.ok).toBe(true);
+      const code = await readFile(output, "utf8");
+      expect(code).toContain(`export const createMessage = (name) => "Hello " + name;`);
+      expect(code).toContain(`export const templateHtml = "";`);
+      expect(code).toContain(`export const bind = () => undefined;`);
+      expect(code).not.toContain(`tachyon-dom/runtime/`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("builds a file route manifest through the CLI helper", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-routes-"));
     try {

@@ -25,6 +25,7 @@ export type TachyonSfcDescriptor = {
 
 export type CompiledTachyonSfc = {
   descriptor: TachyonSfcDescriptor;
+  scriptOnly: boolean;
   template: CompiledTemplate;
 };
 
@@ -44,6 +45,23 @@ const mapGeneratedOffset = (ranges: readonly TemplateRange[], sourceLength: numb
   }
   return sourceLength;
 };
+
+const emptyTemplate = (source: string): CompiledTemplate => ({
+  source,
+  ir: {
+    kind: "template",
+    root: { type: "element", tagName: "template", attrs: [], children: [] },
+    directives: [],
+  },
+  root: { type: "element", tagName: "template", attrs: [], children: [] },
+  client: {
+    bindings: [],
+    components: [],
+    hydrationBoundaries: [],
+    stores: [],
+    templateHtml: "",
+  },
+});
 
 export const parseTachyonSfc = (source: string): Result<TachyonSfcDescriptor, CompilerError> => {
   const matches = Array.from(source.matchAll(scriptOpenPattern));
@@ -87,6 +105,14 @@ export const compileTachyonSfc = (source: string): Result<CompiledTachyonSfc, Co
   if (!descriptor.ok) {
     return err(descriptor.error);
   }
+  const scriptOnly = Boolean(descriptor.value.script) && descriptor.value.template.trim().length === 0;
+  if (scriptOnly) {
+    return ok({
+      descriptor: descriptor.value,
+      scriptOnly: true,
+      template: emptyTemplate(descriptor.value.template),
+    });
+  }
   const template = compileTemplate(descriptor.value.template);
   if (!template.ok) {
     return err({
@@ -96,8 +122,30 @@ export const compileTachyonSfc = (source: string): Result<CompiledTachyonSfc, Co
   }
   return ok({
     descriptor: descriptor.value,
+    scriptOnly: false,
     template: template.value,
   });
+};
+
+export const generateScriptOnlyModule = (target: "client" | "server" | "stream"): string => {
+  if (target === "server") {
+    return [
+      `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll("-->", "--\\\\>");`,
+      `const escapeAttribute = (value) => String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");`,
+      `export const hydrationBoundaries = [];`,
+      `export const renderHydrationState = (id, state) => '<script type="application/json" data-tachyon-state="' + escapeAttribute(id) + '">' + escapeScriptJson(JSON.stringify(state)) + '</script>';`,
+      `export const render = () => "";`,
+    ].join("\n");
+  }
+  if (target === "stream") {
+    return `export const stream = async function* () {};\n`;
+  }
+  return [
+    `export const templateHtml = "";`,
+    `export const hydrationBoundaries = [];`,
+    `export const componentBoundaries = [];`,
+    `export const bind = () => undefined;`,
+  ].join("\n");
 };
 
 export const transformSfcScript = (script: TachyonSfcScript | undefined): TransformedSfcScript => {

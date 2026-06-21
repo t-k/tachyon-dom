@@ -1,6 +1,6 @@
 import type { Plugin } from "vite";
 import type { TachyonApp, TachyonAppAssets } from "./app";
-import { transformSfcScript } from "./compiler/sfc";
+import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index";
 import { diagnoseTachyonSfc, formatDiagnostic } from "./diagnostics";
 import { createFileRouteManifest } from "./router";
@@ -44,8 +44,12 @@ const codeForTarget = (
   target: NonNullable<TachyonDomViteOptions["target"]>,
   template: Parameters<typeof generateClientModule>[0],
   reactive: boolean,
+  scriptOnly: boolean,
   defaultScopeName?: string,
 ): string => {
+  if (scriptOnly) {
+    return generateScriptOnlyModule(target);
+  }
   if (target === "server") {
     return generateServerModule(template);
   }
@@ -113,6 +117,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         target,
         result.value.template,
         options.reactive === true,
+        result.value.scriptOnly,
         target === "client" && script.defaultScopeName ? script.defaultScopeName : undefined,
       )}`;
       const emitSourceMap = shouldEmitSourceMap({
