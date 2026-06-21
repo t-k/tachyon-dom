@@ -1,4 +1,3 @@
-import "./styles.css";
 import * as appModule from "./app-client.td";
 import type { ClientRouter } from "../../src/runtime/router";
 

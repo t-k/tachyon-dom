@@ -1,4 +1,5 @@
-<script>
+<script lang="ts">
+import "./styles.css";
 import * as compilerTemplate from "./compiler/page.td";
 import * as counterTemplate from "./counter/page.td";
 import * as formsTemplate from "./forms/page.td";
@@ -7,11 +8,6 @@ import * as overviewTemplate from "./overview/page.td";
 import * as settingsTemplate from "./settings/page.td";
 import { defaultProfile, escapeHtml, generatedStreamModule, initialRows, t } from "./app";
 import { renderFullAppShellFrame } from "./dom-shell";
-import { createClientRouter } from "../../src/runtime/router";
-import { createMemo, createSignal, effect } from "../../src/runtime/signal";
-import { createStore } from "../../src/runtime/store";
-import { readTextStreamChunks } from "../../src/runtime/stream-client";
-import { renderToReadableStream } from "../../src/server/stream";
 
 const basePath = "";
 

@@ -298,10 +298,19 @@ export const addPageFiles = async (options: Omit<CliAddPageOptions, "command">):
   const title = titleCase(normalized);
   await mkdir(targetDir, { recursive: true });
   const pageFile = join(targetDir, "page.td");
-  const routeFile = join(targetDir, "route.ts");
-  await writeFile(pageFile, `<section>\n  <h1>{title}</h1>\n</section>\n`);
-  await writeFile(routeFile, `export const scope = () => ({\n  title: ${JSON.stringify(title)},\n});\n`);
-  return ok([pageFile, routeFile].join("\n"));
+  await writeFile(
+    pageFile,
+    `<script>
+export const scope = () => ({
+  title: ${JSON.stringify(title)},
+});
+</script>
+<section>
+  <h1>{title}</h1>
+</section>
+`,
+  );
+  return ok(pageFile);
 };
 
 export const generateTemplateTypesFile = async (
@@ -325,11 +334,17 @@ export const createStarterFiles = async (options: Omit<CliInitOptions, "command"
   await mkdir(join(options.outDir, "src", "routes", "index"), { recursive: true });
   await writeFile(
     join(options.outDir, "src", "routes", "index", "page.td"),
-    `<section>\n  <h1>{title}</h1>\n  <p>{message}</p>\n</section>\n`,
-  );
-  await writeFile(
-    join(options.outDir, "src", "routes", "index", "route.ts"),
-    `export const scope = () => ({\n  message: "Edit src/routes/index/page.td to start building.",\n  title: "Welcome",\n});\n`,
+    `<script>
+export const scope = () => ({
+  message: "Edit src/routes/index/page.td to start building.",
+  title: "Welcome",
+});
+</script>
+<section>
+  <h1>{title}</h1>
+  <p>{message}</p>
+</section>
+`,
   );
   await writeFile(
     join(options.outDir, "src", "main.ts"),

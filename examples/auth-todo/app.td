@@ -1,12 +1,10 @@
-<script>
+<script lang="ts">
+import "./styles.css";
 import * as authView from "./auth-view.td";
-import authViewSource from "./auth-view.td?raw";
-import shellSource from "./shell.td?raw";
+import { render as renderAuthView } from "./auth-view.td?server";
+import { render as renderShellView } from "./shell.td?server";
 import * as todoView from "./todo-view.td";
-import todoViewSource from "./todo-view.td?raw";
-import { renderServerTemplate } from "../../src/compiler";
-import { compileTachyonSfc } from "../../src/compiler/sfc";
-import { err, ok } from "../../src/result";
+import { render as renderTodoView } from "./todo-view.td?server";
 
 const messages = {
   en: {
@@ -63,18 +61,6 @@ const copy = () => ({
 
 const sessionStorageKey = "tachyon-auth-todo:session";
 const todoStoragePrefix = "tachyon-auth-todo:todos:";
-
-const compileView = (source) => {
-  const result = compileTachyonSfc(source);
-  if (!result.ok) {
-    throw new Error(result.error.message);
-  }
-  return result.value.template;
-};
-
-const authViewTemplate = compileView(authViewSource);
-const shellTemplate = compileView(shellSource);
-const todoViewTemplate = compileView(todoViewSource);
 
 const storageResult = (read) => {
   try {
@@ -139,13 +125,13 @@ const writeTodos = (session, todos) =>
     localStorage.setItem(todoStorageKey(session), JSON.stringify(todos));
   });
 
-const renderAuthForm = (state) => renderServerTemplate(authViewTemplate, { copy: copy(), status: state.status });
+const renderAuthForm = (state) => renderAuthView({ copy: copy(), status: state.status });
 
 const renderTodoApp = (state, session) =>
-  renderServerTemplate(todoViewTemplate, todoView.createTodoScope(state, session, { copy: copy(), messages: messages.en }));
+  renderTodoView(todoView.createTodoScope(state, session, { copy: copy(), messages: messages.en }));
 
 const renderShell = (state) =>
-  renderServerTemplate(shellTemplate, {
+  renderShellView({
     copy: copy(),
     outlet: state.session ? renderTodoApp(state, state.session) : renderAuthForm(state),
   });

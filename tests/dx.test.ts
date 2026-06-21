@@ -363,7 +363,7 @@ export default { selected: false };
       expect(await readFile(path.join(routesDir, "settings", "profile", "page.td"), "utf8")).toContain(
         "<h1>{title}</h1>",
       );
-      expect(await readFile(path.join(routesDir, "settings", "profile", "route.ts"), "utf8")).toContain(
+      expect(await readFile(path.join(routesDir, "settings", "profile", "page.td"), "utf8")).toContain(
         `title: "Settings Profile"`,
       );
     } finally {
@@ -378,7 +378,7 @@ export default { selected: false };
 
       expect(result.ok).toBe(true);
       expect(await readFile(path.join(dir, "src", "routes", "index", "page.td"), "utf8")).toContain("<h1>{title}</h1>");
-      expect(await readFile(path.join(dir, "src", "routes", "index", "route.ts"), "utf8")).toContain("Welcome");
+      expect(await readFile(path.join(dir, "src", "routes", "index", "page.td"), "utf8")).toContain("Welcome");
       expect(await readFile(path.join(dir, "vite.config.ts"), "utf8")).toContain("tachyonApp");
     } finally {
       await rm(dir, { recursive: true, force: true });

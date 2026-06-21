@@ -11,9 +11,12 @@ type ExamplePage = {
 const examplePages = new Map<string, ExamplePage>([
   [
     "/examples/auth-todo/",
-    { module: "/examples/auth-todo/main.ts", title: "Authenticated Todo | Tachyon DOM Example" },
+    {
+      module: "/examples/auth-todo/app.td?entry&mount=mountAuthTodoExample",
+      title: "Authenticated Todo | Tachyon DOM Example",
+    },
   ],
-  ["/examples/web/", { module: "/examples/web/main.ts", title: "Tachyon DOM Example" }],
+  ["/examples/web/", { module: "/examples/web/app.td?entry&mount=mountWebExample", title: "Tachyon DOM Example" }],
 ]);
 
 const root = dirname(fileURLToPath(import.meta.url));

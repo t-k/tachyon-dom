@@ -1,4 +1,3 @@
-import "./styles.css";
 import * as appModule from "./app.td";
 
 export const mountAuthTodoExample = (

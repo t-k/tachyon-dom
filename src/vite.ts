@@ -82,6 +82,11 @@ const targetForId = (
 
 const isEntryRequest = (id: string): boolean => queryForId(id).has("entry");
 
+const shouldIgnoreQueryRequest = (id: string): boolean => {
+  const query = queryForId(id);
+  return query.has("raw") || query.has("url");
+};
+
 const entryCodeFor = (id: string): string => {
   const moduleId = cleanId(id);
   const query = queryForId(id);
@@ -144,6 +149,9 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       });
     },
     async transform(source, id) {
+      if (shouldIgnoreQueryRequest(id)) {
+        return null;
+      }
       if (isEntryRequest(id)) {
         return null;
       }
@@ -186,6 +194,9 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       };
     },
     load(id) {
+      if (shouldIgnoreQueryRequest(id)) {
+        return null;
+      }
       if (!include.test(cleanId(id)) || !isEntryRequest(id)) {
         return null;
       }
