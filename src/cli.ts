@@ -3,7 +3,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { generateTemplateTypes } from "./app";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index";
-import { diagnoseTemplate, formatDiagnostic } from "./diagnostics";
+import { sfcDefaultScopeName, transformSfcScript } from "./compiler/sfc";
+import { diagnoseTachyonSfc, formatDiagnostic } from "./diagnostics";
 import { scanFileRoutes } from "./router";
 import { appendInlineSourceMap, createSourceMap } from "./source-map";
 import { err, ok, type Result } from "./result";
@@ -236,19 +237,24 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
 
 export const compileFile = async (options: Omit<CliCompileOptions, "command">): Promise<Result<string, string>> => {
   const source = await readFile(options.input, "utf8");
-  const result = diagnoseTemplate(source);
+  const result = diagnoseTachyonSfc(source);
   if (!result.ok) {
     return err(formatDiagnostic(result.error, options.input));
   }
+  const script = transformSfcScript(result.value.descriptor.script);
   const code =
     options.target === "server"
-      ? generateServerModule(result.value)
+      ? generateServerModule(result.value.template)
       : options.target === "stream"
-        ? generateServerStreamModule(result.value)
-        : generateClientModule(result.value, { reactive: options.reactive });
+        ? generateServerStreamModule(result.value.template)
+        : generateClientModule(result.value.template, {
+            reactive: options.reactive,
+            ...(script.defaultScopeName ? { defaultScopeName: sfcDefaultScopeName } : {}),
+          });
+  const moduleCode = `${script.code}${code}`;
   const output = options.sourcemap
-    ? appendInlineSourceMap(code, createSourceMap(source, options.input, options.output))
-    : code;
+    ? appendInlineSourceMap(moduleCode, createSourceMap(source, options.input, options.output))
+    : moduleCode;
   if (options.output) {
     await writeFile(options.output, output);
   }

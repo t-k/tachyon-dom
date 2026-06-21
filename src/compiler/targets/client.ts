@@ -277,6 +277,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const bindings = template.client.bindings;
   const reactive = options.reactive === true;
   const needsStore = template.client.stores.length > 0;
+  const hasDefaultScope = typeof options.defaultScopeName === "string" && options.defaultScopeName.length > 0;
   const sourceName = scopeName(needsStore);
   const needsText = bindings.some((binding) => binding.kind === "text");
   const needsClass = bindings.some((binding) => binding.kind === "class");
@@ -323,7 +324,16 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
   lines.push(`export const componentBoundaries = ${JSON.stringify(template.client.components)};`);
-  lines.push(`export const bind = (root, scope) => {`);
+  if (hasDefaultScope) {
+    lines.push(`const __tachyonCreateScope = (inputScope = {}) => {`);
+    lines.push(`  const localScope = typeof ${options.defaultScopeName} === "function" ? ${options.defaultScopeName}(inputScope) : ${options.defaultScopeName};`);
+    lines.push(`  return localScope && typeof localScope === "object" ? { ...localScope, ...inputScope } : inputScope;`);
+    lines.push(`};`);
+  }
+  lines.push(hasDefaultScope ? `export const bind = (root, inputScope = {}) => {` : `export const bind = (root, scope) => {`);
+  if (hasDefaultScope) {
+    lines.push(`  const scope = __tachyonCreateScope(inputScope);`);
+  }
   if (needsStore) {
     const fields = template.client.stores
       .map((store) => `${store.name}: ${expressionToScopeAccess(store.initial)}`)

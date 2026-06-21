@@ -1,4 +1,8 @@
 declare module "*.td" {
+  const defaultScope:
+    | Record<string, unknown>
+    | ((scope: Record<string, unknown>) => Record<string, unknown>);
+  export default defaultScope;
   export const templateHtml: string;
   export const hydrationBoundaries: unknown[];
   export const componentBoundaries: unknown[];
@@ -11,6 +15,10 @@ declare module "*.td?raw" {
 }
 
 declare module "*.tachyon" {
+  const defaultScope:
+    | Record<string, unknown>
+    | ((scope: Record<string, unknown>) => Record<string, unknown>);
+  export default defaultScope;
   export const templateHtml: string;
   export const hydrationBoundaries: unknown[];
   export const componentBoundaries: unknown[];
@@ -23,6 +31,10 @@ declare module "*.tachyon?raw" {
 }
 
 declare module "*.tachyon.html" {
+  const defaultScope:
+    | Record<string, unknown>
+    | ((scope: Record<string, unknown>) => Record<string, unknown>);
+  export default defaultScope;
   export const templateHtml: string;
   export const hydrationBoundaries: unknown[];
   export const componentBoundaries: unknown[];

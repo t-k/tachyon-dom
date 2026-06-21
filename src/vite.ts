@@ -1,7 +1,8 @@
 import type { Plugin } from "vite";
 import type { TachyonApp, TachyonAppAssets } from "./app";
+import { sfcDefaultScopeName, transformSfcScript } from "./compiler/sfc";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index";
-import { diagnoseTemplate, formatDiagnostic } from "./diagnostics";
+import { diagnoseTachyonSfc, formatDiagnostic } from "./diagnostics";
 import { createFileRouteManifest } from "./router";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "./source-map";
 
@@ -43,6 +44,7 @@ const codeForTarget = (
   target: NonNullable<TachyonDomViteOptions["target"]>,
   template: Parameters<typeof generateClientModule>[0],
   reactive: boolean,
+  defaultScopeName?: string,
 ): string => {
   if (target === "server") {
     return generateServerModule(template);
@@ -50,7 +52,7 @@ const codeForTarget = (
   if (target === "stream") {
     return generateServerStreamModule(template);
   }
-  return generateClientModule(template, { reactive });
+  return generateClientModule(template, { reactive, ...(defaultScopeName ? { defaultScopeName } : {}) });
 };
 
 const shouldLogRequests = (options: TachyonDomViteOptions["requestLog"]): boolean =>
@@ -102,11 +104,17 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       if (!include.test(id)) {
         return null;
       }
-      const result = diagnoseTemplate(source);
+      const result = diagnoseTachyonSfc(source);
       if (!result.ok) {
         this.error(formatDiagnostic(result.error, id));
       }
-      const code = codeForTarget(target, result.value, options.reactive === true);
+      const script = transformSfcScript(result.value.descriptor.script);
+      const code = `${script.code}${codeForTarget(
+        target,
+        result.value.template,
+        options.reactive === true,
+        target === "client" && script.defaultScopeName ? sfcDefaultScopeName : undefined,
+      )}`;
       const emitSourceMap = shouldEmitSourceMap({
         sourcemap: options.sourcemap,
         productionSourceMap: options.productionSourceMap,

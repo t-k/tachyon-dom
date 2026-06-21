@@ -1,4 +1,5 @@
 import { compileTemplate, renderServerTemplate } from "./compiler/index";
+import { compileTachyonSfc } from "./compiler/sfc";
 import type { ClientBinding, CompiledTemplate } from "./compiler/types";
 import { err, ok, type Result } from "./result";
 
@@ -285,15 +286,15 @@ export const generateTemplateTypes = (
   source: string,
   options: TemplateTypeOptions = {},
 ): Result<string, string> => {
-  const result = compileTemplate(source);
+  const result = compileTachyonSfc(source);
   if (!result.ok) {
     return err(result.error.message);
   }
   const identifiers = new Set<string>();
-  for (const binding of result.value.client.bindings) {
+  for (const binding of result.value.template.client.bindings) {
     collectBindingIdentifiers(binding, identifiers);
   }
-  for (const store of result.value.client.stores) {
+  for (const store of result.value.template.client.stores) {
     identifiers.add(store.name);
   }
   const typeName = options.typeName ?? "TemplateScope";

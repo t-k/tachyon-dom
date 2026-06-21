@@ -89,6 +89,38 @@ describe("DX helpers", () => {
     }
   });
 
+  it("compiles .td files with colocated script logic through the CLI helper", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-"));
+    try {
+      const input = path.join(dir, "counter.td");
+      const output = path.join(dir, "counter.js");
+      await writeFile(
+        input,
+        `<script>
+export const pageTitle = "Counter";
+export default () => ({
+  count: 1,
+  increment: () => undefined,
+});
+</script>
+<button on:click={increment}>{count}</button>`,
+      );
+
+      const result = await compileFile({ input, output, target: "client", reactive: true, sourcemap: false });
+
+      expect(result.ok).toBe(true);
+      const code = await readFile(output, "utf8");
+      expect(code).toContain(`export const pageTitle = "Counter";`);
+      expect(code).toContain(`const __tachyonSfcDefaultScope = () => ({`);
+      expect(code).toContain(`export { __tachyonSfcDefaultScope as default };`);
+      expect(code).toContain(`const scope = __tachyonCreateScope(inputScope);`);
+      expect(code).toContain(`export const templateHtml = "<button> </button>";`);
+      expect(code).toContain(`scope.increment`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("builds a file route manifest through the CLI helper", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-routes-"));
     try {
@@ -160,7 +192,13 @@ describe("DX helpers", () => {
     try {
       const input = path.join(dir, "page.td");
       const output = path.join(dir, "page.td.ts");
-      await writeFile(input, `<button on:click={increment} class:active={selected}>{count}</button>`);
+      await writeFile(
+        input,
+        `<script>
+export default { selected: false };
+</script>
+<button on:click={increment} class:active={selected}>{count}</button>`,
+      );
 
       const inline = generateTemplateTypes(`<main>{title}</main>`, { typeName: "HomeScope" });
       const result = await generateTemplateTypesFile({ input, output, typeName: "CounterScope" });
@@ -233,6 +271,36 @@ describe("DX helpers", () => {
     });
     expect(typeof result === "object" && result?.code).toContain(`from "tachyon-dom/runtime/signal"`);
     expect(typeof result === "object" && result?.code).toContain(`sourceMappingURL=data:application/json;base64`);
+  });
+
+  it("transforms .td SFC script blocks through the Vite plugin", async () => {
+    const plugin = tachyonDom({ reactive: true });
+    if (typeof plugin.transform !== "function") {
+      throw new Error("Missing transform hook.");
+    }
+
+    const result = await plugin.transform.call(
+      {
+        error(error: string): never {
+          throw new Error(error);
+        },
+      } as never,
+      `<script>
+export const pageTitle = "Counter";
+export default {
+  count: 1,
+  increment: () => undefined,
+};
+</script>
+<button on:click={increment}>{count}</button>`,
+      "/src/counter.td",
+    );
+
+    const code = typeof result === "object" ? result?.code : undefined;
+    expect(code).toContain(`export const pageTitle = "Counter";`);
+    expect(code).toContain(`const __tachyonSfcDefaultScope = {`);
+    expect(code).toContain(`const scope = __tachyonCreateScope(inputScope);`);
+    expect(code).toContain(`cleanups.push(delegate(root, "click", [], scope.increment));`);
   });
 
   it("logs dev server requests from the Vite plugin", async () => {

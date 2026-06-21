@@ -167,4 +167,5 @@ export type LoweringContext = {
 
 export type GenerateClientModuleOptions = {
   reactive?: boolean;
+  defaultScopeName?: string;
 };

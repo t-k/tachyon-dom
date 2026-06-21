@@ -1,6 +1,7 @@
 import { compileTemplate } from "./compiler/index";
+import { compileTachyonSfc } from "./compiler/sfc";
 import { err, ok, type Result } from "./result";
-import type { CompiledTemplate } from "./compiler/types";
+import type { CompiledTemplate, CompilerError } from "./compiler/types";
 
 export type TemplateDiagnostic = {
   message: string;
@@ -25,6 +26,20 @@ export const locateOffset = (source: string, offset: number): Omit<TemplateDiagn
 
 export const diagnoseTemplate = (source: string): Result<CompiledTemplate, TemplateDiagnostic> => {
   const result = compileTemplate(source);
+  if (result.ok) {
+    return ok(result.value);
+  }
+  return err({
+    message: result.error.message,
+    offset: result.error.offset,
+    ...locateOffset(source, result.error.offset),
+  });
+};
+
+export const diagnoseTachyonSfc = (
+  source: string,
+): Result<ReturnType<typeof compileTachyonSfc> extends Result<infer Value, CompilerError> ? Value : never, TemplateDiagnostic> => {
+  const result = compileTachyonSfc(source);
   if (result.ok) {
     return ok(result.value);
   }
