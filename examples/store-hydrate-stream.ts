@@ -31,8 +31,11 @@ const importExampleScope = async (): Promise<ExampleScope> => {
     return { count: 7, initialCount: 7, islandId: "counter-panel" };
   }
   const encoded = Buffer.from(script.code).toString("base64");
-  const module = (await import(`data:text/javascript;base64,${encoded}`)) as { default: ExampleScope };
-  return module.default;
+  const module = (await import(`data:text/javascript;base64,${encoded}`)) as {
+    default?: ExampleScope;
+    scope?: ExampleScope;
+  };
+  return module.scope ?? module.default ?? { count: 7, initialCount: 7, islandId: "counter-panel" };
 };
 
 export const generatedClientModule = generateClientModule(compiled, { reactive: true });

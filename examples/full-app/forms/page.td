@@ -25,7 +25,7 @@ const profileResult = (form) => {
   });
 };
 
-export default ({ profile }) => ({
+export const scope = ({ profile }) => ({
   copy: copy(),
   saveProfile: (event) => {
     event.preventDefault();

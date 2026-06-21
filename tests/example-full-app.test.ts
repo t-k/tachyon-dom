@@ -71,6 +71,7 @@ describe("full app example", () => {
       expect(existsSync(template)).toBe(true);
       const source = readFileSync(template, "utf8");
       expect(source).toContain("<script>");
+      expect(source).toContain("export const scope");
       expect(source).toContain("<section");
     }
   });

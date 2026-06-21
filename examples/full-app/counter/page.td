@@ -2,7 +2,7 @@
 import { batch } from "../../../src/runtime/signal";
 import { copy } from "../app";
 
-export default ({ count, step }) => ({
+export const scope = ({ count, step }) => ({
   copy: copy(),
   decrement: () => count.update((value) => value - step()),
   doubleStep: () =>

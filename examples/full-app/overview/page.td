@@ -1,7 +1,7 @@
 <script>
 import { copy } from "../app";
 
-export default () => ({
+export const scope = () => ({
   copy: copy(),
 });
 </script>

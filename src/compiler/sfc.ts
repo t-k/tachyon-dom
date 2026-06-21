@@ -3,6 +3,7 @@ import { compileTemplate } from "./index";
 import type { CompiledTemplate, CompilerError } from "./types";
 
 export const sfcDefaultScopeName = "__tachyonSfcDefaultScope";
+export const sfcNamedScopeName = "__tachyonSfcScope";
 
 export type TachyonSfcScript = {
   attrs: string;
@@ -102,6 +103,14 @@ export const compileTachyonSfc = (source: string): Result<CompiledTachyonSfc, Co
 export const transformSfcScript = (script: TachyonSfcScript | undefined): TransformedSfcScript => {
   if (!script || script.content.trim().length === 0) {
     return { code: "" };
+  }
+  const namedScopeExport = /\bexport\s+const\s+scope\s*=/;
+  if (namedScopeExport.test(script.content)) {
+    const code = script.content.replace(namedScopeExport, `const ${sfcNamedScopeName} =`).trim();
+    return {
+      code: `${code}\nexport { ${sfcNamedScopeName} as scope };\n`,
+      defaultScopeName: sfcNamedScopeName,
+    };
   }
   const defaultExport = /\bexport\s+default\b/;
   if (!defaultExport.test(script.content)) {

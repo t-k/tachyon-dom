@@ -8,6 +8,7 @@ describe("store hydrate stream example", () => {
     const template = join(process.cwd(), "examples", "store-hydrate-stream.td");
     expect(existsSync(template)).toBe(true);
     expect(readFileSync(template, "utf8")).toContain("<script>");
+    expect(readFileSync(template, "utf8")).toContain("export const scope");
   });
 
   it("renders streamed HTML with hydrate markers", async () => {
@@ -28,7 +29,9 @@ describe("store hydrate stream example", () => {
   });
 
   it("shows the generated client module shape", () => {
-    expect(generatedClientModule).toContain(`import { createStore as __tachyonCreateStore } from "tachyon-dom/runtime/store";`);
+    expect(generatedClientModule).toContain(
+      `import { createStore as __tachyonCreateStore } from "tachyon-dom/runtime/store";`,
+    );
     expect(generatedClientModule).toContain(`export const hydrationBoundaries = [{"path":`);
     expect(generatedClientModule).toContain(`"id":"islandId"`);
     expect(generatedClientModule).toContain(`__tachyonRead(state.count)`);

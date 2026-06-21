@@ -2,7 +2,7 @@
 import { compiledDiagnosticTemplate, copy, generatedClient, templateSource } from "../app";
 import { renderServerTemplate } from "../../../src/compiler";
 
-export default ({ rows, streamOutput }) => ({
+export const scope = ({ rows, streamOutput }) => ({
   copy: copy(),
   generatedClient,
   streamOutput: streamOutput ?? renderServerTemplate(compiledDiagnosticTemplate, { rows, title: "Compiled stream" }),

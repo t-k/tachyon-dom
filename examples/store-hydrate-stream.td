@@ -1,5 +1,5 @@
 <script>
-export default {
+export const scope = {
   initialCount: 7,
   count: 7,
   islandId: "counter-panel",

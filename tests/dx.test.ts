@@ -121,6 +121,35 @@ export default () => ({
     }
   });
 
+  it("uses named SFC scope exports as the page scope factory", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-scope-"));
+    try {
+      const input = path.join(dir, "counter.td");
+      const output = path.join(dir, "counter.js");
+      await writeFile(
+        input,
+        `<script>
+export const scope = () => ({
+  count: 1,
+  increment: () => undefined,
+});
+</script>
+<button on:click={increment}>{count}</button>`,
+      );
+
+      const result = await compileFile({ input, output, target: "client", reactive: true, sourcemap: false });
+
+      expect(result.ok).toBe(true);
+      const code = await readFile(output, "utf8");
+      expect(code).toContain(`const __tachyonSfcScope = () => ({`);
+      expect(code).toContain(`export { __tachyonSfcScope as scope };`);
+      expect(code).toContain(`typeof __tachyonSfcScope === "function"`);
+      expect(code).toContain(`cleanups.push(__tachyonDelegate(root, "click", [], scope.increment));`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("builds a file route manifest through the CLI helper", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-routes-"));
     try {

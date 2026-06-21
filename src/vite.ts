@@ -1,6 +1,6 @@
 import type { Plugin } from "vite";
 import type { TachyonApp, TachyonAppAssets } from "./app";
-import { sfcDefaultScopeName, transformSfcScript } from "./compiler/sfc";
+import { transformSfcScript } from "./compiler/sfc";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index";
 import { diagnoseTachyonSfc, formatDiagnostic } from "./diagnostics";
 import { createFileRouteManifest } from "./router";
@@ -113,7 +113,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         target,
         result.value.template,
         options.reactive === true,
-        target === "client" && script.defaultScopeName ? sfcDefaultScopeName : undefined,
+        target === "client" && script.defaultScopeName ? script.defaultScopeName : undefined,
       )}`;
       const emitSourceMap = shouldEmitSourceMap({
         sourcemap: options.sourcemap,

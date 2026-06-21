@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { generateTemplateTypes } from "./app";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index";
-import { sfcDefaultScopeName, transformSfcScript } from "./compiler/sfc";
+import { transformSfcScript } from "./compiler/sfc";
 import { diagnoseTachyonSfc, formatDiagnostic } from "./diagnostics";
 import { scanFileRoutes } from "./router";
 import { appendInlineSourceMap, createSourceMap } from "./source-map";
@@ -252,7 +252,7 @@ export const compileFile = async (options: Omit<CliCompileOptions, "command">): 
         ? generateServerStreamModule(result.value.template)
         : generateClientModule(result.value.template, {
             reactive: options.reactive,
-            ...(script.defaultScopeName ? { defaultScopeName: sfcDefaultScopeName } : {}),
+            ...(script.defaultScopeName ? { defaultScopeName: script.defaultScopeName } : {}),
           });
   const moduleCode = `${script.code}${code}`;
   const output = options.sourcemap

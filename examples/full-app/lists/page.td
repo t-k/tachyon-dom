@@ -1,7 +1,7 @@
 <script>
 import { copy, t } from "../app";
 
-export default ({ rows, openOnly }) => ({
+export const scope = ({ rows, openOnly }) => ({
   addRow: () => {
     const id = Math.max(...rows().map((row) => row.id)) + 1;
     rows.set([{ id, label: `Inserted row ${id}`, owner: "User", status: "open" }, ...rows()]);

@@ -1,7 +1,7 @@
 <script>
 import { copy } from "../app";
 
-export default ({ profile, root }) => ({
+export const scope = ({ profile, root }) => ({
   copy: copy(),
   setComfortable: () => {
     profile.density = "comfortable";
