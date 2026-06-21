@@ -2,7 +2,8 @@ import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { compileTemplate, generateClientModule, generateServerStreamModule } from "../src/compiler";
+import { generateClientModule, generateServerStreamModule } from "../src/compiler";
+import { compileTachyonSfc, transformSfcScript } from "../src/compiler/sfc";
 import { renderToResponse } from "../src/server/stream";
 
 type ExampleScope = {
@@ -16,21 +17,27 @@ type GeneratedServerModule = {
 };
 
 const source = readFileSync(join(process.cwd(), "examples", "store-hydrate-stream.td"), "utf8").trim();
-const compiledResult = compileTemplate(source);
+const compiledResult = compileTachyonSfc(source);
 
 if (!compiledResult.ok) {
   throw new Error(compiledResult.error.message);
 }
 
-const compiled = compiledResult.value;
-const scope = {
-  initialCount: 7,
-  count: 7,
-  islandId: "counter-panel",
+const compiled = compiledResult.value.template;
+
+const importExampleScope = async (): Promise<ExampleScope> => {
+  const script = transformSfcScript(compiledResult.value.descriptor.script);
+  if (!script.code) {
+    return { count: 7, initialCount: 7, islandId: "counter-panel" };
+  }
+  const encoded = Buffer.from(script.code).toString("base64");
+  const module = (await import(`data:text/javascript;base64,${encoded}`)) as { default: ExampleScope };
+  return module.default;
 };
 
 export const generatedClientModule = generateClientModule(compiled, { reactive: true });
 export const generatedServerStreamModule = generateServerStreamModule(compiled);
+const scope = await importExampleScope();
 
 const importGeneratedServerModule = async (): Promise<GeneratedServerModule> => {
   const encoded = Buffer.from(generatedServerStreamModule).toString("base64");

@@ -1,9 +1,11 @@
 import "./styles.css";
+import * as authViewModule from "./auth-view.td";
 import authViewSource from "./auth-view.td?raw";
 import shellSource from "./shell.td?raw";
+import * as todoViewModule from "./todo-view.td";
 import todoViewSource from "./todo-view.td?raw";
-import { compileTemplate, renderServerTemplate, type CompiledTemplate } from "../../src/compiler";
-import { enhanceForm, validateFormData } from "../../src/runtime/form";
+import { renderServerTemplate, type CompiledTemplate } from "../../src/compiler";
+import { compileTachyonSfc } from "../../src/compiler/sfc";
 import { err, ok, type Result } from "../../src/result";
 
 type Session = {
@@ -28,8 +30,36 @@ type AuthTodoError = {
   message: string;
 };
 
-type TodoViewModel = Todo & {
-  toggleLabel: string;
+type AuthViewModule = {
+  bindAuthForm: (
+    form: HTMLFormElement,
+    options: {
+      messages: AuthTodoMessages;
+      readTodos: typeof readTodos;
+      render: () => void;
+      state: AuthTodoState;
+      writeSession: typeof writeSession;
+    },
+  ) => () => void;
+};
+
+type TodoViewModule = {
+  bindTodoView: (
+    root: HTMLElement,
+    options: {
+      copy: Record<string, string>;
+      messages: AuthTodoMessages;
+      render: () => void;
+      saveTodos: () => void;
+      state: AuthTodoState;
+      writeSession: typeof writeSession;
+    },
+  ) => () => void;
+  createTodoScope: (
+    state: AuthTodoState,
+    session: Session,
+    options: { copy: Record<string, string>; messages: AuthTodoMessages },
+  ) => Record<string, unknown>;
 };
 
 type MessageKey =
@@ -91,6 +121,11 @@ const messages: Record<"en", Record<MessageKey, string>> = {
   },
 };
 
+type AuthTodoMessages = (typeof messages)["en"];
+
+const authView = authViewModule as unknown as AuthViewModule;
+const todoView = todoViewModule as unknown as TodoViewModule;
+
 const t = (key: MessageKey, values: Record<string, string | number> = {}): string =>
   Object.entries(values).reduce((text, [name, value]) => text.replaceAll(`{${name}}`, String(value)), messages.en[key]);
 
@@ -116,14 +151,12 @@ const copy = (): Record<string, string> => ({
 const sessionStorageKey = "tachyon-auth-todo:session";
 const todoStoragePrefix = "tachyon-auth-todo:todos:";
 
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 const compileView = (source: string): CompiledTemplate => {
-  const result = compileTemplate(source);
+  const result = compileTachyonSfc(source);
   if (!result.ok) {
     throw new Error(result.error.message);
   }
-  return result.value;
+  return result.value.template;
 };
 
 const authViewTemplate = compileView(authViewSource);
@@ -137,10 +170,6 @@ const storageResult = <T>(read: () => T): Result<T, AuthTodoError> => {
     return err({ message: error instanceof Error ? error.message : "Storage unavailable." });
   }
 };
-
-const normalizeEmail = (email: string): string => email.trim().toLowerCase();
-
-const userIdForEmail = (email: string): string => normalizeEmail(email).replaceAll(/[^a-z0-9._-]/g, "-");
 
 const readSession = (): Result<Session | undefined, AuthTodoError> =>
   storageResult(() => {
@@ -197,51 +226,14 @@ const writeTodos = (session: Session | undefined, todos: Todo[]): Result<void, A
     localStorage.setItem(todoStorageKey(session), JSON.stringify(todos));
   });
 
-const signIn = (email: string, passphrase: string): Result<Session, AuthTodoError> => {
-  const normalizedEmail = normalizeEmail(email);
-  if (!emailPattern.test(normalizedEmail)) {
-    return err({ message: t("invalidEmail") });
-  }
-  if (passphrase.length < 8) {
-    return err({ message: t("invalidPassphrase") });
-  }
-  return ok({ email: normalizedEmail, userId: userIdForEmail(normalizedEmail) });
-};
-
-const createTodo = (title: string, now = Date.now()): Result<Todo, AuthTodoError> => {
-  const trimmed = title.trim();
-  if (trimmed.length === 0) {
-    return err({ message: t("todoRequired") });
-  }
-  return ok({
-    completed: false,
-    createdAt: now,
-    id: `${now}-${Math.random().toString(16).slice(2)}`,
-    title: trimmed,
-  });
-};
-
 const renderAuthForm = (state: AuthTodoState): string =>
   renderServerTemplate(authViewTemplate, { copy: copy(), status: state.status });
 
-const openTodoText = (todos: readonly Todo[]): string => {
-  const openCount = todos.filter((todo) => !todo.completed).length;
-  return openCount === 1 ? t("openCountOne") : t("openCountMany", { count: openCount });
-};
-
-const todoViewModels = (todos: readonly Todo[]): TodoViewModel[] =>
-  todos.map((todo) => ({ ...todo, toggleLabel: todo.completed ? t("markOpen") : t("markComplete") }));
-
 const renderTodoApp = (state: AuthTodoState, session: Session): string =>
-  renderServerTemplate(todoViewTemplate, {
-    copy: copy(),
-    hasTodos: state.todos.length > 0,
-    isEmpty: state.todos.length === 0,
-    openCount: openTodoText(state.todos),
-    session,
-    status: state.status,
-    todos: todoViewModels(state.todos),
-  });
+  renderServerTemplate(
+    todoViewTemplate,
+    todoView.createTodoScope(state, session, { copy: copy(), messages: messages.en }),
+  );
 
 const renderShell = (state: AuthTodoState): string =>
   renderServerTemplate(shellTemplate, {
@@ -293,105 +285,28 @@ export const mountAuthTodoExample = (app: HTMLElement): (() => void) => {
     const authForm = app.querySelector<HTMLFormElement>('[data-testid="auth-form"]');
     if (authForm) {
       cleanups.push(
-        enhanceForm(authForm, {
-          validate: ({ formData }) =>
-            validateFormData(formData, {
-              email: { pattern: emailPattern, message: t("invalidEmail"), required: true },
-              passphrase: { message: t("invalidPassphrase"), minLength: 8, required: true },
-            }),
-          submit: ({ formData }) => {
-            const result = signIn(String(formData.get("email") ?? ""), String(formData.get("passphrase") ?? ""));
-            if (!result.ok) {
-              return new Response(result.error.message, { status: 400 });
-            }
-            state.session = result.value;
-            const writeResult = writeSession(result.value);
-            const todosReadResult = readTodos(result.value);
-            state.todos = todosReadResult.ok ? todosReadResult.value : [];
-            state.status = !writeResult.ok
-              ? writeResult.error.message
-              : !todosReadResult.ok
-                ? todosReadResult.error.message
-                : t("signedIn");
-            render();
-            return new Response("ok");
-          },
-          onInvalid: ({ errors }) => {
-            state.status = errors.email ?? errors.passphrase ?? "";
-            render();
-          },
-          onSuccess: async ({ response }) => {
-            if (!response.ok) {
-              state.status = await response.text();
-              render();
-            }
-          },
-          onError: ({ error }) => {
-            state.status = error instanceof Error ? error.message : "Unknown error.";
-            render();
-          },
+        authView.bindAuthForm(authForm, {
+          messages: messages.en,
+          readTodos,
+          render,
+          state,
+          writeSession,
         }),
       );
     }
 
-    const todoForm = app.querySelector<HTMLFormElement>('[data-testid="todo-form"]');
-    if (todoForm) {
+    if (state.session) {
       cleanups.push(
-        enhanceForm(todoForm, {
-          validate: ({ formData }) =>
-            validateFormData(formData, {
-              title: { maxLength: 120, message: t("todoRequired"), required: true },
-            }),
-          submit: ({ formData }) => {
-            const result = createTodo(String(formData.get("title") ?? ""));
-            if (!result.ok) {
-              return new Response(result.error.message, { status: 400 });
-            }
-            state.todos = [result.value, ...state.todos];
-            state.status = t("todoAdded");
-            saveTodos();
-            render();
-            return new Response("ok");
-          },
-          onInvalid: ({ errors }) => {
-            state.status = errors.title ?? "";
-            render();
-          },
+        todoView.bindTodoView(app, {
+          copy: copy(),
+          messages: messages.en,
+          render,
+          saveTodos,
+          state,
+          writeSession,
         }),
       );
     }
-
-    app.querySelector<HTMLButtonElement>('[data-testid="sign-out"]')?.addEventListener("click", () => {
-      state.session = undefined;
-      state.todos = [];
-      state.status = t("signedOut");
-      const result = writeSession(undefined);
-      if (!result.ok) {
-        state.status = result.error.message;
-      }
-      render();
-    });
-
-    app.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const id = button.dataset.id;
-        if (!id) {
-          return;
-        }
-        if (button.dataset.action === "toggle") {
-          state.todos = state.todos.map((todo) => (todo.id === id ? { ...todo, completed: !todo.completed } : todo));
-          saveTodos();
-          render();
-          return;
-        }
-        if (button.dataset.action === "delete") {
-          state.todos = state.todos.filter((todo) => todo.id !== id);
-          state.status = t("todoDeleted");
-          saveTodos();
-          render();
-        }
-      });
-    });
   };
 
   render();

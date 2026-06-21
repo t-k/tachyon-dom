@@ -1,4 +1,7 @@
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Plugin, UserConfig } from "vite";
+import { tachyonDom } from "./src/vite";
 
 type ExamplePage = {
   title: string;
@@ -12,6 +15,9 @@ const examplePages = new Map<string, ExamplePage>([
   ],
   ["/examples/web/", { module: "/examples/web/main.ts", title: "Tachyon DOM Example" }],
 ]);
+
+const root = dirname(fileURLToPath(import.meta.url));
+const sourceRoot = resolve(root, "src");
 
 const normalizePath = (url: string | undefined): string => {
   const path = new URL(url ?? "/", "http://tachyon.local").pathname;
@@ -49,5 +55,11 @@ const tachyonExamplePages = (): Plugin => ({
 });
 
 export default {
-  plugins: [tachyonExamplePages()],
+  plugins: [tachyonDom({ reactive: true }), tachyonExamplePages()],
+  resolve: {
+    alias: [
+      { find: /^tachyon-dom\/(.+)$/, replacement: `${sourceRoot}/$1.ts` },
+      { find: "tachyon-dom", replacement: resolve(sourceRoot, "index.ts") },
+    ],
+  },
 } satisfies UserConfig;

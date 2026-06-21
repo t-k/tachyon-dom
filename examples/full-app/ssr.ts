@@ -90,10 +90,10 @@ const renderRouteHtml = (
         addRow: () => undefined,
         copy: copy(),
         rotateRows: () => undefined,
-        rowMode: state.openOnly ? t("openOnly") : t("allRows"),
-        toggleLabel: state.openOnly ? t("allRows") : t("openOnly"),
+        rowMode: () => (state.openOnly ? t("openOnly") : t("allRows")),
+        toggleLabel: () => (state.openOnly ? t("allRows") : t("openOnly")),
         toggleOpenOnly: () => undefined,
-        visibleRows: state.rows,
+        visibleRows: () => state.rows,
       });
     case "/forms/":
       return renderTemplateHtml(pageTemplates["/forms/"], {

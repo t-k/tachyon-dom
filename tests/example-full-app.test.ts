@@ -69,7 +69,9 @@ describe("full app example", () => {
     for (const page of templates) {
       const template = join(process.cwd(), "examples", "full-app", page, "page.td");
       expect(existsSync(template)).toBe(true);
-      expect(readFileSync(template, "utf8")).toContain("<section");
+      const source = readFileSync(template, "utf8");
+      expect(source).toContain("<script>");
+      expect(source).toContain("<section");
     }
   });
 

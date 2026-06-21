@@ -1,3 +1,14 @@
+<script>
+import { compiledDiagnosticTemplate, copy, generatedClient, templateSource } from "../app";
+import { renderServerTemplate } from "../../../src/compiler";
+
+export default ({ rows, streamOutput }) => ({
+  copy: copy(),
+  generatedClient,
+  streamOutput: streamOutput ?? renderServerTemplate(compiledDiagnosticTemplate, { rows, title: "Compiled stream" }),
+  templateSource,
+});
+</script>
 <section class="page-grid diagnostics-grid">
   <article class="panel">
     <h2>{copy.template}</h2>

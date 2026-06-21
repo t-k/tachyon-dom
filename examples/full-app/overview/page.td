@@ -1,3 +1,10 @@
+<script>
+import { copy } from "../app";
+
+export default () => ({
+  copy: copy(),
+});
+</script>
 <section class="page-grid overview-grid" data-testid="overview-page">
   <article class="panel hero-panel">
     <p class="eyebrow">{copy.summary}</p>

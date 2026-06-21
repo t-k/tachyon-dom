@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mountWebExample } from "../examples/web/main";
@@ -9,6 +9,8 @@ describe("browser web example", () => {
 
     expect(existsSync(join(root, "demo.td"))).toBe(true);
     expect(existsSync(join(root, "shell.td"))).toBe(true);
+    expect(readFileSync(join(root, "demo.td"), "utf8")).toContain("<script>");
+    expect(readFileSync(join(root, "shell.td"), "utf8")).toContain("<script>");
     expect(existsSync(join(root, "index.html"))).toBe(false);
   });
 

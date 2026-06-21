@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { mountAuthTodoExample } from "../examples/auth-todo/main";
@@ -41,6 +41,8 @@ describe("authenticated todo example", () => {
     expect(existsSync(join(root, "auth-view.td"))).toBe(true);
     expect(existsSync(join(root, "shell.td"))).toBe(true);
     expect(existsSync(join(root, "todo-view.td"))).toBe(true);
+    expect(readFileSync(join(root, "auth-view.td"), "utf8")).toContain("<script>");
+    expect(readFileSync(join(root, "todo-view.td"), "utf8")).toContain("<script>");
     expect(existsSync(join(root, "index.html"))).toBe(false);
   });
 

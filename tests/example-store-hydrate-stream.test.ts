@@ -1,11 +1,13 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { generatedClientModule, renderExampleHtml, renderExampleResponse } from "../examples/store-hydrate-stream";
 
 describe("store hydrate stream example", () => {
   it("loads the streamed template from a .td file", () => {
-    expect(existsSync(join(process.cwd(), "examples", "store-hydrate-stream.td"))).toBe(true);
+    const template = join(process.cwd(), "examples", "store-hydrate-stream.td");
+    expect(existsSync(template)).toBe(true);
+    expect(readFileSync(template, "utf8")).toContain("<script>");
   });
 
   it("renders streamed HTML with hydrate markers", async () => {

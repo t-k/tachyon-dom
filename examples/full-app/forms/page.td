@@ -1,3 +1,51 @@
+<script>
+import { copy, t } from "../app";
+import { err, ok } from "../../../src/result";
+
+const profileResult = (form) => {
+  const data = new FormData(form);
+  const displayName = String(data.get("displayName") ?? "").trim();
+  const email = String(data.get("email") ?? "")
+    .trim()
+    .toLowerCase();
+  const role = String(data.get("role") ?? "");
+  if (!displayName) {
+    return err(t("nameRequired"));
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return err(t("emailRequired"));
+  }
+  return ok({
+    density: "comfortable",
+    displayName,
+    email,
+    role,
+    status: t("savedProfile", { name: displayName }),
+    theme: "system",
+  });
+};
+
+export default ({ profile }) => ({
+  copy: copy(),
+  saveProfile: (event) => {
+    event.preventDefault();
+    const form = event.currentTarget instanceof HTMLFormElement ? event.currentTarget : undefined;
+    if (!form) {
+      profile.status = t("nameRequired");
+      return;
+    }
+    const result = profileResult(form);
+    if (!result.ok) {
+      profile.status = result.error;
+      return;
+    }
+    profile.displayName = result.value.displayName;
+    profile.email = result.value.email;
+    profile.role = result.value.role;
+    profile.status = result.value.status;
+  },
+});
+</script>
 <section class="page-grid">
   <form class="panel form-panel" action="/profile" method="post" novalidate on:submit={saveProfile}>
     <fieldset>

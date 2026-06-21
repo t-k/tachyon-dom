@@ -6,22 +6,16 @@ import * as listsTemplate from "./lists/page.td";
 import * as overviewTemplate from "./overview/page.td";
 import * as settingsTemplate from "./settings/page.td";
 import {
-  compiledDiagnosticTemplate,
-  copy,
   defaultProfile,
   escapeHtml,
-  generatedClient,
   generatedStreamModule,
   initialRows,
   t,
-  templateSource,
   type DemoRow,
   type MessageKey,
   type ProfileState,
 } from "./app";
 import { renderFullAppShellFrame } from "./dom-shell";
-import { renderServerTemplate } from "../../src/compiler";
-import { err, ok, type Result } from "../../src/result";
 import { createClientRouter, type ClientRouter, type ClientRouteDefinition } from "../../src/runtime/router";
 import { createMemo, createSignal, effect } from "../../src/runtime/signal";
 import { createStore } from "../../src/runtime/store";
@@ -78,22 +72,6 @@ const mountTemplate = (
   return { element, cleanup: typeof cleanup === "function" ? cleanup : () => undefined };
 };
 
-const overviewScope = (state: { count: unknown; rowCount: unknown; role: unknown }): Record<string, unknown> => ({
-  count: state.count,
-  copy: copy(),
-  role: state.role,
-  rowCount: state.rowCount,
-});
-
-const compilerScope = (state: { rows: DemoRow[]; streamOutput?: string }): Record<string, unknown> => ({
-  copy: copy(),
-  generatedClient,
-  streamOutput:
-    state.streamOutput ??
-    renderServerTemplate(compiledDiagnosticTemplate, { rows: state.rows, title: "Compiled stream" }),
-  templateSource,
-});
-
 const encodeBase64 = (value: string): string => btoa(value);
 
 const importStreamModule = async (): Promise<StreamModule> =>
@@ -111,29 +89,6 @@ const readGeneratedStream = async (rows: DemoRow[]): Promise<string> => {
   return (await readTextStreamChunks(stream)).join("");
 };
 
-const profileResult = (form: HTMLFormElement): Result<ProfileState, string> => {
-  const data = new FormData(form);
-  const displayName = String(data.get("displayName") ?? "").trim();
-  const email = String(data.get("email") ?? "")
-    .trim()
-    .toLowerCase();
-  const role = String(data.get("role") ?? "");
-  if (!displayName) {
-    return err(t("nameRequired"));
-  }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return err(t("emailRequired"));
-  }
-  return ok({
-    density: "comfortable",
-    displayName,
-    email,
-    role,
-    status: t("savedProfile", { name: displayName }),
-    theme: "system",
-  });
-};
-
 export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppInstance> => {
   const count = createSignal(0);
   const step = createSignal(1);
@@ -141,9 +96,6 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
   const rows = createSignal<DemoRow[]>(initialRows());
   const rowCount = createMemo(() => rows().length);
   const openOnly = createSignal(false);
-  const visibleRows = createMemo(() => rows().filter((row) => !openOnly() || row.status === "open"));
-  const rowMode = createMemo(() => (openOnly() ? t("openOnly") : t("allRows")));
-  const toggleLabel = createMemo(() => (openOnly() ? t("allRows") : t("openOnly")));
   const profile = createStore<ProfileState>(defaultProfile());
   const cleanups: Array<() => void> = [];
   let routeCleanups: Array<() => void> = [];
@@ -218,16 +170,14 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
   };
 
   const renderOverview = ({ url }: { url: URL }): HTMLElement =>
-    mountRouteTemplate(
-      "overviewTitle",
-      url.pathname,
-      pageTemplates["/"],
-      overviewScope({ count, role: profile.role, rowCount }),
-    );
+    mountRouteTemplate("overviewTitle", url.pathname, pageTemplates["/"], {
+      count,
+      role: profile.role,
+      rowCount,
+    });
 
   const renderCounter = ({ url }: { url: URL }): HTMLElement =>
     mountRouteTemplate("counterTitle", url.pathname, pageTemplates["/counter/"], {
-      copy: copy(),
       count,
       projected,
       step,
@@ -235,75 +185,25 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
 
   const renderLists = ({ url }: { url: URL }): HTMLElement =>
     mountRouteTemplate("listsTitle", url.pathname, pageTemplates["/lists/"], {
-      addRow: () => {
-        const id = Math.max(...rows().map((row) => row.id)) + 1;
-        rows.set([{ id, label: `Inserted row ${id}`, owner: "User", status: "open" }, ...rows()]);
-      },
-      copy: copy(),
-      rotateRows: () => {
-        const [first, ...rest] = rows();
-        rows.set(first ? [...rest, first] : []);
-      },
-      rowMode,
-      toggleLabel,
-      toggleOpenOnly: () => openOnly.update((value) => !value),
-      visibleRows,
+      openOnly,
+      rows,
     });
 
-  const renderForms = ({ url }: { url: URL }): HTMLElement => {
-    const saveProfile = (event: Event): void => {
-      event.preventDefault();
-      const form = event.currentTarget instanceof HTMLFormElement ? event.currentTarget : undefined;
-      if (!form) {
-        profile.status = t("nameRequired");
-        return;
-      }
-      const result = profileResult(form);
-      if (!result.ok) {
-        profile.status = result.error;
-        return;
-      }
-      profile.displayName = result.value.displayName;
-      profile.email = result.value.email;
-      profile.role = result.value.role;
-      profile.status = result.value.status;
-    };
-    return mountRouteTemplate("formsTitle", url.pathname, pageTemplates["/forms/"], {
-      copy: copy(),
-      profile,
-      saveProfile,
-    });
-  };
+  const renderForms = ({ url }: { url: URL }): HTMLElement =>
+    mountRouteTemplate("formsTitle", url.pathname, pageTemplates["/forms/"], { profile });
 
   const renderCompiler = async ({ url }: { url: URL }): Promise<HTMLElement> => {
     const streamOutput = await readGeneratedStream(rows());
-    return mountRouteTemplate(
-      "compilerTitle",
-      url.pathname,
-      pageTemplates["/compiler/"],
-      compilerScope({ rows: rows(), streamOutput }),
-    );
+    return mountRouteTemplate("compilerTitle", url.pathname, pageTemplates["/compiler/"], {
+      rows: rows(),
+      streamOutput,
+    });
   };
 
   const renderSettings = ({ url }: { url: URL }): HTMLElement =>
     mountRouteTemplate("settingsTitle", url.pathname, pageTemplates["/settings/"], {
-      copy: copy(),
-      setComfortable: () => {
-        profile.density = "comfortable";
-        root.dataset.density = "comfortable";
-      },
-      setCompact: () => {
-        profile.density = "compact";
-        root.dataset.density = "compact";
-      },
-      toggleTheme: (event: Event) => {
-        const input = event.currentTarget;
-        if (!(input instanceof HTMLInputElement)) {
-          return;
-        }
-        profile.theme = input.checked ? "light" : "system";
-        root.dataset.theme = profile.theme;
-      },
+      profile,
+      root,
     });
 
   const target = "#route-outlet";

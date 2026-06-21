@@ -1,3 +1,16 @@
+<script>
+export const bindShellControls = (app, render) => {
+  const rerender = app.querySelector("#rerender");
+  if (!rerender) {
+    return () => undefined;
+  }
+  const onClick = () => {
+    void render();
+  };
+  rerender.addEventListener("click", onClick);
+  return () => rerender.removeEventListener("click", onClick);
+};
+</script>
 <div class="shell">
   <header class="topbar">
     <div>

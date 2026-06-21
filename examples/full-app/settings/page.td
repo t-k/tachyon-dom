@@ -1,3 +1,26 @@
+<script>
+import { copy } from "../app";
+
+export default ({ profile, root }) => ({
+  copy: copy(),
+  setComfortable: () => {
+    profile.density = "comfortable";
+    root.dataset.density = "comfortable";
+  },
+  setCompact: () => {
+    profile.density = "compact";
+    root.dataset.density = "compact";
+  },
+  toggleTheme: (event) => {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) {
+      return;
+    }
+    profile.theme = input.checked ? "light" : "system";
+    root.dataset.theme = profile.theme;
+  },
+});
+</script>
 <section class="page-grid">
   <article class="panel">
     <h2>{copy.settingsTitle}</h2>
