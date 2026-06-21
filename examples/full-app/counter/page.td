@@ -1,3 +1,21 @@
+<script>
+import { batch } from "../../../src/runtime/signal";
+
+export default ({ count, step }) => ({
+  decrement: () => count.update((value) => value - step()),
+  doubleStep: () =>
+    batch(() => {
+      step.update((value) => value * 2);
+      count.update((value) => value + 0);
+    }),
+  increment: () => count.update((value) => value + step()),
+  resetCounter: () =>
+    batch(() => {
+      count.set(0);
+      step.set(1);
+    }),
+});
+</script>
 <section class="page-grid">
   <article class="panel counter-panel">
     <div class="counter-readout">

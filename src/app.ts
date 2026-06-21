@@ -119,7 +119,11 @@ const compilePage = (page: TachyonAppPage): CompiledTemplate => {
 
 const defaultShell = ({ routeHtml }: TachyonAppShellContext): string => `<main id="app">${routeHtml}</main>`;
 
-const assetsForPage = (app: TachyonAppDefinition, page: TachyonAppPage, override?: TachyonAppAssets): TachyonAppAssets => {
+const assetsForPage = (
+  app: TachyonAppDefinition,
+  page: TachyonAppPage,
+  override?: TachyonAppAssets,
+): TachyonAppAssets => {
   if (override) {
     return override;
   }
@@ -133,11 +137,8 @@ const titleForPage = (app: TachyonAppDefinition, page: TachyonAppPage): string =
   return page.title ?? app.title ?? "Tachyon App";
 };
 
-export const renderAppDocument = (
-  app: TachyonApp,
-  path: string,
-  options: TachyonAppDocumentOptions = {},
-): string => app.renderDocument(path, options);
+export const renderAppDocument = (app: TachyonApp, path: string, options: TachyonAppDocumentOptions = {}): string =>
+  app.renderDocument(path, options);
 
 export const defineApp = (definition: TachyonAppDefinition): TachyonApp => {
   const pages = definition.pages.map((page) => ({
@@ -227,12 +228,10 @@ const segmentToRoute = (segment: string): string => {
 
 const segmentToFileName = (segment: string): string => segment;
 
-const assetPrefixForDepth = (depth: number): string => (depth <= 0 ? "." : Array.from({ length: depth }, () => "..").join("/"));
+const assetPrefixForDepth = (depth: number): string =>
+  depth <= 0 ? "." : Array.from({ length: depth }, () => "..").join("/");
 
-export const pagesFromRouteFiles = (
-  files: readonly string[],
-  options: { rootDir: string },
-): TachyonAppPageFile[] =>
+export const pagesFromRouteFiles = (files: readonly string[], options: { rootDir: string }): TachyonAppPageFile[] =>
   files
     .filter((file) => templateExtensions.test(file))
     .map((file) => {
@@ -282,10 +281,7 @@ const collectBindingIdentifiers = (binding: ClientBinding, identifiers: Set<stri
   collectExpressionIdentifiers(binding.expression, identifiers);
 };
 
-export const generateTemplateTypes = (
-  source: string,
-  options: TemplateTypeOptions = {},
-): Result<string, string> => {
+export const generateTemplateTypes = (source: string, options: TemplateTypeOptions = {}): Result<string, string> => {
   const result = compileTachyonSfc(source);
   if (!result.ok) {
     return err(result.error.message);

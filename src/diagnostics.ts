@@ -38,7 +38,10 @@ export const diagnoseTemplate = (source: string): Result<CompiledTemplate, Templ
 
 export const diagnoseTachyonSfc = (
   source: string,
-): Result<ReturnType<typeof compileTachyonSfc> extends Result<infer Value, CompilerError> ? Value : never, TemplateDiagnostic> => {
+): Result<
+  ReturnType<typeof compileTachyonSfc> extends Result<infer Value, CompilerError> ? Value : never,
+  TemplateDiagnostic
+> => {
   const result = compileTachyonSfc(source);
   if (result.ok) {
     return ok(result.value);

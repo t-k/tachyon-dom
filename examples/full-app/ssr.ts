@@ -1,7 +1,8 @@
 import { dirname, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { compileTemplate, renderServerTemplate } from "../../src/compiler";
+import { renderServerTemplate } from "../../src/compiler";
+import { compileTachyonSfc } from "../../src/compiler/sfc";
 import {
   compiledDiagnosticTemplate,
   copy,
@@ -40,16 +41,16 @@ const pageTemplates = {
   "/settings/": pageSource("settings/page.td"),
 } satisfies Record<string, PageTemplate>;
 
-const compiledPageCache = new Map<string, ReturnType<typeof compileTemplate>>();
+const compiledPageCache = new Map<string, ReturnType<typeof compileTachyonSfc>>();
 
 const renderTemplateHtml = (entry: PageTemplate, scope: Record<string, unknown>): string => {
   const cached = compiledPageCache.get(entry.source);
-  const compiledPage = cached ?? compileTemplate(entry.source);
+  const compiledPage = cached ?? compileTachyonSfc(entry.source);
   compiledPageCache.set(entry.source, compiledPage);
   if (!compiledPage.ok) {
     throw new Error(compiledPage.error.message);
   }
-  return renderServerTemplate(compiledPage.value, scope);
+  return renderServerTemplate(compiledPage.value.template, scope);
 };
 
 const overviewScope = (state: { count: unknown; rowCount: unknown; role: unknown }): Record<string, unknown> => ({

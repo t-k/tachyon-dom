@@ -151,7 +151,12 @@ export default () => ({
     const app = defineApp({
       title: "Docs",
       pages: [
-        { path: "/", fileName: "index.html", template: `<section><h1>{title}</h1></section>`, scope: { title: "Home" } },
+        {
+          path: "/",
+          fileName: "index.html",
+          template: `<section><h1>{title}</h1></section>`,
+          scope: { title: "Home" },
+        },
         {
           path: "/counter/",
           fileName: "counter/index.html",
@@ -162,7 +167,9 @@ export default () => ({
       shell: ({ routeHtml }) => `<main id="app">${routeHtml}</main>`,
     });
 
-    expect(renderAppDocument(app, "/counter/")).toContain(`<main id="app"><section><h1>Counter</h1><p>1</p></section></main>`);
+    expect(renderAppDocument(app, "/counter/")).toContain(
+      `<main id="app"><section><h1>Counter</h1><p>1</p></section></main>`,
+    );
     expect(app.entries({ minify: true }).map((entry) => entry.fileName)).toEqual(["index.html", "counter/index.html"]);
     expect(app.entries({ minify: true })[1]?.source).not.toContain("\n  <");
   });
@@ -177,7 +184,12 @@ export default () => ({
 
     expect(pages).toEqual([
       { assetPrefix: ".", file: "/repo/src/routes/index/page.td", fileName: "index.html", path: "/" },
-      { assetPrefix: "..", file: "/repo/src/routes/counter/page.td", fileName: "counter/index.html", path: "/counter/" },
+      {
+        assetPrefix: "..",
+        file: "/repo/src/routes/counter/page.td",
+        fileName: "counter/index.html",
+        path: "/counter/",
+      },
       {
         assetPrefix: "../..",
         file: "/repo/src/routes/blog/[...slug]/page.td",
@@ -247,7 +259,9 @@ export default { selected: false };
 
   it("describes real dev and preview CLI commands", () => {
     expect(serverCommandMessage({ command: "dev", host: "127.0.0.1", port: 5173 })).toContain("Vite dev server");
-    expect(serverCommandMessage({ command: "preview", host: "127.0.0.1", port: 4173 })).toContain("Vite preview server");
+    expect(serverCommandMessage({ command: "preview", host: "127.0.0.1", port: 4173 })).toContain(
+      "Vite preview server",
+    );
   });
 
   it("transforms tachyon html files through the Vite plugin", async () => {
@@ -342,7 +356,14 @@ export default {
 
   it("serves SSR app HTML through the Vite app preset", async () => {
     const app = defineApp({
-      pages: [{ path: "/", fileName: "index.html", template: `<section><h1>{title}</h1></section>`, scope: { title: "Home" } }],
+      pages: [
+        {
+          path: "/",
+          fileName: "index.html",
+          template: `<section><h1>{title}</h1></section>`,
+          scope: { title: "Home" },
+        },
+      ],
     });
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-vite-app-"));
     const server = await createServer({

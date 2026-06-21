@@ -115,7 +115,10 @@ const parseRoutesArgs = (routesDir: string, rest: readonly string[]): Result<Cli
   return ok(options);
 };
 
-const parseServerArgs = (command: "dev" | "preview" | "build", rest: readonly string[]): Result<CliServerOptions, string> => {
+const parseServerArgs = (
+  command: "dev" | "preview" | "build",
+  rest: readonly string[],
+): Result<CliServerOptions, string> => {
   const options: CliServerOptions = { command, host: "127.0.0.1", port: command === "dev" ? 5173 : 4173 };
   for (let index = 0; index < rest.length; index++) {
     const arg = rest[index];
@@ -279,9 +282,7 @@ const titleCase = (value: string): string =>
     .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
     .join(" ");
 
-export const addPageFiles = async (
-  options: Omit<CliAddPageOptions, "command">,
-): Promise<Result<string, string>> => {
+export const addPageFiles = async (options: Omit<CliAddPageOptions, "command">): Promise<Result<string, string>> => {
   const normalized = options.name.replace(/^\/+|\/+$/g, "");
   if (!normalized || normalized.includes("..")) {
     return err("Page name must be a route-local path without '..'.");
@@ -311,9 +312,7 @@ export const generateTemplateTypesFile = async (
   return result;
 };
 
-export const createStarterFiles = async (
-  options: Omit<CliInitOptions, "command">,
-): Promise<Result<string, string>> => {
+export const createStarterFiles = async (options: Omit<CliInitOptions, "command">): Promise<Result<string, string>> => {
   await mkdir(join(options.outDir, "src", "routes", "index"), { recursive: true });
   await writeFile(
     join(options.outDir, "src", "routes", "index", "page.td"),
@@ -331,7 +330,10 @@ export const createStarterFiles = async (
     join(options.outDir, "vite.config.ts"),
     `import { defineConfig } from "vite";\nimport { app } from "./src/main";\nimport { tachyonApp, tachyonDom } from "tachyon-dom/vite";\n\nexport default defineConfig({\n  plugins: [tachyonDom({ reactive: true }), tachyonApp(app)],\n});\n`,
   );
-  await writeFile(join(options.outDir, "package.json"), `${JSON.stringify({ scripts: { build: "vite build", dev: "vite" }, type: "module" }, null, 2)}\n`);
+  await writeFile(
+    join(options.outDir, "package.json"),
+    `${JSON.stringify({ scripts: { build: "vite build", dev: "vite" }, type: "module" }, null, 2)}\n`,
+  );
   return ok(options.outDir);
 };
 
@@ -339,8 +341,8 @@ export const serverCommandMessage = (options: CliServerOptions): string =>
   options.command === "build"
     ? "Build the tachyon-dom app with Vite."
     : options.command === "dev"
-    ? `Start Vite dev server with tachyon-dom plugin on ${options.host}:${options.port}.`
-    : `Start Vite preview server for the built tachyon-dom app on ${options.host}:${options.port}.`;
+      ? `Start Vite dev server with tachyon-dom plugin on ${options.host}:${options.port}.`
+      : `Start Vite preview server for the built tachyon-dom app on ${options.host}:${options.port}.`;
 
 const startViteServer = async (options: CliServerOptions): Promise<Result<string, string>> => {
   const vite = await import("vite");

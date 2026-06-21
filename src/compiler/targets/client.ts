@@ -326,11 +326,17 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   lines.push(`export const componentBoundaries = ${JSON.stringify(template.client.components)};`);
   if (hasDefaultScope) {
     lines.push(`const __tachyonCreateScope = (inputScope = {}) => {`);
-    lines.push(`  const localScope = typeof ${options.defaultScopeName} === "function" ? ${options.defaultScopeName}(inputScope) : ${options.defaultScopeName};`);
-    lines.push(`  return localScope && typeof localScope === "object" ? { ...localScope, ...inputScope } : inputScope;`);
+    lines.push(
+      `  const localScope = typeof ${options.defaultScopeName} === "function" ? ${options.defaultScopeName}(inputScope) : ${options.defaultScopeName};`,
+    );
+    lines.push(
+      `  return localScope && typeof localScope === "object" ? { ...localScope, ...inputScope } : inputScope;`,
+    );
     lines.push(`};`);
   }
-  lines.push(hasDefaultScope ? `export const bind = (root, inputScope = {}) => {` : `export const bind = (root, scope) => {`);
+  lines.push(
+    hasDefaultScope ? `export const bind = (root, inputScope = {}) => {` : `export const bind = (root, scope) => {`,
+  );
   if (hasDefaultScope) {
     lines.push(`  const scope = __tachyonCreateScope(inputScope);`);
   }

@@ -23,7 +23,7 @@ import { renderFullAppShellFrame } from "./dom-shell";
 import { renderServerTemplate } from "../../src/compiler";
 import { err, ok, type Result } from "../../src/result";
 import { createClientRouter, type ClientRouter, type ClientRouteDefinition } from "../../src/runtime/router";
-import { batch, createMemo, createSignal, effect } from "../../src/runtime/signal";
+import { createMemo, createSignal, effect } from "../../src/runtime/signal";
 import { createStore } from "../../src/runtime/store";
 import { readTextStreamChunks } from "../../src/runtime/stream-client";
 import { renderToReadableStream } from "../../src/server/stream";
@@ -229,19 +229,7 @@ export const mountFullAppExample = async (root: HTMLElement): Promise<FullAppIns
     mountRouteTemplate("counterTitle", url.pathname, pageTemplates["/counter/"], {
       copy: copy(),
       count,
-      decrement: () => count.update((value) => value - step()),
-      doubleStep: () =>
-        batch(() => {
-          step.update((value) => value * 2);
-          count.update((value) => value + 0);
-        }),
-      increment: () => count.update((value) => value + step()),
       projected,
-      resetCounter: () =>
-        batch(() => {
-          count.set(0);
-          step.set(1);
-        }),
       step,
     });
 
