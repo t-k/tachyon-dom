@@ -33,7 +33,7 @@ const renderExampleDocument = (page: ExamplePage): string => `<!doctype html>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${page.title}</title>
-    <script type="module" src="${page.module}"></script>
+    <script type="module">import ${JSON.stringify(page.module)};</script>
   </head>
   <body>
     <main id="app"></main>

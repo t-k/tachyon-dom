@@ -153,7 +153,10 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         return null;
       }
       if (isEntryRequest(id)) {
-        return null;
+        return {
+          code: entryCodeFor(id),
+          map: null,
+        };
       }
       if (!include.test(cleanId(id))) {
         return null;
