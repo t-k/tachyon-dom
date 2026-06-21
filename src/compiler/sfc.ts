@@ -56,6 +56,11 @@ const autoImports: Record<string, string> = {
   renderToReadableStream: "tachyon-dom",
   validateFormData: "tachyon-dom",
 };
+const autoImportPattern = new RegExp(
+  `\\b(?:${Object.keys(autoImports)
+    .map((name) => name.replaceAll("$", "\\$"))
+    .join("|")})\\b`,
+);
 
 const mapGeneratedOffset = (ranges: readonly TemplateRange[], sourceLength: number, offset: number): number => {
   for (const range of ranges) {
@@ -228,6 +233,9 @@ const collectScriptIdentifiers = (
 };
 
 const autoImportScriptHelpers = (code: string, script: TachyonSfcScript | undefined): string => {
+  if (!autoImportPattern.test(code)) {
+    return code;
+  }
   const identifiers = collectScriptIdentifiers(code, script);
   const importsByModule = new Map<string, string[]>();
   for (const [name, module] of Object.entries(autoImports)) {
