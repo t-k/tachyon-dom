@@ -1,12 +1,16 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createBenchmarkTableApp } from "../benchmark/js-framework-benchmark/src/main";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 describe("js-framework-benchmark app", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
   const loadBenchmarkDocument = () => {
     const html = readFileSync(path.join(__dirname, "../benchmark/js-framework-benchmark/index.html"), "utf8");
     document.open();
@@ -65,5 +69,64 @@ describe("js-framework-benchmark app", () => {
     expect(app.length()).toBe(0);
     expect(app.selectedIndex()).toBe(-1);
     expect(tbody?.rows.length).toBe(0);
+  });
+
+  it("includes mreact in the local js-framework-benchmark comparison", () => {
+    const runner = readFileSync(path.join(__dirname, "../benchmark/local-compare/run-local-compare.ts"), "utf8");
+    const html = readFileSync(path.join(__dirname, "../benchmark/local-compare/mreact/index.html"), "utf8");
+    const source = readFileSync(path.join(__dirname, "../benchmark/local-compare/mreact/src/main.ts"), "utf8");
+
+    expect(runner).toContain('name: "mreact-keyed"');
+    expect(runner).toContain("/benchmark/local-compare/mreact/");
+    expect(html).toContain("<title>Mreact keyed</title>");
+    expect(html).toContain('id="runlots"');
+    expect(html).toContain('id="tbody"');
+    expect(source).toContain("@reckona/mreact-reactive-core");
+    expect(source).toContain("@reckona/mreact-reactive-dom");
+    expect(source).toContain("bindStaticKeyedSingleNodeList(");
+    expect(source).toContain("deferEventPromotion: false");
+  });
+
+  it("runs mreact keyed table actions through the local comparison fixture", async () => {
+    const html = readFileSync(path.join(__dirname, "../benchmark/local-compare/mreact/index.html"), "utf8");
+    document.open();
+    document.write(html);
+    document.close();
+
+    await import("../benchmark/local-compare/mreact/src/main");
+
+    const click = async (selector: string): Promise<void> => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) {
+        throw new Error(`Missing ${selector}`);
+      }
+      element.click();
+      await Promise.resolve();
+    };
+    const rows = (): HTMLTableRowElement[] => Array.from(document.querySelectorAll<HTMLTableRowElement>("#tbody tr"));
+    const rowId = (row: HTMLTableRowElement): string => row.cells[0]?.textContent ?? "";
+    const rowLabel = (row: HTMLTableRowElement): string => row.cells[1]?.textContent ?? "";
+
+    await click("#run");
+    expect(rows()).toHaveLength(1000);
+    expect(rowId(rows()[0] as HTMLTableRowElement)).toBe("1");
+
+    const firstLabel = rowLabel(rows()[0] as HTMLTableRowElement);
+    await click("#update");
+    expect(rowLabel(rows()[0] as HTMLTableRowElement)).toBe(`${firstLabel} !!!`);
+
+    await click("#tbody tr:nth-child(2) td:nth-child(2) a");
+    expect(rows()[1]?.className).toBe("danger");
+
+    await click("#swaprows");
+    expect(rowId(rows()[998] as HTMLTableRowElement)).toBe("2");
+    expect(rows()[998]?.className).toBe("danger");
+
+    await click("#tbody tr:nth-child(999) td:nth-child(3) a");
+    expect(rows()).toHaveLength(999);
+    expect(rows().some((row) => rowId(row) === "2")).toBe(false);
+
+    await click("#clear");
+    expect(rows()).toHaveLength(0);
   });
 });

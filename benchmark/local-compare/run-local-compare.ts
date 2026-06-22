@@ -86,6 +86,13 @@ const implementations: readonly Implementation[] = [
     entrySourcePaths: ["benchmark/local-compare/marko/src/App.marko", "benchmark/local-compare/marko/src/data.js"],
   },
   {
+    name: "mreact-keyed",
+    title: "mreact-keyed",
+    path: "/benchmark/local-compare/mreact/",
+    sourcePaths: ["benchmark/local-compare/mreact"],
+    entrySourcePaths: ["benchmark/local-compare/mreact/src/main.ts"],
+  },
+  {
     name: "tachyon-dom",
     title: "Tachyon DOM",
     path: "/benchmark/js-framework-benchmark/",
@@ -112,6 +119,33 @@ const scenarios: readonly Scenario[] = [
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../..");
+const mreactRoot = path.resolve(projectRoot, "../mreact");
+const mreactPackageAliases = [
+  {
+    find: /^@reckona\/mreact-reactive-core$/,
+    replacement: path.join(mreactRoot, "packages/reactive-core/src/index.ts"),
+  },
+  {
+    find: /^@reckona\/mreact-reactive-core\/(.+)$/,
+    replacement: `${path.join(mreactRoot, "packages/reactive-core/src")}/$1.ts`,
+  },
+  {
+    find: /^@reckona\/mreact-reactive-dom$/,
+    replacement: path.join(mreactRoot, "packages/reactive-dom/src/index.ts"),
+  },
+  {
+    find: /^@reckona\/mreact-reactive-dom\/(.+)$/,
+    replacement: `${path.join(mreactRoot, "packages/reactive-dom/src")}/$1.ts`,
+  },
+  {
+    find: /^@reckona\/mreact-shared$/,
+    replacement: path.join(mreactRoot, "packages/shared/src/index.ts"),
+  },
+  {
+    find: /^@reckona\/mreact-shared\/(.+)$/,
+    replacement: `${path.join(mreactRoot, "packages/shared/src")}/$1.ts`,
+  },
+];
 const benchmarkPlugins = () => [solid(), marko({ linked: false })];
 
 const parsePositiveInteger = (value: string, name: string): Result<number, string> => {
@@ -241,10 +275,16 @@ const startDevServer = async (): Promise<ViteDevServer> => {
     root: projectRoot,
     logLevel: "silent",
     plugins: benchmarkPlugins(),
+    resolve: {
+      alias: mreactPackageAliases,
+    },
     server: {
       host: "127.0.0.1",
       port: Number.isFinite(requestedPort) ? requestedPort : 0,
       strictPort: requestedPort > 0,
+      fs: {
+        allow: [projectRoot, mreactRoot],
+      },
     },
   });
   await server.listen();
@@ -268,6 +308,9 @@ const startProductionServer = async (): Promise<PreviewServer> => {
     root: projectRoot,
     logLevel: "silent",
     plugins: benchmarkPlugins(),
+    resolve: {
+      alias: mreactPackageAliases,
+    },
     build: {
       outDir: productionOutDir,
       emptyOutDir: true,
@@ -292,6 +335,9 @@ const startProductionServer = async (): Promise<PreviewServer> => {
     root: projectRoot,
     logLevel: "silent",
     plugins: benchmarkPlugins(),
+    resolve: {
+      alias: mreactPackageAliases,
+    },
     build: {
       outDir: productionOutDir,
     },
