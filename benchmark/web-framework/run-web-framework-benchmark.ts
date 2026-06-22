@@ -34,6 +34,7 @@ type ClientBundleSnapshot = {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../..");
 const fixtureRoot = path.join(__dirname, "fixtures");
+const mreactAppRouterRoot = path.resolve(projectRoot, "../mreact/examples/app-router");
 
 const frameworks: readonly FrameworkConfig[] = [
   {
@@ -82,6 +83,12 @@ const frameworks: readonly FrameworkConfig[] = [
       "-p",
       String(port),
     ],
+  },
+  {
+    name: "mreact-app-router",
+    cwd: mreactAppRouterRoot,
+    build: ["pnpm", "build"],
+    start: () => ["pnpm", "start"],
   },
 ];
 

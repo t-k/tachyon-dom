@@ -42,4 +42,27 @@ describe("web framework benchmark fixtures", () => {
     expect(readFileSync(fixture("tanstack-start/src/routes/interactive.tsx"), "utf8")).toContain("useState");
     expect(readFileSync(fixture("next/app/interactive/counter.tsx"), "utf8")).toContain('"use client"');
   });
+
+  it("includes mreact in the web framework benchmark runner", () => {
+    const source = readFileSync(path.join(root, "benchmark/web-framework/run-web-framework-benchmark.ts"), "utf8");
+
+    expect(source).toContain('name: "mreact-app-router"');
+    expect(source).toContain("mreact/examples/app-router");
+  });
+
+  it("keeps the external mreact fixture aligned with benchmark routes", () => {
+    const mreactApp = path.resolve(root, "../mreact/examples/app-router/app");
+
+    expect(existsSync(path.join(mreactApp, "products/$id/page.tsx"))).toBe(true);
+    expect(existsSync(path.join(mreactApp, "dashboard/users/page.tsx"))).toBe(true);
+    expect(existsSync(path.join(mreactApp, "dashboard/orders/page.tsx"))).toBe(true);
+    expect(existsSync(path.join(mreactApp, "interactive/page.tsx"))).toBe(true);
+    expect(existsSync(path.join(mreactApp, "stream/page.tsx"))).toBe(true);
+
+    expect(readFileSync(path.join(mreactApp, "page.tsx"), "utf8")).toContain('data-route="home"');
+    expect(readFileSync(path.join(mreactApp, "page.tsx"), "utf8")).toContain("Static route");
+    expect(readFileSync(path.join(mreactApp, "dashboard/users/page.tsx"), "utf8")).toContain('data-nav="orders"');
+    expect(readFileSync(path.join(mreactApp, "interactive/page.tsx"), "utf8")).toContain('data-action="increment"');
+    expect(readFileSync(path.join(mreactApp, "interactive/page.tsx"), "utf8")).toContain("data-count");
+  });
 });
