@@ -91,6 +91,10 @@
       "types": "./dist/runtime/list.d.ts",
       "import": "./dist/runtime/list.js"
     },
+    "./runtime/chunked-row-list": {
+      "types": "./dist/runtime/chunked-row-list.d.ts",
+      "import": "./dist/runtime/chunked-row-list.js"
+    },
     "./runtime/virtual-list": {
       "types": "./dist/runtime/virtual-list.d.ts",
       "import": "./dist/runtime/virtual-list.js"

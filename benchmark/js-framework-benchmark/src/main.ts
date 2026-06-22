@@ -1,9 +1,13 @@
+import { createChunkedRowList } from "../../../src/runtime/chunked-row-list";
+import { textAt } from "../../../src/runtime/text";
 import { messages } from "./i18n";
 
 type BenchmarkTableRow = HTMLTableRowElement & {
   $id?: Text;
   $label?: Text;
 };
+
+type BenchmarkItem = string;
 
 export type BenchmarkTableApp = {
   replace: (count: number) => void;
@@ -73,16 +77,20 @@ for (const adjective of adjectives) {
 
 let nextId = 1;
 
-const idText = (row: BenchmarkTableRow): Text => (row.$id ??= row.firstChild?.firstChild as Text);
+const idText = (row: BenchmarkTableRow): Text => (row.$id ??= textAt(row, [0, 0]));
 
-const labelText = (row: BenchmarkTableRow): Text =>
-  (row.$label ??= row.firstChild?.nextSibling?.firstChild?.firstChild as Text);
+const labelText = (row: BenchmarkTableRow): Text => (row.$label ??= textAt(row, [1, 0, 0]));
 
-const bindBenchmarkRow = (row: BenchmarkTableRow): Text => {
-  idText(row).nodeValue = String(nextId++);
-  const label = labelText(row);
-  label.nodeValue = labelPool[(Math.random() * labelPool.length) | 0] as string;
-  return label;
+const createBenchmarkItem = (): BenchmarkItem => labelPool[(Math.random() * labelPool.length) | 0] as string;
+
+const bindBenchmarkRow = (row: HTMLTableRowElement, item: BenchmarkItem): void => {
+  const benchmarkRow = row as BenchmarkTableRow;
+  idText(benchmarkRow).nodeValue = String(nextId++);
+  labelText(benchmarkRow).nodeValue = item;
+};
+
+const updateBenchmarkRow = (row: HTMLTableRowElement, item: BenchmarkItem): void => {
+  labelText(row as BenchmarkTableRow).nodeValue = item;
 };
 
 const indexFromEvent = (event: Event, renderer: BenchmarkTableApp): number => {
@@ -110,111 +118,33 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
     throw new Error("Benchmark DOM is missing table, tbody, or row template.");
   }
 
-  const baseRow = rowTemplate.content.firstElementChild;
-  if (!(baseRow instanceof HTMLTableRowElement)) {
-    throw new Error("Benchmark row template must contain a table row.");
+  const listResult = createChunkedRowList<BenchmarkItem>({
+    table,
+    tbody,
+    rowTemplate,
+    bindRow: bindBenchmarkRow,
+    updateRow: updateBenchmarkRow,
+  });
+  if (!listResult.ok) {
+    throw new Error(
+      listResult.error.type === "empty-template"
+        ? "Benchmark row template must contain a table row."
+        : `Benchmark row template must contain a table row, got ${listResult.error.nodeName}.`,
+    );
   }
-
-  let selectedRow: BenchmarkTableRow | undefined;
-  const rows: BenchmarkTableRow[] = [];
-  const labelNodes: Text[] = [];
-  const rowPool: BenchmarkTableRow[] = [];
-  const takeRow = (): BenchmarkTableRow => rowPool.pop() ?? (baseRow.cloneNode(true) as BenchmarkTableRow);
-  const releaseRows = (): void => {
-    while (rows.length > 0) {
-      const row = rows.pop() as BenchmarkTableRow;
-      row.className = "";
-      labelNodes.pop();
-      rowPool.push(row);
-      tbody.removeChild(row);
-    }
-  };
-  const appendRows = (count: number): void => {
-    const fragment = document.createDocumentFragment();
-    for (let index = 0; index < count; index++) {
-      const row = takeRow();
-      const label = bindBenchmarkRow(row);
-      rows.push(row);
-      labelNodes.push(label);
-      fragment.appendChild(row);
-    }
-    tbody.appendChild(fragment);
-  };
-  const clear = (): void => {
-    selectedRow = undefined;
-    rows.length = 0;
-    labelNodes.length = 0;
-    rowPool.length = 0;
-    tbody.textContent = "";
-  };
-  const replace = (count: number): void => {
-    const parent = tbody.parentNode;
-    const nextSibling = tbody.nextSibling;
-    if (parent) {
-      tbody.remove();
-    }
-    selectedRow = undefined;
-    releaseRows();
-    appendRows(count);
-    parent?.insertBefore(tbody, nextSibling);
-  };
+  const list = listResult.value;
   const renderer: BenchmarkTableApp = {
-    replace,
-    append: appendRows,
+    replace: (count) => list.replaceGenerated(count, createBenchmarkItem),
+    append: (count) => list.appendGenerated(count, createBenchmarkItem),
     updateEvery: (step) => {
-      for (let index = 0; index < labelNodes.length; index += step) {
-        (labelNodes[index] as Text).nodeValue += " !!!";
-      }
+      list.mapEvery(step, (item) => `${item} !!!`);
     },
-    selectIndex: (index) => {
-      if (index < 0 || index >= rows.length) {
-        return;
-      }
-      const row = rows[index] as BenchmarkTableRow;
-      if (selectedRow === row) {
-        return;
-      }
-      if (selectedRow) {
-        selectedRow.className = "";
-      }
-      selectedRow = row;
-      row.className = "danger";
-    },
-    removeIndex: (index) => {
-      const row = rows[index];
-      if (!row) {
-        return;
-      }
-      rows.splice(index, 1);
-      labelNodes.splice(index, 1);
-      row.remove();
-      if (selectedRow === row) {
-        selectedRow = undefined;
-      }
-    },
-    swap: (a, b) => {
-      const rowA = rows[a];
-      const rowB = rows[b];
-      if (!rowA || !rowB) {
-        return;
-      }
-      const nextA = rowA.nextSibling;
-      const nextB = rowB.nextSibling;
-      rows[a] = rowB;
-      rows[b] = rowA;
-      const labelA = labelNodes[a] as Text;
-      labelNodes[a] = labelNodes[b] as Text;
-      labelNodes[b] = labelA;
-      if (nextA === rowB) {
-        tbody.insertBefore(rowB, rowA);
-      } else {
-        tbody.insertBefore(rowB, rowA);
-        tbody.insertBefore(rowA, nextB);
-      }
-    },
-    clear,
-    length: () => rows.length,
-    selectedIndex: () => (selectedRow ? rows.indexOf(selectedRow) : -1),
+    selectIndex: list.selectIndex,
+    removeIndex: list.removeIndex,
+    swap: list.swap,
+    clear: list.clear,
+    length: list.length,
+    selectedIndex: list.selectedIndex,
   };
 
   root.querySelector("#run")?.addEventListener("click", () => renderer.replace(1000));
