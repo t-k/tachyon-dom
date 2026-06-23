@@ -706,6 +706,8 @@ const writeResults = async (
         iterations: options.iterations,
         warmup: options.warmup,
         serveMode: options.serveMode,
+        operationStatistic: "trimmedMean",
+        trimFraction: 0.2,
         baseline: "vanillajs-lite-keyed",
         candidate: "tachyon-dom",
         implementations: implementations.map((implementation) => implementation.name),
@@ -765,9 +767,11 @@ const run = async (options: CliOptions): Promise<void> => {
     console.log("");
     console.log(directComparisonTable);
     console.log("");
-    const geomeanRatio =
-      baselineRows.reduce((total, row) => total + Math.log(row.ratio), 0) / Math.max(baselineRows.length, 1);
-    console.log(`Tachyon DOM geometric mean ratio vs vanillajs-lite-keyed: ${Math.exp(geomeanRatio).toFixed(3)}x`);
+    const trimmedGeomeanRatio =
+      baselineRows.reduce((total, row) => total + Math.log(row.trimmedRatio), 0) / Math.max(baselineRows.length, 1);
+    console.log(
+      `Tachyon DOM trimmed geomean ratio vs vanillajs-lite-keyed: ${Math.exp(trimmedGeomeanRatio).toFixed(3)}x`,
+    );
     const gate = evaluateBenchmarkRegressionGate(baselineRows, auxiliaryRows, {
       ...(options.maxGeomeanRatio === undefined ? {} : { maxGeomeanRatio: options.maxGeomeanRatio }),
       ...(options.maxMemoryRatio === undefined ? {} : { maxMemoryRatio: options.maxMemoryRatio }),

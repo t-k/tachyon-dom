@@ -11,9 +11,12 @@ import {
   geomeanComparison,
   mean,
   median,
+  relativeStandardDeviation,
+  standardDeviation,
   percentile,
   summarizeAuxiliaryMetric,
   summarizeScenario,
+  trimmedMean,
 } from "../benchmark/local-compare/report";
 
 describe("local compare report", () => {
@@ -22,6 +25,9 @@ describe("local compare report", () => {
     expect(median([9, 1, 2])).toBe(2);
     expect(median([10, 2, 4, 8])).toBe(6);
     expect(percentile([10, 1, 4, 8, 20], 95)).toBe(20);
+    expect(trimmedMean([10, 10, 11, 12, 200])).toBe(11);
+    expect(standardDeviation([10, 10, 10])).toBe(0);
+    expect(relativeStandardDeviation([10, 10, 10])).toBe(0);
   });
 
   it("compares Tachyon DOM against the vanillajs-lite baseline", () => {
@@ -38,7 +44,10 @@ describe("local compare report", () => {
         candidate: "tachyon-dom",
         baselineMean: 12,
         candidateMean: 18,
+        baselineTrimmedMean: 12,
+        candidateTrimmedMean: 18,
         ratio: 1.5,
+        trimmedRatio: 1.5,
         deltaPercent: 50,
         baselineMedian: 12,
         candidateMedian: 18,
@@ -56,7 +65,10 @@ describe("local compare report", () => {
         candidate: "tachyon-dom",
         baselineMean: 10,
         candidateMean: 5,
+        baselineTrimmedMean: 10,
+        candidateTrimmedMean: 5,
         ratio: 0.5,
+        trimmedRatio: 0.5,
         deltaPercent: -50,
         baselineMedian: 8,
         candidateMedian: 4,
@@ -68,7 +80,10 @@ describe("local compare report", () => {
         candidate: "tachyon-dom",
         baselineMean: 10,
         candidateMean: 20,
+        baselineTrimmedMean: 10,
+        candidateTrimmedMean: 20,
         ratio: 2,
+        trimmedRatio: 2,
         deltaPercent: 100,
         baselineMedian: 8,
         candidateMedian: 16,
@@ -82,10 +97,11 @@ describe("local compare report", () => {
       candidate: "tachyon-dom",
       meanGeomeanRatio: 1,
       medianGeomeanRatio: 1,
+      trimmedGeomeanRatio: 1,
       losses: ["clear rows 2.000x"],
     });
     expect(formatGeomeanComparisonTable([summary])).toContain(
-      "| solid-keyed | tachyon-dom | 1.000x | 1.000x | clear rows 2.000x |",
+      "| solid-keyed | tachyon-dom | 1.000x | 1.000x | 1.000x | clear rows 2.000x |",
     );
   });
 
@@ -108,12 +124,24 @@ describe("local compare report", () => {
           "vanillajs-3-keyed": 8,
           "vanillajs-lite-keyed": 10,
         },
+        relativeStandardDeviations: {
+          "tachyon-dom": 0,
+          "vanillajs-3-keyed": 0,
+          "vanillajs-lite-keyed": 0,
+        },
+        trimmedMeans: {
+          "tachyon-dom": 12,
+          "vanillajs-3-keyed": 8,
+          "vanillajs-lite-keyed": 10,
+        },
         fastestMean: 8,
+        fastestTrimmedMean: 8,
         candidateRatioToFastest: 1.5,
+        candidateTrimmedRatioToFastest: 1.5,
       },
     ]);
     expect(formatScenarioMatrixTable(rows, implementations, "tachyon-dom")).toContain(
-      "| create rows | 10.00ms | 8.00ms | 12.00ms | 1.500x |",
+      "| create rows | 10.00ms | 8.00ms | 12.00ms | 1.500x | 0.0% |",
     );
   });
 
@@ -155,7 +183,10 @@ describe("local compare report", () => {
         candidate: "tachyon-dom",
         baselineMean: 10,
         candidateMean: 12,
+        baselineTrimmedMean: 10,
+        candidateTrimmedMean: 12,
         ratio: 1.2,
+        trimmedRatio: 1.2,
         deltaPercent: 20,
         baselineMedian: 10,
         candidateMedian: 12,
@@ -167,7 +198,10 @@ describe("local compare report", () => {
         candidate: "tachyon-dom",
         baselineMean: 10,
         candidateMean: 18,
+        baselineTrimmedMean: 10,
+        candidateTrimmedMean: 18,
         ratio: 1.8,
+        trimmedRatio: 1.8,
         deltaPercent: 80,
         baselineMedian: 10,
         candidateMedian: 18,
