@@ -14,6 +14,7 @@ export type BenchmarkTableApp = {
   append: (count: number) => void;
   updateEvery: (step: number) => void;
   selectIndex: (index: number) => void;
+  selectRow: (row: HTMLTableRowElement) => void;
   removeIndex: (index: number) => void;
   swap: (a: number, b: number) => void;
   clear: () => void;
@@ -93,19 +94,6 @@ const updateBenchmarkRow = (row: HTMLTableRowElement, item: BenchmarkItem): void
   labelText(row as BenchmarkTableRow).nodeValue = item;
 };
 
-const indexFromEvent = (event: Event, renderer: BenchmarkTableApp): number => {
-  const target = event.target;
-  if (!(target instanceof Element)) {
-    return -1;
-  }
-  const row = target.closest("tr");
-  if (!(row instanceof HTMLTableRowElement)) {
-    return -1;
-  }
-  const index = row.sectionRowIndex;
-  return index >= 0 && index < renderer.length() ? index : -1;
-};
-
 export const createBenchmarkTableApp = (root: Document | HTMLElement = document): BenchmarkTableApp => {
   const tbody = root.querySelector("#tbody");
   const rowTemplate = root.querySelector<HTMLTemplateElement>("#row-template");
@@ -118,6 +106,8 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
     rowTemplate,
     bindRow: bindBenchmarkRow,
     updateRow: updateBenchmarkRow,
+    chunkSize: 50,
+    cloneBoundRows: true,
   });
   if (!listResult.ok) {
     throw new Error(
@@ -131,9 +121,14 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
     replace: (count) => list.replaceGenerated(count, createBenchmarkItem),
     append: (count) => list.appendGenerated(count, createBenchmarkItem),
     updateEvery: (step) => {
-      list.mapEvery(step, (item) => `${item} !!!`);
+      list.patchEvery(step, (row, item) => {
+        const next = `${item} !!!`;
+        labelText(row as BenchmarkTableRow).nodeValue = next;
+        return next;
+      });
     },
     selectIndex: list.selectIndex,
+    selectRow: list.selectRow,
     removeIndex: list.removeIndex,
     swap: list.swap,
     clear: list.clear,
@@ -152,18 +147,18 @@ export const createBenchmarkTableApp = (root: Document | HTMLElement = document)
     if (!(target instanceof Element)) {
       return;
     }
-    const index = indexFromEvent(event, renderer);
-    if (index < 0) {
-      return;
-    }
     const cell = target.closest("td");
     const row = cell?.parentElement;
-    if (!cell || !row) {
+    if (!cell || !(row instanceof HTMLTableRowElement)) {
       return;
     }
     if (row.children[1] === cell) {
-      renderer.selectIndex(index);
+      renderer.selectRow(row);
     } else if (row.children[2] === cell) {
+      const index = row.sectionRowIndex;
+      if (index < 0 || index >= renderer.length()) {
+        return;
+      }
       renderer.removeIndex(index);
     }
   });

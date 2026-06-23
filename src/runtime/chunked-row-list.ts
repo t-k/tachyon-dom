@@ -10,6 +10,12 @@ export type ChunkedRowListOptions<T> = {
   updateRow?: (row: HTMLTableRowElement, item: T, index: number) => void;
   selectedClass?: string;
   chunkSize?: number;
+  /**
+   * Bind cached template chunks before cloning them into the live table.
+   * Only DOM state preserved by cloneNode, such as text, attributes, and classes,
+   * is copied. Event listeners and expando properties are intentionally not copied.
+   */
+  cloneBoundRows?: boolean;
 };
 
 export type ChunkedRowList<T> = {
@@ -19,7 +25,12 @@ export type ChunkedRowList<T> = {
   appendGenerated: (count: number, createItem: (index: number) => T) => void;
   updateEvery: (step: number, updateItem: (item: T, index: number) => void) => void;
   mapEvery: (step: number, mapItem: (item: T, index: number) => T) => void;
+  patchEvery: (
+    step: number,
+    patchItem: (row: HTMLTableRowElement, item: T, index: number) => T | undefined | void,
+  ) => void;
   selectIndex: (index: number) => void;
+  selectRow: (row: HTMLTableRowElement) => void;
   removeIndex: (index: number) => void;
   swap: (a: number, b: number) => void;
   clear: () => void;
@@ -89,10 +100,12 @@ export const createChunkedRowList = <T>(
   const updateRow = options.updateRow ?? bindRow;
   const selectedClass = options.selectedClass ?? "danger";
   const chunkSize = options.chunkSize ?? defaultChunkSize;
+  const cloneBoundRows = options.cloneBoundRows === true;
   const templateRow = templateRowResult.value;
   const chunkCache = new Map<number, DocumentFragment>();
   const items: T[] = [];
   const rowNodes: HTMLTableRowElement[] = [];
+  const rowIndexes = new WeakMap<HTMLTableRowElement, number>();
   const rowPool: HTMLTableRowElement[] = [];
   let selected = -1;
 
@@ -105,12 +118,47 @@ export const createChunkedRowList = <T>(
     return chunk;
   };
 
+  const trackRow = (row: HTMLTableRowElement, index: number): void => {
+    rowIndexes.set(row, index);
+  };
+
+  const reindexRows = (start: number): void => {
+    for (let index = start; index < rowNodes.length; index++) {
+      trackRow(rowNodes[index] as HTMLTableRowElement, index);
+    }
+  };
+
+  const appendCloneBoundChunk = (start: number, offset: number, size: number, createItem: (index: number) => T): void => {
+    const templateChunk = chunkFor(size);
+    const templateChildren = templateChunk.children;
+    for (let localIndex = 0; localIndex < size; localIndex++) {
+      const index = start + offset + localIndex;
+      const item = createItem(index);
+      items[index] = item;
+      bindRow(templateChildren[localIndex] as HTMLTableRowElement, item, index);
+    }
+
+    const fragment = templateChunk.cloneNode(true) as DocumentFragment;
+    const children = fragment.children;
+    for (let localIndex = 0; localIndex < size; localIndex++) {
+      const index = start + offset + localIndex;
+      const row = children[localIndex] as HTMLTableRowElement;
+      rowNodes[index] = row;
+      trackRow(row, index);
+    }
+    options.tbody.appendChild(fragment);
+  };
+
   const appendInternal = (nextItems: readonly T[]): void => {
     const start = items.length;
     items.length = start + nextItems.length;
     for (let offset = 0; offset < nextItems.length; offset += chunkSize) {
       const size = Math.min(chunkSize, nextItems.length - offset);
       const usePool = rowPool.length >= size;
+      if (cloneBoundRows && !usePool) {
+        appendCloneBoundChunk(start, offset, size, (index) => nextItems[index - start] as T);
+        continue;
+      }
       const fragment = usePool ? document.createDocumentFragment() : (chunkFor(size).cloneNode(true) as DocumentFragment);
       const children = fragment.children;
       for (let localIndex = 0; localIndex < size; localIndex++) {
@@ -119,6 +167,7 @@ export const createChunkedRowList = <T>(
         const row = usePool ? (rowPool.pop() as HTMLTableRowElement) : (children[localIndex] as HTMLTableRowElement);
         items[index] = item;
         rowNodes[index] = row;
+        trackRow(row, index);
         bindRow(row, item, index);
         if (usePool) {
           fragment.appendChild(row);
@@ -137,6 +186,10 @@ export const createChunkedRowList = <T>(
     for (let offset = 0; offset < count; offset += chunkSize) {
       const size = Math.min(chunkSize, count - offset);
       const usePool = rowPool.length >= size;
+      if (cloneBoundRows && !usePool) {
+        appendCloneBoundChunk(start, offset, size, createItem);
+        continue;
+      }
       const fragment = usePool ? document.createDocumentFragment() : (chunkFor(size).cloneNode(true) as DocumentFragment);
       const children = fragment.children;
       for (let localIndex = 0; localIndex < size; localIndex++) {
@@ -145,6 +198,7 @@ export const createChunkedRowList = <T>(
         const row = usePool ? (rowPool.pop() as HTMLTableRowElement) : (children[localIndex] as HTMLTableRowElement);
         items[index] = item;
         rowNodes[index] = row;
+        trackRow(row, index);
         bindRow(row, item, index);
         if (usePool) {
           fragment.appendChild(row);
@@ -225,6 +279,19 @@ export const createChunkedRowList = <T>(
     }
   };
 
+  const patchEvery = (
+    step: number,
+    patchItem: (row: HTMLTableRowElement, item: T, index: number) => T | undefined | void,
+  ): void => {
+    for (let index = 0; index < items.length; index += step) {
+      const item = items[index] as T;
+      const nextItem = patchItem(rowNodes[index] as HTMLTableRowElement, item, index);
+      if (nextItem !== undefined) {
+        items[index] = nextItem;
+      }
+    }
+  };
+
   const selectIndex = (index: number): void => {
     if (index < 0 || index >= rowNodes.length || selected === index) {
       return;
@@ -236,14 +303,24 @@ export const createChunkedRowList = <T>(
     (rowNodes[index] as HTMLTableRowElement).className = selectedClass;
   };
 
+  const selectRow = (row: HTMLTableRowElement): void => {
+    const index = rowIndexes.get(row);
+    if (index === undefined || rowNodes[index] !== row) {
+      return;
+    }
+    selectIndex(index);
+  };
+
   const removeIndex = (index: number): void => {
     const row = rowNodes[index];
     if (!row) {
       return;
     }
     row.remove();
+    rowIndexes.delete(row);
     removeAt(items, index);
     removeAt(rowNodes, index);
+    reindexRows(index);
     if (selected === index) {
       selected = -1;
     } else if (selected > index) {
@@ -274,6 +351,8 @@ export const createChunkedRowList = <T>(
 
     swapIndexes(items, a, b);
     swapIndexes(rowNodes, a, b);
+    trackRow(rowA, b);
+    trackRow(rowB, a);
     if (selected === a) {
       selected = b;
     } else if (selected === b) {
@@ -288,7 +367,9 @@ export const createChunkedRowList = <T>(
     appendGenerated,
     updateEvery,
     mapEvery,
+    patchEvery,
     selectIndex,
+    selectRow,
     removeIndex,
     swap,
     clear,

@@ -85,6 +85,21 @@ describe("createChunkedRowList", () => {
     expect(renderer.itemAt(2)?.label).toBe("row 3 mapped");
   });
 
+  it("patches stepped rows directly while keeping stored items in sync", () => {
+    const { renderer, tbody } = setup();
+    renderer.replace(rows(4));
+
+    renderer.patchEvery(2, (row, item) => {
+      const next = { ...item, label: `${item.label} patched` };
+      textAt(row, [1, 0, 0]).nodeValue = next.label;
+      return next;
+    });
+
+    expect(tbody.rows[0]?.cells[1]?.textContent).toBe("row 1 patched");
+    expect(tbody.rows[1]?.cells[1]?.textContent).toBe("row 2");
+    expect(renderer.itemAt(2)?.label).toBe("row 3 patched");
+  });
+
   it("binds the live cloned row so row caches are reusable during updates", () => {
     const { tbody } = setup();
     const seenRows = new WeakSet<HTMLTableRowElement>();
@@ -117,6 +132,37 @@ describe("createChunkedRowList", () => {
 
     expect(tbody.rows[0]?.cells[1]?.textContent).toBe("row 1 updated");
     expect(tbody.rows[2]?.cells[1]?.textContent).toBe("row 3 updated");
+  });
+
+  it("can bind cloneable row state before cloning a chunk into the DOM", () => {
+    const { tbody } = setup();
+    const renderer = createChunkedRowList<Row>({
+      table: tbody.closest("table") as HTMLTableElement,
+      tbody,
+      rowTemplate: document.querySelector<HTMLTemplateElement>("#row-template") as HTMLTemplateElement,
+      chunkSize: 2,
+      cloneBoundRows: true,
+      bindRow: (row, item) => {
+        const cachedRow = row as CachedRow;
+        cachedRow.labelText = textAt(row, [1, 0, 0]);
+        textAt(row, [0, 0]).nodeValue = String(item.id);
+        cachedRow.labelText.nodeValue = item.label;
+      },
+      updateRow: (row, item) => {
+        textAt(row, [1, 0, 0]).nodeValue = item.label;
+      },
+    });
+    if (!renderer.ok) {
+      throw new Error(renderer.error.type);
+    }
+
+    renderer.value.replace(rows(3));
+    renderer.value.mapEvery(2, (row) => ({ ...row, label: `${row.label} updated` }));
+
+    expect(tbody.rows[0]?.cells[0]?.textContent).toBe("1");
+    expect(tbody.rows[0]?.cells[1]?.textContent).toBe("row 1 updated");
+    expect(tbody.rows[2]?.cells[1]?.textContent).toBe("row 3 updated");
+    expect((renderer.value.rowAt(0) as CachedRow | undefined)?.labelText).toBeUndefined();
   });
 
   it("can generate replacement and appended rows without a caller-owned item array", () => {
@@ -156,8 +202,11 @@ describe("createChunkedRowList", () => {
 
     renderer.selectIndex(1);
     expect(tbody.rows[1]?.className).toBe("danger");
-    renderer.selectIndex(998);
+    renderer.selectRow(tbody.rows[2] as HTMLTableRowElement);
     expect(tbody.rows[1]?.className).toBe("");
+    expect(tbody.rows[2]?.className).toBe("danger");
+    renderer.selectIndex(998);
+    expect(tbody.rows[2]?.className).toBe("");
     expect(tbody.rows[998]?.className).toBe("danger");
 
     renderer.swap(1, 998);
@@ -177,5 +226,7 @@ describe("createChunkedRowList", () => {
     renderer.append([{ id: 1000, label: "row 1000" }]);
     expect(renderer.length()).toBe(1);
     expect(tbody.rows[0]?.cells[1]?.textContent).toBe("row 1000");
+    renderer.selectRow(tbody.rows[0] as HTMLTableRowElement);
+    expect(renderer.selectedIndex()).toBe(0);
   });
 });
