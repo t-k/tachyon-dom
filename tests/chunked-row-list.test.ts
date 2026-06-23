@@ -131,6 +131,25 @@ describe("createChunkedRowList", () => {
     expect(renderer.itemAt(4)?.label).toBe("generated 5");
   });
 
+  it("does not require the caller to pass the owning table element", () => {
+    const { tbody } = setup();
+    const renderer = createChunkedRowList<Row>({
+      tbody,
+      rowTemplate: document.querySelector<HTMLTemplateElement>("#row-template") as HTMLTemplateElement,
+      bindRow: (row, item) => {
+        textAt(row, [0, 0]).nodeValue = String(item.id);
+        textAt(row, [1, 0, 0]).nodeValue = item.label;
+      },
+    });
+    if (!renderer.ok) {
+      throw new Error(renderer.error.type);
+    }
+
+    renderer.value.replace([{ id: 1, label: "without table" }]);
+
+    expect(tbody.rows[0]?.cells[1]?.textContent).toBe("without table");
+  });
+
   it("selects, removes, swaps, and clears rows without rebuilding the table", () => {
     const { renderer, tbody } = setup();
     renderer.replace(rows(1000));

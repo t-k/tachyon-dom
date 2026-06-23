@@ -107,19 +107,13 @@ const indexFromEvent = (event: Event, renderer: BenchmarkTableApp): number => {
 };
 
 export const createBenchmarkTableApp = (root: Document | HTMLElement = document): BenchmarkTableApp => {
-  const table = root.querySelector("table");
   const tbody = root.querySelector("#tbody");
   const rowTemplate = root.querySelector<HTMLTemplateElement>("#row-template");
-  if (
-    !(table instanceof HTMLTableElement) ||
-    !(tbody instanceof HTMLTableSectionElement) ||
-    !(rowTemplate instanceof HTMLTemplateElement)
-  ) {
-    throw new Error("Benchmark DOM is missing table, tbody, or row template.");
+  if (!(tbody instanceof HTMLTableSectionElement) || !(rowTemplate instanceof HTMLTemplateElement)) {
+    throw new Error("Benchmark DOM is missing tbody or row template.");
   }
 
   const listResult = createChunkedRowList<BenchmarkItem>({
-    table,
     tbody,
     rowTemplate,
     bindRow: bindBenchmarkRow,

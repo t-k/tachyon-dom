@@ -384,7 +384,9 @@ export const mountKeyedList = (
     if (!record) {
       continue;
     }
-    updateRecord(record, item, options);
+    if (existing) {
+      updateRecord(record, item, options);
+    }
     nextRecords.set(key, record);
     orderedRecords.push(record);
   }

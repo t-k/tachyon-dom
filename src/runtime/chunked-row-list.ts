@@ -3,7 +3,7 @@ import { err, ok, type Result } from "../result";
 export type RowKey = number | string;
 
 export type ChunkedRowListOptions<T> = {
-  table: HTMLTableElement;
+  table?: HTMLTableElement;
   tbody: HTMLTableSectionElement;
   rowTemplate: HTMLTemplateElement;
   bindRow: (row: HTMLTableRowElement, item: T, index: number) => void;
@@ -31,7 +31,7 @@ export type ChunkedRowList<T> = {
 
 export type ChunkedRowListError = { type: "empty-template" } | { type: "non-row-template"; nodeName: string };
 
-const defaultChunkSize = 50;
+const defaultChunkSize = 25;
 
 const getFirstTemplateRow = (template: HTMLTemplateElement): Result<HTMLTableRowElement, ChunkedRowListError> => {
   const first = template.content.firstElementChild;
@@ -68,6 +68,13 @@ const swapIndexes = <T>(items: T[], a: number, b: number): void => {
   const tmp = items[a];
   items[a] = items[b] as T;
   items[b] = tmp as T;
+};
+
+const removeAt = <T>(items: T[], index: number): void => {
+  for (let next = index + 1; next < items.length; next++) {
+    items[next - 1] = items[next] as T;
+  }
+  items.length--;
 };
 
 export const createChunkedRowList = <T>(
@@ -235,8 +242,8 @@ export const createChunkedRowList = <T>(
       return;
     }
     row.remove();
-    items.splice(index, 1);
-    rowNodes.splice(index, 1);
+    removeAt(items, index);
+    removeAt(rowNodes, index);
     if (selected === index) {
       selected = -1;
     } else if (selected > index) {

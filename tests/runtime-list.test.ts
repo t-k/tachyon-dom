@@ -353,6 +353,36 @@ describe("mountKeyedList", () => {
     expect(root.innerHTML).toBe(`<li><span>Guest Ada</span></li>`);
   });
 
+  it("applies bindings once when creating a new keyed row", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    let readCount = 0;
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "item.label",
+          read: (scope: Record<string, unknown>) => {
+            readCount++;
+            return (scope.item as { label: string }).label;
+          },
+        },
+      ],
+    };
+
+    mountKeyedList(root, [], [{ id: 1, label: "One" }], options);
+
+    expect(readCount).toBe(1);
+    expect(root.innerHTML).toBe(`<li><span>One</span></li>`);
+  });
+
   it("reuses a stable options signature without JSON serializing on each mount", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");
