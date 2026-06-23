@@ -10,6 +10,10 @@ type CachedRow = HTMLTableRowElement & {
   labelText?: Text;
 };
 
+type RowState = {
+  labelText: Text;
+};
+
 const setup = () => {
   document.body.innerHTML = `
     <table><tbody id="tbody"></tbody></table>
@@ -98,6 +102,62 @@ describe("createChunkedRowList", () => {
     expect(tbody.rows[0]?.cells[1]?.textContent).toBe("row 1 patched");
     expect(tbody.rows[1]?.cells[1]?.textContent).toBe("row 2");
     expect(renderer.itemAt(2)?.label).toBe("row 3 patched");
+  });
+
+  it("creates row state lazily for patch callbacks and keeps it aligned with moved rows", () => {
+    const { tbody } = setup();
+    let stateCount = 0;
+    const renderer = createChunkedRowList<Row, RowState>({
+      tbody,
+      rowTemplate: document.querySelector<HTMLTemplateElement>("#row-template") as HTMLTemplateElement,
+      chunkSize: 2,
+      cloneBoundRows: true,
+      bindRow: (row, item) => {
+        textAt(row, [0, 0]).nodeValue = String(item.id);
+        textAt(row, [1, 0, 0]).nodeValue = item.label;
+      },
+      createRowState: (row) => {
+        stateCount++;
+        return { labelText: textAt(row, [1, 0, 0]) };
+      },
+    });
+    if (!renderer.ok) {
+      throw new Error(renderer.error.type);
+    }
+
+    renderer.value.replace(rows(4));
+    expect(stateCount).toBe(0);
+
+    renderer.value.patchEvery(2, (_row, item, _index, state) => {
+      const next = { ...item, label: `${item.label} state` };
+      state.labelText.nodeValue = next.label;
+      return next;
+    });
+
+    expect(stateCount).toBe(2);
+    expect(tbody.rows[0]?.cells[1]?.textContent).toBe("row 1 state");
+    expect(tbody.rows[2]?.cells[1]?.textContent).toBe("row 3 state");
+
+    renderer.value.swap(0, 2);
+    renderer.value.patchEvery(2, (_row, item, _index, state) => {
+      const next = { ...item, label: `${item.label} again` };
+      state.labelText.nodeValue = next.label;
+      return next;
+    });
+
+    expect(stateCount).toBe(2);
+    expect(tbody.rows[0]?.cells[1]?.textContent).toBe("row 3 state again");
+    expect(tbody.rows[2]?.cells[1]?.textContent).toBe("row 1 state again");
+
+    renderer.value.removeIndex(0);
+    renderer.value.patchEvery(1, (_row, item, _index, state) => {
+      const next = { ...item, label: `${item.label} removed` };
+      state.labelText.nodeValue = next.label;
+      return next;
+    });
+
+    expect(tbody.rows[0]?.cells[1]?.textContent).toBe("row 2 removed");
+    expect(tbody.rows[1]?.cells[1]?.textContent).toBe("row 1 state again removed");
   });
 
   it("binds the live cloned row so row caches are reusable during updates", () => {

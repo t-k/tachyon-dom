@@ -2,12 +2,13 @@ import { err, ok, type Result } from "../result";
 
 export type RowKey = number | string;
 
-export type ChunkedRowListOptions<T> = {
+export type ChunkedRowListOptions<T, TRowState = never> = {
   table?: HTMLTableElement;
   tbody: HTMLTableSectionElement;
   rowTemplate: HTMLTemplateElement;
   bindRow: (row: HTMLTableRowElement, item: T, index: number) => void;
-  updateRow?: (row: HTMLTableRowElement, item: T, index: number) => void;
+  updateRow?: (row: HTMLTableRowElement, item: T, index: number, rowState: TRowState) => void;
+  createRowState?: (row: HTMLTableRowElement, item: T, index: number) => TRowState;
   selectedClass?: string;
   chunkSize?: number;
   /**
@@ -18,7 +19,7 @@ export type ChunkedRowListOptions<T> = {
   cloneBoundRows?: boolean;
 };
 
-export type ChunkedRowList<T> = {
+export type ChunkedRowList<T, TRowState = never> = {
   replace: (items: readonly T[]) => void;
   append: (items: readonly T[]) => void;
   replaceGenerated: (count: number, createItem: (index: number) => T) => void;
@@ -27,7 +28,7 @@ export type ChunkedRowList<T> = {
   mapEvery: (step: number, mapItem: (item: T, index: number) => T) => void;
   patchEvery: (
     step: number,
-    patchItem: (row: HTMLTableRowElement, item: T, index: number) => T | undefined | void,
+    patchItem: (row: HTMLTableRowElement, item: T, index: number, rowState: TRowState) => T | undefined | void,
   ) => void;
   selectIndex: (index: number) => void;
   selectRow: (row: HTMLTableRowElement) => void;
@@ -88,9 +89,9 @@ const removeAt = <T>(items: T[], index: number): void => {
   items.length--;
 };
 
-export const createChunkedRowList = <T>(
-  options: ChunkedRowListOptions<T>,
-): Result<ChunkedRowList<T>, ChunkedRowListError> => {
+export const createChunkedRowList = <T, TRowState = never>(
+  options: ChunkedRowListOptions<T, TRowState>,
+): Result<ChunkedRowList<T, TRowState>, ChunkedRowListError> => {
   const templateRowResult = getFirstTemplateRow(options.rowTemplate);
   if (!templateRowResult.ok) {
     return err(templateRowResult.error);
@@ -98,6 +99,7 @@ export const createChunkedRowList = <T>(
 
   const bindRow = options.bindRow;
   const updateRow = options.updateRow ?? bindRow;
+  const createRowState = options.createRowState;
   const selectedClass = options.selectedClass ?? "danger";
   const chunkSize = options.chunkSize ?? defaultChunkSize;
   const cloneBoundRows = options.cloneBoundRows === true;
@@ -105,6 +107,7 @@ export const createChunkedRowList = <T>(
   const chunkCache = new Map<number, DocumentFragment>();
   const items: T[] = [];
   const rowNodes: HTMLTableRowElement[] = [];
+  const rowStates: Array<TRowState | undefined> = [];
   const rowPool: HTMLTableRowElement[] = [];
   let selectedRow: HTMLTableRowElement | undefined;
 
@@ -115,6 +118,15 @@ export const createChunkedRowList = <T>(
       chunkCache.set(size, chunk);
     }
     return chunk;
+  };
+
+  const rowStateAt = (index: number): TRowState => {
+    let state = rowStates[index];
+    if (state === undefined && createRowState) {
+      state = createRowState(rowNodes[index] as HTMLTableRowElement, items[index] as T, index);
+      rowStates[index] = state;
+    }
+    return state as TRowState;
   };
 
   const appendCloneBoundChunk = (start: number, offset: number, size: number, createItem: (index: number) => T): void => {
@@ -206,6 +218,7 @@ export const createChunkedRowList = <T>(
     }
     items.length = 0;
     rowNodes.length = 0;
+    rowStates.length = 0;
     selectedRow = undefined;
     if (clearCachedChunks) {
       chunkCache.clear();
@@ -250,28 +263,54 @@ export const createChunkedRowList = <T>(
   };
 
   const updateEvery = (step: number, updateItem: (item: T, index: number) => void): void => {
+    if (createRowState) {
+      for (let index = 0; index < items.length; index += step) {
+        const item = items[index] as T;
+        updateItem(item, index);
+        updateRow(rowNodes[index] as HTMLTableRowElement, item, index, rowStateAt(index));
+      }
+      return;
+    }
     for (let index = 0; index < items.length; index += step) {
       const item = items[index] as T;
       updateItem(item, index);
-      updateRow(rowNodes[index] as HTMLTableRowElement, item, index);
+      updateRow(rowNodes[index] as HTMLTableRowElement, item, index, undefined as TRowState);
     }
   };
 
   const mapEvery = (step: number, mapItem: (item: T, index: number) => T): void => {
+    if (createRowState) {
+      for (let index = 0; index < items.length; index += step) {
+        const item = mapItem(items[index] as T, index);
+        items[index] = item;
+        updateRow(rowNodes[index] as HTMLTableRowElement, item, index, rowStateAt(index));
+      }
+      return;
+    }
     for (let index = 0; index < items.length; index += step) {
       const item = mapItem(items[index] as T, index);
       items[index] = item;
-      updateRow(rowNodes[index] as HTMLTableRowElement, item, index);
+      updateRow(rowNodes[index] as HTMLTableRowElement, item, index, undefined as TRowState);
     }
   };
 
   const patchEvery = (
     step: number,
-    patchItem: (row: HTMLTableRowElement, item: T, index: number) => T | undefined | void,
+    patchItem: (row: HTMLTableRowElement, item: T, index: number, rowState: TRowState) => T | undefined | void,
   ): void => {
+    if (createRowState) {
+      for (let index = 0; index < items.length; index += step) {
+        const item = items[index] as T;
+        const nextItem = patchItem(rowNodes[index] as HTMLTableRowElement, item, index, rowStateAt(index));
+        if (nextItem !== undefined) {
+          items[index] = nextItem;
+        }
+      }
+      return;
+    }
     for (let index = 0; index < items.length; index += step) {
       const item = items[index] as T;
-      const nextItem = patchItem(rowNodes[index] as HTMLTableRowElement, item, index);
+      const nextItem = patchItem(rowNodes[index] as HTMLTableRowElement, item, index, undefined as TRowState);
       if (nextItem !== undefined) {
         items[index] = nextItem;
       }
@@ -312,6 +351,7 @@ export const createChunkedRowList = <T>(
     row.remove();
     removeAt(items, index);
     removeAt(rowNodes, index);
+    removeAt(rowStates, index);
     if (selectedRow === row) {
       selectedRow = undefined;
     }
@@ -340,6 +380,7 @@ export const createChunkedRowList = <T>(
 
     swapIndexes(items, a, b);
     swapIndexes(rowNodes, a, b);
+    swapIndexes(rowStates, a, b);
   };
 
   return ok({
