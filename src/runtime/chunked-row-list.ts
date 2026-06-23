@@ -105,9 +105,8 @@ export const createChunkedRowList = <T>(
   const chunkCache = new Map<number, DocumentFragment>();
   const items: T[] = [];
   const rowNodes: HTMLTableRowElement[] = [];
-  const rowIndexes = new WeakMap<HTMLTableRowElement, number>();
   const rowPool: HTMLTableRowElement[] = [];
-  let selected = -1;
+  let selectedRow: HTMLTableRowElement | undefined;
 
   const chunkFor = (size: number): DocumentFragment => {
     let chunk = chunkCache.get(size);
@@ -116,16 +115,6 @@ export const createChunkedRowList = <T>(
       chunkCache.set(size, chunk);
     }
     return chunk;
-  };
-
-  const trackRow = (row: HTMLTableRowElement, index: number): void => {
-    rowIndexes.set(row, index);
-  };
-
-  const reindexRows = (start: number): void => {
-    for (let index = start; index < rowNodes.length; index++) {
-      trackRow(rowNodes[index] as HTMLTableRowElement, index);
-    }
   };
 
   const appendCloneBoundChunk = (start: number, offset: number, size: number, createItem: (index: number) => T): void => {
@@ -144,7 +133,6 @@ export const createChunkedRowList = <T>(
       const index = start + offset + localIndex;
       const row = children[localIndex] as HTMLTableRowElement;
       rowNodes[index] = row;
-      trackRow(row, index);
     }
     options.tbody.appendChild(fragment);
   };
@@ -167,7 +155,6 @@ export const createChunkedRowList = <T>(
         const row = usePool ? (rowPool.pop() as HTMLTableRowElement) : (children[localIndex] as HTMLTableRowElement);
         items[index] = item;
         rowNodes[index] = row;
-        trackRow(row, index);
         bindRow(row, item, index);
         if (usePool) {
           fragment.appendChild(row);
@@ -198,7 +185,6 @@ export const createChunkedRowList = <T>(
         const row = usePool ? (rowPool.pop() as HTMLTableRowElement) : (children[localIndex] as HTMLTableRowElement);
         items[index] = item;
         rowNodes[index] = row;
-        trackRow(row, index);
         bindRow(row, item, index);
         if (usePool) {
           fragment.appendChild(row);
@@ -220,7 +206,7 @@ export const createChunkedRowList = <T>(
     }
     items.length = 0;
     rowNodes.length = 0;
-    selected = -1;
+    selectedRow = undefined;
     if (clearCachedChunks) {
       chunkCache.clear();
     }
@@ -293,22 +279,29 @@ export const createChunkedRowList = <T>(
   };
 
   const selectIndex = (index: number): void => {
-    if (index < 0 || index >= rowNodes.length || selected === index) {
+    const row = rowNodes[index];
+    if (!row || selectedRow === row) {
       return;
     }
-    if (selected > -1) {
-      (rowNodes[selected] as HTMLTableRowElement).className = "";
+    if (selectedRow) {
+      selectedRow.className = "";
     }
-    selected = index;
-    (rowNodes[index] as HTMLTableRowElement).className = selectedClass;
+    selectedRow = row;
+    row.className = selectedClass;
   };
 
   const selectRow = (row: HTMLTableRowElement): void => {
-    const index = rowIndexes.get(row);
-    if (index === undefined || rowNodes[index] !== row) {
+    if (row.parentNode !== options.tbody) {
       return;
     }
-    selectIndex(index);
+    if (selectedRow === row) {
+      return;
+    }
+    if (selectedRow) {
+      selectedRow.className = "";
+    }
+    selectedRow = row;
+    row.className = selectedClass;
   };
 
   const removeIndex = (index: number): void => {
@@ -317,14 +310,10 @@ export const createChunkedRowList = <T>(
       return;
     }
     row.remove();
-    rowIndexes.delete(row);
     removeAt(items, index);
     removeAt(rowNodes, index);
-    reindexRows(index);
-    if (selected === index) {
-      selected = -1;
-    } else if (selected > index) {
-      selected--;
+    if (selectedRow === row) {
+      selectedRow = undefined;
     }
   };
 
@@ -351,13 +340,6 @@ export const createChunkedRowList = <T>(
 
     swapIndexes(items, a, b);
     swapIndexes(rowNodes, a, b);
-    trackRow(rowA, b);
-    trackRow(rowB, a);
-    if (selected === a) {
-      selected = b;
-    } else if (selected === b) {
-      selected = a;
-    }
   };
 
   return ok({
@@ -375,7 +357,7 @@ export const createChunkedRowList = <T>(
     clear,
     rowAt: (index) => rowNodes[index],
     itemAt: (index) => items[index],
-    selectedIndex: () => selected,
+    selectedIndex: () => (selectedRow?.parentNode === options.tbody ? selectedRow.sectionRowIndex : -1),
     length: () => items.length,
   });
 };
