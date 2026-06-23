@@ -98,6 +98,7 @@ pnpm test
 pnpm build
 pnpm lint
 pnpm bench:local
+pnpm bench:local:dev
 pnpm bench:local:full
 pnpm bench:local:gate
 pnpm bench:local:smoke
@@ -118,9 +119,11 @@ tachyon-dom preview --host 127.0.0.1 --port 4173
 
 Template files use the short `.td` extension. The Vite plugin and file router also accept `.tachyon` and `.tachyon.html` for compatibility.
 
-`pnpm bench:local` starts a temporary Vite server, measures Tachyon DOM against local copies of the keyed vanilla benchmark implementations in Playwright Chromium, prints ratio tables, and writes JSON results under `benchmark/local-compare/results/`.
+`pnpm bench:local` builds every implementation in production mode (bundled and minified, matching what applications ship), serves them from a temporary Vite preview server, measures Tachyon DOM against local copies of the keyed vanilla benchmark implementations in Playwright Chromium, prints ratio tables, and writes JSON results under `benchmark/local-compare/results/`. Production is the canonical mode because dev-server module loading adds overhead that does not exist in a shipped app.
 
-`pnpm bench:local:full` runs the same comparison with extra warmup and measured iterations for noisier performance investigations.
+`pnpm bench:local:dev` runs the same comparison against the unbundled dev server for fast local iteration (no production build step).
+
+`pnpm bench:local:full` runs the canonical production comparison with extra warmup and measured iterations for noisier performance investigations.
 
 `pnpm bench:local:smoke` runs the same local comparison with one warmup and one measured iteration for feature-PR checks.
 

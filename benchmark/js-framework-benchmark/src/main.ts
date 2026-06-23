@@ -1,182 +1,55 @@
-import { createChunkedRowList } from "../../../src/runtime/chunked-row-list";
-import { textAt } from "../../../src/runtime/text";
-import { messages } from "./i18n";
+import { createKeyedRows } from "../../../src/runtime/keyed-rows";
 
-type BenchmarkTableRow = HTMLTableRowElement & {
-  $id?: Text;
-  $label?: Text;
-};
+const adjectives =
+  "pretty large big small tall short long handsome plain quaint clean elegant easy angry crazy helpful mushy odd unsightly adorable important inexpensive cheap expensive fancy".split(
+    " ",
+  );
+const colours = "red yellow blue green pink brown purple brown white black orange".split(" ");
+const nouns = "table chair house bbq desk car pony cookie sandwich burger pizza mouse keyboard".split(" ");
 
-type BenchmarkItem = string;
-
-export type BenchmarkTableApp = {
-  replace: (count: number) => void;
-  append: (count: number) => void;
-  updateEvery: (step: number) => void;
-  selectIndex: (index: number) => void;
-  selectRow: (row: HTMLTableRowElement) => void;
-  removeIndex: (index: number) => void;
-  swap: (a: number, b: number) => void;
-  clear: () => void;
-  length: () => number;
-  selectedIndex: () => number;
-};
-
-const adjectives = [
-  "pretty",
-  "large",
-  "big",
-  "small",
-  "tall",
-  "short",
-  "long",
-  "handsome",
-  "plain",
-  "quaint",
-  "clean",
-  "elegant",
-  "easy",
-  "angry",
-  "crazy",
-  "helpful",
-  "mushy",
-  "odd",
-  "unsightly",
-  "adorable",
-  "important",
-  "inexpensive",
-  "cheap",
-  "expensive",
-  "fancy",
-];
-
-const colours = ["red", "yellow", "blue", "green", "pink", "brown", "purple", "brown", "white", "black", "orange"];
-const nouns = [
-  "table",
-  "chair",
-  "house",
-  "bbq",
-  "desk",
-  "car",
-  "pony",
-  "cookie",
-  "sandwich",
-  "burger",
-  "pizza",
-  "mouse",
-  "keyboard",
-];
-
-const labelPool: string[] = [];
-for (const adjective of adjectives) {
-  for (const colour of colours) {
-    for (const noun of nouns) {
-      labelPool.push(`${adjective} ${colour} ${noun}`);
-    }
-  }
-}
+const pick = (words: readonly string[]) => words[(Math.random() * words.length) | 0] as string;
+const label = () => `${pick(adjectives)} ${pick(colours)} ${pick(nouns)}`;
+const labelText = (row: HTMLTableRowElement) => row.children[1]!.firstChild!.firstChild as Text;
 
 let nextId = 1;
 
-const idText = (row: BenchmarkTableRow): Text => (row.$id ??= textAt(row, [0, 0]));
-
-const labelText = (row: BenchmarkTableRow): Text => (row.$label ??= textAt(row, [1, 0, 0]));
-
-const createBenchmarkItem = (): BenchmarkItem => labelPool[(Math.random() * labelPool.length) | 0] as string;
-
-const bindBenchmarkRow = (row: HTMLTableRowElement, item: BenchmarkItem): void => {
-  const benchmarkRow = row as BenchmarkTableRow;
-  idText(benchmarkRow).nodeValue = String(nextId++);
-  labelText(benchmarkRow).nodeValue = item;
-};
-
-const updateBenchmarkRow = (row: HTMLTableRowElement, item: BenchmarkItem): void => {
-  labelText(row as BenchmarkTableRow).nodeValue = item;
-};
-
-export const createBenchmarkTableApp = (root: Document | HTMLElement = document): BenchmarkTableApp => {
-  const tbody = root.querySelector("#tbody");
-  const rowTemplate = root.querySelector<HTMLTemplateElement>("#row-template");
-  if (!(tbody instanceof HTMLTableSectionElement) || !(rowTemplate instanceof HTMLTemplateElement)) {
-    throw new Error("Benchmark DOM is missing tbody or row template.");
-  }
-
-  const listResult = createChunkedRowList<BenchmarkItem>({
+export const mount = (root: ParentNode = document) => {
+  const tbody = root.querySelector("#tbody") as HTMLTableSectionElement;
+  const list = createKeyedRows<string>({
     tbody,
-    rowTemplate,
-    bindRow: bindBenchmarkRow,
-    updateRow: updateBenchmarkRow,
-    chunkSize: 50,
-    cloneBoundRows: true,
-  });
-  if (!listResult.ok) {
-    throw new Error(
-      listResult.error.type === "empty-template"
-        ? "Benchmark row template must contain a table row."
-        : `Benchmark row template must contain a table row, got ${listResult.error.nodeName}.`,
-    );
-  }
-  const list = listResult.value;
-  const renderer: BenchmarkTableApp = {
-    replace: (count) => list.replaceGenerated(count, createBenchmarkItem),
-    append: (count) => list.appendGenerated(count, createBenchmarkItem),
-    updateEvery: (step) => {
-      list.patchEvery(step, (row, item) => {
-        const next = `${item} !!!`;
-        labelText(row as BenchmarkTableRow).nodeValue = next;
-        return next;
-      });
+    row: '<tr><td class="col-md-1"> </td><td class="col-md-4"><a> </a></td><td class="col-md-1"><a><span class="glyphicon glyphicon-remove" aria-hidden="true"></span></a></td><td class="col-md-6"></td></tr>',
+    bind: (row, text) => {
+      (row.firstChild!.firstChild as Text).data = String(nextId++);
+      labelText(row).data = text;
     },
-    selectIndex: list.selectIndex,
-    selectRow: list.selectRow,
-    removeIndex: list.removeIndex,
-    swap: list.swap,
-    clear: list.clear,
-    length: list.length,
-    selectedIndex: list.selectedIndex,
-  };
+    selectedClass: "danger",
+  });
 
-  root.querySelector("#run")?.addEventListener("click", () => renderer.replace(1000));
-  root.querySelector("#runlots")?.addEventListener("click", () => renderer.replace(10000));
-  root.querySelector("#add")?.addEventListener("click", () => renderer.append(1000));
-  root.querySelector("#update")?.addEventListener("click", () => renderer.updateEvery(10));
-  root.querySelector("#clear")?.addEventListener("click", () => renderer.clear());
-  root.querySelector("#swaprows")?.addEventListener("click", () => renderer.swap(1, 998));
+  const click = (id: string, run: () => void) => {
+    (root.querySelector(`#${id}`) as HTMLElement).onclick = run;
+  };
+  click("run", () => list.replaceEach(1000, label));
+  click("runlots", () => list.replaceEach(10000, label));
+  click("add", () => list.appendEach(1000, label));
+  click("update", () => list.update(10, (row) => (labelText(row).data += " !!!")));
+  click("clear", list.clear);
+  click("swaprows", () => list.swap(1, 998));
+
   tbody.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) {
-      return;
-    }
-    const cell = target.closest("td");
-    const row = cell?.parentElement;
-    if (!cell || !(row instanceof HTMLTableRowElement)) {
-      return;
-    }
-    if (row.children[1] === cell) {
-      renderer.selectRow(row);
-    } else if (row.children[2] === cell) {
-      const index = row.sectionRowIndex;
-      if (index < 0 || index >= renderer.length()) {
-        return;
+    const action = (event.target as Element).closest("a");
+    const row = action?.closest("tr") as HTMLTableRowElement | null;
+    if (action && row) {
+      if (action.firstElementChild) {
+        list.removeRow(row);
+      } else {
+        list.selectRow(row);
       }
-      renderer.removeIndex(index);
     }
   });
 
-  return renderer;
+  return list;
 };
 
-const hydrateLabels = (root: Document): void => {
-  root.querySelector("#title")!.textContent = messages.title;
-  root.querySelector("#run")!.textContent = messages.createRows;
-  root.querySelector("#runlots")!.textContent = messages.createManyRows;
-  root.querySelector("#add")!.textContent = messages.appendRows;
-  root.querySelector("#update")!.textContent = messages.updateEveryTenthRow;
-  root.querySelector("#clear")!.textContent = messages.clear;
-  root.querySelector("#swaprows")!.textContent = messages.swapRows;
-};
-
-if (typeof document !== "undefined" && document.getElementById("main")) {
-  hydrateLabels(document);
-  createBenchmarkTableApp(document);
+if (typeof document !== "undefined" && document.getElementById("run")) {
+  mount();
 }

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { createBenchmarkTableApp } from "../benchmark/js-framework-benchmark/src/main";
+import { mount } from "../benchmark/js-framework-benchmark/src/main";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -21,7 +21,7 @@ describe("js-framework-benchmark app", () => {
   it("creates rows from the checked-in benchmark HTML template", () => {
     loadBenchmarkDocument();
 
-    createBenchmarkTableApp(document);
+    mount(document);
     document.querySelector<HTMLButtonElement>("#run")?.click();
     document.querySelector<HTMLButtonElement>("#add")?.click();
     document.querySelector<HTMLButtonElement>("#update")?.click();
@@ -37,37 +37,37 @@ describe("js-framework-benchmark app", () => {
   it("keeps row order, selection, and length consistent across keyed operations", () => {
     loadBenchmarkDocument();
 
-    const app = createBenchmarkTableApp(document);
-    app.replace(1000);
-    app.selectIndex(1);
+    const list = mount(document);
+    document.querySelector<HTMLButtonElement>("#run")?.click();
+    list.selectAt(1);
     const tbody = document.querySelector<HTMLTableSectionElement>("#tbody");
     const firstId = tbody?.rows[1]?.cells[0]?.textContent;
     const thirdId = tbody?.rows[2]?.cells[0]?.textContent;
     const lastSwapId = tbody?.rows[998]?.cells[0]?.textContent;
 
-    expect(app.length()).toBe(1000);
-    expect(app.selectedIndex()).toBe(1);
+    expect(list.length()).toBe(1000);
+    expect(list.selectedIndex()).toBe(1);
 
-    app.swap(1, 998);
+    list.swap(1, 998);
 
     expect(tbody?.rows[1]?.cells[0]?.textContent).toBe(lastSwapId);
     expect(tbody?.rows[998]?.cells[0]?.textContent).toBe(firstId);
-    expect(app.selectedIndex()).toBe(998);
+    expect(list.selectedIndex()).toBe(998);
 
-    app.removeIndex(1);
+    list.removeAt(1);
 
-    expect(app.length()).toBe(999);
+    expect(list.length()).toBe(999);
     expect(tbody?.rows[1]?.cells[0]?.textContent).toBe(thirdId);
-    expect(app.selectedIndex()).toBe(997);
+    expect(list.selectedIndex()).toBe(997);
 
-    app.updateEvery(10);
+    document.querySelector<HTMLButtonElement>("#update")?.click();
     expect(tbody?.rows[0]?.cells[1]?.textContent).toContain(" !!!");
     expect(tbody?.rows[10]?.cells[1]?.textContent).toContain(" !!!");
 
-    app.clear();
+    list.clear();
 
-    expect(app.length()).toBe(0);
-    expect(app.selectedIndex()).toBe(-1);
+    expect(list.length()).toBe(0);
+    expect(list.selectedIndex()).toBe(-1);
     expect(tbody?.rows.length).toBe(0);
   });
 

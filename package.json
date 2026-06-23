@@ -91,9 +91,9 @@
       "types": "./dist/runtime/list.d.ts",
       "import": "./dist/runtime/list.js"
     },
-    "./runtime/chunked-row-list": {
-      "types": "./dist/runtime/chunked-row-list.d.ts",
-      "import": "./dist/runtime/chunked-row-list.js"
+    "./runtime/keyed-rows": {
+      "types": "./dist/runtime/keyed-rows.d.ts",
+      "import": "./dist/runtime/keyed-rows.js"
     },
     "./runtime/virtual-list": {
       "types": "./dist/runtime/virtual-list.d.ts",
@@ -135,10 +135,10 @@
     "bench:local": "tsx benchmark/local-compare/run-local-compare.ts",
     "bench:local:full": "tsx benchmark/local-compare/run-local-compare.ts --iterations 9 --warmup 3",
     "bench:local:gate": "tsx benchmark/local-compare/run-local-compare.ts --max-geomean-ratio 1.25 --max-memory-ratio 1.5",
-    "bench:local:production": "tsx benchmark/local-compare/run-local-compare.ts --serve-mode production --iterations 9 --warmup 3",
-    "bench:local:smoke": "tsx benchmark/local-compare/run-local-compare.ts --iterations 1 --warmup 1",
+    "bench:local:dev": "tsx benchmark/local-compare/run-local-compare.ts --serve-mode dev",
+    "bench:local:smoke": "tsx benchmark/local-compare/run-local-compare.ts --serve-mode dev --iterations 1 --warmup 1",
     "bench:local:stable": "tsx benchmark/local-compare/run-local-compare.ts --iterations 30 --warmup 5",
-    "bench:local:trace": "tsx benchmark/local-compare/run-local-compare.ts --iterations 1 --warmup 1 --trace-implementation tachyon-dom --trace-scenario partialUpdate",
+    "bench:local:trace": "tsx benchmark/local-compare/run-local-compare.ts --serve-mode dev --iterations 1 --warmup 1 --trace-implementation tachyon-dom --trace-scenario partialUpdate",
     "bench:web-framework": "tsx benchmark/web-framework/run-web-framework-benchmark.ts",
     "bench:web-framework:smoke": "tsx benchmark/web-framework/run-web-framework-benchmark.ts --smoke",
     "example:router": "tsx examples/router.ts",

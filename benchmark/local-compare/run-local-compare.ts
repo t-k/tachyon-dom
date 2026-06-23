@@ -99,9 +99,8 @@ const implementations: readonly Implementation[] = [
     sourcePaths: [
       "benchmark/js-framework-benchmark/index.html",
       "benchmark/js-framework-benchmark/src/main.ts",
-      "benchmark/js-framework-benchmark/src/i18n.ts",
     ],
-    entrySourcePaths: ["benchmark/js-framework-benchmark/src/main.ts", "benchmark/js-framework-benchmark/src/i18n.ts"],
+    entrySourcePaths: ["benchmark/js-framework-benchmark/src/main.ts"],
   },
 ];
 
@@ -169,7 +168,9 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
     iterations: 7,
     warmup: 2,
     headful: false,
-    serveMode: "dev",
+    // Production (bundled + minified) is the canonical mode: it reflects what
+    // applications actually ship. Pass --serve-mode dev for fast local iteration.
+    serveMode: "production",
   };
 
   for (let index = 0; index < argv.length; index++) {

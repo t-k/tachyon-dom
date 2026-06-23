@@ -8,6 +8,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/form`: `bind:value` and `bind:checked` helpers.
 - `runtime/event`: delegated event binding.
 - `runtime/list`: keyed list mounting, reuse, move, and multi-root item support.
+- `runtime/keyed-rows`: dependency-free keyed table-row list where the live DOM is the single source of truth (no shadow item/row arrays). Bulk creation binds and clones a reusable multi-row chunk; remove/swap/select are O(1) DOM operations. Suited to large data tables that do not need per-row reactivity.
 - `runtime/conditional`: conditional DOM mounting.
 - `runtime/hydrate`: SSR boundary location, state handoff, and hydration scheduling.
 - `runtime/router`: client-side navigation with link interception, History API, abortable loaders, scroll hooks, focus restoration, and route HMR cache invalidation.
