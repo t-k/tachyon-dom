@@ -3,10 +3,12 @@ import {
   attrExpression,
   attrString,
   expressionToScopeAccess,
+  hydrationBoundaryFor,
   itemNameFromKey,
   jsOptionalPropertyAccess,
   jsString,
   readExpressionAttribute,
+  renderableChildren,
   textExpressionSegments,
 } from "../utils";
 import { renderOpenTagExpression } from "./server";
@@ -25,7 +27,26 @@ const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, 
   return statements;
 };
 
-const renderForYieldStatements = (node: ElementNode, locals: ReadonlySet<string>, indent: string): string[] => {
+const childPathEntries = (
+  children: readonly TemplateNode[],
+  basePath: readonly number[],
+): Array<{ child: TemplateNode; path: number[] }> => {
+  let domIndex = 0;
+  return children.map((child) => {
+    const path =
+      child.type === "element" && (child.tagName === "store" || child.tagName === "for")
+        ? [...basePath]
+        : [...basePath, domIndex++];
+    return { child, path };
+  });
+};
+
+const renderForYieldStatements = (
+  node: ElementNode,
+  locals: ReadonlySet<string>,
+  indent: string,
+  path: number[],
+): string[] => {
   const each = attrExpression(node, "each") ?? "[]";
   const key = attrExpression(node, "key") ?? "item";
   const itemName = itemNameFromKey(key);
@@ -36,14 +57,19 @@ const renderForYieldStatements = (node: ElementNode, locals: ReadonlySet<string>
     `${indent}if (Array.isArray(${eachAccess})) {`,
     `${indent}  for (const ${itemName} of ${eachAccess}) {`,
   ];
-  for (const child of node.children) {
-    statements.push(...renderNodeYieldStatements(child, childLocals, `${indent}    `));
+  for (const entry of childPathEntries(node.children, path)) {
+    statements.push(...renderNodeYieldStatements(entry.child, childLocals, `${indent}    `, entry.path));
   }
   statements.push(`${indent}  }`, `${indent}}`);
   return statements;
 };
 
-const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<string>, indent: string): string[] => {
+const renderElementYieldStatements = (
+  node: ElementNode,
+  locals: ReadonlySet<string>,
+  indent: string,
+  path: number[],
+): string[] => {
   if (node.tagName === "outlet") {
     return [`${indent}yield String(scope.outlet ?? "");`];
   }
@@ -53,12 +79,12 @@ const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<str
     ];
   }
   if (node.tagName === "for") {
-    return renderForYieldStatements(node, locals, indent);
+    return renderForYieldStatements(node, locals, indent, path);
   }
   if (node.tagName === "if") {
     const statements = [`${indent}if (${expressionToScopeAccess(attrExpression(node, "test") ?? "false", locals)}) {`];
-    for (const child of node.children) {
-      statements.push(...renderNodeYieldStatements(child, locals, `${indent}  `));
+    for (const entry of childPathEntries(node.children, path)) {
+      statements.push(...renderNodeYieldStatements(entry.child, locals, `${indent}  `, entry.path));
     }
     statements.push(`${indent}}`);
     return statements;
@@ -67,7 +93,7 @@ const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<str
     return [];
   }
   if (node.tagName === "component") {
-    return renderComponentYieldStatements(node, locals, indent);
+    return renderComponentYieldStatements(node, locals, indent, path);
   }
   if (node.tagName === "await") {
     const thenName = attrString(node, "then") ?? "value";
@@ -84,8 +110,8 @@ const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<str
       statements.push(
         `${indent}    const ${thenName} = await ${expressionToScopeAccess(attrExpression(node, "value") ?? "undefined", locals)};`,
       );
-      for (const child of node.children) {
-        statements.push(...renderNodeYieldStatements(child, childLocals, `${indent}    `));
+      for (const entry of childPathEntries(node.children, path)) {
+        statements.push(...renderNodeYieldStatements(entry.child, childLocals, `${indent}    `, entry.path));
       }
       statements.push(`${indent}  } catch {`);
       statements.push(`${indent}    yield ${jsString(errorText)};`);
@@ -96,39 +122,46 @@ const renderElementYieldStatements = (node: ElementNode, locals: ReadonlySet<str
     statements.push(
       `${indent}  const ${thenName} = await ${expressionToScopeAccess(attrExpression(node, "value") ?? "undefined", locals)};`,
     );
-    for (const child of node.children) {
-      statements.push(...renderNodeYieldStatements(child, childLocals, `${indent}  `));
+    for (const entry of childPathEntries(node.children, path)) {
+      statements.push(...renderNodeYieldStatements(entry.child, childLocals, `${indent}  `, entry.path));
     }
     statements.push(`${indent}}`);
     return statements;
   }
-  const hydrateId = attrExpression(node, "hydrate:id");
+  const hydrateBoundary = hydrationBoundaryFor(node, path);
   const statements: string[] = [];
-  if (hydrateId) {
+  if (hydrateBoundary) {
+    const marker =
+      hydrateBoundary.idKind === "static"
+        ? jsString(hydrateBoundary.id)
+        : expressionToScopeAccess(hydrateBoundary.id, locals);
     statements.push(
-      `${indent}yield ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${expressionToScopeAccess(
-        hydrateId,
-        locals,
-      )}) + ${jsString(":start-->")};`,
+      `${indent}yield ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${marker}) + ${jsString(":start-->")};`,
     );
   }
   statements.push(`${indent}yield ${renderOpenTagExpression(node, locals)};`);
-  for (const child of node.children) {
-    statements.push(...renderNodeYieldStatements(child, locals, indent));
+  for (const entry of childPathEntries(node.children, path)) {
+    statements.push(...renderNodeYieldStatements(entry.child, locals, indent, entry.path));
   }
   statements.push(`${indent}yield ${jsString(`</${node.tagName}>`)};`);
-  if (hydrateId) {
+  if (hydrateBoundary) {
+    const marker =
+      hydrateBoundary.idKind === "static"
+        ? jsString(hydrateBoundary.id)
+        : expressionToScopeAccess(hydrateBoundary.id, locals);
     statements.push(
-      `${indent}yield ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${expressionToScopeAccess(
-        hydrateId,
-        locals,
-      )}) + ${jsString(":end-->")};`,
+      `${indent}yield ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${marker}) + ${jsString(":end-->")};`,
     );
   }
   return statements;
 };
 
-const renderComponentYieldStatements = (node: ElementNode, locals: ReadonlySet<string>, indent: string): string[] => {
+const renderComponentYieldStatements = (
+  node: ElementNode,
+  locals: ReadonlySet<string>,
+  indent: string,
+  path: number[],
+): string[] => {
   const localNames = new Set(locals);
   const statements = [`${indent}{`];
   for (const attr of node.attrs) {
@@ -153,18 +186,28 @@ const renderComponentYieldStatements = (node: ElementNode, locals: ReadonlySet<s
       }
     }
   }
-  for (const child of node.children) {
-    statements.push(...renderNodeYieldStatements(child, localNames, `${indent}  `));
+  const children = renderableChildren(node);
+  if (children.length === 1) {
+    statements.push(...renderNodeYieldStatements(children[0] as TemplateNode, localNames, `${indent}  `, path));
+  } else {
+    for (const [index, child] of children.entries()) {
+      statements.push(...renderNodeYieldStatements(child, localNames, `${indent}  `, [...path, index]));
+    }
   }
   statements.push(`${indent}}`);
   return statements;
 };
 
-const renderNodeYieldStatements = (node: TemplateNode, locals: ReadonlySet<string>, indent: string): string[] => {
+const renderNodeYieldStatements = (
+  node: TemplateNode,
+  locals: ReadonlySet<string>,
+  indent: string,
+  path: number[] = [],
+): string[] => {
   if (node.type === "text") {
     return renderTextYieldStatements(node, locals, indent);
   }
-  return renderElementYieldStatements(node, locals, indent);
+  return renderElementYieldStatements(node, locals, indent, path);
 };
 
 export const generateServerStreamModule = (template: CompiledTemplate): string => {

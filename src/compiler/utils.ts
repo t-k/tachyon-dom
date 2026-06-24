@@ -1,4 +1,4 @@
-import type { Attribute, ElementNode, TemplateNode } from "./types";
+import type { Attribute, ElementNode, HydrationBoundary, TemplateNode } from "./types";
 import { evaluateExpression, expressionToJs } from "./expression";
 
 export const expressionPattern = /\{([^{}]+)\}/g;
@@ -96,6 +96,59 @@ export const attrExpression = (node: ElementNode, name: string): string | undefi
 export const attrString = (node: ElementNode, name: string): string | undefined => {
   const attr = node.attrs.find((candidate) => candidate.name === name);
   return typeof attr?.value === "string" ? attr.value : undefined;
+};
+
+export const isHydrationAttribute = (name: string): boolean => name === "hydrate" || name.startsWith("hydrate:");
+
+const hydrationStrategies = new Set(["load", "idle", "visible", "media", "interaction"]);
+
+export const isKnownHydrationAttribute = (name: string): boolean =>
+  name === "hydrate" ||
+  name === "hydrate:id" ||
+  (name.startsWith("hydrate:") && hydrationStrategies.has(name.slice("hydrate:".length)));
+
+export const automaticHydrationId = (path: readonly number[]): string =>
+  `td-h-${path.length === 0 ? "root" : path.join("-")}`;
+
+export const hydrationBoundaryFor = (node: ElementNode, path: readonly number[]): HydrationBoundary | undefined => {
+  const explicitId = attrExpression(node, "hydrate:id");
+  const strategyAttr = node.attrs.find(
+    (attr) =>
+      attr.name.startsWith("hydrate:") && attr.name !== "hydrate:id" && hydrationStrategies.has(attr.name.slice(8)),
+  );
+  const hasAutoHydrate = node.attrs.some(
+    (attr) => attr.name === "hydrate" || (attr.name.startsWith("hydrate:") && attr.name !== "hydrate:id"),
+  );
+  if (!explicitId && !hasAutoHydrate) {
+    return undefined;
+  }
+  const boundary: HydrationBoundary = explicitId
+    ? { path: [...path], id: explicitId }
+    : { path: [...path], id: automaticHydrationId(path), idKind: "static" };
+  if (!strategyAttr) {
+    return boundary;
+  }
+  const strategy = strategyAttr.name.slice(8) as NonNullable<HydrationBoundary["strategy"]>;
+  boundary.strategy = strategy;
+  if (strategy === "visible") {
+    const rootMargin = typeof strategyAttr.value === "string" ? strategyAttr.value : undefined;
+    if (rootMargin) {
+      boundary.rootMargin = rootMargin;
+    }
+  }
+  if (strategy === "interaction") {
+    const interaction = typeof strategyAttr.value === "string" ? strategyAttr.value : undefined;
+    if (interaction) {
+      boundary.interaction = interaction;
+    }
+  }
+  if (strategy === "media") {
+    const media = typeof strategyAttr.value === "string" ? strategyAttr.value : undefined;
+    if (media) {
+      boundary.media = media;
+    }
+  }
+  return boundary;
 };
 
 export const isForNode = (node: TemplateNode): node is ElementNode => node.type === "element" && node.tagName === "for";

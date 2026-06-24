@@ -12,8 +12,10 @@ import type {
 import {
   attrExpression,
   attrString,
+  hydrationBoundaryFor,
   identifierNamePattern,
   identifierPattern,
+  isKnownHydrationAttribute,
   itemNameFromKey,
   readExpressionAttribute,
   renderableChildren,
@@ -154,6 +156,9 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     }
   }
   for (const attr of node.attrs) {
+    if (attr.name.startsWith("hydrate:") && !isKnownHydrationAttribute(attr.name)) {
+      return semanticError(`Unknown hydration attribute: ${attr.name}.`);
+    }
     if (attr.name.startsWith("bind:")) {
       const expression = readExpressionAttribute(attr.value);
       if (!expression || !isAssignableExpression(expression)) {
@@ -176,12 +181,12 @@ const validateTree = (node: TemplateNode, hydrateIds: Set<string>): Result<void,
   if (!specialResult.ok) {
     return specialResult;
   }
-  const hydrateId = attrExpression(node, "hydrate:id");
-  if (hydrateId) {
-    if (hydrateIds.has(hydrateId)) {
-      return semanticError(`Duplicate hydrate boundary id expression: ${hydrateId}.`);
+  const hydrateBoundary = hydrationBoundaryFor(node, []);
+  if (hydrateBoundary && hydrateBoundary.idKind !== "static") {
+    if (hydrateIds.has(hydrateBoundary.id)) {
+      return semanticError(`Duplicate hydrate boundary id expression: ${hydrateBoundary.id}.`);
     }
-    hydrateIds.add(hydrateId);
+    hydrateIds.add(hydrateBoundary.id);
   }
   for (const child of node.children) {
     const result = validateTree(child, hydrateIds);
@@ -210,9 +215,9 @@ const collectDirectives = (node: TemplateNode, path: number[], directives: Templ
       stores: componentStores(node),
     });
   }
-  const hydrateId = attrExpression(node, "hydrate:id");
-  if (hydrateId) {
-    directives.push({ kind: "hydrate", path: [...path], id: hydrateId });
+  const hydrateBoundary = hydrationBoundaryFor(node, path);
+  if (hydrateBoundary) {
+    directives.push({ kind: "hydrate", ...hydrateBoundary });
   }
   if (node.tagName === "if") {
     directives.push({ kind: "if", path: [...path], test: attrExpression(node, "test") ?? "false" });

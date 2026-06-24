@@ -108,6 +108,11 @@ export type StoreDefinition = {
 export type HydrationBoundary = {
   path: number[];
   id: string;
+  idKind?: "expression" | "static";
+  strategy?: "load" | "idle" | "visible" | "media" | "interaction";
+  media?: string;
+  interaction?: string;
+  rootMargin?: string;
 };
 
 export type ComponentProp = {
@@ -137,7 +142,16 @@ export type TemplateDirective =
       error?: string;
       reorder?: "preserve" | "resolve";
     }
-  | { kind: "hydrate"; path: number[]; id: string };
+  | {
+      kind: "hydrate";
+      path: number[];
+      id: string;
+      idKind?: "expression" | "static";
+      strategy?: "load" | "idle" | "visible" | "media" | "interaction";
+      media?: string;
+      interaction?: string;
+      rootMargin?: string;
+    };
 
 export type TemplateIr = {
   kind: "template";

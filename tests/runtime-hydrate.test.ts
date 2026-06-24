@@ -4,6 +4,7 @@ import {
   diagnoseHydrationBoundaries,
   locateHydrationBoundary,
   readHydrationState,
+  scheduleHydrationBoundaries,
   scheduleHydration,
   serializeHydrationState,
 } from "../src/runtime/hydrate";
@@ -132,5 +133,31 @@ describe("hydrate boundary runtime", () => {
       { id: "c", type: "missing-start", message: "Missing hydrate boundary start marker for c." },
       { id: "c", type: "missing-end", message: "Missing hydrate boundary end marker for c." },
     ]);
+  });
+
+  it("schedules multiple compiled hydration boundaries from metadata", () => {
+    document.body.innerHTML = `<main><!--tachyon-hydrate:td-h-0:start--><section><button>Open</button></section><!--tachyon-hydrate:td-h-0:end--></main>`;
+    const main = document.querySelector("main");
+    if (!main) {
+      throw new Error("Missing main.");
+    }
+    const bind = vi.fn();
+
+    const cleanup = scheduleHydrationBoundaries(
+      main,
+      [{ id: "td-h-0", idKind: "static", strategy: "interaction", interaction: "pointerenter" }],
+      bind,
+    );
+
+    expect(bind).not.toHaveBeenCalled();
+    main.querySelector("section")?.dispatchEvent(new MouseEvent("pointerenter", { bubbles: true }));
+    expect(bind).toHaveBeenCalledTimes(1);
+    expect(bind).toHaveBeenCalledWith(main.querySelector("section"), {
+      id: "td-h-0",
+      idKind: "static",
+      strategy: "interaction",
+      interaction: "pointerenter",
+    });
+    cleanup();
   });
 });

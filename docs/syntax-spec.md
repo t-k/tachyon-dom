@@ -78,13 +78,26 @@ Components may be nested, and nested component props are resolved against the pa
 
 ## Hydration Boundaries
 
-`hydrate:id={islandId}` connects SSR HTML to client hydration. The client template removes the attribute. The server targets wrap the element with marker comments:
+`hydrate` marks an element as an SSR hydration boundary. When no explicit id is provided, the compiler generates a stable template-local id from the element path. The client template removes hydration attributes. The server targets wrap the element with marker comments:
 
 ```html
 <!--tachyon-hydrate:<id>:start-->
 <section>...</section>
 <!--tachyon-hydrate:<id>:end-->
 ```
+
+Use `hydrate:id={islandId}` when the same template can be rendered multiple times into one root and the caller needs to provide a unique id.
+
+Hydration strategies can be written as shorthand attributes:
+
+```html
+<section hydrate:idle>...</section>
+<section hydrate:visible="128px">...</section>
+<section hydrate:interaction="pointerenter">...</section>
+<section hydrate:media="(min-width: 48rem)">...</section>
+```
+
+The supported shorthand names are `hydrate:load`, `hydrate:idle`, `hydrate:visible`, `hydrate:media`, and `hydrate:interaction`. `hydrate:visible` treats its string value as `rootMargin`; `hydrate:media` treats it as the media query; `hydrate:interaction` treats it as the event name. `hydrate:id={id}` can be combined with a strategy shorthand.
 
 `runtime/hydrate` locates marker pairs and hydrates the existing element without replacing SSR DOM. `serializeHydrationState(id, state)` and `readHydrationState(root, id)` provide the first state handoff path.
 

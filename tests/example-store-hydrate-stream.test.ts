@@ -14,11 +14,12 @@ describe("store hydrate stream example", () => {
   it("renders streamed HTML with hydrate markers", async () => {
     const html = await renderExampleHtml();
 
-    expect(html).toContain(`<!--tachyon-hydrate:counter-panel:start-->`);
+    expect(html).toContain(`<!--tachyon-hydrate:td-h-`);
     expect(html).toContain(`<section>`);
     expect(html).toContain(`<button>7</button>`);
-    expect(html).toContain(`<!--tachyon-hydrate:counter-panel:end-->`);
+    expect(html).toContain(`:end-->`);
     expect(html).not.toContain(`hydrate:id=`);
+    expect(html).not.toContain(`hydrate:idle`);
   });
 
   it("returns an HTML response backed by the stream adapter", async () => {
@@ -33,7 +34,8 @@ describe("store hydrate stream example", () => {
       `import { createStore as __tachyonCreateStore } from "tachyon-dom/runtime/store";`,
     );
     expect(generatedClientModule).toContain(`export const hydrationBoundaries = [{"path":`);
-    expect(generatedClientModule).toContain(`"id":"islandId"`);
+    expect(generatedClientModule).toContain(`"idKind":"static"`);
+    expect(generatedClientModule).toContain(`"strategy":"idle"`);
     expect(generatedClientModule).toContain(`__tachyonRead(state.count)`);
   });
 });

@@ -5,11 +5,14 @@ import {
   escapeHtml,
   escapeMarker,
   expressionToScopeAccess,
+  hydrationBoundaryFor,
+  isHydrationAttribute,
   jsOptionalPropertyAccess,
   jsString,
   itemNameFromKey,
   readExpressionAttribute,
   readPath,
+  renderableChildren,
   serializeStaticAttr,
   textExpressionSegments,
 } from "../utils";
@@ -55,7 +58,21 @@ const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
   return output;
 };
 
-const renderFor = (node: ElementNode, scope: Record<string, unknown>): string => {
+const childPathEntries = (
+  children: readonly TemplateNode[],
+  basePath: readonly number[],
+): Array<{ child: TemplateNode; path: number[] }> => {
+  let domIndex = 0;
+  return children.map((child) => {
+    const path =
+      child.type === "element" && (child.tagName === "store" || child.tagName === "for")
+        ? [...basePath]
+        : [...basePath, domIndex++];
+    return { child, path };
+  });
+};
+
+const renderFor = (node: ElementNode, scope: Record<string, unknown>, path: number[]): string => {
   const each = attrExpression(node, "each");
   const key = attrExpression(node, "key") ?? "item";
   const itemName = itemNameFromKey(key);
@@ -66,12 +83,14 @@ const renderFor = (node: ElementNode, scope: Record<string, unknown>): string =>
   return items
     .map((item) => {
       const childScope = { ...scope, [itemName]: item };
-      return node.children.map((child) => renderNode(child, childScope)).join("");
+      return childPathEntries(node.children, path)
+        .map((entry) => renderNode(entry.child, childScope, entry.path))
+        .join("");
     })
     .join("");
 };
 
-const renderElement = (node: ElementNode, scope: Record<string, unknown>): string => {
+const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: number[] = []): string => {
   if (node.tagName === "outlet") {
     return String(scope.outlet ?? "");
   }
@@ -81,7 +100,7 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
     return slots && typeof slots === "object" ? String((slots as Record<string, unknown>)[name] ?? "") : "";
   }
   if (node.tagName === "for") {
-    return renderFor(node, scope);
+    return renderFor(node, scope, path);
   }
   if (node.tagName === "if") {
     return readPath(scope, attrExpression(node, "test") ?? "false")
@@ -93,7 +112,11 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
   }
   if (node.tagName === "component") {
     const next = componentScope(node, scope);
-    return node.children.map((child) => renderNode(child, next)).join("");
+    const children = renderableChildren(node);
+    if (children.length === 1) {
+      return renderNode(children[0] as TemplateNode, next, path);
+    }
+    return children.map((child, index) => renderNode(child, next, [...path, index])).join("");
   }
   if (node.tagName === "await") {
     const thenName = attrString(node, "then") ?? "value";
@@ -104,13 +127,13 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
   const attrs: string[] = [];
   const classes: string[] = [];
   const styles: string[] = [];
-  const hydrateId = attrExpression(node, "hydrate:id");
+  const hydrateBoundary = hydrationBoundaryFor(node, path);
   for (const attr of node.attrs) {
     if (
       attr.name.startsWith("on:") ||
       attr.name.startsWith("bind:") ||
       attr.name === "ref" ||
-      attr.name === "hydrate:id"
+      isHydrationAttribute(attr.name)
     ) {
       continue;
     }
@@ -149,20 +172,24 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>): strin
   if (styles.length > 0) {
     attrs.push(` style="${escapeHtml(styles.join(";"))}"`);
   }
-  const children = node.children.map((child) => renderNode(child, scope)).join("");
+  const children = childPathEntries(node.children, path)
+    .map((entry) => renderNode(entry.child, scope, entry.path))
+    .join("");
   const html = `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
-  if (!hydrateId) {
+  if (!hydrateBoundary) {
     return html;
   }
-  const marker = escapeMarker(readPath(scope, hydrateId));
+  const marker = escapeMarker(
+    hydrateBoundary.idKind === "static" ? hydrateBoundary.id : readPath(scope, hydrateBoundary.id),
+  );
   return `<!--tachyon-hydrate:${marker}:start-->${html}<!--tachyon-hydrate:${marker}:end-->`;
 };
 
-const renderNode = (node: TemplateNode, scope: Record<string, unknown>): string => {
+const renderNode = (node: TemplateNode, scope: Record<string, unknown>, path: number[] = []): string => {
   if (node.type === "text") {
     return renderText(node, scope);
   }
-  return renderElement(node, scope);
+  return renderElement(node, scope, path);
 };
 
 export const renderServerTemplate = (template: CompiledTemplate, scope: Record<string, unknown>): string =>
@@ -193,7 +220,7 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
       attr.name.startsWith("on:") ||
       attr.name.startsWith("bind:") ||
       attr.name === "ref" ||
-      attr.name === "hydrate:id"
+      isHydrationAttribute(attr.name)
     ) {
       continue;
     }
@@ -248,25 +275,35 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
   return parts.join(" + ");
 };
 
-export const renderNodeExpression = (node: TemplateNode, locals: ReadonlySet<string> = new Set()): string => {
+export const renderNodeExpression = (
+  node: TemplateNode,
+  locals: ReadonlySet<string> = new Set(),
+  path: number[] = [],
+): string => {
   if (node.type === "text") {
     return renderTextExpression(node, locals);
   }
-  return renderElementExpression(node, locals);
+  return renderElementExpression(node, locals, path);
 };
 
-const renderForExpression = (node: ElementNode, locals: ReadonlySet<string>): string => {
+const renderForExpression = (node: ElementNode, locals: ReadonlySet<string>, path: number[]): string => {
   const each = attrExpression(node, "each") ?? "[]";
   const key = attrExpression(node, "key") ?? "item";
   const itemName = itemNameFromKey(key);
   const eachAccess = expressionToScopeAccess(each, locals);
   const childLocals = new Set(locals);
   childLocals.add(itemName);
-  const childExpression = node.children.map((child) => renderNodeExpression(child, childLocals)).join(" + ");
+  const childExpression = childPathEntries(node.children, path)
+    .map((entry) => renderNodeExpression(entry.child, childLocals, entry.path))
+    .join(" + ");
   return `(Array.isArray(${eachAccess}) ? ${eachAccess}.map((${itemName}) => ${childExpression || `""`}).join("") : "")`;
 };
 
-const renderElementExpression = (node: ElementNode, locals: ReadonlySet<string> = new Set()): string => {
+const renderElementExpression = (
+  node: ElementNode,
+  locals: ReadonlySet<string> = new Set(),
+  path: number[] = [],
+): string => {
   if (node.tagName === "outlet") {
     return `String(scope.outlet ?? "")`;
   }
@@ -275,41 +312,50 @@ const renderElementExpression = (node: ElementNode, locals: ReadonlySet<string> 
     return `String(${jsOptionalPropertyAccess("scope.slots", name)} ?? "")`;
   }
   if (node.tagName === "for") {
-    return renderForExpression(node, locals);
+    return renderForExpression(node, locals, path);
   }
   if (node.tagName === "if") {
     const test = expressionToScopeAccess(attrExpression(node, "test") ?? "false", locals);
-    const childExpression = node.children.map((child) => renderNodeExpression(child, locals)).join(" + ");
+    const childExpression = childPathEntries(node.children, path)
+      .map((entry) => renderNodeExpression(entry.child, locals, entry.path))
+      .join(" + ");
     return `(${test} ? ${childExpression || `""`} : "")`;
   }
   if (node.tagName === "store") {
     return `""`;
   }
   if (node.tagName === "component") {
-    return renderComponentExpression(node, locals);
+    return renderComponentExpression(node, locals, path);
   }
   if (node.tagName === "await") {
     const value = expressionToScopeAccess(attrExpression(node, "value") ?? "undefined", locals);
     const thenName = attrString(node, "then") ?? "value";
     const childLocals = new Set(locals);
     childLocals.add(thenName);
-    const childExpression = node.children.map((child) => renderNodeExpression(child, childLocals)).join(" + ");
+    const childExpression = childPathEntries(node.children, path)
+      .map((entry) => renderNodeExpression(entry.child, childLocals, entry.path))
+      .join(" + ");
     return `(((${thenName}) => ${childExpression || `""`})(${value}))`;
   }
 
   const parts: string[] = [renderOpenTagExpression(node, locals)];
-  parts.push(...node.children.map((child) => renderNodeExpression(child, locals)));
+  parts.push(
+    ...childPathEntries(node.children, path).map((entry) => renderNodeExpression(entry.child, locals, entry.path)),
+  );
   parts.push(jsString(`</${node.tagName}>`));
   const expression = parts.join(" + ");
-  const hydrateId = attrExpression(node, "hydrate:id");
-  if (!hydrateId) {
+  const hydrateBoundary = hydrationBoundaryFor(node, path);
+  if (!hydrateBoundary) {
     return expression;
   }
-  const marker = expressionToScopeAccess(hydrateId, locals);
+  const marker =
+    hydrateBoundary.idKind === "static"
+      ? jsString(hydrateBoundary.id)
+      : expressionToScopeAccess(hydrateBoundary.id, locals);
   return `${jsString("<!--tachyon-hydrate:")} + escapeMarker(${marker}) + ${jsString(":start-->")} + ${expression} + ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${marker}) + ${jsString(":end-->")}`;
 };
 
-const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string>): string => {
+const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string>, path: number[]): string => {
   const localNames = new Set(locals);
   const declarations: string[] = [];
   for (const attr of node.attrs) {
@@ -338,7 +384,11 @@ const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string
     }
   };
   node.children.forEach(applyStoreDeclarations);
-  const expression = node.children.map((child) => renderNodeExpression(child, localNames)).join(" + ") || `""`;
+  const children = renderableChildren(node);
+  const expression =
+    children.length === 1
+      ? renderNodeExpression(children[0] as TemplateNode, localNames, path)
+      : children.map((child, index) => renderNodeExpression(child, localNames, [...path, index])).join(" + ") || `""`;
   return `(() => { ${declarations.join(" ")} return ${expression}; })()`;
 };
 

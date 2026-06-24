@@ -34,6 +34,21 @@ export type HydrationScheduleOptions = {
   matchMedia?: (query: string) => MediaQueryList;
 };
 
+export type CompiledHydrationBoundary = {
+  id: string;
+  idKind?: "expression" | "static";
+  strategy?: HydrationStrategy;
+  media?: string;
+  interaction?: keyof HTMLElementEventMap | string;
+  rootMargin?: string;
+};
+
+export type ScheduleHydrationBoundariesOptions = {
+  resolveId?: (boundary: CompiledHydrationBoundary) => string | undefined;
+  onError?: (error: HydrationBoundaryError, boundary: CompiledHydrationBoundary) => void;
+  matchMedia?: (query: string) => MediaQueryList;
+};
+
 type HydrationCleanup = void | (() => void);
 
 const escapeScriptJson = (value: string): string => value.replaceAll("<", "\\u003c").replaceAll("-->", "--\\>");
@@ -212,4 +227,39 @@ export const scheduleHydration = (
   };
   document.addEventListener(eventName, listener, true);
   return () => document.removeEventListener(eventName, listener, true);
+};
+
+export const scheduleHydrationBoundaries = (
+  root: ParentNode,
+  boundaries: readonly CompiledHydrationBoundary[],
+  bind: (element: Element, boundary: CompiledHydrationBoundary) => HydrationCleanup,
+  options: ScheduleHydrationBoundariesOptions = {},
+): (() => void) => {
+  const cleanups: Array<() => void> = [];
+  for (const boundary of boundaries) {
+    const id = boundary.idKind === "expression" ? options.resolveId?.(boundary) : boundary.id;
+    if (!id) {
+      continue;
+    }
+    const handle = createHydrationBoundary(root, id, (element) => bind(element, boundary));
+    if (!handle.ok) {
+      options.onError?.(handle.error, boundary);
+      continue;
+    }
+    cleanups.push(
+      scheduleHydration(handle.value, {
+        strategy: boundary.strategy ?? "load",
+        ...(boundary.media ? { media: boundary.media } : {}),
+        ...(boundary.interaction ? { interaction: boundary.interaction } : {}),
+        ...(boundary.rootMargin ? { rootMargin: boundary.rootMargin } : {}),
+        ...(options.matchMedia ? { matchMedia: options.matchMedia } : {}),
+      }),
+    );
+    cleanups.push(() => handle.value.dispose());
+  }
+  return () => {
+    for (const cleanup of cleanups.splice(0).reverse()) {
+      cleanup();
+    }
+  };
 };

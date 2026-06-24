@@ -9,7 +9,6 @@ import { renderToResponse } from "../src/server/stream";
 type ExampleScope = {
   initialCount: number;
   count: number;
-  islandId: string;
 };
 
 type GeneratedServerModule = {
@@ -31,14 +30,14 @@ const importExampleScope = async (): Promise<ExampleScope> => {
     throw new Error(script.error.message);
   }
   if (!script.value.code) {
-    return { count: 7, initialCount: 7, islandId: "counter-panel" };
+    return { count: 7, initialCount: 7 };
   }
   const encoded = Buffer.from(script.value.code).toString("base64");
   const module = (await import(`data:text/javascript;base64,${encoded}`)) as {
     default?: ExampleScope;
     scope?: ExampleScope;
   };
-  return module.scope ?? module.default ?? { count: 7, initialCount: 7, islandId: "counter-panel" };
+  return module.scope ?? module.default ?? { count: 7, initialCount: 7 };
 };
 
 export const generatedClientModule = generateClientModule(compiled, { reactive: true });

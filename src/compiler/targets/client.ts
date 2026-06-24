@@ -13,6 +13,8 @@ import { storeDefinitionsFor } from "../ir";
 import {
   attrExpression,
   expressionToScopeAccess,
+  hydrationBoundaryFor,
+  isHydrationAttribute,
   isForNode,
   isStoreNode,
   itemNameFromKey,
@@ -161,12 +163,15 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
 
   const attrs: string[] = [];
   const staticClassNames: string[] = [];
-  const hydrateId = attrExpression(node, "hydrate:id");
-  if (hydrateId) {
-    context.hydrationBoundaries.push({ path: [...path], id: hydrateId });
+  const hydrateBoundary = hydrationBoundaryFor(node, path);
+  if (hydrateBoundary) {
+    context.hydrationBoundaries.push(hydrateBoundary);
   }
 
   for (const attr of node.attrs) {
+    if (isHydrationAttribute(attr.name)) {
+      continue;
+    }
     if (attr.name.startsWith("on:")) {
       const handler = readExpressionAttribute(attr.value);
       if (handler) {
@@ -201,9 +206,6 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
       if (expression) {
         context.bindings.push({ kind: "class", path: [...path], className: attr.name.slice(6), expression });
       }
-      continue;
-    }
-    if (attr.name === "hydrate:id") {
       continue;
     }
     const expression = readExpressionAttribute(attr.value);
