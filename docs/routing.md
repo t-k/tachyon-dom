@@ -6,11 +6,15 @@ Tachyon DOM keeps routing outside the template compiler. Templates compile to se
 
 `createFileRouteManifest(files, { rootDir })` maps route files to paths:
 
+- `index.td` -> `/`
 - `index.tachyon.html` -> `/`
+- `users/[id].td` -> `/users/:id`
 - `users/[id].tachyon.html` -> `/users/:id`
 - `blog/[...slug].tachyon.html` -> `/blog/*slug`
 - `admin/route.ts` -> `/admin`
 - `admin/layout.ts` -> `/admin`
+
+Template routes may use `.td`, `.tachyon`, or `.tachyon.html` extensions. Route and layout modules may use `.ts` or `.js`.
 
 `scanFileRoutes(rootDir)` performs the same mapping by reading the filesystem.
 

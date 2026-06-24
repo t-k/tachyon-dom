@@ -48,6 +48,12 @@ Supported expression forms include identifiers, dotted paths, literals, arrays, 
 
 Inside a component, store declarations create local server/stream scope values for that component subtree.
 
+## Attributes and Bindings
+
+Expression attributes such as `title="{label}"` create dynamic attribute bindings. `class:name={condition}` toggles one class, `style:name={value}` writes one style property, and `ref={path}` stores the element into the provided scope path.
+
+`bind:value={path}` and `bind:checked={path}` create two-way form bindings. The expression must be assignable: either an identifier path or a non-optional member expression.
+
 ## Events
 
 `on:event={handler}` creates an event binding. The client target imports `runtime/event` only when events are present. Server targets do not emit event attributes.
@@ -109,6 +115,20 @@ These are intended for route layouts and transparent component composition.
 ```
 
 The synchronous server string target treats the current `value` as the resolved value. Use the stream target when `value` is a Promise.
+
+`<await>` also accepts:
+
+- `fallback="..."` to yield static fallback HTML before awaiting in the stream target.
+- `error="..."` to yield static error HTML if the awaited value rejects in the stream target.
+- `reorder="preserve"` or `reorder="resolve"` in the IR. Current stream emission preserves document order.
+
+## Single File Templates
+
+`.td` files can contain one optional `<script>` block plus template markup. The compiler removes the script block before parsing the template and maps template diagnostics back to the original source offsets.
+
+Script-only `.td` files are valid and emit empty client, server, or stream template modules. `<script setup>` exposes top-level bindings as the default client scope. A named `export const scope` or `export default` can also provide default client scope values, but a file must not use both forms at once.
+
+Template scripts can use compiler helper names such as `validateFormData` and `compileTachyonSfc`; the SFC transform auto-imports supported helpers from Tachyon DOM modules.
 
 ## Compiler Pipeline
 

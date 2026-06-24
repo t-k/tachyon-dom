@@ -5,10 +5,11 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/text`: text node lookup and updates.
 - `runtime/class`: element lookup and class toggles.
 - `runtime/attr`: dynamic attributes, styles, and refs.
-- `runtime/form`: `bind:value` and `bind:checked` helpers.
+- `runtime/form`: `bind:value`, `bind:checked`, validation, and progressive form helpers.
 - `runtime/event`: delegated event binding.
 - `runtime/list`: keyed list mounting, reuse, move, and multi-root item support.
 - `runtime/keyed-rows`: dependency-free keyed table-row list where the live DOM is the single source of truth (no shadow item/row arrays). Bulk creation binds and clones a reusable multi-row chunk; remove/swap/select are O(1) DOM operations. Suited to large data tables that do not need per-row reactivity.
+- `runtime/virtual-list`: fixed-height virtualized lists with overscan, imperative updates, index scrolling, and ARIA position metadata.
 - `runtime/conditional`: conditional DOM mounting.
 - `runtime/hydrate`: SSR boundary location, state handoff, and hydration scheduling.
 - `runtime/router`: client-side navigation with link interception, History API, abortable loaders, scroll hooks, focus restoration, and route HMR cache invalidation.
@@ -34,6 +35,14 @@ The compiler records hydration boundaries with `hydrate:id={id}`. Runtime schedu
 ## Progressive Forms
 
 `enhanceForm(form, options)` intercepts submit events only when JavaScript is running, builds a `Request` from the existing form markup, and calls `fetch()` or a custom `submit()` callback. Without JavaScript, the same form remains a normal browser form.
+
+`enhanceForm()` also supports:
+
+- `validate(context)` returning `FormValidationResult`.
+- `onInvalid(context)`, `onSuccess(context)`, and `onError(context)` lifecycle callbacks.
+- `navigate(href, { replace })` for redirect responses.
+
+`validateFormData(formData, rules)` validates field-level `required`, `pattern`, `minLength`, `maxLength`, and custom `validate()` rules. Failed validations set browser custom validity messages and `aria-invalid` on named controls.
 
 ## Client Router Cache
 
@@ -63,5 +72,6 @@ Routes can define `action()` and `revalidateOnAction`. `router.submit(href, init
 
 `runtime/stream-client` provides:
 
+- `readTextStreamChunks(stream)` to decode a `ReadableStream<Uint8Array>` into text chunks.
 - `applyDeferredDataChunk(root, chunk)` to write streamed deferred values into `[data-tachyon-deferred-target="id:key"]` elements.
 - `readDeferredDataScript(root, id)` to read server-emitted deferred data scripts.
