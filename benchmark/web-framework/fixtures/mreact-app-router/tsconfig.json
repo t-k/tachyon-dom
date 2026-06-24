@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@reckona/mreact",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "target": "ES2022",
+    "types": ["@reckona/mreact-router/app-router-globals"]
+  },
+  "include": ["app", "vite.config.ts"]
+}

@@ -47,11 +47,11 @@ describe("web framework benchmark fixtures", () => {
     const source = readFileSync(path.join(root, "benchmark/web-framework/run-web-framework-benchmark.ts"), "utf8");
 
     expect(source).toContain('name: "mreact-app-router"');
-    expect(source).toContain("mreact/examples/app-router");
+    expect(source).toContain("benchmark/web-framework/fixtures/mreact-app-router");
   });
 
-  it("keeps the external mreact fixture aligned with benchmark routes", () => {
-    const mreactApp = path.resolve(root, "../mreact/examples/app-router/app");
+  it("keeps the repo-local mreact fixture aligned with benchmark routes", () => {
+    const mreactApp = fixture("mreact-app-router/app");
 
     expect(existsSync(path.join(mreactApp, "products/$id/page.tsx"))).toBe(true);
     expect(existsSync(path.join(mreactApp, "dashboard/users/page.tsx"))).toBe(true);
@@ -64,5 +64,14 @@ describe("web framework benchmark fixtures", () => {
     expect(readFileSync(path.join(mreactApp, "dashboard/users/page.tsx"), "utf8")).toContain('data-nav="orders"');
     expect(readFileSync(path.join(mreactApp, "interactive/page.tsx"), "utf8")).toContain('data-action="increment"');
     expect(readFileSync(path.join(mreactApp, "interactive/page.tsx"), "utf8")).toContain("data-count");
+  });
+
+  it("uses published mreact packages for the repo-local mreact fixture", () => {
+    const packageJson = readFileSync(fixture("mreact-app-router/package.json"), "utf8");
+
+    expect(packageJson).toContain("@reckona/mreact");
+    expect(packageJson).toContain("@reckona/mreact-router");
+    expect(packageJson).not.toContain("workspace:");
+    expect(packageJson).not.toContain("../mreact");
   });
 });

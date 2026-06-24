@@ -34,7 +34,7 @@ type ClientBundleSnapshot = {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../..");
 const fixtureRoot = path.join(__dirname, "fixtures");
-const mreactAppRouterRoot = path.resolve(projectRoot, "../mreact/examples/app-router");
+const mreactAppRouterRoot = path.join(projectRoot, "benchmark/web-framework/fixtures/mreact-app-router");
 
 const frameworks: readonly FrameworkConfig[] = [
   {

@@ -1,0 +1,29 @@
+export default function Layout() {
+  return (
+    <html lang="en">
+      <body>
+        <nav>
+          <a href="/" data-nav="home">
+            Home
+          </a>
+          <a href="/products/42" data-nav="product">
+            Product
+          </a>
+          <a href="/dashboard/users" data-nav="users">
+            Users
+          </a>
+          <a href="/dashboard/orders" data-nav="orders">
+            Orders
+          </a>
+          <a href="/interactive" data-nav="interactive">
+            Interactive
+          </a>
+          <a href="/stream" data-nav="stream">
+            Stream
+          </a>
+        </nav>
+        <Slot />
+      </body>
+    </html>
+  );
+}
