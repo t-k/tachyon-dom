@@ -3,12 +3,20 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import {
+  createWorkersFetchHandler,
   createWorkersHandler,
+  type AdapterFetchHandler,
   type StaticRouteDefinition,
+  type WorkersFetchHandlerOptions,
   type WorkersHandlerOptions,
 } from "./workers.js";
 
 export type NodeHandlerOptions = WorkersHandlerOptions & {
+  staticAssets?: StaticAssetOptions;
+};
+
+export type NodeFetchHandlerOptions = Omit<WorkersFetchHandlerOptions, "fetch"> & {
+  fetch: AdapterFetchHandler;
   staticAssets?: StaticAssetOptions;
 };
 
@@ -194,3 +202,21 @@ export const createNodeHandler =
     const webResponse = await createWorkersHandler(options).fetch(webRequest);
     await writeNodeResponse(webResponse, response);
   };
+
+export const createNodeFetchHandler = (
+  options: NodeFetchHandlerOptions,
+): ((request: IncomingMessage, response: ServerResponse) => Promise<void>) => {
+  const staticAssetHandler = options.staticAssets ? createStaticAssetHandler(options.staticAssets) : undefined;
+  const fetchHandler = createWorkersFetchHandler({
+    ...options,
+    fetch: async (request) => {
+      const asset = await staticAssetHandler?.(request);
+      return asset ?? options.fetch(request);
+    },
+  });
+  return async (request, response) => {
+    const webRequest = webRequestFor(request);
+    const webResponse = await fetchHandler.fetch(webRequest);
+    await writeNodeResponse(webResponse, response);
+  };
+};

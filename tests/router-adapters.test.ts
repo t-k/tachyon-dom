@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
+  createLambdaFetchHandler,
   createLambdaHandler,
   createLambdaStreamingHandler,
   lambdaResponseFromWebResponse,
   requestFromLambdaEvent,
 } from "../src/adapters/lambda";
-import { createNodeHandler } from "../src/adapters/node";
+import { createNodeFetchHandler, createNodeHandler } from "../src/adapters/node";
 import { createWorkersHandler } from "../src/adapters/workers";
 import { createSecurityHeaders, redirect, type RouteDefinition } from "../src/router";
 
@@ -344,6 +345,106 @@ describe("server adapters", () => {
     expect(chunks.join("")).toBe("<p>Loading</p><h1>Ready</h1>");
   });
 
+  it("creates a Node fetch handler that serves static assets before a standards fetch handler", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-fetch-assets-"));
+    try {
+      await writeFile(path.join(dir, "app.js"), `console.log("asset");`);
+      let fetchCalls = 0;
+      const handler = createNodeFetchHandler({
+        fetch: async (request) => {
+          fetchCalls += 1;
+          return new Response(`<h1>${new URL(request.url).pathname}</h1>`, {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          });
+        },
+        staticAssets: { rootDir: dir, basePath: "/assets" },
+        securityHeaders: createSecurityHeaders({ csp: true, nonce: "fetch-nonce" }),
+      });
+      const makeRequest = (url: string) => {
+        const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+          method: string;
+          url: string;
+          headers: Record<string, string>;
+        };
+        req.method = "GET";
+        req.url = url;
+        req.headers = { host: "example.com" };
+        return req;
+      };
+      const writeResponse = async (url: string) => {
+        const chunks: string[] = [];
+        const headers = new Map<string, string | number | readonly string[]>();
+        const res = {
+          statusCode: 200,
+          setHeader: (key: string, value: string | number | readonly string[]) => {
+            headers.set(key, value);
+          },
+          end: (chunk?: string) => {
+            if (chunk) {
+              chunks.push(chunk);
+            }
+          },
+        };
+        await handler(makeRequest(url) as never, res as never);
+        return { chunks, headers, res };
+      };
+
+      const asset = await writeResponse("/assets/app.js");
+      const app = await writeResponse("/dashboard");
+
+      expect(fetchCalls).toBe(1);
+      expect(asset.res.statusCode).toBe(200);
+      expect(asset.headers.get("content-security-policy")).toContain("'nonce-fetch-nonce'");
+      expect(asset.chunks.join("")).toBe(`console.log("asset");`);
+      expect(app.res.statusCode).toBe(200);
+      expect(app.headers.get("content-security-policy")).toContain("'nonce-fetch-nonce'");
+      expect(app.chunks.join("")).toBe("<h1>/dashboard</h1>");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("serves static Node routes before a standards fetch handler", async () => {
+    let fetchCalls = 0;
+    const handler = createNodeFetchHandler({
+      fetch: () => {
+        fetchCalls += 1;
+        return new Response("<h1>Dynamic</h1>");
+      },
+      staticRoutes: [{ path: "/", body: "<h1>Static</h1>" }],
+      securityHeaders: createSecurityHeaders({ csp: true, nonce: "static-fetch-nonce" }),
+    });
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/";
+    req.headers = { host: "example.com" };
+    const chunks: string[] = [];
+    const headers = new Map<string, string | number | readonly string[]>();
+    const res = {
+      statusCode: 200,
+      setHeader: (key: string, value: string | number | readonly string[]) => {
+        headers.set(key, value);
+      },
+      end: (chunk?: string) => {
+        if (chunk) {
+          chunks.push(chunk);
+        }
+      },
+    };
+
+    await handler(req as never, res as never);
+
+    expect(fetchCalls).toBe(0);
+    expect(res.statusCode).toBe(200);
+    expect(headers.get("content-security-policy")).toContain("'nonce-static-fetch-nonce'");
+    expect(headers.get("content-length")).toBe("15");
+    expect(chunks.join("")).toBe("<h1>Static</h1>");
+  });
+
   it("converts Lambda HTTP API v2 events into Web requests", async () => {
     const request = requestFromLambdaEvent(
       lambdaEvent({
@@ -385,6 +486,32 @@ describe("server adapters", () => {
     expect(response.headers["content-security-policy"]).toContain("'nonce-lambda-nonce'");
     expect(response.isBase64Encoded).toBe(false);
     expect(response.body).toBe("<h1>Lambda</h1>");
+  });
+
+  it("creates a Lambda fetch handler that adapts HTTP API events without route definitions", async () => {
+    let seenRequest: Request | undefined;
+    const handler = createLambdaFetchHandler({
+      origin: "admin.example",
+      fetch: async (request) => {
+        seenRequest = request;
+        return new Response(`<h1>${new URL(request.url).pathname}</h1>`, {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      },
+      securityHeaders: createSecurityHeaders({ csp: true, nonce: "lambda-fetch-nonce" }),
+    });
+
+    const response = await handler(
+      lambdaEvent({
+        rawPath: "/admin",
+        rawQueryString: "debug=1",
+      }),
+    );
+
+    expect(seenRequest?.url).toBe("https://admin.example/admin?debug=1");
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-security-policy"]).toContain("'nonce-lambda-fetch-nonce'");
+    expect(response.body).toBe("<h1>/admin</h1>");
   });
 
   it("maps Set-Cookie headers to Lambda cookies and base64 encodes binary responses", async () => {
