@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { generateTachyonModuleTypes, generateTemplateTypes } from "./app.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
@@ -436,6 +437,20 @@ export const runCli = async (argv: readonly string[] = process.argv.slice(2)): P
   return 0;
 };
 
-if (process.argv[1]?.endsWith("cli.js")) {
+export const isCliEntrypoint = async (
+  scriptPath: string | undefined = process.argv[1],
+  moduleUrl = import.meta.url,
+): Promise<boolean> => {
+  if (!scriptPath) {
+    return false;
+  }
+  try {
+    return pathToFileURL(await realpath(scriptPath)).href === moduleUrl;
+  } catch {
+    return scriptPath.endsWith("cli.js") && moduleUrl.endsWith("/cli.js");
+  }
+};
+
+if (await isCliEntrypoint()) {
   process.exitCode = await runCli();
 }

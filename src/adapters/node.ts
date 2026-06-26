@@ -103,7 +103,12 @@ export const createStaticAssetHandler =
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, HEAD" } });
     }
-    const relativePath = decodeURIComponent(url.pathname.slice(basePath.length)).replace(/^\/+/, "");
+    let relativePath: string;
+    try {
+      relativePath = decodeURIComponent(url.pathname.slice(basePath.length)).replace(/^\/+/, "");
+    } catch {
+      return new Response("Not Found", { status: 404 });
+    }
     if (!relativePath || relativePath.split("/").includes("..")) {
       return new Response("Forbidden", { status: 403 });
     }

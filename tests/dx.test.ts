@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { createServer } from "vite";
@@ -10,6 +11,7 @@ import {
   createStarterFiles,
   compileFile,
   generateTemplateTypesFile,
+  isCliEntrypoint,
   runCli,
   serverCommandMessage,
 } from "../src/cli";
@@ -113,6 +115,25 @@ describe("DX helpers", () => {
     expect(packageJson.sideEffects).toBe(false);
     expect(packageJson.exports).toHaveProperty("./runtime/list");
     expect(packageJson.exports).toHaveProperty("./router");
+  });
+
+  it("declares npm release metadata for public package discovery", async () => {
+    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+      description?: string;
+      repository?: { type?: string; url?: string };
+      keywords?: string[];
+      engines?: { node?: string };
+      publishConfig?: { access?: string };
+    };
+
+    expect(packageJson.description).toBe("A small TypeScript UI runtime and HTML-first compiler.");
+    expect(packageJson.repository).toEqual({
+      type: "git",
+      url: "https://github.com/t-k/tachyon-dom.git",
+    });
+    expect(packageJson.keywords).toEqual(["ui", "runtime", "compiler", "templates", "ssr"]);
+    expect(packageJson.engines?.node).toBe(">=24");
+    expect(packageJson.publishConfig).toEqual({ access: "public" });
   });
 
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
@@ -453,6 +474,22 @@ export default { selected: false };
 
   it("prints CLI help successfully", async () => {
     await expect(runCli(["--help"])).resolves.toBe(0);
+  });
+
+  it("detects CLI entrypoints through npm bin symlinks", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-bin-"));
+    try {
+      const target = path.join(dir, "dist", "cli.js");
+      const link = path.join(dir, "node_modules", ".bin", "tachyon-dom");
+      await mkdir(path.dirname(target), { recursive: true });
+      await mkdir(path.dirname(link), { recursive: true });
+      await writeFile(target, "");
+      await symlink(target, link);
+
+      await expect(isCliEntrypoint(link, pathToFileURL(target).href)).resolves.toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("transforms tachyon html files through the Vite plugin", async () => {

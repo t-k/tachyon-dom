@@ -270,6 +270,45 @@ describe("server adapters", () => {
     }
   });
 
+  it("returns not found for malformed static asset percent encoding", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-adapter-assets-"));
+    try {
+      const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+        method: string;
+        url: string;
+        headers: Record<string, string>;
+      };
+      req.method = "GET";
+      req.url = "/assets/%E0%A4%A";
+      req.headers = { host: "example.com" };
+      const chunks: string[] = [];
+      const headers = new Map<string, string | number | readonly string[]>();
+      const res = {
+        statusCode: 200,
+        setHeader: vi.fn((key: string, value: string | number | readonly string[]) => {
+          headers.set(key, value);
+        }),
+        end: vi.fn((chunk?: string) => {
+          if (chunk) {
+            chunks.push(chunk);
+          }
+        }),
+      };
+
+      await createNodeHandler({
+        routes: [{ path: "/", render: () => "<h1>Home</h1>" }],
+        staticAssets: { rootDir: dir, basePath: "/assets" },
+        securityHeaders: createSecurityHeaders({ csp: true, nonce: "asset-nonce" }),
+      })(req as never, res as never);
+
+      expect(res.statusCode).toBe(404);
+      expect(headers.get("content-security-policy")).toContain("'nonce-asset-nonce'");
+      expect(chunks.join("")).toBe("Not Found");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("pipes Node streaming responses without buffering through end text", async () => {
     const routes: RouteDefinition[] = [
       { path: "/", fallback: "<p>Loading</p>", loader: async () => "Ready", render: ({ data }) => `<h1>${data}</h1>` },

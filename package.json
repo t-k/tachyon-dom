@@ -1,8 +1,26 @@
 {
   "name": "tachyon-dom",
   "version": "0.1.0",
+  "description": "A small TypeScript UI runtime and HTML-first compiler.",
   "private": false,
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/t-k/tachyon-dom.git"
+  },
+  "keywords": [
+    "ui",
+    "runtime",
+    "compiler",
+    "templates",
+    "ssr"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "bin": {
     "tachyon-dom": "./dist/cli.js"
   },
