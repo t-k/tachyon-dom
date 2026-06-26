@@ -40,6 +40,10 @@
       "types": "./dist/adapters/node.d.ts",
       "import": "./dist/adapters/node.js"
     },
+    "./adapters/lambda": {
+      "types": "./dist/adapters/lambda.d.ts",
+      "import": "./dist/adapters/lambda.js"
+    },
     "./diagnostics": {
       "types": "./dist/diagnostics.d.ts",
       "import": "./dist/diagnostics.js"
