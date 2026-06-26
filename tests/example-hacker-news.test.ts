@@ -14,6 +14,7 @@ import {
   renderHackerNewsError,
   renderHackerNewsStream,
 } from "../examples/hacker-news/renderer";
+import { createHackerNewsWorker } from "../examples/hacker-news/worker";
 
 const jsonResponse = (value: unknown, init: ResponseInit = {}): Response =>
   new Response(JSON.stringify(value), {
@@ -166,5 +167,51 @@ describe("Hacker News example renderer", () => {
     expect(chunks.length).toBeGreaterThanOrEqual(2);
     expect(chunks[0]).toContain("Loading top stories");
     expect(chunks.join("")).toContain("Streaming SSR");
+  });
+});
+
+describe("Hacker News example Worker", () => {
+  it("Worker streams the Hacker News HTML route", async () => {
+    const worker = createHackerNewsWorker({
+      loadStories: async () => ({ ok: true, value: [story(1, "Worker SSR")] }),
+    });
+
+    const response = await worker.fetch(new Request("https://example.com/"));
+
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.get("content-security-policy")).toContain("'report-sample'");
+    expect(await response.text()).toContain("Worker SSR");
+  });
+
+  it("Worker sends asset requests to the Cloudflare Assets binding", async () => {
+    const worker = createHackerNewsWorker({
+      loadStories: async () => ({ ok: true, value: [story(1)] }),
+    });
+    let seenUrl = "";
+    const response = await worker.fetch(new Request("https://example.com/assets/styles.css"), {
+      ASSETS: {
+        fetch: async (request: Request) => {
+          seenUrl = request.url;
+          return new Response("body { color: black; }", {
+            headers: { "content-type": "text/css; charset=utf-8" },
+          });
+        },
+      },
+    });
+
+    expect(seenUrl).toBe("https://example.com/assets/styles.css");
+    expect(response.headers.get("content-type")).toBe("text/css; charset=utf-8");
+    expect(await response.text()).toContain("color");
+  });
+
+  it("Worker renders error HTML when the Hacker News API fails", async () => {
+    const worker = createHackerNewsWorker({
+      loadStories: async () => ({ ok: false, error: { message: "upstream unavailable" } }),
+    });
+
+    const response = await worker.fetch(new Request("https://example.com/"));
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("upstream unavailable");
   });
 });
