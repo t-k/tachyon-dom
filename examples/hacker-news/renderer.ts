@@ -99,8 +99,7 @@ ${renderHackerNewsList(options.stories)}
 ${renderShellEnd()}`;
 
 export async function* renderHackerNewsStream(options: HackerNewsStreamOptions): AsyncIterable<string> {
-  yield `${renderShellStart({ stylesheet: options.stylesheet })}
-${renderLoadingState()}`;
+  yield renderShellStart(options.stylesheet ? { stylesheet: options.stylesheet } : {});
   const result = await options.loadStories();
   if (!result.ok) {
     yield renderHackerNewsError(result.error.message);

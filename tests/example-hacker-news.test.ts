@@ -7,7 +7,6 @@ import {
   loadTopStories,
   storyFromItem,
   type HackerNewsStory,
-  type HackerNewsItem,
 } from "../examples/hacker-news/hn-api";
 import {
   renderHackerNewsDocument,
@@ -123,6 +122,7 @@ describe("Hacker News example files", () => {
     expect(wrangler).toContain('"main": "./worker.ts"');
     expect(wrangler).toContain('"binding": "ASSETS"');
     expect(wrangler).toContain('"directory": "./public"');
+    expect(wrangler).toContain('"run_worker_first": true');
   });
 });
 
@@ -179,8 +179,9 @@ describe("Hacker News example renderer", () => {
     }
 
     expect(chunks.length).toBeGreaterThanOrEqual(2);
-    expect(chunks[0]).toContain("Loading top stories");
+    expect(chunks[0]).toContain("Top stories");
     expect(chunks.join("")).toContain("Streaming SSR");
+    expect(chunks.join("")).not.toContain("Loading top stories");
   });
 });
 
@@ -215,7 +216,22 @@ describe("Hacker News example Worker", () => {
 
     expect(seenUrl).toBe("https://example.com/assets/styles.css");
     expect(response.headers.get("content-type")).toBe("text/css; charset=utf-8");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("content-security-policy")).toContain("'report-sample'");
     expect(await response.text()).toContain("color");
+  });
+
+  it("Worker rejects non-read methods on the HTML route", async () => {
+    const worker = createHackerNewsWorker({
+      loadStories: async () => ({ ok: true, value: [story(1)] }),
+    });
+
+    const response = await worker.fetch(new Request("https://example.com/", { method: "POST" }));
+
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET, HEAD");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await response.text()).toBe("Method Not Allowed");
   });
 
   it("Worker renders error HTML when the Hacker News API fails", async () => {
