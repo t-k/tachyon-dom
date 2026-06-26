@@ -110,6 +110,20 @@ describe("Hacker News example files", () => {
   it("keeps the test fixture path anchored in the repository", () => {
     expect(readFileSync(join(process.cwd(), "package.json"), "utf8")).toContain("tachyon-dom");
   });
+
+  it("declares Cloudflare deployment config and package scripts", () => {
+    const packageJson = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+      scripts: Record<string, string>;
+    };
+    const wrangler = readFileSync(join(process.cwd(), "examples", "hacker-news", "wrangler.jsonc"), "utf8");
+
+    expect(packageJson.scripts["example:hacker-news:deploy"]).toBe(
+      "wrangler deploy --config examples/hacker-news/wrangler.jsonc",
+    );
+    expect(wrangler).toContain('"main": "./worker.ts"');
+    expect(wrangler).toContain('"binding": "ASSETS"');
+    expect(wrangler).toContain('"directory": "./public"');
+  });
 });
 
 const story = (id: number, title = `Story ${id}`): HackerNewsStory => ({
@@ -144,7 +158,7 @@ describe("Hacker News example renderer", () => {
 
     expect(html).toContain(`data-rank="1"`);
     expect(html).toContain(`data-rank="11" class="story-row story-row-deferred"`);
-    const css = readFileSync(join(process.cwd(), "examples", "hacker-news", "styles.css"), "utf8");
+    const css = readFileSync(join(process.cwd(), "examples", "hacker-news", "public", "assets", "styles.css"), "utf8");
     expect(css).toContain("content-visibility: auto");
     expect(css).toContain("contain-intrinsic-size");
   });

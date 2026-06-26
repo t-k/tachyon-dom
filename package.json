@@ -64,6 +64,10 @@
       "types": "./dist/router.d.ts",
       "import": "./dist/router.js"
     },
+    "./router/node": {
+      "types": "./dist/router-node.d.ts",
+      "import": "./dist/router-node.js"
+    },
     "./runtime/text": {
       "types": "./dist/runtime/text.d.ts",
       "import": "./dist/runtime/text.js"
@@ -154,6 +158,9 @@
     "example:stream": "tsx examples/store-hydrate-stream.ts",
     "example:full-app": "vite --config examples/full-app/vite.config.ts --host 127.0.0.1",
     "example:full-app:build": "vite build --config examples/full-app/vite.config.ts",
+    "example:hacker-news:build": "wrangler deploy --config examples/hacker-news/wrangler.jsonc --dry-run --outdir dist/hacker-news-worker",
+    "example:hacker-news:dev": "wrangler dev --config examples/hacker-news/wrangler.jsonc --local --port 8787",
+    "example:hacker-news:deploy": "wrangler deploy --config examples/hacker-news/wrangler.jsonc",
     "example:web": "vite --host 127.0.0.1",
     "test": "vitest run",
     "lint": "oxlint .",
@@ -192,7 +199,8 @@
     "vinxi": "^0.5.11",
     "vite": "^8.0.16",
     "vite-plugin-solid": "^2.11.12",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.9",
+    "wrangler": "^4.105.0"
   },
   "packageManager": "pnpm@10.32.1"
 }

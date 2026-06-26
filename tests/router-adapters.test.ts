@@ -286,5 +286,6 @@ describe("server adapters", () => {
 
     expect(workersSource).not.toMatch(topLevelNodeImport);
     expect(routerSource).not.toMatch(topLevelNodeImport);
+    expect(routerSource).not.toContain("node:");
   });
 });
