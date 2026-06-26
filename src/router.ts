@@ -1,5 +1,3 @@
-import { readdir } from "node:fs/promises";
-import path from "node:path";
 import { timingSafeEqual } from "./constant-time.js";
 import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
@@ -559,6 +557,20 @@ const routeKindForFile = (file: string): FileRouteManifestEntry["kind"] | undefi
   return undefined;
 };
 
+const normalizeFilePath = (file: string): string => file.replaceAll("\\", "/");
+
+const relativeRouteFile = (file: string, rootDir: string): string => {
+  const normalizedFile = normalizeFilePath(file);
+  const normalizedRoot = normalizeFilePath(rootDir).replace(/\/+$/, "");
+  if (normalizedFile === normalizedRoot) {
+    return "";
+  }
+  if (normalizedFile.startsWith(`${normalizedRoot}/`)) {
+    return normalizedFile.slice(normalizedRoot.length + 1);
+  }
+  return normalizedFile.replace(/^\/+/, "");
+};
+
 export const createFileRouteManifest = (
   files: readonly string[],
   options: { rootDir: string },
@@ -568,7 +580,7 @@ export const createFileRouteManifest = (
     if (!kind) {
       return [];
     }
-    const relative = path.relative(options.rootDir, file).replaceAll(path.sep, "/");
+    const relative = relativeRouteFile(file, options.rootDir);
     const withoutExtension = relative.replace(/\.(?:td|tachyon(?:\.html)?)$/, "").replace(/\.[tj]s$/, "");
     const parts = withoutExtension.split("/");
     const fileName = parts.at(-1) ?? "";
@@ -583,10 +595,11 @@ export const createFileRouteManifest = (
   });
 
 const collectFiles = async (directory: string): Promise<string[]> => {
+  const [{ readdir }, nodePath] = await Promise.all([import("node:fs/promises"), import("node:path")]);
   const entries = await readdir(directory, { withFileTypes: true });
   const files = await Promise.all(
     entries.map(async (entry) => {
-      const absolute = path.join(directory, entry.name);
+      const absolute = nodePath.join(directory, entry.name);
       return entry.isDirectory() ? await collectFiles(absolute) : [absolute];
     }),
   );
