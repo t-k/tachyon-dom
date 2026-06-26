@@ -125,7 +125,7 @@ export const fetchTopStoryIds = async (
   fetcher: FetchLike,
   signal?: AbortSignal,
 ): Promise<Result<number[], HackerNewsError>> => {
-  const response = await fetcher(`${hnApiBase}/topstories.json`, { signal });
+  const response = await fetcher(`${hnApiBase}/topstories.json`, signal ? { signal } : undefined);
   const json = await readJson(response, "top stories");
   if (!json.ok) {
     return json;
@@ -141,7 +141,7 @@ export const fetchItem = async (
   id: number,
   signal?: AbortSignal,
 ): Promise<Result<HackerNewsItem, HackerNewsError>> => {
-  const response = await fetcher(`${hnApiBase}/item/${id}.json`, { signal });
+  const response = await fetcher(`${hnApiBase}/item/${id}.json`, signal ? { signal } : undefined);
   const json = await readJson(response, `item ${id}`);
   if (!json.ok) {
     return json;

@@ -37,25 +37,40 @@ const streamToResponse = (chunks: AsyncIterable<string>, init: ResponseInit = {}
   );
 };
 
+const securityHeaders = createSecurityHeaders({ csp: true });
+
 const mergeHeaders = (response: Response, headers: Headers): Response => {
   const nextHeaders = new Headers(response.headers);
   headers.forEach((value, key) => nextHeaders.set(key, value));
-  return new Response(response.body, { status: response.status, statusText: response.statusText, headers: nextHeaders });
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: nextHeaders,
+  });
 };
 
 const assetsHandler = createWorkersHandler<HackerNewsEnv>({
-    assets: { bindingName: "ASSETS", basePath: "/assets" },
+  assets: { bindingName: "ASSETS", basePath: "/assets" },
   routes: [],
+  securityHeaders,
 });
 
 export const createHackerNewsWorker = (options: HackerNewsWorkerOptions = {}) => {
-  const securityHeaders = createSecurityHeaders({ csp: true });
   const loadStories = options.loadStories ?? (() => loadTopStories());
   return {
     fetch: async (request: Request, env?: HackerNewsEnv): Promise<Response> => {
       const url = new URL(request.url);
       if (url.pathname.startsWith("/assets/")) {
         return assetsHandler.fetch(request, env);
+      }
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return mergeHeaders(
+          new Response("Method Not Allowed", {
+            status: 405,
+            headers: { allow: "GET, HEAD" },
+          }),
+          securityHeaders,
+        );
       }
       const response = streamToResponse(
         renderHackerNewsStream({
