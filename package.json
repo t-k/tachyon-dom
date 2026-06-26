@@ -180,7 +180,7 @@
     "example:stream": "tsx examples/store-hydrate-stream.ts",
     "example:full-app": "vite --config examples/full-app/vite.config.ts --host 127.0.0.1",
     "example:full-app:build": "vite build --config examples/full-app/vite.config.ts",
-    "example:hacker-news:build": "wrangler deploy --config examples/hacker-news/wrangler.jsonc --dry-run --outdir dist/hacker-news-worker",
+    "example:hacker-news:build": "wrangler deploy --config examples/hacker-news/wrangler.jsonc --dry-run --outdir examples/hacker-news/dist/worker",
     "example:hacker-news:dev": "wrangler dev --config examples/hacker-news/wrangler.jsonc --local --port 8787",
     "example:hacker-news:deploy": "wrangler deploy --config examples/hacker-news/wrangler.jsonc",
     "example:web": "vite --host 127.0.0.1",
