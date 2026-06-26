@@ -129,13 +129,30 @@ For server sessions, `createCookieSessionStorage({ secret })` stores signed sess
 
 ## Server Adapters
 
-`tachyon-dom/adapters` provides:
+`tachyon-dom/adapters` provides compatibility exports for:
 
 - `createNodeHandler({ routes })`
 - `createWorkersHandler({ routes })`
 - `createStaticAssetHandler({ rootDir, basePath })`
 
-Both adapters can apply `securityHeaders`, serve `staticAssets`, and can use `streaming: true` to route through `renderRouteStream()`.
+Use the runtime-specific entries for deployable server bundles:
+
+- `tachyon-dom/adapters/node` exports `createNodeHandler()` and `createStaticAssetHandler()`.
+- `tachyon-dom/adapters/workers` exports `createWorkersHandler()` without importing Node built-ins.
+
+Both runtime handlers can apply `securityHeaders` and can use `streaming: true` to route through `renderRouteStream()`. File-system static asset serving is Node-only. On Cloudflare Workers, pass an Assets binding instead:
+
+```ts
+import { createWorkersHandler } from "tachyon-dom/adapters/workers";
+
+export default createWorkersHandler<{ ASSETS: { fetch: (request: Request) => Promise<Response> } }>({
+  routes,
+  assets: { bindingName: "ASSETS", basePath: "/assets" },
+  securityHeaders,
+});
+```
+
+If `basePath` is omitted, 404 responses from the binding fall through to the dynamic router. If `basePath` is provided, matching requests are treated as asset requests and the binding response is returned with `securityHeaders` merged.
 
 The Node adapter constructs `Request.url` from the incoming `Host` header and `X-Forwarded-Proto` when present. Treat those headers as trusted only when the process is behind a proxy or edge layer that normalizes and validates them. If clients can reach the Node process directly, validate or strip forwarded headers at the deployment boundary before using the adapter for security-sensitive redirects, canonical URLs, or absolute links.
 
