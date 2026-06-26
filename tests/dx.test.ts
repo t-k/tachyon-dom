@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { createServer } from "vite";
 import {
@@ -9,6 +10,7 @@ import {
   createStarterFiles,
   compileFile,
   generateTemplateTypesFile,
+  runCli,
   serverCommandMessage,
 } from "../src/cli";
 import { defineApp, generateTemplateTypes, pagesFromRouteFiles, renderAppDocument } from "../src/app";
@@ -20,6 +22,46 @@ import { tachyonApp, tachyonDom, tachyonDomRoutes } from "../src/vite";
 type PanelScope = {
   title: string;
   count: number;
+};
+
+const collectTypeScriptFiles = async (dir: string): Promise<string[]> => {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        return collectTypeScriptFiles(entryPath);
+      }
+      return entry.isFile() && entry.name.endsWith(".ts") ? [entryPath] : [];
+    }),
+  );
+  return files.flat();
+};
+
+const collectRelativeModuleSpecifiers = (sourceFile: ts.SourceFile): string[] => {
+  const specifiers: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text.startsWith(".")
+    ) {
+      specifiers.push(node.moduleSpecifier.text);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length === 1
+    ) {
+      const [specifier] = node.arguments;
+      if (specifier && ts.isStringLiteral(specifier) && specifier.text.startsWith(".")) {
+        specifiers.push(specifier.text);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return specifiers;
 };
 
 describe("DX helpers", () => {
@@ -71,6 +113,23 @@ describe("DX helpers", () => {
     expect(packageJson.sideEffects).toBe(false);
     expect(packageJson.exports).toHaveProperty("./runtime/list");
     expect(packageJson.exports).toHaveProperty("./router");
+  });
+
+  it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
+    const files = await collectTypeScriptFiles(path.join(process.cwd(), "src"));
+    const extensionlessSpecifiers: string[] = [];
+
+    for (const file of files) {
+      const source = await readFile(file, "utf8");
+      const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+      for (const specifier of collectRelativeModuleSpecifiers(sourceFile)) {
+        if (!path.extname(specifier)) {
+          extensionlessSpecifiers.push(`${path.relative(process.cwd(), file)} -> ${specifier}`);
+        }
+      }
+    }
+
+    expect(extensionlessSpecifiers).toEqual([]);
   });
 
   it("compiles template files through the CLI helper", async () => {
@@ -390,6 +449,10 @@ export default { selected: false };
     expect(serverCommandMessage({ command: "preview", host: "127.0.0.1", port: 4173 })).toContain(
       "Vite preview server",
     );
+  });
+
+  it("prints CLI help successfully", async () => {
+    await expect(runCli(["--help"])).resolves.toBe(0);
   });
 
   it("transforms tachyon html files through the Vite plugin", async () => {

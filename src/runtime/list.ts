@@ -1,7 +1,7 @@
-import { setClassPresence } from "./class";
-import { setAttributeValue, setRef, setStyleValue } from "./attr";
-import { setText } from "./text";
-import { bindControl, setControlValue } from "./form";
+import { setClassPresence } from "./class.js";
+import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
+import { setText } from "./text.js";
+import { bindControl, setControlValue } from "./form.js";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void;

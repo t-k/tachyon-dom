@@ -1,1 +1,1 @@
-export { createStore } from "./signal";
+export { createStore } from "./signal.js";

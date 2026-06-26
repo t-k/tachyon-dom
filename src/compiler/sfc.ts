@@ -1,7 +1,7 @@
 import * as ts from "typescript";
-import { err, ok, type Result } from "../result";
-import { compileTemplate } from "./index";
-import type { CompiledTemplate, CompilerError } from "./types";
+import { err, ok, type Result } from "../result.js";
+import { compileTemplate } from "./index.js";
+import type { CompiledTemplate, CompilerError } from "./types.js";
 
 export const sfcDefaultScopeName = "__tachyonSfcDefaultScope";
 export const sfcNamedScopeName = "__tachyonSfcScope";

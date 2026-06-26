@@ -1,5 +1,5 @@
-import type { TachyonApp } from "./app";
-import { renderRoute, type RouteDefinition, type RouteRenderOptions, type RouteRenderResult } from "./router";
+import type { TachyonApp } from "./app.js";
+import { renderRoute, type RouteDefinition, type RouteRenderOptions, type RouteRenderResult } from "./router.js";
 
 export const renderRouteForTest = async (
   routes: readonly RouteDefinition[],

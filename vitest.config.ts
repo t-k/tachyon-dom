@@ -35,6 +35,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    fileParallelism: false,
     globals: true,
     include: ["tests/**/*.test.ts"],
   },

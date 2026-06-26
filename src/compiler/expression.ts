@@ -1,6 +1,6 @@
 import type { Expression as OxcExpression, ParseResult, ParserOptions } from "oxc-parser";
-import { err, ok, type Result } from "../result";
-import type { CompilerError } from "./types";
+import { err, ok, type Result } from "../result.js";
+import type { CompilerError } from "./types.js";
 
 export type ExpressionParserBackend = "auto" | "native" | "oxc";
 

@@ -8,8 +8,8 @@ import type {
   StoreDefinition,
   TemplateNode,
   TextNode,
-} from "../types";
-import { storeDefinitionsFor } from "../ir";
+} from "../types.js";
+import { storeDefinitionsFor } from "../ir.js";
 import {
   attrExpression,
   expressionToScopeAccess,
@@ -23,8 +23,8 @@ import {
   renderableChildren,
   serializeStaticAttr,
   textExpressionSegments,
-} from "../utils";
-import { isAssignableExpression } from "../expression";
+} from "../utils.js";
+import { isAssignableExpression } from "../expression.js";
 
 const lowerTextNode = (node: TextNode, path: number[], context: LoweringContext): string => {
   let output = "";

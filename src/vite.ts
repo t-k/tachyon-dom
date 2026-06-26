@@ -1,10 +1,10 @@
 import type { Plugin } from "vite";
-import type { TachyonApp, TachyonAppAssets } from "./app";
-import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc";
-import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index";
-import { diagnoseTachyonSfc, formatDiagnostic, locateOffset } from "./diagnostics";
-import { createFileRouteManifest } from "./router";
-import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "./source-map";
+import type { TachyonApp, TachyonAppAssets } from "./app.js";
+import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
+import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
+import { diagnoseTachyonSfc, formatDiagnostic, locateOffset } from "./diagnostics.js";
+import { createFileRouteManifest } from "./router.js";
+import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "./source-map.js";
 
 export type TachyonDomViteOptions = {
   include?: RegExp;

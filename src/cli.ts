@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { generateTachyonModuleTypes, generateTemplateTypes } from "./app";
-import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index";
-import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc";
-import { diagnoseTachyonSfc, formatDiagnostic, locateOffset } from "./diagnostics";
-import { scanFileRoutes } from "./router";
-import { appendInlineSourceMap, createSourceMap } from "./source-map";
-import { err, ok, type Result } from "./result";
+import { generateTachyonModuleTypes, generateTemplateTypes } from "./app.js";
+import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
+import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
+import { diagnoseTachyonSfc, formatDiagnostic, locateOffset } from "./diagnostics.js";
+import { scanFileRoutes } from "./router.js";
+import { appendInlineSourceMap, createSourceMap } from "./source-map.js";
+import { err, ok, type Result } from "./result.js";
 
 export type CliCompileOptions = {
   command: "compile";
@@ -57,6 +57,9 @@ export type CliOptions =
   | CliAddPageOptions
   | CliTypegenOptions
   | CliInitOptions;
+
+const usage =
+  "Usage: tachyon-dom <compile|routes|dev|build|preview|add|typegen|init>. Use compile for templates, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, and init for starters.";
 
 const parseCompileArgs = (input: string, rest: readonly string[]): Result<CliCompileOptions, string> => {
   if (!input) {
@@ -236,9 +239,7 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
   if (command === "init") {
     return parseInitArgs([input, ...rest].filter((arg): arg is string => Boolean(arg)));
   }
-  return err(
-    "Usage: tachyon-dom <compile|routes|dev|build|preview|add|typegen|init>. Use compile for templates, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, and init for starters.",
-  );
+  return err(usage);
 };
 
 export const compileFile = async (options: Omit<CliCompileOptions, "command">): Promise<Result<string, string>> => {
@@ -390,6 +391,10 @@ const startViteServer = async (options: CliServerOptions): Promise<Result<string
 };
 
 export const runCli = async (argv: readonly string[] = process.argv.slice(2)): Promise<number> => {
+  if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
+    console.log(usage);
+    return 0;
+  }
   const parsed = parseArgs(argv);
   if (!parsed.ok) {
     console.error(parsed.error);

@@ -1,5 +1,5 @@
-import { unsafeHtml, type TrustedHtml } from "./router";
-import { timingSafeEqual } from "./constant-time";
+import { unsafeHtml, type TrustedHtml } from "./router.js";
+import { timingSafeEqual } from "./constant-time.js";
 
 export type CsrfOptions = {
   token: string;

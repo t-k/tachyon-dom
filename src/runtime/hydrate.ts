@@ -1,4 +1,4 @@
-import { err, ok, type Result } from "../result";
+import { err, ok, type Result } from "../result.js";
 
 export type HydrationBoundaryError = {
   message: string;

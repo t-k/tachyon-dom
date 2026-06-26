@@ -1,7 +1,7 @@
-import { compileTemplate } from "./compiler/index";
-import { compileTachyonSfc } from "./compiler/sfc";
-import { err, ok, type Result } from "./result";
-import type { CompiledTemplate, CompilerError } from "./compiler/types";
+import { compileTemplate } from "./compiler/index.js";
+import { compileTachyonSfc } from "./compiler/sfc.js";
+import { err, ok, type Result } from "./result.js";
+import type { CompiledTemplate, CompilerError } from "./compiler/types.js";
 
 export type TemplateDiagnostic = {
   message: string;

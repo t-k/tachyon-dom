@@ -1,5 +1,5 @@
-import { err, ok, type Result } from "../result";
-import type { Attribute, CompilerError, ElementNode, TextNode } from "./types";
+import { err, ok, type Result } from "../result.js";
+import type { Attribute, CompilerError, ElementNode, TextNode } from "./types.js";
 
 type Parser = {
   source: string;

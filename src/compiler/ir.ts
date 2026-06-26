@@ -1,5 +1,5 @@
-import { err, ok, type Result } from "../result";
-import { isAssignableExpression, parseExpression } from "./expression";
+import { err, ok, type Result } from "../result.js";
+import { isAssignableExpression, parseExpression } from "./expression.js";
 import type {
   CompilerError,
   ComponentProp,
@@ -8,7 +8,7 @@ import type {
   TemplateDirective,
   TemplateIr,
   TemplateNode,
-} from "./types";
+} from "./types.js";
 import {
   attrExpression,
   attrString,
@@ -20,7 +20,7 @@ import {
   readExpressionAttribute,
   renderableChildren,
   textExpressionSegments,
-} from "./utils";
+} from "./utils.js";
 
 const semanticError = (message: string): Result<never, CompilerError> => err({ message, offset: 0 });
 

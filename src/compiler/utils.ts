@@ -1,5 +1,5 @@
-import type { Attribute, ElementNode, HydrationBoundary, TemplateNode } from "./types";
-import { evaluateExpression, expressionToJs } from "./expression";
+import type { Attribute, ElementNode, HydrationBoundary, TemplateNode } from "./types.js";
+import { evaluateExpression, expressionToJs } from "./expression.js";
 
 export const expressionPattern = /\{([^{}]+)\}/g;
 export const identifierNamePattern = /^[A-Za-z_$][\w$]*$/;

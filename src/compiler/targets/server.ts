@@ -1,4 +1,4 @@
-import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types";
+import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import {
   attrExpression,
   attrString,
@@ -15,7 +15,7 @@ import {
   renderableChildren,
   serializeStaticAttr,
   textExpressionSegments,
-} from "../utils";
+} from "../utils.js";
 
 const componentScope = (node: ElementNode, scope: Record<string, unknown>): Record<string, unknown> => {
   const next = { ...scope };

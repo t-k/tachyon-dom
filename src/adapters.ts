@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
-import { renderRoute, renderRouteStream, type RouteDefinition, type RouteRenderOptions } from "./router";
+import { renderRoute, renderRouteStream, type RouteDefinition, type RouteRenderOptions } from "./router.js";
 
 export type HandlerOptions = RouteRenderOptions & {
   routes: readonly RouteDefinition[];

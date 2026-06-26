@@ -1,4 +1,4 @@
-import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types";
+import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import {
   attrExpression,
   attrString,
@@ -10,8 +10,8 @@ import {
   readExpressionAttribute,
   renderableChildren,
   textExpressionSegments,
-} from "../utils";
-import { renderOpenTagExpression } from "./server";
+} from "../utils.js";
+import { renderOpenTagExpression } from "./server.js";
 
 const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, indent: string): string[] => {
   const statements: string[] = [];

@@ -1,8 +1,8 @@
-import { err, ok, type Result } from "../result";
-import { createTemplateIr } from "./ir";
-import { parseTemplate } from "./parser";
-import { lowerClientTemplate } from "./targets/client";
-import type { CompiledTemplate, CompilerError } from "./types";
+import { err, ok, type Result } from "../result.js";
+import { createTemplateIr } from "./ir.js";
+import { parseTemplate } from "./parser.js";
+import { lowerClientTemplate } from "./targets/client.js";
+import type { CompiledTemplate, CompilerError } from "./types.js";
 
 export const compileTemplate = (source: string): Result<CompiledTemplate, CompilerError> => {
   const rootResult = parseTemplate(source);
@@ -21,7 +21,7 @@ export const compileTemplate = (source: string): Result<CompiledTemplate, Compil
   });
 };
 
-export * from "./types";
-export { generateClientModule } from "./targets/client";
-export { generateServerModule, renderServerTemplate } from "./targets/server";
-export { generateServerStreamModule } from "./targets/stream";
+export * from "./types.js";
+export { generateClientModule } from "./targets/client.js";
+export { generateServerModule, renderServerTemplate } from "./targets/server.js";
+export { generateServerStreamModule } from "./targets/stream.js";

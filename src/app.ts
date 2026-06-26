@@ -1,7 +1,7 @@
-import { compileTemplate, renderServerTemplate } from "./compiler/index";
-import { compileTachyonSfc, generateSfcScriptDeclarations } from "./compiler/sfc";
-import type { ClientBinding, CompiledTemplate } from "./compiler/types";
-import { err, ok, type Result } from "./result";
+import { compileTemplate, renderServerTemplate } from "./compiler/index.js";
+import { compileTachyonSfc, generateSfcScriptDeclarations } from "./compiler/sfc.js";
+import type { ClientBinding, CompiledTemplate } from "./compiler/types.js";
+import { err, ok, type Result } from "./result.js";
 
 export type TachyonAppPage = {
   path: string;

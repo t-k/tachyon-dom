@@ -1,8 +1,8 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
-import { timingSafeEqual } from "./constant-time";
-import { err, ok, type Result } from "./result";
-import { serializeHydrationState } from "./runtime/hydrate";
+import { timingSafeEqual } from "./constant-time.js";
+import { err, ok, type Result } from "./result.js";
+import { serializeHydrationState } from "./runtime/hydrate.js";
 
 export type RouteParams = Record<string, string>;
 

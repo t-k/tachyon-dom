@@ -1,8 +1,8 @@
-import { elementAt, setClassPresence } from "./class";
-import { setAttributeValue, setRef, setStyleValue } from "./attr";
-import { delegate } from "./event";
-import { bindControl, setControlValue } from "./form";
-import { setText, textAt } from "./text";
+import { elementAt, setClassPresence } from "./class.js";
+import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
+import { delegate } from "./event.js";
+import { bindControl, setControlValue } from "./form.js";
+import { setText, textAt } from "./text.js";
 
 type TextBinding = {
   kind: "text";

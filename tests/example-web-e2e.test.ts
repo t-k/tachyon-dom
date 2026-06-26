@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { chromium, type Browser, type Page } from "playwright";
 import { createServer, type ViteDevServer } from "vite";
 
@@ -26,11 +26,21 @@ describe("browser hydration boundary example", () => {
     });
     await server.listen();
     browser = await chromium.launch({ headless: true });
-    page = await browser.newPage();
   }, 30000);
 
-  afterAll(async () => {
+  beforeEach(async () => {
+    if (!browser) {
+      throw new Error("Missing browser.");
+    }
+    page = await browser.newPage();
+  });
+
+  afterEach(async () => {
     await page?.close();
+    page = undefined;
+  });
+
+  afterAll(async () => {
     await browser?.close();
     await server?.close();
   });
