@@ -11,7 +11,7 @@ import {
   requestFromLambdaEvent,
 } from "../src/adapters/lambda";
 import { createNodeFetchHandler, createNodeHandler } from "../src/adapters/node";
-import { createWorkersHandler } from "../src/adapters/workers";
+import { createWorkersFetchHandler, createWorkersHandler } from "../src/adapters/workers";
 import { createSecurityHeaders, redirect, type RouteDefinition } from "../src/router";
 
 const lambdaEvent = (overrides: Record<string, unknown> = {}) => ({
@@ -35,6 +35,174 @@ const lambdaEvent = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("server adapters", () => {
+  it("emits structured request lifecycle events for Workers routes", async () => {
+    const events: Array<Record<string, unknown>> = [];
+    const handler = createWorkersHandler({
+      routes: [{ id: "user-detail", path: "/users/:id", render: ({ params }) => `<h1>${params.id}</h1>` }],
+      observability: {
+        onRequestStart: (event) => {
+          events.push({ type: event.type, method: event.method, path: event.path });
+        },
+        onRouteMatched: (event) => {
+          events.push({
+            type: event.type,
+            routeId: event.routeId,
+            routePattern: event.routePattern,
+            path: event.path,
+          });
+        },
+        onResponse: (event) => {
+          events.push({
+            type: event.type,
+            status: event.status,
+            routeId: event.routeId,
+            routePattern: event.routePattern,
+            failedBeforeRouteDispatch: event.failedBeforeRouteDispatch,
+            durationIsNumber: typeof event.durationMs === "number",
+          });
+        },
+      },
+    });
+
+    const response = await handler.fetch(new Request("https://example.com/users/42"));
+
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("<h1>42</h1>");
+    expect(events).toEqual([
+      { type: "request_start", method: "GET", path: "/users/42" },
+      { type: "route_matched", routeId: "user-detail", routePattern: "/users/:id", path: "/users/42" },
+      {
+        type: "response",
+        status: 200,
+        routeId: "user-detail",
+        routePattern: "/users/:id",
+        failedBeforeRouteDispatch: false,
+        durationIsNumber: true,
+      },
+    ]);
+  });
+
+  it("emits response events for Workers fetch handlers without route definitions", async () => {
+    const responses: Array<Record<string, unknown>> = [];
+    const handler = createWorkersFetchHandler({
+      fetch: () => new Response("ok", { status: 202 }),
+      observability: {
+        onResponse: (event) => {
+          responses.push({
+            type: event.type,
+            status: event.status,
+            path: event.path,
+            routeId: event.routeId,
+            failedBeforeRouteDispatch: event.failedBeforeRouteDispatch,
+          });
+        },
+      },
+    });
+
+    const response = await handler.fetch(new Request("https://example.com/jobs"));
+
+    expect(response.status).toBe(202);
+    expect(responses).toEqual([
+      {
+        type: "response",
+        status: 202,
+        path: "/jobs",
+        routeId: undefined,
+        failedBeforeRouteDispatch: false,
+      },
+    ]);
+  });
+
+  it("marks unmatched Workers requests as failed before route dispatch", async () => {
+    const responses: Array<Record<string, unknown>> = [];
+    const handler = createWorkersHandler({
+      routes: [{ path: "/", render: () => "<h1>Home</h1>" }],
+      observability: {
+        onResponse: (event) => {
+          responses.push({
+            status: event.status,
+            routeId: event.routeId,
+            failedBeforeRouteDispatch: event.failedBeforeRouteDispatch,
+          });
+        },
+      },
+    });
+
+    const response = await handler.fetch(new Request("https://example.com/missing"));
+
+    expect(response.status).toBe(404);
+    expect(responses).toEqual([{ status: 404, routeId: undefined, failedBeforeRouteDispatch: true }]);
+  });
+
+  it("labels Node handler observability events with the Node adapter", async () => {
+    const responses: Array<Record<string, unknown>> = [];
+    const routes: RouteDefinition[] = [{ id: "node-home", path: "/", render: () => "<h1>Node</h1>" }];
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/";
+    req.headers = { host: "example.com" };
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    };
+
+    await createNodeHandler({
+      routes,
+      observability: {
+        onResponse: (event) => {
+          responses.push({
+            adapter: event.adapter,
+            status: event.status,
+            routeId: event.routeId,
+          });
+        },
+      },
+    })(req as never, res as never);
+
+    expect(responses).toEqual([{ adapter: "node", status: 200, routeId: "node-home" }]);
+  });
+
+  it("adds Lambda invocation metadata to observability events when context is provided", async () => {
+    const responses: Array<Record<string, unknown>> = [];
+    const handler = createLambdaHandler({
+      routes: [{ id: "lambda-home", path: "/", render: () => "<h1>Lambda</h1>" }],
+      observability: {
+        onResponse: (event) => {
+          responses.push({
+            adapter: event.adapter,
+            runtime: event.runtime,
+            status: event.status,
+            routeId: event.routeId,
+            awsRequestId: event.metadata?.awsRequestId,
+            functionName: event.metadata?.functionName,
+          });
+        },
+      },
+    });
+
+    const response = await handler(lambdaEvent(), {
+      awsRequestId: "aws-request-1",
+      functionName: "tachyon-admin",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(responses).toEqual([
+      {
+        adapter: "lambda",
+        runtime: "aws-lambda",
+        status: 200,
+        routeId: "lambda-home",
+        awsRequestId: "aws-request-1",
+        functionName: "tachyon-admin",
+      },
+    ]);
+  });
+
   it("creates a Workers fetch handler with security headers", async () => {
     const routes: RouteDefinition[] = [{ path: "/", render: () => "<h1>Home</h1>" }];
     const handler = createWorkersHandler({

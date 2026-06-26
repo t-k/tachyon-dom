@@ -1,6 +1,8 @@
 import {
   createWorkersFetchHandler,
   createWorkersHandler,
+  type AdapterObservabilityHooks,
+  type AdapterObservabilityMetadata,
   type AdapterFetchHandler,
   type WorkersFetchHandlerOptions,
   type WorkersHandlerOptions,
@@ -63,6 +65,16 @@ export type LambdaStreamingRuntime = {
   HttpResponseStream: {
     from: (responseStream: LambdaResponseStream, metadata: LambdaHttpResponseMetadata) => LambdaResponseStream;
   };
+};
+
+export type LambdaContextMetadata = {
+  awsRequestId?: string;
+  functionName?: string;
+  functionVersion?: string;
+  invokedFunctionArn?: string;
+  memoryLimitInMB?: string;
+  logGroupName?: string;
+  logStreamName?: string;
 };
 
 const textEncoder = new TextEncoder();
@@ -210,6 +222,44 @@ const resolveStreamingRuntime = (runtime?: LambdaStreamingRuntime): LambdaStream
   return candidate;
 };
 
+const metadataForContext = (context: unknown): AdapterObservabilityMetadata | undefined => {
+  if (!context || typeof context !== "object") {
+    return undefined;
+  }
+  const candidate = context as LambdaContextMetadata;
+  const metadata: AdapterObservabilityMetadata = {};
+  for (const key of [
+    "awsRequestId",
+    "functionName",
+    "functionVersion",
+    "invokedFunctionArn",
+    "memoryLimitInMB",
+    "logGroupName",
+    "logStreamName",
+  ] as const) {
+    if (candidate[key] !== undefined) {
+      metadata[key] = candidate[key];
+    }
+  }
+  return Object.keys(metadata).length > 0 ? metadata : undefined;
+};
+
+const lambdaObservability = (
+  observability: AdapterObservabilityHooks | undefined,
+  context: unknown,
+): AdapterObservabilityHooks | undefined => {
+  const metadata = metadataForContext(context);
+  if (!observability && !metadata) {
+    return undefined;
+  }
+  return {
+    ...observability,
+    adapter: "lambda",
+    runtime: "aws-lambda",
+    ...(metadata || observability?.metadata ? { metadata: { ...observability?.metadata, ...metadata } } : {}),
+  };
+};
+
 export const writeWebResponseToLambdaStream = async (
   response: Response,
   responseStream: LambdaResponseStream,
@@ -237,17 +287,23 @@ export const writeWebResponseToLambdaStream = async (
 
 export const createLambdaHandler =
   (options: LambdaHandlerOptions) =>
-  async (event: LambdaHttpEventV2): Promise<LambdaProxyResponseV2> => {
+  async (event: LambdaHttpEventV2, context?: unknown): Promise<LambdaProxyResponseV2> => {
     const request = requestFromLambdaEvent(event, options);
-    const response = await createWorkersHandler(options).fetch(request);
+    const response = await createWorkersHandler({
+      ...options,
+      observability: lambdaObservability(options.observability, context),
+    }).fetch(request);
     return lambdaResponseFromWebResponse(response);
   };
 
 export const createLambdaFetchHandler =
   (options: LambdaFetchHandlerOptions) =>
-  async (event: LambdaHttpEventV2): Promise<LambdaProxyResponseV2> => {
+  async (event: LambdaHttpEventV2, context?: unknown): Promise<LambdaProxyResponseV2> => {
     const request = requestFromLambdaEvent(event, options);
-    const response = await createWorkersFetchHandler(options).fetch(request);
+    const response = await createWorkersFetchHandler({
+      ...options,
+      observability: lambdaObservability(options.observability, context),
+    }).fetch(request);
     return lambdaResponseFromWebResponse(response);
   };
 
@@ -256,9 +312,12 @@ export const createLambdaStreamingHandler = (
   runtime?: LambdaStreamingRuntime,
 ): unknown => {
   const resolvedRuntime = resolveStreamingRuntime(runtime);
-  const webHandler = createWorkersHandler(options);
-  return resolvedRuntime.streamifyResponse<LambdaHttpEventV2, unknown>(async (event, responseStream) => {
+  return resolvedRuntime.streamifyResponse<LambdaHttpEventV2, unknown>(async (event, responseStream, context) => {
     const request = requestFromLambdaEvent(event, options);
+    const webHandler = createWorkersHandler({
+      ...options,
+      observability: lambdaObservability(options.observability, context),
+    });
     const response = await webHandler.fetch(request);
     await writeWebResponseToLambdaStream(response, responseStream, resolvedRuntime);
   });

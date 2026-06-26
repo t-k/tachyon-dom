@@ -1,10 +1,86 @@
-import { renderRoute, renderRouteStream, type RouteDefinition, type RouteRenderOptions } from "../router.js";
+import {
+  renderRoute,
+  renderRouteStream,
+  type MatchedRoute,
+  type RouteDefinition,
+  type RouteHooks,
+  type RouteRenderOptions,
+} from "../router.js";
 
 export type WorkersAssetsBinding = {
   fetch: (request: Request) => Response | Promise<Response>;
 };
 
 export type AdapterFetchHandler = (request: Request) => Response | Promise<Response>;
+
+export type AdapterObservabilityMetadata = Record<string, string | number | boolean | undefined>;
+
+export type AdapterRequestStartEvent = {
+  type: "request_start";
+  request: Request;
+  method: string;
+  path: string;
+  adapter: string;
+  runtime?: string;
+  metadata?: AdapterObservabilityMetadata;
+  startedAt: number;
+};
+
+export type AdapterRouteMatchedEvent = {
+  type: "route_matched";
+  request: Request;
+  method: string;
+  path: string;
+  adapter: string;
+  runtime?: string;
+  metadata?: AdapterObservabilityMetadata;
+  routeId: string;
+  routePattern: string;
+  matchedRoute: MatchedRoute;
+  startedAt: number;
+};
+
+export type AdapterResponseEvent = {
+  type: "response";
+  request: Request;
+  method: string;
+  path: string;
+  adapter: string;
+  runtime?: string;
+  metadata?: AdapterObservabilityMetadata;
+  status: number;
+  routeId?: string;
+  routePattern?: string;
+  failedBeforeRouteDispatch: boolean;
+  durationMs: number;
+  startedAt: number;
+};
+
+export type AdapterErrorEvent = {
+  type: "error";
+  request: Request;
+  method: string;
+  path: string;
+  adapter: string;
+  runtime?: string;
+  metadata?: AdapterObservabilityMetadata;
+  error: unknown;
+  routeId?: string;
+  routePattern?: string;
+  failedBeforeRouteDispatch: boolean;
+  durationMs: number;
+  startedAt: number;
+};
+
+export type AdapterObservabilityHooks = {
+  adapter?: string;
+  runtime?: string;
+  metadata?: AdapterObservabilityMetadata;
+  onRequestStart?: (event: AdapterRequestStartEvent) => void | Promise<void>;
+  onRouteMatched?: (event: AdapterRouteMatchedEvent) => void | Promise<void>;
+  onResponse?: (event: AdapterResponseEvent) => void | Promise<void>;
+  onError?: (event: AdapterErrorEvent) => void | Promise<void>;
+};
 
 export type WorkersAssetOptions<Env> = {
   binding?: WorkersAssetsBinding;
@@ -20,6 +96,7 @@ export type WorkersHandlerOptions<Env = Record<string, unknown>> = RouteRenderOp
   streaming?: boolean;
   staticRoutes?: readonly StaticRouteDefinition[];
   assets?: WorkersAssetOptions<Env>;
+  observability?: AdapterObservabilityHooks | undefined;
 };
 
 export type WorkersFetchHandlerOptions<Env = Record<string, unknown>> = {
@@ -27,6 +104,7 @@ export type WorkersFetchHandlerOptions<Env = Record<string, unknown>> = {
   securityHeaders?: Headers;
   staticRoutes?: readonly StaticRouteDefinition[];
   assets?: WorkersAssetOptions<Env>;
+  observability?: AdapterObservabilityHooks | undefined;
 };
 
 export type StaticRouteDefinition = {
@@ -86,6 +164,115 @@ const responseForStaticRoute = (route: StaticRouteDefinition, request: Request, 
     status: route.status ?? 200,
     headers: headersForStaticRoute(route, securityHeaders),
   });
+
+const now = (): number => globalThis.performance?.now() ?? Date.now();
+
+const routePatternFor = (match: MatchedRoute): string => match.branch.at(-1)?.path ?? match.pathname;
+
+const routeIdFor = (match: MatchedRoute): string => match.route.id ?? routePatternFor(match);
+
+type AdapterRequestState = {
+  request: Request;
+  method: string;
+  path: string;
+  adapter: string;
+  runtime?: string;
+  metadata?: AdapterObservabilityMetadata;
+  startedAt: number;
+  routeId?: string;
+  routePattern?: string;
+};
+
+const createRequestState = (
+  request: Request,
+  observability: AdapterObservabilityHooks | undefined,
+): AdapterRequestState => {
+  const url = new URL(request.url);
+  return {
+    request,
+    method: request.method,
+    path: url.pathname,
+    adapter: observability?.adapter ?? "workers",
+    ...(observability?.runtime ? { runtime: observability.runtime } : {}),
+    ...(observability?.metadata ? { metadata: observability.metadata } : {}),
+    startedAt: now(),
+  };
+};
+
+const emitRequestStart = async (
+  observability: AdapterObservabilityHooks | undefined,
+  state: AdapterRequestState,
+): Promise<void> => {
+  await observability?.onRequestStart?.({ type: "request_start", ...state });
+};
+
+const emitRouteMatched = async (
+  observability: AdapterObservabilityHooks | undefined,
+  state: AdapterRequestState,
+  match: MatchedRoute,
+): Promise<void> => {
+  const routePattern = routePatternFor(match);
+  state.routeId = routeIdFor(match);
+  state.routePattern = routePattern;
+  await observability?.onRouteMatched?.({
+    type: "route_matched",
+    ...state,
+    routeId: state.routeId,
+    routePattern,
+    matchedRoute: match,
+  });
+};
+
+const emitResponse = async (
+  observability: AdapterObservabilityHooks | undefined,
+  state: AdapterRequestState,
+  response: Response,
+  failedBeforeRouteDispatch: boolean,
+): Promise<void> => {
+  await observability?.onResponse?.({
+    type: "response",
+    ...state,
+    status: response.status,
+    failedBeforeRouteDispatch,
+    durationMs: now() - state.startedAt,
+  });
+};
+
+const emitError = async (
+  observability: AdapterObservabilityHooks | undefined,
+  state: AdapterRequestState,
+  error: unknown,
+  failedBeforeRouteDispatch: boolean,
+): Promise<void> => {
+  await observability?.onError?.({
+    type: "error",
+    ...state,
+    error,
+    failedBeforeRouteDispatch,
+    durationMs: now() - state.startedAt,
+  });
+};
+
+const routeObservabilityHooks = (
+  hooks: RouteHooks | undefined,
+  observability: AdapterObservabilityHooks | undefined,
+  state: AdapterRequestState,
+): RouteHooks | undefined => {
+  if (!observability) {
+    return hooks;
+  }
+  return {
+    ...hooks,
+    onMatch: async (context) => {
+      await hooks?.onMatch?.(context);
+      await emitRouteMatched(observability, state, context.match);
+    },
+    onError: async (context) => {
+      await hooks?.onError?.(context);
+      await emitError(observability, state, context.error, false);
+    },
+  };
+};
 
 const normalizeBasePath = (basePath: string | undefined): string | undefined => {
   if (!basePath || basePath === "/") {
@@ -153,41 +340,67 @@ const responseFor = async <Env>(
   request: Request,
   env: Env | undefined,
 ): Promise<Response> => {
+  const state = createRequestState(request, options.observability);
+  await emitRequestStart(options.observability, state);
   const staticRoute = findStaticRoute(options.staticRoutes, request.method, new URL(request.url));
   if (staticRoute) {
-    return responseForStaticRoute(staticRoute, request, options.securityHeaders);
+    state.routeId = staticRoute.path;
+    state.routePattern = staticRoute.path;
+    const response = responseForStaticRoute(staticRoute, request, options.securityHeaders);
+    await emitResponse(options.observability, state, response, false);
+    return response;
   }
-  const asset = await responseForAsset(options, request, env);
-  if (asset) {
-    return asset;
-  }
-  if (options.streaming) {
-    const result = await renderRouteStream(options.routes, request, options);
-    if (!result.ok) {
-      return new Response(result.error.message, { status: result.error.status });
+  try {
+    const asset = await responseForAsset(options, request, env);
+    if (asset) {
+      const response = asset;
+      await emitResponse(options.observability, state, response, false);
+      return response;
     }
-    const stream = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        const encoder = new TextEncoder();
-        for await (const chunk of result.value.chunks) {
-          controller.enqueue(encoder.encode(chunk));
-        }
-        controller.close();
-      },
-    });
-    return new Response(stream, {
+    const hooks = routeObservabilityHooks(options.hooks, options.observability, state);
+    const renderOptions = {
+      ...options,
+      ...(hooks ? { hooks } : {}),
+    };
+    if (options.streaming) {
+      const result = await renderRouteStream(options.routes, request, renderOptions);
+      if (!result.ok) {
+        const response = new Response(result.error.message, { status: result.error.status });
+        await emitResponse(options.observability, state, response, true);
+        return response;
+      }
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          for await (const chunk of result.value.chunks) {
+            controller.enqueue(encoder.encode(chunk));
+          }
+          controller.close();
+        },
+      });
+      const response = new Response(stream, {
+        status: result.value.status,
+        headers: mergeHeaders(result.value.headers, options.securityHeaders),
+      });
+      await emitResponse(options.observability, state, response, state.routeId === undefined);
+      return response;
+    }
+    const result = await renderRoute(options.routes, request, renderOptions);
+    if (!result.ok) {
+      const response = new Response(result.error.message, { status: result.error.status });
+      await emitResponse(options.observability, state, response, true);
+      return response;
+    }
+    const response = new Response(result.value.responseBody ?? result.value.html, {
       status: result.value.status,
       headers: mergeHeaders(result.value.headers, options.securityHeaders),
     });
+    await emitResponse(options.observability, state, response, state.routeId === undefined);
+    return response;
+  } catch (error) {
+    await emitError(options.observability, state, error, state.routeId === undefined);
+    throw error;
   }
-  const result = await renderRoute(options.routes, request, options);
-  if (!result.ok) {
-    return new Response(result.error.message, { status: result.error.status });
-  }
-  return new Response(result.value.responseBody ?? result.value.html, {
-    status: result.value.status,
-    headers: mergeHeaders(result.value.headers, options.securityHeaders),
-  });
 };
 
 const responseForFetch = async <Env>(
@@ -195,15 +408,29 @@ const responseForFetch = async <Env>(
   request: Request,
   env: Env | undefined,
 ): Promise<Response> => {
+  const state = createRequestState(request, options.observability);
+  await emitRequestStart(options.observability, state);
   const staticRoute = findStaticRoute(options.staticRoutes, request.method, new URL(request.url));
   if (staticRoute) {
-    return responseForStaticRoute(staticRoute, request, options.securityHeaders);
+    state.routeId = staticRoute.path;
+    state.routePattern = staticRoute.path;
+    const response = responseForStaticRoute(staticRoute, request, options.securityHeaders);
+    await emitResponse(options.observability, state, response, false);
+    return response;
   }
-  const asset = await responseForAsset(options, request, env);
-  if (asset) {
-    return asset;
+  try {
+    const asset = await responseForAsset(options, request, env);
+    if (asset) {
+      await emitResponse(options.observability, state, asset, false);
+      return asset;
+    }
+    const response = withExtraHeaders(await options.fetch(request), options.securityHeaders);
+    await emitResponse(options.observability, state, response, false);
+    return response;
+  } catch (error) {
+    await emitError(options.observability, state, error, state.routeId === undefined);
+    throw error;
   }
-  return withExtraHeaders(await options.fetch(request), options.securityHeaders);
 };
 
 export const createWorkersHandler = <Env = Record<string, unknown>>(

@@ -5,6 +5,7 @@ import { Readable } from "node:stream";
 import {
   createWorkersFetchHandler,
   createWorkersHandler,
+  type AdapterObservabilityHooks,
   type AdapterFetchHandler,
   type StaticRouteDefinition,
   type WorkersFetchHandlerOptions,
@@ -183,6 +184,11 @@ const webRequestFor = (request: IncomingMessage): Request => {
   return new Request(requestUrl(request), init);
 };
 
+const nodeObservability = (
+  observability: AdapterObservabilityHooks | undefined,
+): AdapterObservabilityHooks | undefined =>
+  observability ? { ...observability, adapter: observability.adapter ?? "node" } : undefined;
+
 export const createNodeHandler =
   (options: NodeHandlerOptions) =>
   async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
@@ -199,7 +205,10 @@ export const createNodeHandler =
         return;
       }
     }
-    const webResponse = await createWorkersHandler(options).fetch(webRequest);
+    const webResponse = await createWorkersHandler({
+      ...options,
+      observability: nodeObservability(options.observability),
+    }).fetch(webRequest);
     await writeNodeResponse(webResponse, response);
   };
 
@@ -209,6 +218,7 @@ export const createNodeFetchHandler = (
   const staticAssetHandler = options.staticAssets ? createStaticAssetHandler(options.staticAssets) : undefined;
   const fetchHandler = createWorkersFetchHandler({
     ...options,
+    observability: nodeObservability(options.observability),
     fetch: async (request) => {
       const asset = await staticAssetHandler?.(request);
       return asset ?? options.fetch(request);
