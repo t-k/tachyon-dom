@@ -3,7 +3,8 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { createNodeHandler, createWorkersHandler } from "../src/adapters";
+import { createNodeHandler } from "../src/adapters/node";
+import { createWorkersHandler } from "../src/adapters/workers";
 import { createSecurityHeaders, redirect, type RouteDefinition } from "../src/router";
 
 describe("server adapters", () => {
@@ -117,25 +118,109 @@ describe("server adapters", () => {
     expect(await response.text()).toBe("");
   });
 
+  it("serves Cloudflare assets from env binding with security headers", async () => {
+    const assetFetch = vi.fn((request: Request) => {
+      expect(new URL(request.url).pathname).toBe("/assets/app.js");
+      return new Response(`console.log("asset");`, {
+        headers: { "content-type": "text/javascript; charset=utf-8" },
+      });
+    });
+    const render = vi.fn(() => "<h1>Dynamic</h1>");
+    const handler = createWorkersHandler<{ ASSETS: { fetch: typeof assetFetch } }>({
+      routes: [{ path: "/", render }],
+      assets: { bindingName: "ASSETS", basePath: "/assets" },
+      securityHeaders: createSecurityHeaders({ csp: true, nonce: "asset-nonce" }),
+    });
+
+    const response = await handler.fetch(new Request("https://example.com/assets/app.js"), {
+      ASSETS: { fetch: assetFetch },
+    });
+
+    expect(assetFetch).toHaveBeenCalledOnce();
+    expect(render).not.toHaveBeenCalled();
+    expect(response.headers.get("content-security-policy")).toContain("'nonce-asset-nonce'");
+    expect(response.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(await response.text()).toBe(`console.log("asset");`);
+  });
+
+  it("falls through to dynamic routes when Cloudflare asset basePath does not match", async () => {
+    const assetFetch = vi.fn(() => new Response("asset"));
+    const handler = createWorkersHandler<{ ASSETS: { fetch: typeof assetFetch } }>({
+      routes: [{ path: "/", render: () => "<h1>Home</h1>" }],
+      assets: { bindingName: "ASSETS", basePath: "/assets" },
+    });
+
+    const response = await handler.fetch(new Request("https://example.com/"), {
+      ASSETS: { fetch: assetFetch },
+    });
+
+    expect(assetFetch).not.toHaveBeenCalled();
+    expect(await response.text()).toBe("<h1>Home</h1>");
+  });
+
   it("applies method guards and security headers to static assets", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-adapter-assets-"));
     try {
       await writeFile(path.join(dir, "app.js"), `console.log("ok");`);
       const handler = createWorkersHandler({
         routes: [{ path: "/", render: () => "<h1>Home</h1>" }],
-        staticAssets: { rootDir: dir, basePath: "/assets" },
+        assets: { binding: { fetch: () => new Response("unused") }, basePath: "/unmatched" },
         securityHeaders: createSecurityHeaders({ csp: true, nonce: "asset-nonce" }),
       });
 
       const getResponse = await handler.fetch(new Request("https://example.com/assets/app.js"));
-      expect(getResponse.status).toBe(200);
-      expect(getResponse.headers.get("content-security-policy")).toContain("'nonce-asset-nonce'");
-      expect(await getResponse.text()).toBe(`console.log("ok");`);
+      expect(getResponse.status).toBe(404);
 
-      const postResponse = await handler.fetch(new Request("https://example.com/assets/app.js", { method: "POST" }));
-      expect(postResponse.status).toBe(405);
-      expect(postResponse.headers.get("allow")).toBe("GET, HEAD");
-      expect(postResponse.headers.get("content-security-policy")).toContain("'nonce-asset-nonce'");
+      const makeRequest = (method: string) => {
+        const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+          method: string;
+          url: string;
+          headers: Record<string, string>;
+        };
+        req.method = method;
+        req.url = "/assets/app.js";
+        req.headers = { host: "example.com" };
+        return req;
+      };
+      const nodeHandler = createNodeHandler({
+        routes: [{ path: "/", render: () => "<h1>Home</h1>" }],
+        staticAssets: { rootDir: dir, basePath: "/assets" },
+        securityHeaders: createSecurityHeaders({ csp: true, nonce: "asset-nonce" }),
+      });
+      const getChunks: string[] = [];
+      const getHeaders = new Map<string, string | number | readonly string[]>();
+      const getRes = {
+        statusCode: 200,
+        setHeader: vi.fn((key: string, value: string | number | readonly string[]) => {
+          getHeaders.set(key, value);
+        }),
+        end: vi.fn((chunk?: string) => {
+          if (chunk) {
+            getChunks.push(chunk);
+          }
+        }),
+      };
+
+      await nodeHandler(makeRequest("GET") as never, getRes as never);
+
+      expect(getRes.statusCode).toBe(200);
+      expect(getHeaders.get("content-security-policy")).toContain("'nonce-asset-nonce'");
+      expect(getChunks.join("")).toBe(`console.log("ok");`);
+
+      const postHeaders = new Map<string, string | number | readonly string[]>();
+      const postRes = {
+        statusCode: 200,
+        setHeader: vi.fn((key: string, value: string | number | readonly string[]) => {
+          postHeaders.set(key, value);
+        }),
+        end: vi.fn(),
+      };
+
+      await nodeHandler(makeRequest("POST") as never, postRes as never);
+
+      expect(postRes.statusCode).toBe(405);
+      expect(postHeaders.get("allow")).toBe("GET, HEAD");
+      expect(postHeaders.get("content-security-policy")).toContain("'nonce-asset-nonce'");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
