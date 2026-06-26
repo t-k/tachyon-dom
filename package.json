@@ -1,7 +1,8 @@
 {
   "name": "tachyon-dom",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "license": "MIT",
   "bin": {
     "tachyon-dom": "./dist/cli.js"
   },
