@@ -35,7 +35,10 @@ const mergeHeaders = (base: Headers, extra?: Headers): Headers => {
 };
 
 const withExtraHeaders = (response: Response, ...extras: Array<Headers | undefined>): Response => {
-  const headers = extras.reduce((current, extra) => mergeHeaders(current, extra), new Headers(response.headers));
+  let headers = new Headers(response.headers);
+  for (const extra of extras) {
+    headers = mergeHeaders(headers, extra);
+  }
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -119,7 +122,10 @@ const responseForAsset = async <Env>(
     return undefined;
   }
   if (request.method !== "GET" && request.method !== "HEAD") {
-    return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, HEAD" } });
+    return withExtraHeaders(
+      new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, HEAD" } }),
+      options.securityHeaders,
+    );
   }
   const binding = resolveAssetsBinding(assetOptions, env);
   if (!binding) {

@@ -158,6 +158,24 @@ describe("server adapters", () => {
     expect(await response.text()).toBe("<h1>Home</h1>");
   });
 
+  it("applies security headers to rejected Cloudflare asset methods", async () => {
+    const assetFetch = vi.fn(() => new Response("asset"));
+    const handler = createWorkersHandler<{ ASSETS: { fetch: typeof assetFetch } }>({
+      routes: [{ path: "/", render: () => "<h1>Home</h1>" }],
+      assets: { bindingName: "ASSETS", basePath: "/assets" },
+      securityHeaders: createSecurityHeaders({ csp: true, nonce: "asset-nonce" }),
+    });
+
+    const response = await handler.fetch(new Request("https://example.com/assets/app.js", { method: "POST" }), {
+      ASSETS: { fetch: assetFetch },
+    });
+
+    expect(assetFetch).not.toHaveBeenCalled();
+    expect(response.status).toBe(405);
+    expect(response.headers.get("allow")).toBe("GET, HEAD");
+    expect(response.headers.get("content-security-policy")).toContain("'nonce-asset-nonce'");
+  });
+
   it("applies method guards and security headers to static assets", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-adapter-assets-"));
     try {
