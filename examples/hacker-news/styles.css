@@ -1,0 +1,151 @@
+:root {
+  color-scheme: light;
+  font-family:
+    Verdana,
+    Geneva,
+    sans-serif;
+  background: #f6f6ef;
+  color: #111111;
+}
+
+body {
+  margin: 0;
+  background: #f6f6ef;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.page-shell {
+  max-width: 1120px;
+  min-height: 100vh;
+  margin: 0 auto;
+  background: #f6f6ef;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 8px;
+  background: #ff6600;
+  color: #000000;
+  font-size: 13px;
+}
+
+.brand {
+  font-weight: 700;
+}
+
+.topbar nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.intro {
+  padding: 14px 10px 8px;
+  border-bottom: 1px solid #e2dcc7;
+}
+
+.intro h1 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.intro p {
+  margin: 4px 0 0;
+  color: #555555;
+  font-size: 12px;
+}
+
+.story-list {
+  display: grid;
+  gap: 1px;
+  padding: 6px 0 20px;
+}
+
+.story-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 6px;
+  padding: 5px 10px;
+}
+
+.story-row-deferred {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 58px;
+}
+
+.story-rank {
+  color: #828282;
+  text-align: right;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.story-main {
+  min-width: 0;
+}
+
+.story-title {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 400;
+}
+
+.story-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+  color: #828282;
+  font-size: 10px;
+}
+
+.notice {
+  margin: 14px 10px;
+  padding: 14px;
+  border: 1px solid #e2dcc7;
+  border-radius: 6px;
+  background: #fffaf0;
+}
+
+.notice h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.notice p {
+  margin: 0;
+  color: #555555;
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .page-shell {
+    max-width: none;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 8px;
+  }
+
+  .story-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+    padding-right: 8px;
+    padding-left: 4px;
+  }
+}
