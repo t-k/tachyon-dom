@@ -12,6 +12,7 @@ import {
   compileFile,
   generateTemplateTypesFile,
   isCliEntrypoint,
+  parseArgs,
   runCli,
   serverCommandMessage,
 } from "../src/cli";
@@ -500,6 +501,17 @@ export default { selected: false };
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("parses language server stdio commands", () => {
+    expect(parseArgs(["language-server", "--stdio"])).toEqual({
+      ok: true,
+      value: { command: "language-server", transport: "stdio" },
+    });
+    expect(parseArgs(["language-server"])).toEqual({
+      ok: false,
+      error: "Usage: tachyon-dom language-server --stdio",
+    });
   });
 
   it("transforms tachyon html files through the Vite plugin", async () => {

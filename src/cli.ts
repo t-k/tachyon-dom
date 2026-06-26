@@ -51,16 +51,22 @@ export type CliInitOptions = {
   template: "basic" | "ssr";
 };
 
+export type CliLanguageServerOptions = {
+  command: "language-server";
+  transport: "stdio";
+};
+
 export type CliOptions =
   | CliCompileOptions
   | CliRoutesOptions
   | CliServerOptions
   | CliAddPageOptions
   | CliTypegenOptions
-  | CliInitOptions;
+  | CliInitOptions
+  | CliLanguageServerOptions;
 
 const usage =
-  "Usage: tachyon-dom <compile|routes|dev|build|preview|add|typegen|init>. Use compile for templates, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, and init for starters.";
+  "Usage: tachyon-dom <compile|routes|dev|build|preview|add|typegen|init|language-server>. Use compile for templates, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, init for starters, and language-server for editor diagnostics.";
 
 const parseCompileArgs = (input: string, rest: readonly string[]): Result<CliCompileOptions, string> => {
   if (!input) {
@@ -217,7 +223,12 @@ const parseInitArgs = (rest: readonly string[]): Result<CliInitOptions, string> 
   return ok(options);
 };
 
-const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
+const parseLanguageServerArgs = (rest: readonly string[]): Result<CliLanguageServerOptions, string> =>
+  rest.length === 1 && rest[0] === "--stdio"
+    ? ok({ command: "language-server", transport: "stdio" })
+    : err("Usage: tachyon-dom language-server --stdio");
+
+export const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
   const [command, input, ...rest] = argv;
   if (command === "compile") {
     return parseCompileArgs(input ?? "", rest);
@@ -239,6 +250,9 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
   }
   if (command === "init") {
     return parseInitArgs([input, ...rest].filter((arg): arg is string => Boolean(arg)));
+  }
+  if (command === "language-server") {
+    return parseLanguageServerArgs([input, ...rest].filter((arg): arg is string => Boolean(arg)));
   }
   return err(usage);
 };
@@ -403,6 +417,11 @@ export const runCli = async (argv: readonly string[] = process.argv.slice(2)): P
   }
   let result: Result<string, string>;
   switch (parsed.value.command) {
+    case "language-server": {
+      const { startLanguageServer } = await import("./language-server.js");
+      startLanguageServer();
+      return 0;
+    }
     case "dev":
     case "build":
     case "preview":

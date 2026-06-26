@@ -117,9 +117,12 @@ tachyon-dom init --template basic --out my-app
 tachyon-dom dev --host 127.0.0.1 --port 5173
 tachyon-dom build
 tachyon-dom preview --host 127.0.0.1 --port 4173
+tachyon-dom language-server --stdio
 ```
 
 Template files use the short `.td` extension. The Vite plugin and file router also accept `.tachyon` and `.tachyon.html` for compatibility.
+
+`tachyon-dom language-server --stdio` starts a minimal Language Server Protocol server for editor integrations. The first version reports Tachyon template diagnostics for `.td`, `.tachyon`, and `.tachyon.html` documents; completion, hover, and semantic tokens are intentionally left to later editor-support slices.
 
 `pnpm bench:local` builds every implementation in production mode (bundled and minified, matching what applications ship), serves them from a temporary Vite preview server, measures Tachyon DOM against local copies of the keyed vanilla benchmark implementations in Playwright Chromium, prints ratio tables, and writes JSON results under `benchmark/local-compare/results/`. Production is the canonical mode because dev-server module loading adds overhead that does not exist in a shipped app.
 

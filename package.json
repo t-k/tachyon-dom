@@ -78,6 +78,10 @@
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js"
     },
+    "./language-server": {
+      "types": "./dist/language-server.d.ts",
+      "import": "./dist/language-server.js"
+    },
     "./vite": {
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.js"
@@ -190,7 +194,9 @@
   },
   "dependencies": {
     "oxc-parser": "^0.136.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vscode-languageserver": "^10.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
   },
   "devDependencies": {
     "@marko/run": "^0.10.0",
