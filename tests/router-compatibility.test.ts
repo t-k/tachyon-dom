@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createWorkersHandler } from "../src/adapters";
+import { createLambdaHandler, createWorkersHandler } from "../src/adapters";
 import { enhanceForm } from "../src/runtime/form";
 import { diagnoseHydrationBoundaries } from "../src/runtime/hydrate";
 import { readTextStreamChunks } from "../src/runtime/stream-client";
@@ -27,6 +27,34 @@ describe("router compatibility matrix", () => {
     } else {
       await expect(response.text()).resolves.toBe("<h1>Home</h1>");
     }
+  });
+
+  it("exports the Lambda adapter through the compatibility entry", async () => {
+    const handler = createLambdaHandler({
+      routes: [{ path: "/", render: () => "<h1>Lambda</h1>" }],
+    });
+
+    const response = await handler({
+      version: "2.0",
+      routeKey: "$default",
+      rawPath: "/",
+      rawQueryString: "",
+      headers: { host: "lambda.example" },
+      requestContext: {
+        domainName: "lambda.example",
+        http: {
+          method: "GET",
+          path: "/",
+          protocol: "HTTP/1.1",
+          sourceIp: "127.0.0.1",
+          userAgent: "vitest",
+        },
+      },
+      isBase64Encoded: false,
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toBe("<h1>Lambda</h1>");
   });
 
   it("covers SSR hydration diagnostics and progressive form enhancement together", async () => {

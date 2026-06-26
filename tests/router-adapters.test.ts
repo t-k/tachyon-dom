@@ -3,9 +3,35 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import {
+  createLambdaHandler,
+  createLambdaStreamingHandler,
+  lambdaResponseFromWebResponse,
+  requestFromLambdaEvent,
+} from "../src/adapters/lambda";
 import { createNodeHandler } from "../src/adapters/node";
 import { createWorkersHandler } from "../src/adapters/workers";
 import { createSecurityHeaders, redirect, type RouteDefinition } from "../src/router";
+
+const lambdaEvent = (overrides: Record<string, unknown> = {}) => ({
+  version: "2.0",
+  routeKey: "$default",
+  rawPath: "/",
+  rawQueryString: "",
+  headers: { host: "lambda.example" },
+  requestContext: {
+    domainName: "lambda.example",
+    http: {
+      method: "GET",
+      path: "/",
+      protocol: "HTTP/1.1",
+      sourceIp: "127.0.0.1",
+      userAgent: "vitest",
+    },
+  },
+  isBase64Encoded: false,
+  ...overrides,
+});
 
 describe("server adapters", () => {
   it("creates a Workers fetch handler with security headers", async () => {
@@ -277,6 +303,123 @@ describe("server adapters", () => {
     expect(res.write).toHaveBeenCalled();
     expect(res.end).toHaveBeenCalledWith();
     expect(chunks.join("")).toBe("<p>Loading</p><h1>Ready</h1>");
+  });
+
+  it("converts Lambda HTTP API v2 events into Web requests", async () => {
+    const request = requestFromLambdaEvent(
+      lambdaEvent({
+        rawPath: "/submit",
+        rawQueryString: "debug=1",
+        cookies: ["session=abc", "theme=dark"],
+        headers: { "content-type": "text/plain", host: "client.example" },
+        requestContext: {
+          domainName: "public.example",
+          http: {
+            method: "POST",
+            path: "/submit",
+            protocol: "HTTP/1.1",
+            sourceIp: "127.0.0.1",
+            userAgent: "vitest",
+          },
+        },
+        body: "hello",
+      }),
+    );
+
+    expect(request.method).toBe("POST");
+    expect(request.url).toBe("https://public.example/submit?debug=1");
+    expect(request.headers.get("cookie")).toBe("session=abc; theme=dark");
+    expect(request.headers.get("content-type")).toBe("text/plain");
+    expect(await request.text()).toBe("hello");
+  });
+
+  it("creates a Lambda handler that returns buffered SSR responses with security headers", async () => {
+    const handler = createLambdaHandler({
+      routes: [{ path: "/", render: () => "<h1>Lambda</h1>" }],
+      securityHeaders: createSecurityHeaders({ csp: true, nonce: "lambda-nonce" }),
+    });
+
+    const response = await handler(lambdaEvent());
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["content-type"]).toBe("text/html; charset=utf-8");
+    expect(response.headers["content-security-policy"]).toContain("'nonce-lambda-nonce'");
+    expect(response.isBase64Encoded).toBe(false);
+    expect(response.body).toBe("<h1>Lambda</h1>");
+  });
+
+  it("maps Set-Cookie headers to Lambda cookies and base64 encodes binary responses", async () => {
+    const cookieResponse = await lambdaResponseFromWebResponse(
+      new Response("ok", {
+        status: 201,
+        headers: [
+          ["content-type", "text/plain; charset=utf-8"],
+          ["set-cookie", "sid=abc; Path=/; HttpOnly"],
+          ["x-test", "yes"],
+        ],
+      }),
+    );
+
+    expect(cookieResponse.statusCode).toBe(201);
+    expect(cookieResponse.headers["x-test"]).toBe("yes");
+    expect(cookieResponse.headers["set-cookie"]).toBeUndefined();
+    expect(cookieResponse.cookies).toEqual(["sid=abc; Path=/; HttpOnly"]);
+    expect(cookieResponse.body).toBe("ok");
+    expect(cookieResponse.isBase64Encoded).toBe(false);
+
+    const bytes = Uint8Array.from([0, 255, 1]);
+    const binaryResponse = await lambdaResponseFromWebResponse(
+      new Response(bytes, { headers: { "content-type": "application/octet-stream" } }),
+    );
+
+    expect(binaryResponse.isBase64Encoded).toBe(true);
+    expect(binaryResponse.body).toBe(Buffer.from(bytes).toString("base64"));
+  });
+
+  it("streams Lambda responses through awslambda metadata and chunk writes", async () => {
+    const chunks: string[] = [];
+    const from = vi.fn((stream: { write: (chunk: string | Uint8Array) => void; end: () => void }) => stream);
+    const runtime = {
+      streamifyResponse: vi.fn((handler) => handler),
+      HttpResponseStream: { from },
+    };
+    const stream = {
+      write: vi.fn((chunk: string | Uint8Array) => {
+        chunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
+      }),
+      end: vi.fn(),
+    };
+    const handler = createLambdaStreamingHandler(
+      {
+        routes: [
+          {
+            path: "/",
+            fallback: "<p>Loading</p>",
+            loader: async () => "Ready",
+            render: ({ data }) => `<h1>${data}</h1>`,
+          },
+        ],
+        streaming: true,
+        securityHeaders: createSecurityHeaders({ csp: true, nonce: "stream-nonce" }),
+      },
+      runtime,
+    ) as (event: ReturnType<typeof lambdaEvent>, responseStream: typeof stream, context: unknown) => Promise<void>;
+
+    await handler(lambdaEvent(), stream, {});
+
+    expect(runtime.streamifyResponse).toHaveBeenCalledOnce();
+    expect(from).toHaveBeenCalledWith(
+      stream,
+      expect.objectContaining({
+        statusCode: 200,
+        headers: expect.objectContaining({
+          "content-security-policy": expect.stringContaining("'nonce-stream-nonce'"),
+          "content-type": "text/html; charset=utf-8",
+        }),
+      }),
+    );
+    expect(chunks.join("")).toBe("<p>Loading</p><h1>Ready</h1>");
+    expect(stream.end).toHaveBeenCalledOnce();
   });
 
   it("keeps the Workers entry and router runtime free of top-level Node imports", async () => {
