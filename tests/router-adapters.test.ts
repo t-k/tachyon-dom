@@ -376,6 +376,21 @@ describe("server adapters", () => {
     expect(binaryResponse.body).toBe(Buffer.from(bytes).toString("base64"));
   });
 
+  it("base64 encodes Lambda responses that already have content encoding", async () => {
+    const bytes = Uint8Array.from([31, 139, 8, 0]);
+    const response = await lambdaResponseFromWebResponse(
+      new Response(bytes, {
+        headers: {
+          "content-encoding": "gzip",
+          "content-type": "text/html; charset=utf-8",
+        },
+      }),
+    );
+
+    expect(response.isBase64Encoded).toBe(true);
+    expect(response.body).toBe(Buffer.from(bytes).toString("base64"));
+  });
+
   it("streams Lambda responses through awslambda metadata and chunk writes", async () => {
     const chunks: string[] = [];
     const from = vi.fn((stream: { write: (chunk: string | Uint8Array) => void; end: () => void }) => stream);

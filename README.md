@@ -80,7 +80,7 @@ The Vite integration also exposes `tachyonDomRoutes()` for a `virtual:tachyon-do
 
 During Vite dev server runs, `tachyonDom()` logs simple request lines such as `GET / 200 4ms` through Vite's logger. Query strings are omitted by default to avoid leaking tokens or other sensitive parameters. Disable request logs with `tachyonDom({ requestLog: false })`, pass `requestLog: { logger }` to route messages to a custom sink, or set `requestLog: { includeQuery: true }` when query strings are explicitly useful.
 
-Server adapters live in `tachyon-dom/adapters` as compatibility exports, with runtime-specific entries at `tachyon-dom/adapters/node` and `tachyon-dom/adapters/workers`. The Workers entry avoids Node built-ins and can serve Cloudflare Assets bindings before dynamic routes; the Node entry keeps file-system static asset serving. `tachyon-dom/runtime/form` includes progressive form enhancement, and `tachyon-dom/runtime/hydrate` includes boundary mismatch diagnostics for SSR tests and development builds.
+Server adapters live in `tachyon-dom/adapters` as compatibility exports, with runtime-specific entries at `tachyon-dom/adapters/node`, `tachyon-dom/adapters/workers`, and `tachyon-dom/adapters/lambda`. The Workers entry avoids Node built-ins and can serve Cloudflare Assets bindings before dynamic routes; the Node entry keeps file-system static asset serving; the Lambda entry supports Function URL and API Gateway HTTP API v2 style events, including AWS Lambda response streaming. `tachyon-dom/runtime/form` includes progressive form enhancement, and `tachyon-dom/runtime/hydrate` includes boundary mismatch diagnostics for SSR tests and development builds.
 
 ## Security Notes
 
@@ -89,6 +89,8 @@ Server adapters live in `tachyon-dom/adapters` as compatibility exports, with ru
 The built-in sanitizer rejects protocol-relative URLs and removes absolute `http:`/`https:` URLs unless their origin is explicitly listed in `allowedUrlOrigins`. `redirect()` similarly accepts path-relative targets by default; external redirects require `allowExternal: true` plus an `allowedOrigins` entry for the target origin.
 
 The Node adapter derives request URLs from `Host` and `X-Forwarded-Proto`. Only use those headers behind a trusted proxy or edge that normalizes them; otherwise validate the host/proto boundary before routing.
+
+The Lambda adapter derives request URLs from `event.requestContext.domainName` by default and falls back to the `Host` header for minimal local events. Pass `origin` when the public origin differs from the Lambda event domain, for example behind CloudFront or a custom domain.
 
 ## Commands
 

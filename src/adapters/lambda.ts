@@ -151,6 +151,9 @@ const responseHeaders = (headers: Headers): Record<string, string> => {
 };
 
 const isTextResponse = (headers: Headers): boolean => {
+  if (headers.has("content-encoding")) {
+    return false;
+  }
   const contentType = headers.get("content-type")?.toLowerCase();
   if (!contentType) {
     return true;
