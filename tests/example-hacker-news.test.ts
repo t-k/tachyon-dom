@@ -6,8 +6,14 @@ import {
   hostForStory,
   loadTopStories,
   storyFromItem,
+  type HackerNewsStory,
   type HackerNewsItem,
 } from "../examples/hacker-news/hn-api";
+import {
+  renderHackerNewsDocument,
+  renderHackerNewsError,
+  renderHackerNewsStream,
+} from "../examples/hacker-news/renderer";
 
 const jsonResponse = (value: unknown, init: ResponseInit = {}): Response =>
   new Response(JSON.stringify(value), {
@@ -102,5 +108,63 @@ describe("Hacker News example HN API", () => {
 describe("Hacker News example files", () => {
   it("keeps the test fixture path anchored in the repository", () => {
     expect(readFileSync(join(process.cwd(), "package.json"), "utf8")).toContain("tachyon-dom");
+  });
+});
+
+const story = (id: number, title = `Story ${id}`): HackerNewsStory => ({
+  age: "1 hour ago",
+  comments: id,
+  domain: "example.com",
+  hnUrl: `https://news.ycombinator.com/item?id=${id}`,
+  href: `https://example.com/${id}`,
+  id,
+  score: id * 10,
+  title,
+  user: "alice",
+});
+
+describe("Hacker News example renderer", () => {
+  it("renderer emits a complete SSR document with escaped story data", () => {
+    const html = renderHackerNewsDocument({
+      stories: [story(1, `Fast <script>alert("x")</script> SSR`)],
+    });
+
+    expect(html).toContain("<!doctype html>");
+    expect(html).toContain("Tachyon News");
+    expect(html).toContain(`<link rel="stylesheet" href="/assets/styles.css" />`);
+    expect(html).toContain("Fast &lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt; SSR");
+    expect(html).not.toContain("<script>alert");
+  });
+
+  it("renderer defers only below-fold story rows with content-visibility", () => {
+    const html = renderHackerNewsDocument({
+      stories: Array.from({ length: 12 }, (_, index) => story(index + 1)),
+    });
+
+    expect(html).toContain(`data-rank="1"`);
+    expect(html).toContain(`data-rank="11" class="story-row story-row-deferred"`);
+    const css = readFileSync(join(process.cwd(), "examples", "hacker-news", "styles.css"), "utf8");
+    expect(css).toContain("content-visibility: auto");
+    expect(css).toContain("contain-intrinsic-size");
+  });
+
+  it("renderer emits a readable error panel", () => {
+    const html = renderHackerNewsError("Unable to load top stories");
+
+    expect(html).toContain("Unable to load top stories");
+    expect(html).toContain("data-state=\"error\"");
+  });
+
+  it("streaming yields shell before story rows", async () => {
+    const chunks: string[] = [];
+    for await (const chunk of renderHackerNewsStream({
+      loadStories: async () => ({ ok: true, value: [story(1, "Streaming SSR")] }),
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    expect(chunks[0]).toContain("Loading top stories");
+    expect(chunks.join("")).toContain("Streaming SSR");
   });
 });
