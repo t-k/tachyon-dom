@@ -594,21 +594,6 @@ export const createFileRouteManifest = (
     return [{ id: idParts.join("-") || "index", path: routePath, file, kind }];
   });
 
-const collectFiles = async (directory: string): Promise<string[]> => {
-  const [{ readdir }, nodePath] = await Promise.all([import("node:fs/promises"), import("node:path")]);
-  const entries = await readdir(directory, { withFileTypes: true });
-  const files = await Promise.all(
-    entries.map(async (entry) => {
-      const absolute = nodePath.join(directory, entry.name);
-      return entry.isDirectory() ? await collectFiles(absolute) : [absolute];
-    }),
-  );
-  return files.flat();
-};
-
-export const scanFileRoutes = async (rootDir: string): Promise<FileRouteManifestEntry[]> =>
-  createFileRouteManifest(await collectFiles(rootDir), { rootDir });
-
 export const createRouteManifest = (
   routes: readonly RouteDefinition[],
   parentPath = "",

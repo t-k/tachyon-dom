@@ -19,11 +19,11 @@ import {
   renderRoute,
   renderRouteStream,
   routeFromModule,
-  scanFileRoutes,
   unsafeHtml,
   type ParamsForPath,
   type RouteDefinition,
 } from "../src/router";
+import { scanFileRoutes } from "../src/router-node";
 import { renderRouteForTest } from "../src/testing";
 
 describe("advanced router features", () => {

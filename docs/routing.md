@@ -16,7 +16,7 @@ Tachyon DOM keeps routing outside the template compiler. Templates compile to se
 
 Template routes may use `.td`, `.tachyon`, or `.tachyon.html` extensions. Route and layout modules may use `.ts` or `.js`.
 
-`scanFileRoutes(rootDir)` performs the same mapping by reading the filesystem.
+`tachyon-dom/router/node` exports `scanFileRoutes(rootDir)` for Node-based tooling that should read the filesystem. The runtime `tachyon-dom/router` entry does not import Node built-ins, so it is suitable for Workers bundles.
 
 ## Route Modules
 

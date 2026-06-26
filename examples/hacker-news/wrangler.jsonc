@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tachyon-dom-hacker-news",
+  "main": "./worker.ts",
+  "compatibility_date": "2026-06-26",
+  "assets": {
+    "binding": "ASSETS",
+    "directory": "./public"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

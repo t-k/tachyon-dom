@@ -5,7 +5,7 @@ import { generateTachyonModuleTypes, generateTemplateTypes } from "./app.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { diagnoseTachyonSfc, formatDiagnostic, locateOffset } from "./diagnostics.js";
-import { scanFileRoutes } from "./router.js";
+import { scanFileRoutes } from "./router-node.js";
 import { appendInlineSourceMap, createSourceMap } from "./source-map.js";
 import { err, ok, type Result } from "./result.js";
 
