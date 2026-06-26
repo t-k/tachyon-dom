@@ -1,5 +1,5 @@
 import { Readable } from "node:stream";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -259,5 +259,14 @@ describe("server adapters", () => {
     expect(res.write).toHaveBeenCalled();
     expect(res.end).toHaveBeenCalledWith();
     expect(chunks.join("")).toBe("<p>Loading</p><h1>Ready</h1>");
+  });
+
+  it("keeps the Workers entry and router runtime free of top-level Node imports", async () => {
+    const workersSource = await readFile(path.join(process.cwd(), "src", "adapters", "workers.ts"), "utf8");
+    const routerSource = await readFile(path.join(process.cwd(), "src", "router.ts"), "utf8");
+    const topLevelNodeImport = /^import\s+(?:type\s+)?[\s\S]*?\s+from\s+["']node:/m;
+
+    expect(workersSource).not.toMatch(topLevelNodeImport);
+    expect(routerSource).not.toMatch(topLevelNodeImport);
   });
 });
