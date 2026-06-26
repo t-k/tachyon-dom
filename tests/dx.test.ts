@@ -136,6 +136,16 @@ describe("DX helpers", () => {
     expect(packageJson.publishConfig).toEqual({ access: "public" });
   });
 
+  it("keeps example build output outside the published dist directory", async () => {
+    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    const script = packageJson.scripts?.["example:hacker-news:build"] ?? "";
+
+    expect(script).toContain("--outdir examples/hacker-news/dist/worker");
+    expect(script).not.toContain("--outdir dist/");
+  });
+
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
     const files = await collectTypeScriptFiles(path.join(process.cwd(), "src"));
     const extensionlessSpecifiers: string[] = [];
