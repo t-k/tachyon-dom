@@ -1,5 +1,8 @@
 import {
+  createWorkersFetchHandler,
   createWorkersHandler,
+  type AdapterFetchHandler,
+  type WorkersFetchHandlerOptions,
   type WorkersHandlerOptions,
 } from "./workers.js";
 
@@ -33,6 +36,11 @@ export type LambdaProxyResponseV2 = {
 };
 
 export type LambdaHandlerOptions = WorkersHandlerOptions & {
+  origin?: string | ((event: LambdaHttpEventV2) => string);
+};
+
+export type LambdaFetchHandlerOptions = Omit<WorkersFetchHandlerOptions, "fetch"> & {
+  fetch: AdapterFetchHandler;
   origin?: string | ((event: LambdaHttpEventV2) => string);
 };
 
@@ -232,6 +240,14 @@ export const createLambdaHandler =
   async (event: LambdaHttpEventV2): Promise<LambdaProxyResponseV2> => {
     const request = requestFromLambdaEvent(event, options);
     const response = await createWorkersHandler(options).fetch(request);
+    return lambdaResponseFromWebResponse(response);
+  };
+
+export const createLambdaFetchHandler =
+  (options: LambdaFetchHandlerOptions) =>
+  async (event: LambdaHttpEventV2): Promise<LambdaProxyResponseV2> => {
+    const request = requestFromLambdaEvent(event, options);
+    const response = await createWorkersFetchHandler(options).fetch(request);
     return lambdaResponseFromWebResponse(response);
   };
 

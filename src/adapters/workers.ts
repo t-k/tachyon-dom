@@ -4,6 +4,8 @@ export type WorkersAssetsBinding = {
   fetch: (request: Request) => Response | Promise<Response>;
 };
 
+export type AdapterFetchHandler = (request: Request) => Response | Promise<Response>;
+
 export type WorkersAssetOptions<Env> = {
   binding?: WorkersAssetsBinding;
   bindingName?: keyof Env & string;
@@ -16,6 +18,13 @@ export type WorkersHandlerOptions<Env = Record<string, unknown>> = RouteRenderOp
   routes: readonly RouteDefinition[];
   securityHeaders?: Headers;
   streaming?: boolean;
+  staticRoutes?: readonly StaticRouteDefinition[];
+  assets?: WorkersAssetOptions<Env>;
+};
+
+export type WorkersFetchHandlerOptions<Env = Record<string, unknown>> = {
+  fetch: AdapterFetchHandler;
+  securityHeaders?: Headers;
   staticRoutes?: readonly StaticRouteDefinition[];
   assets?: WorkersAssetOptions<Env>;
 };
@@ -109,7 +118,7 @@ const resolveAssetsBinding = <Env>(
 };
 
 const responseForAsset = async <Env>(
-  options: WorkersHandlerOptions<Env>,
+  options: Pick<WorkersHandlerOptions<Env>, "assets" | "securityHeaders">,
   request: Request,
   env: Env | undefined,
 ): Promise<Response | undefined> => {
@@ -181,8 +190,30 @@ const responseFor = async <Env>(
   });
 };
 
+const responseForFetch = async <Env>(
+  options: WorkersFetchHandlerOptions<Env>,
+  request: Request,
+  env: Env | undefined,
+): Promise<Response> => {
+  const staticRoute = findStaticRoute(options.staticRoutes, request.method, new URL(request.url));
+  if (staticRoute) {
+    return responseForStaticRoute(staticRoute, request, options.securityHeaders);
+  }
+  const asset = await responseForAsset(options, request, env);
+  if (asset) {
+    return asset;
+  }
+  return withExtraHeaders(await options.fetch(request), options.securityHeaders);
+};
+
 export const createWorkersHandler = <Env = Record<string, unknown>>(
   options: WorkersHandlerOptions<Env>,
 ): { fetch: (request: Request, env?: Env) => Promise<Response> } => ({
   fetch: (request, env) => responseFor(options, request, env),
+});
+
+export const createWorkersFetchHandler = <Env = Record<string, unknown>>(
+  options: WorkersFetchHandlerOptions<Env>,
+): { fetch: (request: Request, env?: Env) => Promise<Response> } => ({
+  fetch: (request, env) => responseForFetch(options, request, env),
 });

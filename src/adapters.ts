@@ -1,9 +1,11 @@
 export {
+  createLambdaFetchHandler,
   createLambdaHandler,
   createLambdaStreamingHandler,
   lambdaResponseFromWebResponse,
   requestFromLambdaEvent,
   writeWebResponseToLambdaStream,
+  type LambdaFetchHandlerOptions,
   type LambdaHandlerOptions,
   type LambdaHttpEventV2,
   type LambdaHttpResponseMetadata,
@@ -12,17 +14,22 @@ export {
   type LambdaStreamingRuntime,
 } from "./adapters/lambda.js";
 export {
+  createWorkersFetchHandler,
   createWorkersHandler,
   defineStaticRoute,
+  type AdapterFetchHandler,
   type StaticRouteDefinition,
+  type WorkersFetchHandlerOptions,
   type WorkersAssetOptions,
   type WorkersAssetsBinding,
   type WorkersHandlerOptions,
 } from "./adapters/workers.js";
 export {
+  createNodeFetchHandler,
   createNodeHandler,
   createStaticAssetHandler,
   writeNodeResponse,
+  type NodeFetchHandlerOptions,
   type NodeHandlerOptions,
   type StaticAssetOptions,
 } from "./adapters/node.js";

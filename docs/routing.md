@@ -134,13 +134,16 @@ For server sessions, `createCookieSessionStorage({ secret })` stores signed sess
 - `createNodeHandler({ routes })`
 - `createWorkersHandler({ routes })`
 - `createLambdaHandler({ routes })`
+- `createNodeFetchHandler({ fetch })`
+- `createWorkersFetchHandler({ fetch })`
+- `createLambdaFetchHandler({ fetch })`
 - `createStaticAssetHandler({ rootDir, basePath })`
 
 Use the runtime-specific entries for deployable server bundles:
 
-- `tachyon-dom/adapters/node` exports `createNodeHandler()` and `createStaticAssetHandler()`.
-- `tachyon-dom/adapters/workers` exports `createWorkersHandler()` without importing Node built-ins.
-- `tachyon-dom/adapters/lambda` exports `createLambdaHandler()` and `createLambdaStreamingHandler()` for AWS Lambda Function URL and API Gateway HTTP API v2 style events.
+- `tachyon-dom/adapters/node` exports `createNodeHandler()`, `createNodeFetchHandler()`, and `createStaticAssetHandler()`.
+- `tachyon-dom/adapters/workers` exports `createWorkersHandler()` and `createWorkersFetchHandler()` without importing Node built-ins.
+- `tachyon-dom/adapters/lambda` exports `createLambdaHandler()`, `createLambdaFetchHandler()`, and `createLambdaStreamingHandler()` for AWS Lambda Function URL and API Gateway HTTP API v2 style events.
 
 Both runtime handlers can apply `securityHeaders` and can use `streaming: true` to route through `renderRouteStream()`. File-system static asset serving is Node-only. On Cloudflare Workers, pass an Assets binding instead:
 
@@ -156,15 +159,33 @@ export default createWorkersHandler<{ ASSETS: { fetch: (request: Request) => Pro
 
 If `basePath` is omitted, 404 responses from the binding fall through to the dynamic router. If `basePath` is provided, matching requests are treated as asset requests and the binding response is returned with `securityHeaders` merged.
 
+If your application already exposes a standards-based `Request -> Response` handler, use the fetch handler variants instead of adding a catch-all route. The fetch variants still apply `securityHeaders` and still serve configured static routes or assets before calling your app handler:
+
+```ts
+import { createNodeFetchHandler } from "tachyon-dom/adapters/node";
+
+export const handler = createNodeFetchHandler({
+  fetch: renderRequest,
+  staticAssets: { rootDir: "dist/client", basePath: "/assets" },
+  securityHeaders,
+});
+```
+
 The Node adapter constructs `Request.url` from the incoming `Host` header and `X-Forwarded-Proto` when present. Treat those headers as trusted only when the process is behind a proxy or edge layer that normalizes and validates them. If clients can reach the Node process directly, validate or strip forwarded headers at the deployment boundary before using the adapter for security-sensitive redirects, canonical URLs, or absolute links.
 
 The Lambda adapter constructs a Web `Request` from the payload format v2.0 event shape used by Function URLs and API Gateway HTTP APIs. It preserves `rawPath`, `rawQueryString`, request cookies, decoded request bodies, route headers, and `securityHeaders`:
 
 ```ts
-import { createLambdaHandler } from "tachyon-dom/adapters/lambda";
+import { createLambdaFetchHandler, createLambdaHandler } from "tachyon-dom/adapters/lambda";
 
 export const handler = createLambdaHandler({
   routes,
+  origin: "https://example.com",
+  securityHeaders,
+});
+
+export const fetchHandler = createLambdaFetchHandler({
+  fetch: renderRequest,
   origin: "https://example.com",
   securityHeaders,
 });
