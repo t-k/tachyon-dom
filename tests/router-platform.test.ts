@@ -37,6 +37,32 @@ describe("router platform features", () => {
     }
   });
 
+  it("keeps static asset rejections when not-found fallthrough is enabled", async () => {
+    const dir = path.join(tmpdir(), `tachyon-assets-${Date.now()}-fallthrough`);
+    await mkdir(path.join(dir, "folder"), { recursive: true });
+    try {
+      const handler = createStaticAssetHandler({ rootDir: dir, basePath: "/", fallthroughOnNotFound: true });
+
+      await expect(handler(new Request("https://x.test/healthz"))).resolves.toBeUndefined();
+
+      const malformed = await handler(new Request("https://x.test/%E0%A4%A"));
+      expect(malformed?.status).toBe(404);
+      await expect(malformed?.text()).resolves.toBe("Not Found");
+
+      const traversal = await handler(new Request("https://x.test/%2F..%2Fsecret.txt"));
+      expect(traversal?.status).toBe(403);
+      await expect(traversal?.text()).resolves.toBe("Forbidden");
+
+      const post = await handler(new Request("https://x.test/app.js", { method: "POST" }));
+      expect(post?.status).toBe(405);
+      expect(post?.headers.get("allow")).toBe("GET, HEAD");
+
+      await expect(handler(new Request("https://x.test/folder"))).resolves.toBeUndefined();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("creates a route build manifest with route assets and types", async () => {
     const routes: RouteDefinition[] = [
       { id: "home", path: "/", resources: [{ rel: "stylesheet", href: "/app.css" }], render: () => "home" },

@@ -572,6 +572,62 @@ describe("server adapters", () => {
     }
   });
 
+  it("falls through to a Node fetch handler when root static assets are not found", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-fetch-assets-"));
+    try {
+      await writeFile(path.join(dir, "app.js"), `console.log("asset");`);
+      let fetchCalls = 0;
+      const handler = createNodeFetchHandler({
+        fetch: async (request) => {
+          fetchCalls += 1;
+          return new Response(`<h1>${new URL(request.url).pathname}</h1>`, {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          });
+        },
+        staticAssets: { rootDir: dir, basePath: "/", fallthroughOnNotFound: true },
+      });
+      const makeRequest = (url: string) => {
+        const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+          method: string;
+          url: string;
+          headers: Record<string, string>;
+        };
+        req.method = "GET";
+        req.url = url;
+        req.headers = { host: "example.com" };
+        return req;
+      };
+      const writeResponse = async (url: string) => {
+        const chunks: string[] = [];
+        const res = {
+          statusCode: 200,
+          setHeader: vi.fn(),
+          end: vi.fn((chunk?: string) => {
+            if (chunk) {
+              chunks.push(chunk);
+            }
+          }),
+        };
+        await handler(makeRequest(url) as never, res as never);
+        return { chunks, res };
+      };
+
+      const healthz = await writeResponse("/healthz");
+      const home = await writeResponse("/");
+      const asset = await writeResponse("/app.js");
+
+      expect(fetchCalls).toBe(2);
+      expect(healthz.res.statusCode).toBe(200);
+      expect(healthz.chunks.join("")).toBe("<h1>/healthz</h1>");
+      expect(home.res.statusCode).toBe(200);
+      expect(home.chunks.join("")).toBe("<h1>/</h1>");
+      expect(asset.res.statusCode).toBe(200);
+      expect(asset.chunks.join("")).toBe(`console.log("asset");`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("serves static Node routes before a standards fetch handler", async () => {
     let fetchCalls = 0;
     const handler = createNodeFetchHandler({

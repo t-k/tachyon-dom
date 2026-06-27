@@ -25,6 +25,7 @@ export type StaticAssetOptions = {
   rootDir: string;
   basePath?: string;
   headers?: HeadersInit;
+  fallthroughOnNotFound?: boolean;
 };
 
 const mergeHeaders = (base: Headers, extra?: Headers): Headers => {
@@ -101,6 +102,11 @@ const withSecurityHeaders = (response: Response, securityHeaders?: Headers): Res
   });
 };
 
+const isFileSystemNotFound = (error: unknown): boolean => {
+  const code = (error as { code?: unknown }).code;
+  return code === "ENOENT" || code === "ENOTDIR";
+};
+
 export const createStaticAssetHandler =
   (options: StaticAssetOptions): ((request: Request) => Promise<Response | undefined>) =>
   async (request) => {
@@ -118,7 +124,10 @@ export const createStaticAssetHandler =
     } catch {
       return new Response("Not Found", { status: 404 });
     }
-    if (!relativePath || relativePath.split("/").includes("..")) {
+    if (!relativePath) {
+      return options.fallthroughOnNotFound ? undefined : new Response("Forbidden", { status: 403 });
+    }
+    if (relativePath.split("/").includes("..")) {
       return new Response("Forbidden", { status: 403 });
     }
     const root = path.resolve(options.rootDir);
@@ -129,7 +138,7 @@ export const createStaticAssetHandler =
     try {
       const info = await stat(file);
       if (!info.isFile()) {
-        return new Response("Not Found", { status: 404 });
+        return options.fallthroughOnNotFound ? undefined : new Response("Not Found", { status: 404 });
       }
       const headers = new Headers(options.headers);
       if (!headers.has("content-type")) {
@@ -137,7 +146,10 @@ export const createStaticAssetHandler =
       }
       headers.set("content-length", String(info.size));
       return new Response(request.method === "HEAD" ? null : await readFile(file), { status: 200, headers });
-    } catch {
+    } catch (error) {
+      if (options.fallthroughOnNotFound && isFileSystemNotFound(error)) {
+        return undefined;
+      }
       return new Response("Not Found", { status: 404 });
     }
   };
