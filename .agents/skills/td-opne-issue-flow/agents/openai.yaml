@@ -1,0 +1,4 @@
+interface:
+  display_name: "TD Open Issue Flow"
+  short_description: "Process docs.local issue files for Tachyon DOM."
+  default_prompt: "Use td-opne-issue-flow to handle a Tachyon DOM docs.local issue from triage through verification."
