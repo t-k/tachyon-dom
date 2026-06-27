@@ -116,6 +116,9 @@ export const createStaticAssetHandler =
       return undefined;
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
+      if (options.fallthroughOnNotFound) {
+        return undefined;
+      }
       return new Response("Method Not Allowed", { status: 405, headers: { allow: "GET, HEAD" } });
     }
     let relativePath: string;

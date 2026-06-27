@@ -37,7 +37,7 @@ describe("router platform features", () => {
     }
   });
 
-  it("keeps static asset rejections when not-found fallthrough is enabled", async () => {
+  it("falls through for unsupported methods while keeping static asset rejections", async () => {
     const dir = path.join(tmpdir(), `tachyon-assets-${Date.now()}-fallthrough`);
     await mkdir(path.join(dir, "folder"), { recursive: true });
     try {
@@ -53,9 +53,7 @@ describe("router platform features", () => {
       expect(traversal?.status).toBe(403);
       await expect(traversal?.text()).resolves.toBe("Forbidden");
 
-      const post = await handler(new Request("https://x.test/app.js", { method: "POST" }));
-      expect(post?.status).toBe(405);
-      expect(post?.headers.get("allow")).toBe("GET, HEAD");
+      await expect(handler(new Request("https://x.test/app.js", { method: "POST" }))).resolves.toBeUndefined();
 
       await expect(handler(new Request("https://x.test/folder"))).resolves.toBeUndefined();
     } finally {

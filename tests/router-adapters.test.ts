@@ -586,18 +586,18 @@ describe("server adapters", () => {
         },
         staticAssets: { rootDir: dir, basePath: "/", fallthroughOnNotFound: true },
       });
-      const makeRequest = (url: string) => {
+      const makeRequest = (url: string, method = "GET") => {
         const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
           method: string;
           url: string;
           headers: Record<string, string>;
         };
-        req.method = "GET";
+        req.method = method;
         req.url = url;
         req.headers = { host: "example.com" };
         return req;
       };
-      const writeResponse = async (url: string) => {
+      const writeResponse = async (url: string, method = "GET") => {
         const chunks: string[] = [];
         const res = {
           statusCode: 200,
@@ -608,21 +608,24 @@ describe("server adapters", () => {
             }
           }),
         };
-        await handler(makeRequest(url) as never, res as never);
+        await handler(makeRequest(url, method) as never, res as never);
         return { chunks, res };
       };
 
       const healthz = await writeResponse("/healthz");
       const home = await writeResponse("/");
       const asset = await writeResponse("/app.js");
+      const login = await writeResponse("/login", "POST");
 
-      expect(fetchCalls).toBe(2);
+      expect(fetchCalls).toBe(3);
       expect(healthz.res.statusCode).toBe(200);
       expect(healthz.chunks.join("")).toBe("<h1>/healthz</h1>");
       expect(home.res.statusCode).toBe(200);
       expect(home.chunks.join("")).toBe("<h1>/</h1>");
       expect(asset.res.statusCode).toBe(200);
       expect(asset.chunks.join("")).toBe(`console.log("asset");`);
+      expect(login.res.statusCode).toBe(200);
+      expect(login.chunks.join("")).toBe("<h1>/login</h1>");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
