@@ -462,15 +462,52 @@ export default { selected: false };
     }
   });
 
-  it("creates starter files for new apps", async () => {
+  it("creates route-local starter files for new apps", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-starter-"));
     try {
       const result = await createStarterFiles({ outDir: dir, template: "basic" });
 
       expect(result.ok).toBe(true);
-      expect(await readFile(path.join(dir, "src", "routes", "index", "page.td"), "utf8")).toContain("<h1>{title}</h1>");
-      expect(await readFile(path.join(dir, "src", "routes", "index", "page.td"), "utf8")).toContain("Welcome");
-      expect(await readFile(path.join(dir, "vite.config.ts"), "utf8")).toContain("tachyonApp");
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+      expect(result.value).toContain("Edit src/routes/index/page.td");
+
+      const page = await readFile(path.join(dir, "src", "routes", "index", "page.td"), "utf8");
+      const app = await readFile(path.join(dir, "src", "app.ts"), "utf8");
+      const client = await readFile(path.join(dir, "src", "client", "main.ts"), "utf8");
+      const viteConfig = await readFile(path.join(dir, "vite.config.ts"), "utf8");
+      const tsconfig = await readFile(path.join(dir, "tsconfig.json"), "utf8");
+      const readme = await readFile(path.join(dir, "README.md"), "utf8");
+      const packageJson = JSON.parse(await readFile(path.join(dir, "package.json"), "utf8")) as {
+        scripts?: Record<string, string>;
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+
+      expect(page).toContain("<h1>{title}</h1>");
+      expect(page).toContain("Welcome");
+      expect(app).toContain(`import pageTemplate from "./routes/index/page.td?raw";`);
+      expect(app).toContain("template: pageTemplate");
+      expect(app).not.toContain(`template: "<section>`);
+      expect(client).toContain("Client entry for Tachyon DOM runtime code.");
+      expect(viteConfig).toContain("tachyonDom({ reactive: true })");
+      expect(viteConfig).toContain('tachyonApp(app, { appScript: "/src/client/main.ts" })');
+      expect(viteConfig).toContain(`input: "src/client/main.ts"`);
+      expect(tsconfig).toContain(`"types": ["vite/client"]`);
+      expect(readme).toContain("Edit `src/routes/index/page.td`");
+      expect(readme).toContain("Do not put application code in `public/client/main.js`");
+      expect(readme).toContain("Adapters are lower-level deployment APIs");
+      expect(packageJson.scripts).toMatchObject({
+        build: "vite build",
+        dev: "vite",
+        preview: "vite preview",
+        typecheck: "tsc --noEmit",
+      });
+      expect(packageJson.dependencies).toHaveProperty("tachyon-dom");
+      expect(packageJson.devDependencies).toHaveProperty("typescript");
+      expect(packageJson.devDependencies).toHaveProperty("vite");
+      await expect(readFile(path.join(dir, "public", "client", "main.js"), "utf8")).rejects.toThrow();
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
