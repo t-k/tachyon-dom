@@ -173,6 +173,31 @@ export const handler = createNodeFetchHandler({
 
 When Node static assets are mounted at the application root, pass `staticAssets: { fallthroughOnNotFound: true }` so missing files, root requests, and non-GET/HEAD application routes such as `POST /login` continue to your app handler instead of being handled by the static asset layer.
 
+For Vite dev servers with request-scoped SSR, `tachyon-dom/vite` exports `tachyonSsr()`. It mounts the same fetch-style handler shape as `createNodeFetchHandler()`, lets Vite handle internal module URLs by default, and serves configured static assets before the dynamic handler:
+
+```ts
+import { defineConfig } from "vite";
+import { tachyonDom, tachyonSsr } from "tachyon-dom/vite";
+
+export default defineConfig({
+  plugins: [
+    tachyonDom({ reactive: true }),
+    tachyonSsr({
+      clientScript: (request) =>
+        new URL(request.url).searchParams.has("preview") ? "/client/main.js" : "/src/client/main.ts",
+      fetch: async (request, { clientScript }) => {
+        const locale = request.headers.get("accept-language")?.split(",", 1)[0] ?? "en";
+        return new Response(`<main data-locale="${locale}"></main><script type="module" src="${clientScript ?? ""}"></script>`, {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      },
+    }),
+  ],
+});
+```
+
+Use `createTachyonSsrMiddleware()` when a custom Vite plugin needs direct access to the Connect middleware instead of the preset plugin.
+
 The Node adapter constructs `Request.url` from the incoming `Host` header and `X-Forwarded-Proto` when present. Treat those headers as trusted only when the process is behind a proxy or edge layer that normalizes and validates them. If clients can reach the Node process directly, validate or strip forwarded headers at the deployment boundary before using the adapter for security-sensitive redirects, canonical URLs, or absolute links.
 
 The Lambda adapter constructs a Web `Request` from the payload format v2.0 event shape used by Function URLs and API Gateway HTTP APIs. It preserves `rawPath`, `rawQueryString`, request cookies, decoded request bodies, route headers, and `securityHeaders`:
@@ -219,6 +244,18 @@ The adapter uses `rawPath` and `rawQueryString` as delivered by the Lambda event
 ## Type Generation
 
 `generateRouteTypes(manifest)` emits a TypeScript declaration shape backed by `ParamsForPath`.
+
+If TypeScript imports Tachyon template modules directly, add the ambient module package entry once per project:
+
+```json
+{
+  "compilerOptions": {
+    "types": ["vite/client", "tachyon-dom/td-modules"]
+  }
+}
+```
+
+Single files can also use `/// <reference types="tachyon-dom/td-modules" />`. The entry declares `.td`, `.td?client`, `.td?server`, `.td?stream`, and `.td?raw` modules with the Vite plugin output types.
 
 `createRouteBuildManifest(routes, { buildId, assets })` creates a route build manifest containing route paths, per-route assets, and generated route types.
 

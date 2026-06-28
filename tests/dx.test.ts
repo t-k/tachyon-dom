@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
-import { createServer } from "vite";
+import { createServer, type Plugin } from "vite";
 import {
   addPageFiles,
   buildRouteManifestFile,
@@ -21,6 +21,7 @@ import { diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
 import { tachyonApp, tachyonDom, tachyonDomRoutes } from "../src/vite";
+import * as viteIntegration from "../src/vite";
 
 type PanelScope = {
   title: string;
@@ -676,6 +677,100 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(typeof client === "object" && client?.code).toContain(`export const bind = (root, scope) =>`);
   });
 
+  it("exports ambient types for .td modules through a package subpath", async () => {
+    const packageJson = JSON.parse(await readFile(path.join(process.cwd(), "package.json"), "utf8")) as {
+      exports?: Record<string, { types?: string; import?: string }>;
+    };
+    const tdModulesExport = packageJson.exports?.["./td-modules"];
+    expect(tdModulesExport).toMatchObject({ types: "./dist/tachyon-html.d.ts" });
+
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-td-types-"));
+    try {
+      const packageDir = path.join(dir, "node_modules", "tachyon-dom");
+      await mkdir(path.join(packageDir, "dist"), { recursive: true });
+      await mkdir(path.join(dir, "src"), { recursive: true });
+      await writeFile(
+        path.join(packageDir, "package.json"),
+        JSON.stringify(
+          {
+            name: "tachyon-dom",
+            type: "module",
+            exports: { "./td-modules": tdModulesExport },
+          },
+          null,
+          2,
+        ),
+      );
+      await writeFile(
+        path.join(packageDir, "dist", "tachyon-html.d.ts"),
+        await readFile(path.join(process.cwd(), "src", "tachyon-html.d.ts"), "utf8"),
+      );
+      await writeFile(
+        path.join(dir, "src", "app.ts"),
+        `/// <reference types="tachyon-dom/td-modules" />
+import defaultScope, { bind, componentBoundaries, hydrationBoundaries, scope, templateHtml } from "./view.td";
+import { bind as bindClient, templateHtml as clientHtml } from "./view.td?client";
+import { render, renderHydrationState } from "./view.td?server";
+import { stream } from "./view.td?stream";
+import rawSource from "./view.td?raw";
+
+const root = document.createElement("main");
+const resolvedDefaultScope = typeof defaultScope === "function" ? defaultScope({}) : defaultScope;
+const resolvedNamedScope = typeof scope === "function" ? scope(resolvedDefaultScope) : scope;
+const cleanup = bind(root, resolvedNamedScope);
+if (typeof cleanup === "function") {
+  cleanup();
+}
+bindClient(root, {});
+const rendered: string = render({ title: "Home" });
+const state: string = renderHydrationState("route", { ok: true });
+const raw: string = rawSource;
+const html: string = templateHtml + clientHtml + rendered + state + raw;
+const markers: readonly unknown[] = hydrationBoundaries;
+const components: readonly unknown[] = componentBoundaries;
+const chunks: AsyncIterable<string> = stream({});
+void html;
+void markers;
+void components;
+void chunks;
+`,
+      );
+      await writeFile(
+        path.join(dir, "tsconfig.json"),
+        JSON.stringify(
+          {
+            compilerOptions: {
+              target: "ES2022",
+              lib: ["ES2022", "DOM", "DOM.Iterable"],
+              module: "ESNext",
+              moduleResolution: "Bundler",
+              strict: true,
+              noEmit: true,
+              skipLibCheck: true,
+            },
+            include: ["src"],
+          },
+          null,
+          2,
+        ),
+      );
+
+      const configPath = path.join(dir, "tsconfig.json");
+      const config = ts.readConfigFile(configPath, ts.sys.readFile);
+      const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, dir);
+      const program = ts.createProgram(parsed.fileNames, parsed.options);
+      const diagnostics = ts.getPreEmitDiagnostics(program);
+
+      expect(
+        diagnostics.map((diagnostic) =>
+          ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+        ),
+      ).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("loads .td entry modules that auto-mount exported mount functions", async () => {
     const plugin = tachyonDom({ reactive: true });
     if (typeof plugin.load !== "function") {
@@ -761,6 +856,85 @@ export const bindRows = (root, rows, options) => effect(() => {
       expect(response.status).toBe(200);
       expect(html).toContain("<h1>Home</h1>");
       expect(html).toContain('<main id="app">');
+    } finally {
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("serves request-scoped SSR through a Vite middleware preset", async () => {
+    type TachyonSsrForTest = (options: {
+      fetch: (
+        request: Request,
+        context: { clientScript?: string },
+      ) => Response | Promise<Response>;
+      staticAssets?: { rootDir: string; basePath?: string; fallthroughOnNotFound?: boolean };
+      clientScript?: string | ((request: Request) => string | Promise<string>);
+    }) => Plugin;
+    const tachyonSsr = (viteIntegration as typeof viteIntegration & { tachyonSsr?: TachyonSsrForTest }).tachyonSsr;
+    expect(tachyonSsr).toBeTypeOf("function");
+    if (!tachyonSsr) {
+      throw new Error("Missing tachyonSsr export.");
+    }
+
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-vite-ssr-"));
+    const seenPaths: string[] = [];
+    const server = await createServer({
+      root: dir,
+      logLevel: "silent",
+      plugins: [
+        tachyonSsr({
+          fetch: (request, context) => {
+            const url = new URL(request.url);
+            seenPaths.push(`${url.pathname}${url.search}`);
+            return new Response(
+              `<main>${url.searchParams.get("name") ?? "Guest"}</main><script type="module" src="${context.clientScript ?? ""}"></script>`,
+              { headers: { "content-type": "text/html; charset=utf-8" } },
+            );
+          },
+          staticAssets: { rootDir: path.join(dir, "public"), basePath: "/", fallthroughOnNotFound: true },
+          clientScript: (request) =>
+            new URL(request.url).searchParams.has("prod") ? "/client/main.js" : "/src/client/main.ts",
+        }),
+      ],
+      server: {
+        host: "127.0.0.1",
+        port: 0,
+      },
+    });
+    try {
+      await mkdir(path.join(dir, "public"), { recursive: true });
+      await mkdir(path.join(dir, "src", "client"), { recursive: true });
+      await writeFile(path.join(dir, "public", "logo.txt"), "static asset");
+      await writeFile(path.join(dir, "src", "client", "main.ts"), "export const started = true;");
+
+      await server.listen();
+      const localUrl = server.resolvedUrls?.local.find((url) => url.startsWith("http://127.0.0.1"));
+      if (!localUrl) {
+        throw new Error("Missing Vite local URL.");
+      }
+
+      const page = await fetch(`${localUrl}dashboard?name=Ada`);
+      const pageHtml = await page.text();
+      const prodPage = await fetch(`${localUrl}dashboard?name=Ada&prod=1`);
+      const prodHtml = await prodPage.text();
+      const asset = await fetch(`${localUrl}logo.txt`);
+      const assetText = await asset.text();
+      const viteClient = await fetch(`${localUrl}@vite/client`);
+      await viteClient.text();
+      const sourceModule = await fetch(`${localUrl}src/client/main.ts`);
+      const sourceModuleText = await sourceModule.text();
+
+      expect(page.status).toBe(200);
+      expect(pageHtml).toContain("<main>Ada</main>");
+      expect(pageHtml).toContain(`src="/src/client/main.ts"`);
+      expect(prodHtml).toContain(`src="/client/main.js"`);
+      expect(asset.status).toBe(200);
+      expect(assetText).toBe("static asset");
+      expect(viteClient.status).toBe(200);
+      expect(sourceModule.status).toBe(200);
+      expect(sourceModuleText).toContain("started");
+      expect(seenPaths).toEqual(["/dashboard?name=Ada", "/dashboard?name=Ada&prod=1"]);
     } finally {
       await server.close();
       await rm(dir, { recursive: true, force: true });

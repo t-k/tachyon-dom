@@ -1,4 +1,6 @@
 import type { Plugin } from "vite";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { createNodeFetchHandler, type NodeFetchHandlerOptions, type StaticAssetOptions } from "./adapters/node.js";
 import type { TachyonApp, TachyonAppAssets } from "./app.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
@@ -39,6 +41,33 @@ export type TachyonAppViteOptions = {
   appScript?: string;
   minifyHtml?: boolean;
 };
+
+export type TachyonSsrContext = {
+  clientScript?: string;
+};
+
+export type TachyonSsrFetchHandler = (
+  request: Request,
+  context: TachyonSsrContext,
+) => Response | Promise<Response>;
+
+export type TachyonSsrBypass = (url: URL, request: IncomingMessage) => boolean;
+
+export type TachyonSsrMiddlewareOptions = Omit<NodeFetchHandlerOptions, "fetch"> & {
+  fetch: TachyonSsrFetchHandler;
+  clientScript?: string | ((request: Request) => string | undefined | Promise<string | undefined>);
+  bypass?: TachyonSsrBypass;
+};
+
+export type TachyonSsrViteOptions = Omit<TachyonSsrMiddlewareOptions, "staticAssets"> & {
+  staticAssets?: StaticAssetOptions | false;
+};
+
+export type TachyonSsrMiddleware = (
+  request: IncomingMessage,
+  response: ServerResponse,
+  next: (error?: unknown) => void,
+) => void;
 
 const codeForTarget = (
   target: NonNullable<TachyonDomViteOptions["target"]>,
@@ -259,6 +288,61 @@ export const tachyonDomRoutes = (options: TachyonDomRoutesViteOptions): Plugin =
 };
 
 const prefixed = (prefix: string, fileName: string): string => `${prefix}/${fileName}`;
+
+const viteInternalExactPaths = ["/@vite/client", "/@react-refresh", "/__vite_ping"];
+const viteInternalPrefixes = ["/@id/", "/@fs/", "/src/", "/node_modules/"];
+
+export const isViteSsrPassthroughRequest = (url: URL): boolean =>
+  viteInternalExactPaths.includes(url.pathname) || viteInternalPrefixes.some((prefix) => url.pathname.startsWith(prefix));
+
+const resolveClientScript = async (
+  request: Request,
+  clientScript: TachyonSsrMiddlewareOptions["clientScript"],
+): Promise<string | undefined> => {
+  if (typeof clientScript === "function") {
+    return clientScript(request);
+  }
+  return clientScript;
+};
+
+export const createTachyonSsrMiddleware = (options: TachyonSsrMiddlewareOptions): TachyonSsrMiddleware => {
+  const { fetch, clientScript, bypass = isViteSsrPassthroughRequest, ...adapterOptions } = options;
+  const handler = createNodeFetchHandler({
+    ...adapterOptions,
+    fetch: async (request) => {
+      const resolvedClientScript = await resolveClientScript(request, clientScript);
+      return fetch(request, resolvedClientScript ? { clientScript: resolvedClientScript } : {});
+    },
+  });
+  return (request, response, next) => {
+    let url: URL;
+    try {
+      url = new URL(request.url ?? "/", "http://tachyon.local");
+    } catch {
+      next();
+      return;
+    }
+    if (bypass(url, request)) {
+      next();
+      return;
+    }
+    void handler(request, response).catch((error: unknown) => next(error));
+  };
+};
+
+export const tachyonSsr = (options: TachyonSsrViteOptions): Plugin => ({
+  name: "tachyon-dom-ssr",
+  configureServer(server) {
+    const { staticAssets = { rootDir: server.config.publicDir, basePath: "/", fallthroughOnNotFound: true }, ...rest } =
+      options;
+    server.middlewares.use(
+      createTachyonSsrMiddleware({
+        ...rest,
+        ...(staticAssets === false ? {} : { staticAssets }),
+      }),
+    );
+  },
+});
 
 export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {}): Plugin => ({
   name: "tachyon-dom-app",

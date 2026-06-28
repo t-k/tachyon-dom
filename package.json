@@ -86,6 +86,9 @@
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.js"
     },
+    "./td-modules": {
+      "types": "./dist/tachyon-html.d.ts"
+    },
     "./router": {
       "types": "./dist/router.d.ts",
       "import": "./dist/router.js"

@@ -89,6 +89,14 @@ vite.config.ts
 
 Use `src/routes/**/page.td` as the source of truth for page markup. Use `src/client/main.ts` for client-side runtime code that should be bundled by Vite. Do not put application code in `public/client/main.js`; reserve `public/` for static assets such as images, icons, manifests, and service workers.
 
+Add Tachyon DOM template module types when TypeScript imports `.td` files directly:
+
+```ts
+/// <reference types="tachyon-dom/td-modules" />
+```
+
+For project-wide setup, add `"tachyon-dom/td-modules"` to `compilerOptions.types` alongside `"vite/client"`. The type entry covers `.td`, `.td?client`, `.td?server`, `.td?stream`, and `.td?raw` imports.
+
 Adapters are lower-level deployment APIs for Node, Workers, and Lambda composition. They are useful when composing Tachyon DOM with an existing Request-to-Response handler, but an adapter-only app with TypeScript string templates is not the standard framework shape. If you are migrating an existing SSR app, start by replacing hand-written enhancement registries with `tachyon-dom/runtime/enhancement`, then move one screen at a time into `.td` templates, and finally wire those screens through the app or route layer.
 
 ## Routing
@@ -98,6 +106,31 @@ Routing is provided as a separate layer instead of being baked into the template
 The Vite integration also exposes `tachyonDomRoutes()` for a `virtual:tachyon-dom/routes` module. It emits a manifest plus lazy dynamic imports, which keeps route modules split into separate chunks.
 
 During Vite dev server runs, `tachyonDom()` logs simple request lines such as `GET / 200 4ms` through Vite's logger. Query strings are omitted by default to avoid leaking tokens or other sensitive parameters. Disable request logs with `tachyonDom({ requestLog: false })`, pass `requestLog: { logger }` to route messages to a custom sink, or set `requestLog: { includeQuery: true }` when query strings are explicitly useful.
+
+For request-scoped dynamic SSR, use `tachyonSsr()` in the Vite plugin list. It mounts a fetch-style `Request -> Response` handler in Vite dev, passes Vite module URLs such as `/@vite/client`, `/src/`, and `/node_modules/` through to Vite, and can serve public assets before the dynamic handler through the Node adapter static asset semantics:
+
+```ts
+import { defineConfig } from "vite";
+import { tachyonDom, tachyonSsr } from "tachyon-dom/vite";
+
+const clientScript = (request: Request) =>
+  new URL(request.url).searchParams.has("prod") ? "/client/main.js" : "/src/client/main.ts";
+
+export default defineConfig({
+  plugins: [
+    tachyonDom({ reactive: true }),
+    tachyonSsr({
+      clientScript,
+      fetch: async (request, { clientScript }) => {
+        const user = new URL(request.url).searchParams.get("user") ?? "Guest";
+        return new Response(`<main>Hello ${user}</main><script type="module" src="${clientScript ?? ""}"></script>`, {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      },
+    }),
+  ],
+});
+```
 
 Server adapters live in `tachyon-dom/adapters` as compatibility exports, with runtime-specific entries at `tachyon-dom/adapters/node`, `tachyon-dom/adapters/workers`, and `tachyon-dom/adapters/lambda`. The Workers entry avoids Node built-ins and can serve Cloudflare Assets bindings before dynamic routes; the Node entry keeps file-system static asset serving; the Lambda entry supports Function URL and API Gateway HTTP API v2 style events, including AWS Lambda response streaming. When a Node app serves public files from a root `staticAssets.basePath`, set `staticAssets.fallthroughOnNotFound: true` to let missing files such as `/healthz`, `/`, or non-GET/HEAD app routes like `POST /login` continue to the app handler while still serving files that exist. `tachyon-dom/runtime/form` includes progressive form enhancement, `tachyon-dom/runtime/enhancement` adds small opt-in client behavior for SSR markup via `data-td-enhance`, and `tachyon-dom/runtime/hydrate` includes boundary mismatch diagnostics for SSR tests and development builds.
 
