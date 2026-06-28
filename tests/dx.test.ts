@@ -477,7 +477,9 @@ export default { selected: false };
       const app = await readFile(path.join(dir, "src", "app.ts"), "utf8");
       const client = await readFile(path.join(dir, "src", "client", "main.ts"), "utf8");
       const viteConfig = await readFile(path.join(dir, "vite.config.ts"), "utf8");
-      const tsconfig = await readFile(path.join(dir, "tsconfig.json"), "utf8");
+      const tsconfig = JSON.parse(await readFile(path.join(dir, "tsconfig.json"), "utf8")) as {
+        compilerOptions?: { types?: string[] };
+      };
       const readme = await readFile(path.join(dir, "README.md"), "utf8");
       const packageJson = JSON.parse(await readFile(path.join(dir, "package.json"), "utf8")) as {
         scripts?: Record<string, string>;
@@ -494,7 +496,7 @@ export default { selected: false };
       expect(viteConfig).toContain("tachyonDom({ reactive: true })");
       expect(viteConfig).toContain('tachyonApp(app, { appScript: "/src/client/main.ts" })');
       expect(viteConfig).toContain(`input: "src/client/main.ts"`);
-      expect(tsconfig).toContain(`"types": ["vite/client"]`);
+      expect(tsconfig.compilerOptions?.types).toEqual(["vite/client"]);
       expect(readme).toContain("Edit `src/routes/index/page.td`");
       expect(readme).toContain("Do not put application code in `public/client/main.js`");
       expect(readme).toContain("Adapters are lower-level deployment APIs");
