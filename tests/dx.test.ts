@@ -147,6 +147,16 @@ describe("DX helpers", () => {
     expect(script).not.toContain("--outdir dist/");
   });
 
+  it("documents the recommended application shape", async () => {
+    const readme = await readFile("README.md", "utf8");
+
+    expect(readme).toContain("## Recommended App Shape");
+    expect(readme).toContain("src/routes/index/page.td");
+    expect(readme).toContain("src/client/main.ts");
+    expect(readme).toContain("Do not put application code in `public/client/main.js`");
+    expect(readme).toContain("Adapters are lower-level deployment APIs");
+  });
+
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
     const files = await collectTypeScriptFiles(path.join(process.cwd(), "src"));
     const extensionlessSpecifiers: string[] = [];

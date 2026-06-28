@@ -72,6 +72,25 @@ Route-local template conventions are available through `pagesFromRouteFiles()`: 
 
 `examples/full-app` is a multi-page browser example with SSR initial HTML for every page, a persistent layout, client-side routing, counters, keyed lists, forms, settings, and compiler/stream diagnostics. Run it with `pnpm example:full-app`, then open the Vite dev server root. Source pages are route-local `.td` templates, and the example Vite config generates dev/build HTML entries instead of keeping `index.html` files in source. Production output is available with `pnpm example:full-app:build`; the example config builds every generated page entry and minifies HTML during build.
 
+## Recommended App Shape
+
+For applications, keep route markup in route-local `.td` files and let Vite run the Tachyon DOM plugins on the main development path:
+
+```text
+src/
+  routes/
+    index/
+      page.td
+  client/
+    main.ts
+  app.ts
+vite.config.ts
+```
+
+Use `src/routes/**/page.td` as the source of truth for page markup. Use `src/client/main.ts` for client-side runtime code that should be bundled by Vite. Do not put application code in `public/client/main.js`; reserve `public/` for static assets such as images, icons, manifests, and service workers.
+
+Adapters are lower-level deployment APIs for Node, Workers, and Lambda composition. They are useful when composing Tachyon DOM with an existing Request-to-Response handler, but an adapter-only app with TypeScript string templates is not the standard framework shape. If you are migrating an existing SSR app, start by replacing hand-written enhancement registries with `tachyon-dom/runtime/enhancement`, then move one screen at a time into `.td` templates, and finally wire those screens through the app or route layer.
+
 ## Routing
 
 Routing is provided as a separate layer instead of being baked into the template compiler. The server router in `tachyon-dom/router` supports static routes, `:param` routes, wildcard routes, nested layouts through `outlet`, route loaders, form actions, auth guards, 404/error boundaries, head descriptor rendering, route hydration state scripts, trusted HTML responses, backend HTML sanitization helpers and adapters, CSRF guards, signed cookie sessions, middleware, observability hooks, deferred data helpers, CSP nonce propagation, resource hints, streaming finalization, build manifests, typed href builders, route preload plans, and route type generation. The client router in `tachyon-dom/runtime/router` supports same-origin link interception, History API navigation, `popstate`, abortable route loaders/actions, action-driven revalidation, loader cache/prefetch/invalidation, Vite route HMR revalidation, scroll-to-top hooks, focus restoration, navigation announcements, title updates, and 404/error rendering.
@@ -123,6 +142,8 @@ tachyon-dom build
 tachyon-dom preview --host 127.0.0.1 --port 4173
 tachyon-dom language-server --stdio
 ```
+
+`tachyon-dom init --template basic --out my-app` creates a route-local starter with `src/routes/index/page.td`, `src/client/main.ts`, `src/app.ts`, `vite.config.ts`, `tsconfig.json`, `README.md`, and `package.json`. The `ssr` starter currently uses the same Vite SSR shape as `basic`.
 
 Template files use the short `.td` extension. The Vite plugin and file router also accept `.tachyon` and `.tachyon.html` for compatibility.
 
