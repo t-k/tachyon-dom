@@ -118,6 +118,10 @@
       "types": "./dist/runtime/form.d.ts",
       "import": "./dist/runtime/form.js"
     },
+    "./runtime/enhancement": {
+      "types": "./dist/runtime/enhancement.d.ts",
+      "import": "./dist/runtime/enhancement.js"
+    },
     "./runtime/fragment": {
       "types": "./dist/runtime/fragment.d.ts",
       "import": "./dist/runtime/fragment.js"
@@ -161,6 +165,14 @@
     "./server/stream": {
       "types": "./dist/server/stream.d.ts",
       "import": "./dist/server/stream.js"
+    },
+    "./server/html": {
+      "types": "./dist/server/html.d.ts",
+      "import": "./dist/server/html.js"
+    },
+    "./server/form-action": {
+      "types": "./dist/server/form-action.d.ts",
+      "import": "./dist/server/form-action.js"
     },
     "./security": {
       "types": "./dist/security.d.ts",
