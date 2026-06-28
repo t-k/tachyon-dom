@@ -451,6 +451,12 @@ export default { selected: false };
       const result = await addPageFiles({ name: "settings/profile", routesDir });
 
       expect(result.ok).toBe(true);
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+      expect(result.value).toContain(path.join("settings", "profile", "page.td"));
+      expect(result.value).toContain("Edit the generated page.td");
+      expect(result.value).toContain("tachyon-dom typegen");
       expect(await readFile(path.join(routesDir, "settings", "profile", "page.td"), "utf8")).toContain(
         "<h1>{title}</h1>",
       );

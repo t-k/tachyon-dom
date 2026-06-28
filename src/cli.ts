@@ -326,7 +326,14 @@ export const scope = () => ({
 </section>
 `,
   );
-  return ok(pageFile);
+  return ok(
+    [
+      `Created ${pageFile}.`,
+      "Edit the generated page.td to define the route markup and scope.",
+      `Run tachyon-dom typegen ${pageFile} --out ${pageFile}.ts --module if you want generated scope declarations.`,
+      "Register the route through your app definition or file-route collection.",
+    ].join("\n"),
+  );
 };
 
 export const generateTemplateTypesFile = async (
