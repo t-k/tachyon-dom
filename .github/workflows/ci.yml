@@ -30,6 +30,8 @@ jobs:
 
       - run: pnpm build
 
+      - run: pnpm verify:package
+
       - run: pnpm test
 
       - run: pnpm bench:local:smoke

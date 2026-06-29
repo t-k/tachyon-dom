@@ -1,11 +1,16 @@
 import type { Plugin } from "vite";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createNodeFetchHandler, type NodeFetchHandlerOptions, type StaticAssetOptions } from "./adapters/node.js";
 import type { TachyonApp, TachyonAppAssets } from "./app.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import { diagnoseTachyonSfc, formatDiagnostic, locateOffset } from "./diagnostics.js";
 import { createFileRouteManifest } from "./router.js";
+import { err, ok, type Result } from "./result.js";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "./source-map.js";
 
 export type TachyonDomViteOptions = {
@@ -68,6 +73,95 @@ export type TachyonSsrMiddleware = (
   response: ServerResponse,
   next: (error?: unknown) => void,
 ) => void;
+
+export type CloudflarePagesPackageOptions = {
+  entry: string;
+  outDir: string;
+  assetsDir?: string;
+  exportName?: string;
+  fallthroughStatuses?: readonly number[];
+  runtimeEnvKeys?: readonly string[];
+};
+
+export type CloudflarePagesPackageResult = {
+  outDir: string;
+  workerPath: string;
+};
+
+const cloudflarePagesWorkerSource = (options: CloudflarePagesPackageOptions): string => {
+  const exportName = options.exportName ?? "renderRequest";
+  const fallthroughStatuses = options.fallthroughStatuses ?? [404];
+  const runtimeEnvKeys = options.runtimeEnvKeys ?? [];
+  return `import * as entry from ${JSON.stringify(pathToFileURL(options.entry).href)};
+
+const renderer = entry[${JSON.stringify(exportName)}] ?? entry.default;
+const fallthroughStatuses = new Set(${JSON.stringify(fallthroughStatuses)});
+const runtimeEnvKeys = ${JSON.stringify(runtimeEnvKeys)};
+
+const runtimeEnvFor = (env) => Object.fromEntries(runtimeEnvKeys.map((key) => [key, env?.[key]]));
+
+export default {
+  async fetch(request, env = {}, ctx) {
+    const assets = env && typeof env === "object" ? env.ASSETS : undefined;
+    if (assets && typeof assets.fetch === "function") {
+      const assetResponse = await assets.fetch(request);
+      if (!fallthroughStatuses.has(assetResponse.status)) {
+        return assetResponse;
+      }
+    }
+    if (typeof renderer !== "function") {
+      return new Response("Cloudflare Pages renderer export was not found.", { status: 500 });
+    }
+    return renderer(request, env, ctx, runtimeEnvFor(env));
+  },
+};
+`;
+};
+
+export const packageCloudflarePages = async (
+  options: CloudflarePagesPackageOptions,
+): Promise<Result<CloudflarePagesPackageResult, string>> => {
+  const tempDir = await mkdtemp(join(tmpdir(), "tachyon-cloudflare-pages-"));
+  try {
+    await rm(options.outDir, { recursive: true, force: true });
+    await mkdir(options.outDir, { recursive: true });
+    if (options.assetsDir) {
+      await cp(options.assetsDir, options.outDir, { recursive: true, force: true });
+    }
+    const workerEntry = join(tempDir, "worker-entry.js");
+    await writeFile(workerEntry, cloudflarePagesWorkerSource(options));
+    const vite = await import("vite");
+    await vite.build({
+      configFile: false,
+      logLevel: "silent",
+      publicDir: false,
+      ssr: { noExternal: true },
+      build: {
+        emptyOutDir: false,
+        minify: false,
+        outDir: options.outDir,
+        sourcemap: false,
+        ssr: true,
+        target: "es2022",
+        lib: {
+          entry: workerEntry,
+          formats: ["es"],
+          fileName: () => "_worker.js",
+        },
+        rollupOptions: {
+          output: {
+            entryFileNames: "_worker.js",
+          },
+        },
+      },
+    });
+    return ok({ outDir: options.outDir, workerPath: join(options.outDir, "_worker.js") });
+  } catch (error) {
+    return err(error instanceof Error ? error.message : String(error));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+};
 
 const codeForTarget = (
   target: NonNullable<TachyonDomViteOptions["target"]>,

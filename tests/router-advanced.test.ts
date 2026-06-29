@@ -110,6 +110,38 @@ describe("advanced router features", () => {
     );
   });
 
+  it("passes route-local loader data to dynamic resource functions", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        id: "app",
+        path: "/app",
+        loader: () => ({ asset: "/app-shell.js" }),
+        resources: ({ data }) => [{ href: (data as { asset: string }).asset, rel: "modulepreload" }],
+        render: ({ outlet }) => `<main>${outlet}</main>`,
+        children: [
+          {
+            id: "user",
+            path: "users/:id",
+            loader: ({ params }) => ({ asset: `/users/${params.id}.js` }),
+            resources: ({ data, loaderData }) => [
+              { href: (data as { asset: string }).asset, rel: "modulepreload" },
+              { href: (loaderData.app as { asset: string }).asset, rel: "preload", as: "script" },
+            ],
+            render: ({ data }) => `<h1>${(data as { asset: string }).asset}</h1>`,
+          },
+        ],
+      },
+    ];
+
+    const result = await renderRoute(routes, "https://example.com/app/users/42");
+
+    expect(result.ok && result.value.resourceHints).toContain(`<link rel="modulepreload" href="/app-shell.js">`);
+    expect(result.ok && result.value.resourceHints).toContain(`<link rel="modulepreload" href="/users/42.js">`);
+    expect(result.ok && result.value.resourceHints).toContain(
+      `<link rel="preload" href="/app-shell.js" as="script">`,
+    );
+  });
+
   it("matches named wildcard route params from file-route catchalls", async () => {
     const routes: RouteDefinition[] = [
       {
@@ -218,6 +250,55 @@ describe("advanced router features", () => {
     expect(chunks).toEqual(["<p>Loading</p>", "<h1>Ready</h1>"]);
     await expect(result.value.final).resolves.toMatchObject({
       headHtml: "",
+      stateScript: expect.stringContaining(`data-tachyon-state="route:stream"`),
+    });
+  });
+
+  it("emits streaming route fallback before loader data resolves", async () => {
+    let resolveLoader: ((value: string) => void) | undefined;
+    const loaderStarted: string[] = [];
+    const routes: RouteDefinition[] = [
+      {
+        id: "stream",
+        path: "/stream",
+        fallback: "<p>Loading</p>",
+        loader: () => {
+          loaderStarted.push("loader");
+          return new Promise<string>((resolve) => {
+            resolveLoader = resolve;
+          });
+        },
+        render: ({ data }) => `<h1>${data}</h1>`,
+      },
+    ];
+
+    const pendingResult = renderRouteStream(routes, "https://example.com/stream");
+    const result = await Promise.race([
+      pendingResult,
+      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 25)),
+    ]);
+    expect(result).not.toBeUndefined();
+    if (!result) {
+      resolveLoader?.("Ready");
+      await pendingResult;
+      throw new Error("renderRouteStream waited for loader data before returning.");
+    }
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+    const iterator = result.value.chunks[Symbol.asyncIterator]();
+    const firstChunk = await Promise.race([
+      iterator.next(),
+      Promise.resolve().then(() => ({ done: false as const, value: "loader still pending" })),
+    ]);
+
+    expect(loaderStarted).toEqual(["loader"]);
+    expect(firstChunk).toEqual({ done: false, value: "<p>Loading</p>" });
+    resolveLoader?.("Ready");
+    await expect(iterator.next()).resolves.toEqual({ done: false, value: "<h1>Ready</h1>" });
+    await expect(result.value.final).resolves.toMatchObject({
+      status: 200,
       stateScript: expect.stringContaining(`data-tachyon-state="route:stream"`),
     });
   });

@@ -36,9 +36,15 @@ importers:
       '@reckona/mreact-reactive-core':
         specifier: ^0.0.181
         version: 0.0.181
+      '@reckona/mreact-reactive-dom':
+        specifier: ^0.0.181
+        version: 0.0.181
       '@reckona/mreact-router':
         specifier: ^0.0.181
         version: 0.0.181(vite@8.0.16(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.48.0)(tsx@4.22.4))
+      '@reckona/mreact-shared':
+        specifier: ^0.0.181
+        version: 0.0.181
       '@solidjs/router':
         specifier: ^0.16.1
         version: 0.16.1(solid-js@1.9.13)

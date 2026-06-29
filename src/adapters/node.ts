@@ -80,6 +80,20 @@ const headersForStaticRoute = (route: StaticRouteDefinition, extra?: Headers): H
   return headers;
 };
 
+const setNodeHeaders = (response: ServerResponse, headers: Headers): void => {
+  const setCookies = headers.getSetCookie();
+  headers.forEach((value, key) => {
+    if (key.toLowerCase() !== "set-cookie") {
+      response.setHeader(key, value);
+    }
+  });
+  if (setCookies.length === 1) {
+    response.setHeader("set-cookie", setCookies[0] ?? "");
+  } else if (setCookies.length > 1) {
+    response.setHeader("set-cookie", setCookies);
+  }
+};
+
 const writeNodeStaticRoute = (
   route: StaticRouteDefinition,
   request: IncomingMessage,
@@ -87,7 +101,7 @@ const writeNodeStaticRoute = (
   securityHeaders?: Headers,
 ): void => {
   response.statusCode = route.status ?? 200;
-  headersForStaticRoute(route, securityHeaders).forEach((value, key) => response.setHeader(key, value));
+  setNodeHeaders(response, headersForStaticRoute(route, securityHeaders));
   response.end(request.method === "HEAD" ? undefined : route.body);
 };
 
@@ -159,7 +173,7 @@ export const createStaticAssetHandler =
 
 export const writeNodeResponse = async (webResponse: Response, response: ServerResponse): Promise<void> => {
   response.statusCode = webResponse.status;
-  webResponse.headers.forEach((value, key) => response.setHeader(key, value));
+  setNodeHeaders(response, webResponse.headers);
   const writable = response as ServerResponse & { write?: (chunk: Buffer) => void };
   if (!webResponse.body || typeof writable.write !== "function") {
     response.end(await webResponse.text());

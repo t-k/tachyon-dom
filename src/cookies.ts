@@ -32,6 +32,30 @@ const encodeCookiePart = (value: string): string => encodeURIComponent(value).re
 
 const decodeCookiePart = (value: string): string => decodeURIComponent(value.replaceAll("+", "%20"));
 
+const hasControlCharacter = (value: string): boolean => {
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code <= 0x1f || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const validateCookiePath = (value: string): string => {
+  if (hasControlCharacter(value) || value.includes(";")) {
+    throw new Error("Invalid cookie Path.");
+  }
+  return value;
+};
+
+const validateCookieDomain = (value: string): string => {
+  if (hasControlCharacter(value) || value.includes(";") || /\s/.test(value) || !/^[A-Za-z0-9.-]+$/.test(value)) {
+    throw new Error("Invalid cookie Domain.");
+  }
+  return value;
+};
+
 const tryDecodeCookiePart = (value: string): string | undefined => {
   try {
     return decodeCookiePart(value);
@@ -105,10 +129,10 @@ export const parseCookies = (header: string | null | undefined): Record<string, 
 export const serializeCookie = (name: string, value: string, options: CookieOptions = {}): string => {
   const parts = [`${encodeCookiePart(name)}=${encodeCookiePart(value)}`];
   if (options.path) {
-    parts.push(`Path=${options.path}`);
+    parts.push(`Path=${validateCookiePath(options.path)}`);
   }
   if (options.domain) {
-    parts.push(`Domain=${options.domain}`);
+    parts.push(`Domain=${validateCookieDomain(options.domain)}`);
   }
   if (options.maxAge !== undefined) {
     parts.push(`Max-Age=${Math.trunc(options.maxAge)}`);

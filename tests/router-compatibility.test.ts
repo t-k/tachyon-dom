@@ -2,10 +2,52 @@ import { describe, expect, it } from "vitest";
 import { createLambdaHandler, createWorkersHandler } from "../src/adapters";
 import { enhanceForm } from "../src/runtime/form";
 import { diagnoseHydrationBoundaries } from "../src/runtime/hydrate";
+import { createClientRouter, type ClientRouteDefinition } from "../src/runtime/router";
 import { readTextStreamChunks } from "../src/runtime/stream-client";
-import { type RouteDefinition } from "../src/router";
+import { matchRoute, type RouteDefinition } from "../src/router";
 
 describe("router compatibility matrix", () => {
+  it("keeps server and client route matching semantics aligned", async () => {
+    const cases = [
+      { href: "/users/new", routeId: "new-user", html: "<h1>new-user:{}</h1>" },
+      { href: "/users/launch%20notes", routeId: "user", html: `<h1>launch notes</h1>` },
+      { href: "/blog/2026/launch%20notes", routeId: "blog", html: `<h1>2026/launch notes</h1>` },
+      { href: "/users/42/", routeId: "user", html: `<h1>42</h1>` },
+      { href: "/missing", routeId: "fallback", html: `<h1>fallback:{}</h1>` },
+    ];
+    const serverRoutes: RouteDefinition[] = [
+      { id: "user", path: "/users/:id", render: ({ params }) => `<h1>${params.id}</h1>` },
+      { id: "new-user", path: "/users/new", render: () => "<h1>new-user:{}</h1>" },
+      { id: "blog", path: "/blog/*slug", render: ({ params }) => `<h1>${params.slug}</h1>` },
+      { id: "fallback", path: "*", render: () => "<h1>fallback:{}</h1>" },
+    ];
+    const clientRoutes: ClientRouteDefinition[] = [
+      { id: "user", path: "/users/:id", render: ({ params }) => `<h1>${params.id}</h1>` },
+      { id: "new-user", path: "/users/new", render: () => "<h1>new-user:{}</h1>" },
+      { id: "blog", path: "/blog/*slug", render: ({ params }) => `<h1>${params.slug}</h1>` },
+      { id: "fallback", path: "*", render: () => "<h1>fallback:{}</h1>" },
+    ];
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    history.replaceState({}, "", "/");
+    const router = createClientRouter({ root, routes: clientRoutes, scrollTo: () => undefined });
+    await router.start();
+
+    try {
+      for (const item of cases) {
+        const serverMatch = matchRoute(serverRoutes, `https://example.com${item.href}`);
+        expect(serverMatch.ok && serverMatch.value.route.id).toBe(item.routeId);
+        await router.navigate(item.href);
+        expect(root.innerHTML).toBe(item.html);
+      }
+    } finally {
+      router.dispose();
+    }
+  });
+
   it.each([
     { runtime: "workers", streaming: false },
     { runtime: "workers", streaming: true },

@@ -331,12 +331,20 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     const nextController = new AbortController();
     controller = nextController;
     const url = toUrl(href, location.href || baseUrl);
+    if (location.pathname === url.pathname && location.search === url.search && location.hash !== url.hash) {
+      if (navigateOptions.replace) {
+        history.replaceState({}, "", url);
+      } else {
+        history.pushState({}, "", url);
+      }
+      return;
+    }
     const match = matchClientRoute(options.routes, url.pathname);
     const task = (async () => {
       if (!match) {
         if (navigateOptions.replace) {
           history.replaceState({}, "", url);
-        } else if (location.pathname !== url.pathname || location.search !== url.search) {
+        } else if (location.pathname !== url.pathname || location.search !== url.search || location.hash !== url.hash) {
           history.pushState({}, "", url);
         }
         renderNotFound(url);
@@ -356,7 +364,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         }
         if (navigateOptions.replace) {
           history.replaceState({}, "", url);
-        } else if (location.pathname !== url.pathname || location.search !== url.search) {
+        } else if (location.pathname !== url.pathname || location.search !== url.search || location.hash !== url.hash) {
           history.pushState({}, "", url);
         }
         const target = routeTargetFor(options.root, match, url, data);

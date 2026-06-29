@@ -8,15 +8,7 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
-    "paths": {
-      "@reckona/mreact-reactive-core": ["../mreact/packages/reactive-core/src/index.ts"],
-      "@reckona/mreact-reactive-core/*": ["../mreact/packages/reactive-core/src/*.ts"],
-      "@reckona/mreact-reactive-dom": ["../mreact/packages/reactive-dom/src/index.ts"],
-      "@reckona/mreact-reactive-dom/*": ["../mreact/packages/reactive-dom/src/*.ts"],
-      "@reckona/mreact-shared": ["../mreact/packages/shared/src/index.ts"],
-      "@reckona/mreact-shared/*": ["../mreact/packages/shared/src/*.ts"]
-    }
+    "baseUrl": "."
   },
   "include": [
     "src",

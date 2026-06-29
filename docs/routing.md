@@ -73,6 +73,8 @@ HTML responses use explicit trusted HTML helpers:
 - `unsafeHtml(markup)` marks raw HTML as trusted and should only be used for framework-generated or otherwise trusted markup.
 - `sanitizeHtml(markup)` is available from `tachyon-dom/security` for allowlist-based backend sanitization before passing content to `html()`.
 
+`TrustedHtml` values are factory-created runtime values, not plain structural objects. Passing a hand-written object that only looks like `TrustedHtml` is rejected. Use `escapeToHtml()` for text and `sanitizeHtml()` with a vetted sanitizer adapter before rendering user-controlled HTML.
+
 The built-in sanitizer keeps path-relative URLs such as `/posts/1`, same-page fragments, and `mailto:` links. Absolute `http:`/`https:` URLs are removed unless their origin is listed in `allowedUrlOrigins`:
 
 ```ts
@@ -115,7 +117,7 @@ await renderRoute(routes, request, { cspNonce: nonce });
 - `middleware`
 - `hooks`
 
-`createSecurityHeaders()` returns default defense-in-depth headers including `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `COOP`, optional HSTS, and optional nonce-based CSP. Use `applySecurityHeaders(response, headers)` to merge them onto a response.
+`createSecurityHeaders()` returns default defense-in-depth headers including `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `COOP`, optional HSTS, and optional nonce-based CSP. CSP `nonce` and `frameAncestors` values are validated before they are inserted into the header; invalid values throw instead of producing a weakened or injected policy. Use `applySecurityHeaders(response, headers)` to merge them onto a response.
 
 `tachyon-dom/security` also exports:
 
@@ -123,7 +125,7 @@ await renderRoute(routes, request, { cspNonce: nonce });
 - `csrfInput(token)`
 - `verifyCsrfRequest(request, { token })`
 
-`tachyon-dom/cookies` exports `parseCookies()`, `serializeCookie()`, and `createMemorySessionStorage()` for small server adapters and examples.
+`tachyon-dom/cookies` exports `parseCookies()`, `serializeCookie()`, and `createMemorySessionStorage()` for small server adapters and examples. `serializeCookie()` validates `Path` and `Domain` attributes and throws on semicolons, control characters, CRLF, whitespace in domains, or other values that would inject extra cookie attributes or invalid header bytes.
 
 For server sessions, `createCookieSessionStorage({ secret })` stores signed session payloads in secure, HTTP-only, SameSite=Lax cookies. `signCookieValue()` and `verifySignedCookieValue()` are also exported for custom adapters.
 
@@ -158,6 +160,29 @@ export default createWorkersHandler<{ ASSETS: { fetch: (request: Request) => Pro
 ```
 
 If `basePath` is omitted, 404 responses from the binding fall through to the dynamic router. If `basePath` is provided, matching requests are treated as asset requests and the binding response is returned with `securityHeaders` merged.
+
+For Cloudflare Pages, `tachyon-dom/vite` also exports `packageCloudflarePages()`. It copies static assets into the Pages output directory and writes a bundled `_worker.js` with the Pages `fetch(request, env, ctx)` shape. The generated worker asks `env.ASSETS.fetch(request)` first and falls through to your renderer for configured statuses, 404 by default:
+
+```ts
+import { packageCloudflarePages } from "tachyon-dom/vite";
+
+await packageCloudflarePages({
+  assetsDir: "public",
+  entry: "src/renderer.ts",
+  outDir: ".tachyon/pages",
+  runtimeEnvKeys: ["SSR_API_BASE_URL"],
+});
+```
+
+The entry module should export `renderRequest(request, env, ctx, runtimeEnv)` or a default renderer. A minimal `wrangler.jsonc` for the generated directory is:
+
+```jsonc
+{
+  "name": "tachyon-app",
+  "pages_build_output_dir": ".tachyon/pages",
+  "compatibility_date": "2026-06-29"
+}
+```
 
 If your application already exposes a standards-based `Request -> Response` handler, use the fetch handler variants instead of adding a catch-all route. The fetch variants still apply `securityHeaders` and still serve configured static routes or assets before calling your app handler:
 

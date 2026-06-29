@@ -293,12 +293,25 @@ const escapeHtml = (value: unknown): string =>
     .replaceAll(">", "&gt;")
     .replaceAll(`"`, "&quot;");
 
-export const unsafeHtml = (value: string): TrustedHtml => ({ __tachyonTrustedHtml: true, value });
+const trustedHtmlValues = new WeakSet<TrustedHtml>();
+
+export const unsafeHtml = (value: string): TrustedHtml => {
+  const trusted = { __tachyonTrustedHtml: true as const, value };
+  trustedHtmlValues.add(trusted);
+  return trusted;
+};
 
 export const escapeToHtml = (value: unknown): TrustedHtml => unsafeHtml(escapeHtml(value));
 
-const trustedHtmlValue = (value: TrustedHtml | string): string =>
-  typeof value === "string" ? escapeHtml(value) : value.value;
+const trustedHtmlValue = (value: TrustedHtml | string): string => {
+  if (typeof value === "string") {
+    return escapeHtml(value);
+  }
+  if (!trustedHtmlValues.has(value)) {
+    throw new Error("TrustedHtml values must be created by tachyon-dom helpers.");
+  }
+  return value.value;
+};
 
 export const html = (body: TrustedHtml, init: ResponseInit = {}): RouteResponse => {
   const headers = new Headers(init.headers);
@@ -447,6 +460,40 @@ const readLimitedRequest = async (request: Request, maxBytes: number): Promise<R
   });
 };
 
+const validateCspNonce = (nonce: string): string => {
+  if (!/^[A-Za-z0-9+/_=-]+$/.test(nonce)) {
+    throw new Error("Invalid CSP nonce.");
+  }
+  return nonce;
+};
+
+const hasControlCharacter = (value: string): boolean => {
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code <= 0x1f || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const validateFrameAncestors = (value: string): string => {
+  if (hasControlCharacter(value) || value.includes(";")) {
+    throw new Error("Invalid CSP frame-ancestors.");
+  }
+  const sources = value.split(/\s+/).filter(Boolean);
+  if (
+    sources.length === 0 ||
+    sources.some((source) => source !== "'self'" && source !== "'none'" && !/^https?:\/\/[^\s;]+$/.test(source))
+  ) {
+    throw new Error("Invalid CSP frame-ancestors.");
+  }
+  if (sources.includes("'none'") && sources.length > 1) {
+    throw new Error("Invalid CSP frame-ancestors.");
+  }
+  return sources.join(" ");
+};
+
 export const createSecurityHeaders = (
   options: {
     nonce?: string;
@@ -465,10 +512,11 @@ export const createSecurityHeaders = (
     headers.set("strict-transport-security", "max-age=31536000; includeSubDomains; preload");
   }
   if (options.csp) {
-    const nonce = options.nonce ? ` 'nonce-${options.nonce}' 'strict-dynamic'` : "";
+    const nonce = options.nonce ? ` 'nonce-${validateCspNonce(options.nonce)}' 'strict-dynamic'` : "";
+    const frameAncestors = validateFrameAncestors(options.frameAncestors ?? "'self'");
     headers.set(
       "content-security-policy",
-      `script-src${nonce} 'report-sample'; object-src 'none'; base-uri 'none'; frame-ancestors ${options.frameAncestors ?? "'self'"}; form-action 'self'`,
+      `script-src${nonce} 'report-sample'; object-src 'none'; base-uri 'none'; frame-ancestors ${frameAncestors}; form-action 'self'`,
     );
   }
   return headers;
@@ -865,6 +913,9 @@ export const collectRouteResources = (
     if (!entry.route.resources) {
       continue;
     }
+    const id = routeId(entry.route, entry.path);
+    const routeData =
+      context?.loaderData && Object.hasOwn(context.loaderData, id) ? context.loaderData[id] : context?.data;
     const value =
       typeof entry.route.resources === "function"
         ? entry.route.resources({
@@ -873,7 +924,7 @@ export const collectRouteResources = (
             params: context?.params ?? entry.params,
             route: entry.route,
             env: context?.env ?? {},
-            data: context?.data,
+            data: routeData,
             loaderData: context?.loaderData ?? {},
             actionResult: context?.actionResult,
             outlet: context?.outlet ?? "",
@@ -1175,47 +1226,56 @@ export const renderRouteStream = async (
       }),
     });
   }
-  const rendered = await renderRoute(routes, request, options);
-  if (!rendered.ok) {
-    return ok({
-      status: rendered.error.status,
-      chunks: (async function* () {
-        yield rendered.error.message;
-      })(),
-      headHtml: "",
-      resourceHints: renderResourceHints(collectRouteResources(match.value.branch)),
-      stateScript: "",
-      headers: new Headers(),
-      final: Promise.resolve({
+  const renderedPromise = renderRoute(routes, request, options);
+  type SettledRender =
+    | { settled: true; rendered: Awaited<typeof renderedPromise> }
+    | { settled: false; rendered?: undefined };
+  const pending = (): Promise<SettledRender> => new Promise((resolve) => setTimeout(() => resolve({ settled: false }), 0));
+  const settle = (rendered: Awaited<typeof renderedPromise>): SettledRender => ({ settled: true, rendered });
+  const immediate = await Promise.race([renderedPromise.then(settle), pending()]);
+  if (immediate.settled) {
+    const rendered = immediate.rendered;
+    if (!rendered.ok) {
+      return ok({
         status: rendered.error.status,
+        chunks: (async function* () {
+          yield rendered.error.message;
+        })(),
         headHtml: "",
-        resourceHints: "",
+        resourceHints: renderResourceHints(collectRouteResources(match.value.branch)),
         stateScript: "",
         headers: new Headers(),
-      }),
-    });
-  }
-  if (rendered.value.status !== 200 || rendered.value.responseBody !== undefined) {
-    return ok({
-      status: rendered.value.status,
-      chunks: (async function* () {
-        const body = rendered.value.responseBody ?? rendered.value.html;
-        if (body) {
-          yield body;
-        }
-      })(),
-      headHtml: rendered.value.headHtml,
-      resourceHints: rendered.value.resourceHints,
-      stateScript: rendered.value.stateScript,
-      headers: rendered.value.headers,
-      final: Promise.resolve({
+        final: Promise.resolve({
+          status: rendered.error.status,
+          headHtml: "",
+          resourceHints: "",
+          stateScript: "",
+          headers: new Headers(),
+        }),
+      });
+    }
+    if (rendered.value.status !== 200 || rendered.value.responseBody !== undefined) {
+      return ok({
         status: rendered.value.status,
+        chunks: (async function* () {
+          const body = rendered.value.responseBody ?? rendered.value.html;
+          if (body) {
+            yield body;
+          }
+        })(),
         headHtml: rendered.value.headHtml,
         resourceHints: rendered.value.resourceHints,
         stateScript: rendered.value.stateScript,
         headers: rendered.value.headers,
-      }),
-    });
+        final: Promise.resolve({
+          status: rendered.value.status,
+          headHtml: rendered.value.headHtml,
+          resourceHints: rendered.value.resourceHints,
+          stateScript: rendered.value.stateScript,
+          headers: rendered.value.headers,
+        }),
+      });
+    }
   }
   const chunks = async function* (): AsyncIterable<string> {
     for (const entry of match.value.branch) {
@@ -1223,24 +1283,46 @@ export const renderRouteStream = async (
         yield entry.route.fallback;
       }
     }
+    const rendered = await renderedPromise;
+    if (!rendered.ok) {
+      yield rendered.error.message;
+      return;
+    }
+    if (rendered.value.status !== 200 || rendered.value.responseBody !== undefined) {
+      const body = rendered.value.responseBody ?? rendered.value.html;
+      if (body) {
+        yield body;
+      }
+      return;
+    }
     if (rendered.value.html) {
       yield rendered.value.html;
     }
   };
-  const final = Promise.resolve({
-    status: rendered.value.status,
-    headHtml: rendered.value.headHtml,
-    resourceHints: rendered.value.resourceHints,
-    stateScript: rendered.value.stateScript,
-    headers: rendered.value.headers,
-  });
+  const final = renderedPromise.then((rendered) =>
+    rendered.ok
+      ? {
+          status: rendered.value.status,
+          headHtml: rendered.value.headHtml,
+          resourceHints: rendered.value.resourceHints,
+          stateScript: rendered.value.stateScript,
+          headers: rendered.value.headers,
+        }
+      : {
+          status: rendered.error.status,
+          headHtml: "",
+          resourceHints: "",
+          stateScript: "",
+          headers: new Headers(),
+        },
+  );
   return ok({
-    status: rendered.value.status,
+    status: 200,
     chunks: chunks(),
-    headHtml: rendered.value.headHtml,
-    resourceHints: rendered.value.resourceHints,
-    stateScript: rendered.value.stateScript,
-    headers: rendered.value.headers,
+    headHtml: "",
+    resourceHints: renderResourceHints(collectRouteResources(match.value.branch)),
+    stateScript: "",
+    headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
     final,
   });
 };

@@ -245,6 +245,92 @@ describe("server adapters", () => {
     expect(chunks.join("")).toBe("<h1>Home</h1>");
   });
 
+  it("preserves multiple Set-Cookie headers in Node fetch responses", async () => {
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/";
+    req.headers = { host: "example.com" };
+    const headers = new Headers({ "content-type": "text/plain; charset=utf-8" });
+    headers.append("set-cookie", "sid=abc; Path=/; HttpOnly");
+    headers.append("set-cookie", "theme=dark; Path=/");
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    };
+
+    await createNodeFetchHandler({
+      fetch: () => new Response("ok", { headers }),
+    })(req as never, res as never);
+
+    expect(res.setHeader).toHaveBeenCalledWith("set-cookie", ["sid=abc; Path=/; HttpOnly", "theme=dark; Path=/"]);
+    expect(res.setHeader).toHaveBeenCalledWith("content-type", "text/plain; charset=utf-8");
+  });
+
+  it("preserves Set-Cookie arrays for Node static routes and assets", async () => {
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/";
+    req.headers = { host: "example.com" };
+    const routeRes = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    };
+
+    await createNodeHandler({
+      routes: [{ path: "/", render: () => "<h1>Dynamic</h1>" }],
+      staticRoutes: [
+        {
+          path: "/",
+          body: "<h1>Static</h1>",
+          headers: [
+            ["set-cookie", "a=1; Path=/"],
+            ["set-cookie", "b=2; Path=/"],
+          ],
+        },
+      ],
+    })(req as never, routeRes as never);
+
+    expect(routeRes.setHeader).toHaveBeenCalledWith("set-cookie", ["a=1; Path=/", "b=2; Path=/"]);
+
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-node-assets-"));
+    try {
+      await writeFile(path.join(dir, "app.txt"), "asset");
+      req.url = "/app.txt";
+      const assetRes = {
+        statusCode: 200,
+        setHeader: vi.fn(),
+        end: vi.fn(),
+      };
+      await createNodeFetchHandler({
+        staticAssets: {
+          rootDir: dir,
+          headers: [
+            ["set-cookie", "asset=1; Path=/"],
+            ["set-cookie", "asset2=1; Path=/"],
+          ],
+        },
+        fetch: () => new Response("dynamic"),
+      })(req as never, assetRes as never);
+
+      expect(assetRes.setHeader).toHaveBeenCalledWith("set-cookie", [
+        "asset=1; Path=/",
+        "asset2=1; Path=/",
+      ]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("serves static Node routes before the dynamic router", async () => {
     const render = vi.fn(() => "<h1>Dynamic</h1>");
     const routes: RouteDefinition[] = [{ path: "/", render }];

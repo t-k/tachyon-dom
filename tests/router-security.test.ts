@@ -8,7 +8,7 @@ import {
   verifySignedCookieValue,
 } from "../src/cookies";
 import { createCsrfToken, createHtmlSanitizer, csrfInput, sanitizeHtml, verifyCsrfRequest } from "../src/security";
-import { html, redirect, renderRoute, unsafeHtml, type RouteDefinition } from "../src/router";
+import { createSecurityHeaders, html, redirect, renderRoute, unsafeHtml, type RouteDefinition } from "../src/router";
 
 describe("router security helpers", () => {
   it("sanitizes route HTML before creating trusted HTML responses", async () => {
@@ -21,6 +21,13 @@ describe("router security helpers", () => {
     );
 
     expect(result.ok && result.value.html).toBe(`<article><h1>Post</h1><a>bad</a></article>`);
+  });
+
+  it("requires factory-created TrustedHtml values at runtime", () => {
+    expect(html(unsafeHtml("<strong>Safe</strong>")).body).toBe("<strong>Safe</strong>");
+    expect(() =>
+      html({ __tachyonTrustedHtml: true, value: "<img src=x onerror=alert(1)>" } as never),
+    ).toThrow("TrustedHtml values must be created by tachyon-dom helpers");
   });
 
   it("rejects protocol-relative and unapproved absolute sanitizer URLs", () => {
@@ -106,6 +113,49 @@ describe("router security helpers", () => {
     const restored = await storage.getSession(cookie);
 
     expect(restored.data).toEqual({ userId: "u1" });
+  });
+
+  it("rejects cookie path and domain values that can inject attributes or headers", async () => {
+    expect(() => serializeCookie("sid", "abc", { path: "/; SameSite=None" })).toThrow("Invalid cookie Path");
+    expect(() => serializeCookie("sid", "abc", { path: "/\r\nSet-Cookie: injected=1" })).toThrow(
+      "Invalid cookie Path",
+    );
+    expect(() => serializeCookie("sid", "abc", { domain: "example.test; Secure" })).toThrow(
+      "Invalid cookie Domain",
+    );
+    expect(serializeCookie("sid", "abc", { path: "/", domain: "example.test" })).toBe(
+      "sid=abc; Path=/; Domain=example.test",
+    );
+
+    const memoryStorage = createMemorySessionStorage({
+      cookieName: "sid",
+      cookie: { path: "/; SameSite=None" },
+      id: () => "s1",
+    });
+    await expect(memoryStorage.commitSession({ id: "s1", data: {} })).rejects.toThrow("Invalid cookie Path");
+
+    const cookieStorage = createCookieSessionStorage({
+      secret: "secret",
+      cookieName: "sid",
+      cookie: { path: "/", domain: "example.test; Secure" },
+      id: () => "s1",
+    });
+    await expect(cookieStorage.commitSession({ id: "s1", data: {} })).rejects.toThrow("Invalid cookie Domain");
+  });
+
+  it("rejects CSP options that can inject directives or source expressions", () => {
+    expect(createSecurityHeaders({ csp: true, nonce: "abc123" }).get("content-security-policy")).toContain(
+      `script-src 'nonce-abc123' 'strict-dynamic'`,
+    );
+    expect(() => createSecurityHeaders({ csp: true, nonce: "abc' https://evil.test 'unsafe-inline" })).toThrow(
+      "Invalid CSP nonce",
+    );
+    expect(() => createSecurityHeaders({ csp: true, frameAncestors: "'self'; script-src *" })).toThrow(
+      "Invalid CSP frame-ancestors",
+    );
+    expect(createSecurityHeaders({ csp: true, frameAncestors: "'self' https://app.example" }).get(
+      "content-security-policy",
+    )).toContain("frame-ancestors 'self' https://app.example");
   });
 
   it("signs cookie values and rejects tampered session cookies", async () => {

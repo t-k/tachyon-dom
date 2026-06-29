@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createServer, type Plugin } from "vite";
 import {
   addPageFiles,
@@ -20,7 +20,8 @@ import { defineApp, generateTemplateTypes, pagesFromRouteFiles, renderAppDocumen
 import { diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
-import { tachyonApp, tachyonDom, tachyonDomRoutes } from "../src/vite";
+import { verifyPackageArtifacts } from "../src/package-integrity";
+import { packageCloudflarePages, tachyonApp, tachyonDom, tachyonDomRoutes } from "../src/vite";
 import * as viteIntegration from "../src/vite";
 
 type PanelScope = {
@@ -766,6 +767,111 @@ void chunks;
           ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
         ),
       ).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("verifies package export and bin artifacts before release", async () => {
+    const packageJson = JSON.parse(await readFile(path.join(process.cwd(), "package.json"), "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    const workflow = await readFile(path.join(process.cwd(), ".github", "workflows", "ci.yml"), "utf8");
+    expect(packageJson.scripts?.["verify:package"]).toBe("node scripts/verify-package-artifacts.mjs");
+    expect(workflow).toContain("pnpm verify:package");
+
+    const realResult = await verifyPackageArtifacts({ packageDir: process.cwd(), checkPack: false });
+    expect(realResult.ok).toBe(true);
+    if (!realResult.ok) {
+      throw new Error(realResult.error);
+    }
+    expect(realResult.value.checkedFiles).toContain("dist/tachyon-html.d.ts");
+
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-package-artifacts-"));
+    try {
+      await mkdir(path.join(dir, "dist"), { recursive: true });
+      await writeFile(path.join(dir, "dist", "index.js"), "export {};\n");
+      await writeFile(path.join(dir, "dist", "index.d.ts"), "export {};\n");
+      await writeFile(
+        path.join(dir, "package.json"),
+        JSON.stringify(
+          {
+            name: "fixture-package",
+            version: "0.0.0",
+            type: "module",
+            files: ["dist"],
+            bin: { fixture: "./dist/cli.js" },
+            exports: {
+              ".": { types: "./dist/index.d.ts", import: "./dist/index.js" },
+              "./missing": { types: "./dist/missing.d.ts" },
+            },
+          },
+          null,
+          2,
+        ),
+      );
+
+      const missing = await verifyPackageArtifacts({ packageDir: dir, checkPack: true });
+      expect(missing.ok).toBe(false);
+      expect(!missing.ok && missing.error).toContain("bin.fixture -> ./dist/cli.js");
+      expect(!missing.ok && missing.error).toContain("exports../missing.types -> ./dist/missing.d.ts");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("packages a Cloudflare Pages worker with copied assets and ASSETS fallback", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-pages-package-"));
+    try {
+      const publicDir = path.join(dir, "public");
+      const srcDir = path.join(dir, "src");
+      const outDir = path.join(dir, "pages");
+      await mkdir(path.join(publicDir, "assets"), { recursive: true });
+      await mkdir(srcDir, { recursive: true });
+      await writeFile(path.join(publicDir, "assets", "app.css"), "body{color:red}");
+      await writeFile(
+        path.join(srcDir, "entry.ts"),
+        `export const renderRequest = (request, env) => new Response(String(env.SSR_API_BASE_URL) + ":" + new URL(request.url).pathname, { headers: { "x-rendered": "yes" } });\n`,
+      );
+
+      const result = await packageCloudflarePages({
+        assetsDir: publicDir,
+        entry: path.join(srcDir, "entry.ts"),
+        outDir,
+        runtimeEnvKeys: ["SSR_API_BASE_URL"],
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) {
+        throw new Error(result.error);
+      }
+      expect(await readdir(outDir)).toContain("_worker.js");
+      expect(await readFile(path.join(outDir, "assets", "app.css"), "utf8")).toBe("body{color:red}");
+      const workerCode = await readFile(result.value.workerPath, "utf8");
+      const workerModule = (await import(
+        /* @vite-ignore */ `data:text/javascript;base64,${Buffer.from(workerCode).toString("base64")}`
+      )) as {
+        default: { fetch: (request: Request, env: Record<string, unknown>, ctx: unknown) => Promise<Response> };
+      };
+      const assetFetch = vi.fn((request: Request) =>
+        new URL(request.url).pathname === "/assets/app.css"
+          ? new Response("asset css", { headers: { "content-type": "text/css" } })
+          : new Response("missing", { status: 404 }),
+      );
+
+      const asset = await workerModule.default.fetch(
+        new Request("https://example.com/assets/app.css"),
+        { ASSETS: { fetch: assetFetch }, SSR_API_BASE_URL: "https://api.example" },
+        {},
+      );
+      expect(await asset.text()).toBe("asset css");
+
+      const page = await workerModule.default.fetch(
+        new Request("https://example.com/dashboard"),
+        { ASSETS: { fetch: assetFetch }, SSR_API_BASE_URL: "https://api.example" },
+        {},
+      );
+      expect(page.headers.get("x-rendered")).toBe("yes");
+      expect(await page.text()).toBe("https://api.example:/dashboard");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

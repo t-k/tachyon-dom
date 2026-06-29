@@ -73,6 +73,40 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("updates hash-only same-route links without reloading route data", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/page?tab=a");
+    let loads = 0;
+    const scrolled: Array<[number, number]> = [];
+    const router = createClientRouter({
+      root,
+      routes: [
+        {
+          path: "/page",
+          load: () => ({ count: ++loads }),
+          render: ({ data }) => `<a href="/page?tab=a#section">Section ${(data as { count: number }).count}</a>`,
+        },
+      ],
+      scrollTo: (x, y) => scrolled.push([x, y]),
+    });
+    await router.start();
+    expect(loads).toBe(1);
+
+    root.querySelector("a")?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    await router.settled();
+
+    expect(location.pathname).toBe("/page");
+    expect(location.search).toBe("?tab=a");
+    expect(location.hash).toBe("#section");
+    expect(loads).toBe(1);
+    expect(scrolled).toHaveLength(1);
+    router.dispose();
+  });
+
   it("updates route targets without replacing persistent shell DOM", async () => {
     document.body.innerHTML = `<main id="app"><nav data-shell="stable"><a href="/orders">Orders</a></nav><section id="outlet"></section></main>`;
     const root = document.querySelector("#app");
