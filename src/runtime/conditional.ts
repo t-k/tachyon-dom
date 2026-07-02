@@ -197,6 +197,7 @@ export const mountConditional = (
   if (!visible) {
     if (current) {
       cleanup(current);
+      states.delete(anchor);
     }
     return;
   }

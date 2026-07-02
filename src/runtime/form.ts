@@ -61,9 +61,9 @@ export type EnhanceFormOptions = {
   navigate?: (href: string, options?: { replace?: boolean }) => void | Promise<void>;
 };
 
-const formMethod = (form: HTMLFormElement): string => (form.method || "get").toUpperCase();
+const formMethod = (form: HTMLFormElement): string => (form.getAttribute("method") || "get").toUpperCase();
 
-const formAction = (form: HTMLFormElement): URL => new URL(form.action || location.href, location.href);
+const formAction = (form: HTMLFormElement): URL => new URL(form.getAttribute("action") || location.href, location.href);
 
 const requestForForm = (form: HTMLFormElement, formData: FormData): Request => {
   const method = formMethod(form);
@@ -170,7 +170,7 @@ export const enhanceForm = (form: HTMLFormElement, options: EnhanceFormOptions =
       form.reportValidity();
       return;
     }
-    const formData = new FormData(form);
+    const formData = event.submitter instanceof HTMLElement ? new FormData(form, event.submitter) : new FormData(form);
     const request = requestForForm(form, formData);
     const context = { form, request, formData };
     void (async () => {

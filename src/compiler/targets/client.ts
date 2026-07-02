@@ -16,6 +16,7 @@ import {
   hydrationBoundaryFor,
   isHydrationAttribute,
   isForNode,
+  isVoidElement,
   isStoreNode,
   itemNameFromKey,
   attrString,
@@ -26,17 +27,43 @@ import {
 } from "../utils.js";
 import { isAssignableExpression } from "../expression.js";
 
-const lowerTextNode = (node: TextNode, path: number[], context: LoweringContext): string => {
+type LoweredNode = {
+  html: string;
+  nodeCount: number;
+};
+
+const lowerTextNode = (node: TextNode, path: number[], context: LoweringContext): LoweredNode => {
   let output = "";
+  let nodeOffset = 0;
+  let lastEmittedWasText = false;
+  const separateTextNode = (): void => {
+    if (lastEmittedWasText) {
+      output += "<!---->";
+      nodeOffset++;
+    }
+  };
   for (const segment of textExpressionSegments(node.value)) {
     if (segment.kind === "text") {
+      if (!segment.value) {
+        continue;
+      }
+      separateTextNode();
       output += segment.value;
+      nodeOffset++;
+      lastEmittedWasText = true;
       continue;
     }
-    context.bindings.push({ kind: "text", path: [...path], expression: segment.value });
+    separateTextNode();
+    context.bindings.push({
+      kind: "text",
+      path: [...path.slice(0, -1), (path.at(-1) ?? 0) + nodeOffset],
+      expression: segment.value,
+    });
     output += " ";
+    nodeOffset++;
+    lastEmittedWasText = true;
   }
-  return output;
+  return { html: output, nodeCount: nodeOffset };
 };
 
 const addStoreDefinitions = (node: ElementNode, context: LoweringContext): void => {
@@ -77,9 +104,16 @@ const lowerComponent = (node: ElementNode, path: number[], context: LoweringCont
     return "";
   }
   if (children.length === 1) {
-    return lowerNode(children[0] as TemplateNode, path, context);
+    return lowerNode(children[0] as TemplateNode, path, context).html;
   }
-  return children.map((child, index) => lowerNode(child, [...path, index], context)).join("");
+  let html = "";
+  let domIndex = 0;
+  for (const child of children) {
+    const lowered = lowerNode(child, [...path, domIndex], context);
+    html += lowered.html;
+    domIndex += lowered.nodeCount;
+  }
+  return html;
 };
 
 const lowerIf = (node: ElementNode, path: number[], context: LoweringContext): string => {
@@ -90,9 +124,13 @@ const lowerIf = (node: ElementNode, path: number[], context: LoweringContext): s
     components: [],
   };
   const children = renderableChildren(node);
-  const templateHtml = children
-    .map((child, index) => lowerNode(child, children.length === 1 ? [] : [index], childContext))
-    .join("");
+  let templateHtml = "";
+  let domIndex = 0;
+  for (const child of children) {
+    const lowered = lowerNode(child, children.length === 1 ? [] : [domIndex], childContext);
+    templateHtml += lowered.html;
+    domIndex += lowered.nodeCount;
+  }
   context.bindings.push({
     kind: "if",
     path: [...path],
@@ -121,9 +159,13 @@ const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
     components: [],
   };
   const children = renderableChildren(node);
-  const templateHtml = children
-    .map((child, index) => lowerNode(child, children.length === 1 ? [] : [index], childContext))
-    .join("");
+  let templateHtml = "";
+  let domIndex = 0;
+  for (const child of children) {
+    const lowered = lowerNode(child, children.length === 1 ? [] : [domIndex], childContext);
+    templateHtml += lowered.html;
+    domIndex += lowered.nodeCount;
+  }
   for (const child of node.children) {
     if (isForNode(child)) {
       childContext.bindings.push(lowerList(child, []));
@@ -235,17 +277,20 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
       addStoreDefinitions(child, context);
       continue;
     }
-    children += lowerNode(child, [...path, domIndex], context);
-    domIndex++;
+    const lowered = lowerNode(child, [...path, domIndex], context);
+    children += lowered.html;
+    domIndex += lowered.nodeCount;
   }
-  return `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
+  return isVoidElement(node)
+    ? `<${node.tagName}${attrs.join("")}>`
+    : `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
 };
 
-const lowerNode = (node: TemplateNode, path: number[], context: LoweringContext): string => {
+const lowerNode = (node: TemplateNode, path: number[], context: LoweringContext): LoweredNode => {
   if (node.type === "text") {
     return lowerTextNode(node, path, context);
   }
-  return lowerElement(node, path, context);
+  return { html: lowerElement(node, path, context), nodeCount: 1 };
 };
 
 export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client"] => {
@@ -483,6 +528,7 @@ const emitListBinding = (binding: ListBinding, reactive: boolean, sourceName: st
     `    key: ${JSON.stringify(binding.key)},`,
     `    keyRead: (scope) => ${bindingReadExpression(binding.key)},`,
     `    itemName: ${JSON.stringify(binding.itemName)},`,
+    `    scope: ${sourceName},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
     `  };`,

@@ -6,6 +6,26 @@ import {
   generateServerStreamModule,
   renderServerTemplate,
 } from "../src/compiler";
+import { setText, textAt } from "../src/runtime/text";
+
+const mountClientTextBindings = (
+  templateHtml: string,
+  bindings: Array<{ kind: string; path: number[] }>,
+  scope: Record<string, unknown>,
+): HTMLElement => {
+  document.body.innerHTML = templateHtml;
+  const root = document.body.firstElementChild;
+  if (!(root instanceof HTMLElement)) {
+    throw new Error("Missing mounted root.");
+  }
+  for (const binding of bindings) {
+    if (binding.kind === "text") {
+      const expression = "expression" in binding && typeof binding.expression === "string" ? binding.expression : "";
+      setText(textAt(root, binding.path), scope[expression]);
+    }
+  }
+  return root;
+};
 
 describe("HTML-first compiler", () => {
   it("extracts text bindings while keeping a static client template", () => {
@@ -21,6 +41,58 @@ describe("HTML-first compiler", () => {
       { kind: "text", path: [0, 0], expression: "row.id" },
       { kind: "text", path: [1, 0, 0], expression: "row.label" },
     ]);
+  });
+
+  it("preserves static text around client text bindings after mounting", () => {
+    const result = compileTemplate(`<p>Hello {name}!</p>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const root = mountClientTextBindings(result.value.client.templateHtml, result.value.client.bindings, {
+      name: "World",
+    });
+
+    expect(root.textContent).toBe("Hello World!");
+  });
+
+  it("keeps multiple expressions in one text node independent after client mounting", () => {
+    const result = compileTemplate(`<p>{a} and {b}</p>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const root = mountClientTextBindings(result.value.client.templateHtml, result.value.client.bindings, {
+      a: "x",
+      b: "y",
+    });
+
+    expect(root.textContent).toBe("x and y");
+  });
+
+  it("omits closing tags for void elements in client and server targets", () => {
+    const result = compileTemplate(`<div><br/>{label}<hr/></div>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.templateHtml).toBe(`<div><br> <hr></div>`);
+    expect(renderServerTemplate(result.value, { label: "Ready" })).toBe(`<div><br>Ready<hr></div>`);
+    expect(generateServerStreamModule(result.value)).not.toContain(`</hr>`);
+  });
+
+  it("escapes quoted static attributes in generated markup", () => {
+    const result = compileTemplate(`<button title='say "hi"' data-note="rock & roll">Save</button>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.templateHtml).toBe(
+      `<button title="say &quot;hi&quot;" data-note="rock &amp; roll">Save</button>`,
+    );
+    expect(renderServerTemplate(result.value, {})).toBe(
+      `<button title="say &quot;hi&quot;" data-note="rock &amp; roll">Save</button>`,
+    );
   });
 
   it("separates class and event directives from static markup", () => {
@@ -84,7 +156,7 @@ describe("HTML-first compiler", () => {
       throw new Error(result.error.message);
     }
 
-    expect(result.value.client.templateHtml).toBe(`<section><input></input><label><input></input> </label></section>`);
+    expect(result.value.client.templateHtml).toBe(`<section><input><label><input> </label></section>`);
     expect(result.value.client.bindings).toEqual([
       { kind: "attr", path: [], name: "data-count", expression: "count + 1" },
       { kind: "style", path: [], name: "width", expression: `size + "px"` },
@@ -96,7 +168,7 @@ describe("HTML-first compiler", () => {
 
     const refs: { panel?: Element } = {};
     expect(renderServerTemplate(result.value, { count: 2, size: 10, user: { name: "Ada", active: true }, refs })).toBe(
-      `<section data-count="3" style="width:10px"><input></input><label><input></input>Ada</label></section>`,
+      `<section data-count="3" style="width:10px"><input><label><input>Ada</label></section>`,
     );
 
     const code = generateClientModule(result.value);

@@ -232,6 +232,69 @@ describe("mountKeyedList", () => {
     expect(calls).toEqual(["new"]);
   });
 
+  it("allows row bindings to read handlers and values from the outer scope", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const removed: number[] = [];
+    const outerScope = {
+      prefix: "Row",
+      remove: (id: number) => {
+        removed.push(id);
+      },
+    };
+    const options = {
+      key: "row.id",
+      itemName: "row",
+      scope: outerScope,
+      templateHtml: `<li><button title=""> </button></li>`,
+      bindings: [
+        {
+          kind: "attr" as const,
+          path: [0],
+          name: "title",
+          expression: "prefix",
+          read: (scope: Record<string, unknown>) => scope.prefix,
+        },
+        {
+          kind: "event" as const,
+          path: [0],
+          eventName: "click",
+          handler: "remove(row.id)",
+          read: (scope: Record<string, unknown>) => () =>
+            (scope.remove as (id: number) => void)((scope.row as { id: number }).id),
+        },
+      ],
+    };
+
+    mountKeyedList(root, [], [{ id: 7 }], options);
+
+    const button = root.querySelector("button");
+    expect(button?.getAttribute("title")).toBe("Row");
+    button?.click();
+    expect(removed).toEqual([7]);
+  });
+
+  it("removes surplus SSR rows when the first client mount has fewer items", () => {
+    document.body.innerHTML = `<ul id="items"><li><span>One</span></li><li><span>Two</span></li><li><span>Three</span></li></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [{ kind: "text" as const, path: [0, 0], expression: "item.label" }],
+    };
+
+    mountKeyedList(root, [], [{ id: 1, label: "One" }], options);
+
+    expect(Array.from(root.children, (child) => child.textContent)).toEqual(["One"]);
+  });
+
   it("delegates row events through the list container", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

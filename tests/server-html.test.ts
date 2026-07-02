@@ -14,6 +14,13 @@ describe("server html helper", () => {
     expect(String(view)).toBe(`<input value="&quot;x&quot; &amp; &lt;y&gt;" />`);
   });
 
+  it("escapes single quotes in quoted attribute interpolation", () => {
+    const strings = [`<a href='`, `'>link</a>`] as unknown as TemplateStringsArray;
+    const view = html(strings, `' onmouseover='alert(1)`);
+
+    expect(String(view)).toBe(`<a href='&#39; onmouseover=&#39;alert(1)'>link</a>`);
+  });
+
   it("renders optional attributes, boolean attributes, classes, nested fragments, and lists", () => {
     const view = html`<section${attr("data-name", "Ada & Lin")}${attr("hidden", null)}${booleanAttr(
       "aria-busy",

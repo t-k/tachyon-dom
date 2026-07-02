@@ -51,7 +51,7 @@ export type ScheduleHydrationBoundariesOptions = {
 
 type HydrationCleanup = void | (() => void);
 
-const escapeScriptJson = (value: string): string => value.replaceAll("<", "\\u003c").replaceAll("-->", "--\\>");
+const escapeScriptJson = (value: string): string => value.replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
 
 const escapeAttribute = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll(`"`, "&quot;").replaceAll("<", "&lt;");
@@ -158,7 +158,7 @@ export const createHydrationBoundary = (
 
 export const serializeHydrationState = (id: string, state: unknown, options: { nonce?: string } = {}): string => {
   const nonce = options.nonce ? ` nonce="${escapeAttribute(options.nonce)}"` : "";
-  return `<script type="application/json" data-tachyon-state="${escapeAttribute(id)}"${nonce}>${escapeScriptJson(JSON.stringify(state))}</script>`;
+  return `<script type="application/json" data-tachyon-state="${escapeAttribute(id)}"${nonce}>${escapeScriptJson(JSON.stringify(state) ?? "null")}</script>`;
 };
 
 export const readHydrationState = <T>(root: ParentNode, id: string): Result<T, HydrationBoundaryError> => {

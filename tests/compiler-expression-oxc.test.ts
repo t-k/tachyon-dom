@@ -36,12 +36,24 @@ describe("compiler expression OXC backend", () => {
     );
   });
 
-  it("keeps comparison coercion aligned between SSR evaluation and generated client JS", () => {
+  it("keeps comparison semantics aligned between SSR evaluation and generated client JS", () => {
     const scope = { count: "10", limit: "2" };
     const js = expressionToJs("count > limit", new Set(), "scope");
     const clientValue = Function("scope", `return ${js}`)(scope);
 
-    expect(evaluateExpression("count > limit", scope)).toBe(true);
-    expect(clientValue).toBe(true);
+    expect(evaluateExpression("count > limit", scope)).toBe(false);
+    expect(clientValue).toBe(false);
+  });
+
+  it("evaluates equality and string comparisons with JavaScript semantics", () => {
+    expect(evaluateExpression("a != b", { a: 3, b: 2 })).toBe(true);
+    expect(evaluateExpression("a == b", { a: 1, b: 2 })).toBe(false);
+    expect(evaluateExpression("'apple' < 'banana'", {})).toBe(true);
+    expect(evaluateExpression("'apple' <= 'apple'", {})).toBe(true);
+  });
+
+  it("decodes native string literal escapes", () => {
+    expect(evaluateExpression(String.raw`'a\nb'`, {})).toBe("a\nb");
+    expect(evaluateExpression(String.raw`'it\'s ok'`, {})).toBe("it's ok");
   });
 });

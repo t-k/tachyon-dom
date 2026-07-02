@@ -4,6 +4,7 @@ import {
   attrString,
   expressionToScopeAccess,
   hydrationBoundaryFor,
+  isVoidElement,
   itemNameFromKey,
   jsOptionalPropertyAccess,
   jsString,
@@ -143,7 +144,9 @@ const renderElementYieldStatements = (
   for (const entry of childPathEntries(node.children, path)) {
     statements.push(...renderNodeYieldStatements(entry.child, locals, indent, entry.path));
   }
-  statements.push(`${indent}yield ${jsString(`</${node.tagName}>`)};`);
+  if (!isVoidElement(node)) {
+    statements.push(`${indent}yield ${jsString(`</${node.tagName}>`)};`);
+  }
   if (hydrateBoundary) {
     const marker =
       hydrateBoundary.idKind === "static"
@@ -212,7 +215,7 @@ const renderNodeYieldStatements = (
 
 export const generateServerStreamModule = (template: CompiledTemplate): string => {
   const lines = [
-    `const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
+    `const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");`,
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `export const stream = async function* (scope) {`,
     ...renderNodeYieldStatements(template.root, new Set(), "  "),

@@ -80,6 +80,20 @@ describe("hydrate boundary runtime", () => {
     expect(main.querySelector("section")?.outerHTML).toBe(boundaryBefore);
   });
 
+  it("serializes comment-close text and undefined state as valid JSON", () => {
+    document.body.innerHTML = `<main>${serializeHydrationState("article", { body: "before --> after" })}${serializeHydrationState("empty", undefined)}</main>`;
+    const main = document.querySelector("main");
+    if (!main) {
+      throw new Error("Missing main.");
+    }
+
+    const article = readHydrationState<{ body: string }>(main, "article");
+    const empty = readHydrationState<null>(main, "empty");
+
+    expect(article.ok && article.value).toEqual({ body: "before --> after" });
+    expect(empty.ok && empty.value).toBe(null);
+  });
+
   it("schedules idle, media, and interaction hydration strategies", () => {
     document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--><section><button>Open</button></section><!--tachyon-hydrate:panel:end--></main>`;
     const main = document.querySelector("main");

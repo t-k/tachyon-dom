@@ -38,7 +38,8 @@ const escapeText = (value: unknown): string =>
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll(`"`, "&quot;");
+    .replaceAll(`"`, "&quot;")
+    .replaceAll("'", "&#39;");
 
 const escapeAttribute = (value: unknown): string => escapeText(value).replaceAll("'", "&#39;").replaceAll("`", "&#96;");
 

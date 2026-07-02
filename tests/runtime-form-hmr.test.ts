@@ -28,6 +28,57 @@ describe("runtime form and HMR helpers", () => {
     cleanup();
   });
 
+  it("includes the clicked submitter in enhanced form data", async () => {
+    document.body.innerHTML = `<form action="/save" method="post"><input name="title" value="Hello"><button name="intent" value="publish">Publish</button></form>`;
+    const form = document.querySelector("form");
+    const button = document.querySelector("button");
+    if (!(form instanceof HTMLFormElement) || !(button instanceof HTMLButtonElement)) {
+      throw new Error("Missing form.");
+    }
+    const submitted: string[] = [];
+    const cleanup = enhanceForm(form, {
+      submit: ({ formData }) => {
+        submitted.push(String(formData.get("intent")));
+        return new Response("ok");
+      },
+    });
+
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: button }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(submitted).toEqual(["publish"]);
+    cleanup();
+  });
+
+  it("reads action and method attributes when form properties are clobbered", async () => {
+    document.body.innerHTML = `<form action="/save" method="post"><input name="action" value="/clobbered"><input name="method" value="get"></form>`;
+    const form = document.querySelector("form");
+    const actionInput = document.querySelector(`input[name="action"]`);
+    const methodInput = document.querySelector(`input[name="method"]`);
+    if (
+      !(form instanceof HTMLFormElement) ||
+      !(actionInput instanceof HTMLInputElement) ||
+      !(methodInput instanceof HTMLInputElement)
+    ) {
+      throw new Error("Missing form.");
+    }
+    Object.defineProperty(form, "action", { configurable: true, value: actionInput });
+    Object.defineProperty(form, "method", { configurable: true, value: methodInput });
+    const submitted: string[] = [];
+    const cleanup = enhanceForm(form, {
+      submit: ({ request }) => {
+        submitted.push(`${request.method} ${new URL(request.url).pathname}`);
+        return new Response("ok");
+      },
+    });
+
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(submitted).toEqual(["POST /save"]);
+    cleanup();
+  });
+
   it("validates form data before enhanced submission and focuses invalid fields", async () => {
     document.body.innerHTML = `<form action="/save" method="post"><input name="email" value="bad"></form>`;
     const form = document.querySelector("form");

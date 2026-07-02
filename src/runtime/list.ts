@@ -67,6 +67,7 @@ type KeyedListOptions = {
   key: string;
   keyRead?: ExpressionReader;
   itemName: string;
+  scope?: Record<string, unknown>;
   templateHtml: string;
   bindings: Binding[];
 };
@@ -127,7 +128,11 @@ const readBinding = (
 const readHandler = (scope: Record<string, unknown>, binding: EventBinding): unknown =>
   binding.read ? binding.read(scope) : readPath(scope, binding.handler);
 
-const scopedItem = (itemName: string, item: unknown): Record<string, unknown> => ({ [itemName]: item });
+const scopedItem = (
+  itemName: string,
+  item: unknown,
+  scope: Record<string, unknown> | undefined,
+): Record<string, unknown> => ({ ...scope, [itemName]: item });
 
 const nodeAt = (root: Node, path: readonly number[]): Node => {
   let current = root;
@@ -294,7 +299,7 @@ const bindRowControls = (record: RowRecord, options: KeyedListOptions): void => 
 };
 
 const keyFor = (item: unknown, options: KeyedListOptions): PropertyKey => {
-  const scope = scopedItem(options.itemName, item);
+  const scope = scopedItem(options.itemName, item, options.scope);
   const key = options.keyRead ? options.keyRead(scope) : readPath(scope, options.key);
   if (typeof key === "string" || typeof key === "number" || typeof key === "symbol") {
     return key;
@@ -316,7 +321,7 @@ const createRecord = (
   if (!element) {
     return undefined;
   }
-  const scope = scopedItem(options.itemName, item);
+  const scope = scopedItem(options.itemName, item, options.scope);
   const record = {
     key,
     element,
@@ -335,6 +340,9 @@ const createRecord = (
 };
 
 const updateRecord = (record: RowRecord, item: unknown, options: KeyedListOptions): void => {
+  if (options.scope) {
+    Object.assign(record.scope, options.scope);
+  }
   record.scope[options.itemName] = item;
   applyRowBindings(record, record.scope, options);
 };
@@ -400,6 +408,11 @@ export const mountKeyedList = (
       }
     }
   });
+  if (canAdoptServerRows) {
+    for (const element of Array.from(container.children).slice(orderedRecords.length)) {
+      element.parentNode?.removeChild(element);
+    }
+  }
   let elementIndex = 0;
   let nodeIndex = 0;
   for (let index = 0; index < orderedRecords.length; index++) {

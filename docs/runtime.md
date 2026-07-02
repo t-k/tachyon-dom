@@ -89,6 +89,8 @@ This helper escapes values; it is not an arbitrary HTML sanitizer. Do not pass u
 
 `tachyon-dom/server/form-action` provides a small SSR form round-trip convention. `formAction()` parses `Request.formData()`, routes success and error branches, and keeps the validation library choice in userland. `preserveFormValues()` preserves submitted values while excluding common password fields by default. `formField()` returns stable input attributes and accessible error markup with `aria-invalid`, `aria-describedby`, and a deterministic error id. `redirectResponse()` accepts path-relative redirects by default; external redirects require `allowExternal: true` and an explicit `allowedOrigins` entry.
 
+`formAction()` is a low-level `Request -> Response` helper. When you call it directly, enforce the accepted HTTP methods and your CSRF/Origin policy before invoking the returned handler. Route actions rendered through `renderRoute()` can use the router-level `csrf` option; direct `formAction()` handlers do not add that protection automatically.
+
 ```ts
 import { err, ok } from "tachyon-dom";
 import { formAction, formField, formState, preserveFormValues, redirectResponse } from "tachyon-dom/server/form-action";

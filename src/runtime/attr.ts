@@ -3,7 +3,13 @@ export const setAttributeValue = (element: Element, name: string, value: unknown
     element.removeAttribute(name);
     if (name in element) {
       try {
-        (element as unknown as Record<string, unknown>)[name] = false;
+        const properties = element as unknown as Record<string, unknown>;
+        const current = properties[name];
+        if (typeof current === "boolean") {
+          properties[name] = false;
+        } else if (name === "value" && typeof current === "string") {
+          properties[name] = "";
+        }
       } catch {
         // Some readonly DOM properties throw on assignment.
       }

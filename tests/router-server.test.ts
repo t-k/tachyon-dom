@@ -23,6 +23,15 @@ describe("server router", () => {
     expect(missing.ok && missing.value.route.id).toBe("fallback");
   });
 
+  it("returns a route error instead of throwing for invalid encoded params", () => {
+    const routes: RouteDefinition[] = [{ id: "item", path: "/items/:id", render: () => "" }];
+
+    const result = matchRoute(routes, "/items/%zz");
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.status).toBe(400);
+  });
+
   it("renders route loaders, nested layouts, head tags, and hydration state", async () => {
     const routes: RouteDefinition[] = [
       {
@@ -61,6 +70,27 @@ describe("server router", () => {
     expect(result.value.headHtml).toContain(`<link rel="modulepreload" href="/app.js">`);
     expect(result.value.stateScript).toContain(`data-tachyon-state="route:user"`);
     expect(result.value.loaderData).toEqual({ user: { name: "User 42" } });
+  });
+
+  it("serializes undefined loader data as null hydration state", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        id: "optional",
+        path: "/optional",
+        loader: () => undefined,
+        render: () => `<p>optional</p>`,
+      },
+    ];
+
+    const result = await renderRoute(routes, "https://example.com/optional");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+    expect(result.value.status).toBe(200);
+    expect(result.value.stateScript).toContain(`data-tachyon-state="route:optional"`);
+    expect(result.value.stateScript).toContain(`>null</script>`);
   });
 
   it("runs route actions before rendering loader data", async () => {

@@ -169,7 +169,8 @@ export const escapeHtml = (value: unknown): string =>
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll(`"`, "&quot;");
+    .replaceAll(`"`, "&quot;")
+    .replaceAll("'", "&#39;");
 
 export const escapeMarker = (value: unknown): string =>
   String(value ?? "")
@@ -184,8 +185,26 @@ export const serializeStaticAttr = (attr: Attribute): string => {
   if (attr.value === true) {
     return ` ${attr.name}`;
   }
-  return ` ${attr.name}="${attr.value}"`;
+  return ` ${attr.name}="${escapeHtml(attr.value)}"`;
 };
+
+export const voidElementNames = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "source",
+  "track",
+  "wbr",
+]);
+
+export const isVoidElement = (node: ElementNode): boolean => voidElementNames.has(node.tagName);
 
 export const expressionToScopeAccess = (
   expression: string,

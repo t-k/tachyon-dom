@@ -36,6 +36,8 @@ type Parser = {
 const operators = [
   "===",
   "!==",
+  "==",
+  "!=",
   "??",
   "?.",
   ">=",
@@ -65,6 +67,8 @@ const binaryPrecedence = new Map([
   ["||", 1],
   ["??", 1],
   ["&&", 2],
+  ["==", 3],
+  ["!=", 3],
   ["===", 3],
   ["!==", 3],
   [">", 4],
@@ -113,8 +117,29 @@ const tokenize = (source: string): Result<Token[], CompilerError> => {
       let value = "";
       while (offset < source.length && source[offset] !== quote) {
         if (source[offset] === "\\") {
-          value += source[offset] as string;
           offset++;
+          const escaped = source[offset] as string | undefined;
+          if (escaped === undefined) {
+            return expressionError("Unclosed string literal.");
+          }
+          value +=
+            escaped === "n"
+              ? "\n"
+              : escaped === "r"
+                ? "\r"
+                : escaped === "t"
+                  ? "\t"
+                  : escaped === "b"
+                    ? "\b"
+                    : escaped === "f"
+                      ? "\f"
+                      : escaped === "v"
+                        ? "\v"
+                        : escaped === "0"
+                          ? "\0"
+                          : escaped;
+          offset++;
+          continue;
         }
         value += source[offset] as string;
         offset++;
@@ -616,6 +641,8 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
   const right = evaluateExpressionNode(node.right, scope);
   if (node.operator === "===") return left === right;
   if (node.operator === "!==") return left !== right;
+  if (node.operator === "==") return left == right;
+  if (node.operator === "!=") return left != right;
   if (node.operator === "&&") return left && right;
   if (node.operator === "||") return left || right;
   if (node.operator === "+") {
@@ -627,10 +654,13 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
   if (node.operator === "*") return Number(left) * Number(right);
   if (node.operator === "/") return Number(left) / Number(right);
   if (node.operator === "%") return Number(left) % Number(right);
-  if (node.operator === ">") return Number(left) > Number(right);
-  if (node.operator === "<") return Number(left) < Number(right);
-  if (node.operator === ">=") return Number(left) >= Number(right);
-  return Number(left) <= Number(right);
+  const comparableLeft = left as number;
+  const comparableRight = right as number;
+  if (node.operator === ">") return comparableLeft > comparableRight;
+  if (node.operator === "<") return comparableLeft < comparableRight;
+  if (node.operator === ">=") return comparableLeft >= comparableRight;
+  if (node.operator === "<=") return comparableLeft <= comparableRight;
+  return undefined;
 };
 
 export const evaluateExpression = (source: string, scope: Record<string, unknown>): unknown => {
@@ -706,13 +736,6 @@ export const expressionNodeToJs = (
         typeof part === "string" ? JSON.stringify(part) : `String(${expressionNodeToJs(part, locals, scopeName)})`,
       )
       .join(" + ");
-  }
-  if (node.operator === ">" || node.operator === "<" || node.operator === ">=" || node.operator === "<=") {
-    return `(Number(${expressionNodeToJs(node.left, locals, scopeName)}) ${node.operator} Number(${expressionNodeToJs(
-      node.right,
-      locals,
-      scopeName,
-    )}))`;
   }
   return `(${expressionNodeToJs(node.left, locals, scopeName)} ${node.operator} ${expressionNodeToJs(
     node.right,

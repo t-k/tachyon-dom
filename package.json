@@ -205,6 +205,7 @@
     "example:web": "vite --host 127.0.0.1",
     "test": "vitest run",
     "verify:package": "node scripts/verify-package-artifacts.mjs",
+    "prepublishOnly": "pnpm build && pnpm verify:package",
     "lint": "oxlint .",
     "format": "oxfmt --write ."
   },

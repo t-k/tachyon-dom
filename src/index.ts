@@ -15,3 +15,4 @@ export { renderToReadableStream } from "./server/stream.js";
 export { err, ok };
 export { textAt } from "./runtime/text.js";
 export type { KeyedRows, KeyedRowsOptions } from "./runtime/keyed-rows.js";
+export type { Err, Ok, Result } from "./result.js";

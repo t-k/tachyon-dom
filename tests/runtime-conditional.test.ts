@@ -45,4 +45,22 @@ describe("mountConditional", () => {
     });
     expect(root.querySelector("button")).toBeNull();
   });
+
+  it("remounts conditional content after hide and show with the same signature", () => {
+    document.body.innerHTML = `<section><!----></section>`;
+    const root = document.querySelector("section");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing root.");
+    }
+    const options = {
+      templateHtml: `<span> </span>`,
+      bindings: [{ kind: "text" as const, path: [0], expression: "message" }],
+    };
+
+    mountConditional(root, [0], true, { message: "Hello" }, options);
+    mountConditional(root, [0], false, { message: "Hidden" }, options);
+    mountConditional(root, [0], true, { message: "Again" }, options);
+
+    expect(root.querySelector("span")?.textContent).toBe("Again");
+  });
 });

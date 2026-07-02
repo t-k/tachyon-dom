@@ -385,7 +385,7 @@ export const resolveDeferredData = async <T extends Record<string, unknown>>(dat
   return resolved as T;
 };
 
-const escapeScriptJson = (value: string): string => value.replaceAll("<", "\\u003c").replaceAll("-->", "--\\>");
+const escapeScriptJson = (value: string): string => value.replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
 
 const escapeAttribute = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll(`"`, "&quot;").replaceAll("<", "&lt;");
@@ -397,7 +397,7 @@ export const renderDeferredDataScript = async <T extends Record<string, unknown>
 ): Promise<string> => {
   const resolved = await resolveDeferredData(data);
   const nonce = options.nonce ? ` nonce="${escapeAttribute(options.nonce)}"` : "";
-  return `<script type="application/json" data-tachyon-deferred="${escapeAttribute(id)}"${nonce}>${escapeScriptJson(JSON.stringify(resolved))}</script>`;
+  return `<script type="application/json" data-tachyon-deferred="${escapeAttribute(id)}"${nonce}>${escapeScriptJson(JSON.stringify(resolved) ?? "null")}</script>`;
 };
 
 const verifyCsrf = async (request: Request, options: NonNullable<RouteRenderOptions["csrf"]>): Promise<boolean> => {
@@ -845,9 +845,14 @@ export const matchRoute = (
     if (!match) {
       continue;
     }
-    const params = Object.fromEntries(
-      compiled.names.map((name, index) => [name, decodeURIComponent(match[index + 1] ?? "")]),
-    );
+    const params: RouteParams = {};
+    for (const [index, name] of compiled.names.entries()) {
+      try {
+        params[name] = decodeURIComponent(match[index + 1] ?? "");
+      } catch {
+        return err(routeError(`Invalid route parameter encoding for ${name}.`, 400));
+      }
+    }
     const branch = candidate.branch.map((entry) => ({ ...entry, params }));
     const matched = { route: candidate.route, branch, params, pathname };
     if (compiled.wildcard) {

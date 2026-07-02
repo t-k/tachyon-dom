@@ -320,10 +320,10 @@ export const compileTachyonSfc = (source: string): Result<CompiledTachyonSfc, Co
 export const generateScriptOnlyModule = (target: "client" | "server" | "stream"): string => {
   if (target === "server") {
     return [
-      `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll("-->", "--\\\\>");`,
+      `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll(">", "\\\\u003e");`,
       `const escapeAttribute = (value) => String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");`,
       `export const hydrationBoundaries = [];`,
-      `export const renderHydrationState = (id, state) => '<script type="application/json" data-tachyon-state="' + escapeAttribute(id) + '">' + escapeScriptJson(JSON.stringify(state)) + '</script>';`,
+      `export const renderHydrationState = (id, state) => '<script type="application/json" data-tachyon-state="' + escapeAttribute(id) + '">' + escapeScriptJson(JSON.stringify(state) ?? "null") + '</script>';`,
       `export const render = () => "";`,
     ].join("\n");
   }
@@ -338,7 +338,9 @@ export const generateScriptOnlyModule = (target: "client" | "server" | "stream")
   ].join("\n");
 };
 
-export const transformSfcScript = (script: TachyonSfcScript | undefined): Result<TransformedSfcScript, CompilerError> => {
+export const transformSfcScript = (
+  script: TachyonSfcScript | undefined,
+): Result<TransformedSfcScript, CompilerError> => {
   if (!script || script.content.trim().length === 0) {
     return ok({ code: "", setupBindings: [] });
   }
@@ -395,7 +397,11 @@ export const generateSfcScriptDeclarations = (script: TachyonSfcScript | undefin
   });
   if (result.outputText.trim().length === 0) {
     const diagnostic = result.diagnostics?.find((item) => item.category === ts.DiagnosticCategory.Error);
-    return err(diagnostic ? ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n") : "Unable to emit script declarations.");
+    return err(
+      diagnostic
+        ? ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")
+        : "Unable to emit script declarations.",
+    );
   }
   return ok(result.outputText.trim());
 };

@@ -29,6 +29,23 @@ describe("attribute and form runtime helpers", () => {
     expect(button.style.width).toBe("");
   });
 
+  it("removes string reflected attributes without writing false into the DOM property", () => {
+    document.body.innerHTML = `<button title="Save"></button><input value="Ada">`;
+    const button = document.querySelector("button");
+    const input = document.querySelector("input");
+    if (!(button instanceof HTMLButtonElement) || !(input instanceof HTMLInputElement)) {
+      throw new Error("Missing controls.");
+    }
+
+    setAttributeValue(button, "title", null);
+    setAttributeValue(input, "value", null);
+
+    expect(button.hasAttribute("title")).toBe(false);
+    expect(button.title).toBe("");
+    expect(input.hasAttribute("value")).toBe(false);
+    expect(input.value).toBe("");
+  });
+
   it("binds text inputs and checkbox controls", () => {
     document.body.innerHTML = `<input id="name"><input id="active" type="checkbox">`;
     const name = document.querySelector("#name");

@@ -7,6 +7,7 @@ import {
   expressionToScopeAccess,
   hydrationBoundaryFor,
   isHydrationAttribute,
+  isVoidElement,
   jsOptionalPropertyAccess,
   jsString,
   itemNameFromKey,
@@ -172,10 +173,11 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
   if (styles.length > 0) {
     attrs.push(` style="${escapeHtml(styles.join(";"))}"`);
   }
-  const children = childPathEntries(node.children, path)
-    .map((entry) => renderNode(entry.child, scope, entry.path))
-    .join("");
-  const html = `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
+  const html = isVoidElement(node)
+    ? `<${node.tagName}${attrs.join("")}>`
+    : `<${node.tagName}${attrs.join("")}>${childPathEntries(node.children, path)
+        .map((entry) => renderNode(entry.child, scope, entry.path))
+        .join("")}</${node.tagName}>`;
   if (!hydrateBoundary) {
     return html;
   }
@@ -342,7 +344,9 @@ const renderElementExpression = (
   parts.push(
     ...childPathEntries(node.children, path).map((entry) => renderNodeExpression(entry.child, locals, entry.path)),
   );
-  parts.push(jsString(`</${node.tagName}>`));
+  if (!isVoidElement(node)) {
+    parts.push(jsString(`</${node.tagName}>`));
+  }
   const expression = parts.join(" + ");
   const hydrateBoundary = hydrationBoundaryFor(node, path);
   if (!hydrateBoundary) {
@@ -394,12 +398,12 @@ const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string
 
 export const generateServerModule = (template: CompiledTemplate): string => {
   const lines = [
-    `const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");`,
+    `const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");`,
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
-    `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll("-->", "--\\\\>");`,
+    `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll(">", "\\\\u003e");`,
     `const escapeAttribute = (value) => String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");`,
     `export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`,
-    `export const renderHydrationState = (id, state) => '<script type="application/json" data-tachyon-state="' + escapeAttribute(id) + '">' + escapeScriptJson(JSON.stringify(state)) + '</script>';`,
+    `export const renderHydrationState = (id, state) => '<script type="application/json" data-tachyon-state="' + escapeAttribute(id) + '">' + escapeScriptJson(JSON.stringify(state) ?? "null") + '</script>';`,
     `export const render = (scope) => ${renderElementExpression(template.root)};`,
   ];
   return `${lines.join("\n")}\n`;
