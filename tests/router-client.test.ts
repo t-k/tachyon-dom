@@ -446,6 +446,74 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("wraps client navigation commits in view transitions when enabled", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: false })),
+    );
+    const startViewTransition = vi.fn((update: () => Promise<void> | void) => {
+      const updateCallbackDone = Promise.resolve(update());
+      return { updateCallbackDone, finished: updateCallbackDone };
+    });
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: startViewTransition });
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => rawHtml(`<h1>Home</h1>`) },
+        { path: "/next", render: () => rawHtml(`<h1>Next</h1>`) },
+      ],
+      scrollTo: () => undefined,
+      viewTransition: true,
+    });
+
+    await router.start();
+    await router.navigate("/next");
+
+    expect(startViewTransition).toHaveBeenCalled();
+    expect(root.innerHTML).toBe("<h1>Next</h1>");
+    router.dispose();
+  });
+
+  it("skips view transitions when reduced motion is requested", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: true })),
+    );
+    const startViewTransition = vi.fn((update: () => Promise<void> | void) => {
+      const updateCallbackDone = Promise.resolve(update());
+      return { updateCallbackDone, finished: updateCallbackDone };
+    });
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: startViewTransition });
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => rawHtml(`<h1>Home</h1>`) },
+        { path: "/next", render: () => rawHtml(`<h1>Next</h1>`) },
+      ],
+      scrollTo: () => undefined,
+      viewTransition: true,
+    });
+
+    await router.start();
+    await router.navigate("/next");
+
+    expect(startViewTransition).not.toHaveBeenCalled();
+    expect(root.innerHTML).toBe("<h1>Next</h1>");
+    router.dispose();
+  });
+
   it("aborts in-flight prefetches on dispose", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");

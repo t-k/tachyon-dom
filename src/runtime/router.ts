@@ -62,6 +62,7 @@ export type ClientRouterOptions = {
   eager?: boolean;
   liveRegion?: Element;
   title?: (context: { url: URL; data: unknown }) => string;
+  viewTransition?: boolean | ((context: { url: URL; params: ClientRouteParams; data: unknown }) => boolean);
 };
 
 export type ClientRouter = {
@@ -78,6 +79,15 @@ export type ClientRouter = {
 type NavigateOptions = {
   replace?: boolean;
   restoreScroll?: boolean;
+};
+
+type ViewTransitionResult = {
+  updateCallbackDone?: Promise<unknown>;
+  finished?: Promise<unknown>;
+};
+
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (update: () => void | Promise<void>) => ViewTransitionResult;
 };
 
 export type RouteHotReloader = {
@@ -352,6 +362,47 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     }
   };
 
+  const shouldUseViewTransition = (url: URL, match: ClientMatch, data: unknown): boolean => {
+    const setting = options.viewTransition;
+    if (!setting) {
+      return false;
+    }
+    if (typeof (document as ViewTransitionDocument).startViewTransition !== "function") {
+      return false;
+    }
+    if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return false;
+    }
+    return typeof setting === "function" ? setting({ url, params: match.params, data }) : true;
+  };
+
+  const commitNavigation = async (
+    url: URL,
+    match: ClientMatch,
+    data: unknown,
+    rendered: ClientRenderValue,
+    navigateOptions: NavigateOptions,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    const target = routeTargetFor(options.root, match, url, data);
+    const commit = async (): Promise<void> => {
+      renderInto(target, rendered);
+      await updateHead(url, match, data, signal);
+      if (signal.aborted) {
+        return;
+      }
+      restoreOrScroll(url, navigateOptions);
+      focusRouteContent(target, focusSelector);
+      updateA11y(url, data);
+    };
+    if (!shouldUseViewTransition(url, match, data)) {
+      await commit();
+      return;
+    }
+    const transition = (document as ViewTransitionDocument).startViewTransition?.(commit);
+    await (transition?.updateCallbackDone ?? transition?.finished ?? Promise.resolve());
+  };
+
   const scrollKeyFor = (state: unknown): number | undefined => {
     if (!state || typeof state !== "object") {
       return undefined;
@@ -534,15 +585,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
           return;
         }
         writeHistory(url, navigateOptions);
-        const target = routeTargetFor(options.root, match, url, data);
-        renderInto(target, rendered);
-        await updateHead(url, match, data, nextController.signal);
-        if (nextController.signal.aborted) {
-          return;
-        }
-        restoreOrScroll(url, navigateOptions);
-        focusRouteContent(target, focusSelector);
-        updateA11y(url, data);
+        await commitNavigation(url, match, data, rendered, navigateOptions, nextController.signal);
       } catch (error) {
         if (!nextController.signal.aborted) {
           renderError(url, error);
