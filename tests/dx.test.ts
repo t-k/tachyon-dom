@@ -225,8 +225,11 @@ describe("DX helpers", () => {
     expect(packageJson.scripts?.["check:size"]).toBe("size-limit");
     expect(packageJson["size-limit"]?.map((entry) => entry.name)).toEqual(publicJsExportNames);
     expect(packageJson["size-limit"]?.some((entry) => entry.name === "td-modules")).toBe(false);
+    expect(ci).toContain("workflow_dispatch");
     expect(ci).toContain("pnpm check:exports");
     expect(ci).toContain("pnpm check:size");
+    expect(ci).toContain("github.event_name == 'workflow_dispatch'");
+    expect(ci).toContain("pnpm bench:local:smoke");
     expect(release).toContain("tags:");
     expect(release).toContain("npm publish --provenance --access public");
   });

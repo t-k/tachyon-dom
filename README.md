@@ -248,7 +248,7 @@ Template files use the short `.td` extension. The Vite plugin and file router al
 
 `pnpm bench:local:full` runs the canonical production comparison with extra warmup and measured iterations for noisier performance investigations.
 
-`pnpm bench:local:smoke` runs the same local comparison with one warmup and one measured iteration for feature-PR checks.
+`pnpm bench:local:smoke` runs the same local comparison with one warmup and one measured iteration for manual benchmark smoke checks. The CI workflow exposes it through `workflow_dispatch`; normal push and pull request runs skip the benchmark.
 
 `pnpm bench:local:gate` runs the local comparison with operation and memory regression thresholds.
 

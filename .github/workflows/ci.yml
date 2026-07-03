@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -39,3 +40,4 @@ jobs:
       - run: pnpm test
 
       - run: pnpm bench:local:smoke
+        if: github.event_name == 'workflow_dispatch'
