@@ -48,6 +48,13 @@ The first list runtime path, `tachyon-dom/runtime/list`, preserves keyed row ele
 
 `tachyon-dom/app` provides a small app definition layer for examples and applications that should not need duplicated `main.ts`, `ssr.ts`, and HTML entry files. Define pages once, render SSR documents from the same definition, and let the Vite preset serve generated HTML in development and emit minified HTML in production:
 
+Create a starter app with:
+
+```sh
+npm create tachyon-dom@latest my-app
+pnpm create tachyon-dom my-app
+```
+
 ```ts
 import { defineApp } from "tachyon-dom/app";
 import { tachyonApp, tachyonDom } from "tachyon-dom/vite";

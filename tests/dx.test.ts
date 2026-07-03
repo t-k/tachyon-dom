@@ -120,6 +120,21 @@ describe("DX helpers", () => {
     });
   });
 
+  it("renders defineApp routes through a compiled SSR renderer", () => {
+    const app = defineApp({
+      pages: [
+        {
+          path: "/",
+          fileName: "index.html",
+          template: `<main><h1>{title.toUpperCase()}</h1><p>{count + 1}</p></main>`,
+          scope: { title: "home", count: 1 },
+        },
+      ],
+    });
+
+    expect(app.renderRoute("/")).toBe(`<main><h1>HOME</h1><p>2</p></main>`);
+  });
+
   it("marks the package as tree-shakable for bundlers", async () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
       sideEffects?: boolean;
@@ -596,6 +611,23 @@ export default { selected: false };
       "--template",
       "basic",
     ]);
+  });
+
+  it("ships a create-tachyon-dom package for npm create and pnpm create", async () => {
+    const packageJson = JSON.parse(await readFile("packages/create-tachyon-dom/package.json", "utf8")) as {
+      name?: string;
+      bin?: Record<string, string>;
+      dependencies?: Record<string, string>;
+    };
+    const entry = await readFile("packages/create-tachyon-dom/src/index.ts", "utf8");
+    const readme = await readFile("README.md", "utf8");
+
+    expect(packageJson.name).toBe("create-tachyon-dom");
+    expect(packageJson.bin).toEqual({ "create-tachyon-dom": "./dist/index.js" });
+    expect(packageJson.dependencies).toHaveProperty("tachyon-dom");
+    expect(entry).toContain(`runCli(process.argv.slice(2), "create-tachyon-dom")`);
+    expect(readme).toContain("npm create tachyon-dom@latest my-app");
+    expect(readme).toContain("pnpm create tachyon-dom my-app");
   });
 
   it("describes real dev and preview CLI commands", () => {

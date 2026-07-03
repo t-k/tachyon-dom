@@ -33,6 +33,10 @@
       "types": "./dist/compiler.d.ts",
       "import": "./dist/compiler.js"
     },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    },
     "./app": {
       "types": "./dist/app.d.ts",
       "import": "./dist/app.js"

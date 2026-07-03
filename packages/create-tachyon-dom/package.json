@@ -1,0 +1,30 @@
+{
+  "name": "create-tachyon-dom",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Create a Tachyon DOM starter app.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "create-tachyon-dom": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "dependencies": {
+    "tachyon-dom": "^0.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
