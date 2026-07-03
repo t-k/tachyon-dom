@@ -388,6 +388,67 @@ const moveBefore = (container: Element, node: Node, before: Node | null): void =
   container.insertBefore(node, before);
 };
 
+const longestIncreasingSubsequencePositions = (values: readonly number[]): Set<number> => {
+  const predecessors = Array(values.length).fill(-1) as number[];
+  const tails: number[] = [];
+  const tailPositions: number[] = [];
+  for (let index = 0; index < values.length; index++) {
+    const value = values[index] as number;
+    if (value < 0) {
+      continue;
+    }
+    let low = 0;
+    let high = tails.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if ((tails[middle] as number) < value) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    if (low > 0) {
+      predecessors[index] = tailPositions[low - 1] as number;
+    }
+    tails[low] = value;
+    tailPositions[low] = index;
+  }
+  const positions = new Set<number>();
+  let cursor = tailPositions[tails.length - 1] ?? -1;
+  while (cursor >= 0) {
+    positions.add(cursor);
+    cursor = predecessors[cursor] as number;
+  }
+  return positions;
+};
+
+const positionRecords = (
+  container: Element,
+  orderedRecords: readonly RowRecord[],
+  previousRecords: ReadonlyMap<PropertyKey, RowRecord>,
+): void => {
+  const previousOrder = new Map<PropertyKey, number>();
+  Array.from(previousRecords.keys()).forEach((key, index) => previousOrder.set(key, index));
+  const stablePositions = longestIncreasingSubsequencePositions(
+    orderedRecords.map((record) => previousOrder.get(record.key) ?? -1),
+  );
+  let anchor: Node | null = null;
+  for (let index = orderedRecords.length - 1; index >= 0; index--) {
+    const record = orderedRecords[index] as RowRecord;
+    if (stablePositions.has(index)) {
+      anchor = record.nodes[0] ?? anchor;
+      continue;
+    }
+    for (let nodeIndex = record.nodes.length - 1; nodeIndex >= 0; nodeIndex--) {
+      const node = record.nodes[nodeIndex] as Node;
+      if (node.parentNode !== container || node.nextSibling !== anchor) {
+        moveBefore(container, node, anchor);
+      }
+      anchor = node;
+    }
+  }
+};
+
 export const mountKeyedList = (
   root: Element,
   path: readonly number[],
@@ -444,23 +505,6 @@ export const mountKeyedList = (
       element.parentNode?.removeChild(element);
     }
   }
-  let elementIndex = 0;
-  let nodeIndex = 0;
-  for (let index = 0; index < orderedRecords.length; index++) {
-    const record = orderedRecords[index] as RowRecord;
-    for (const node of record.nodes) {
-      const currentNode =
-        node instanceof Element
-          ? (container.children[elementIndex] ?? null)
-          : (container.childNodes[nodeIndex] ?? null);
-      if (currentNode !== node) {
-        moveBefore(container, node, currentNode);
-      }
-      if (node instanceof Element) {
-        elementIndex++;
-      }
-      nodeIndex++;
-    }
-  }
+  positionRecords(container, orderedRecords, state.records);
   state.records = nextRecords;
 };

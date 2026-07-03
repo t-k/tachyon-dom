@@ -244,6 +244,51 @@ describe("mountKeyedList", () => {
     expect(root.innerHTML).toBe(`<li><span>Two</span></li><li><span>One</span></li>`);
   });
 
+  it("moves only out-of-order keyed rows for a far swap", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    let moves = 0;
+    (root as HTMLElement & { moveBefore: (node: Node, child: Node | null) => void }).moveBefore = (node, child) => {
+      moves++;
+      root.insertBefore(node, child);
+    };
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [{ kind: "text" as const, path: [0, 0], expression: "item.label" }],
+    };
+    const rows = Array.from({ length: 10 }, (_, id) => ({ id, label: String(id) }));
+
+    mountKeyedList(root, [], rows, options);
+    moves = 0;
+    mountKeyedList(
+      root,
+      [],
+      [rows[0], rows[8], ...rows.slice(2, 8), rows[1], rows[9]].filter((row): row is (typeof rows)[number] =>
+        Boolean(row),
+      ),
+      options,
+    );
+
+    expect(moves).toBeLessThanOrEqual(2);
+    expect(Array.from(root.children, (child) => child.textContent)).toEqual([
+      "0",
+      "8",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "1",
+      "9",
+    ]);
+  });
+
   it("keeps event handlers current when keyed rows are reused", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");
