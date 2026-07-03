@@ -67,6 +67,11 @@ export type ClientRouter = {
   dispose: () => void;
 };
 
+type NavigateOptions = {
+  replace?: boolean;
+  restoreScroll?: boolean;
+};
+
 export type RouteHotReloader = {
   accept: (update?: { routeIds?: readonly string[]; href?: string }) => Promise<void>;
 };
@@ -259,6 +264,8 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   const cache = new Map<string, unknown>();
   const prefetchControllers = new Map<string, AbortController>();
   const eagerlyNavigated = new WeakSet<HTMLAnchorElement>();
+  const scrollPositions = new Map<number, { x: number; y: number }>();
+  let nextScrollKey = 1;
   const cacheKey = (url: URL): string => `${url.pathname}${url.search}`;
   for (const entry of options.initialCache ?? []) {
     cache.set(cacheKey(toUrl(entry.href, baseUrl)), entry.data);
@@ -290,6 +297,83 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     }
     if (options.liveRegion) {
       options.liveRegion.textContent = `Navigated to ${url.pathname}`;
+    }
+  };
+
+  const scrollKeyFor = (state: unknown): number | undefined => {
+    if (!state || typeof state !== "object") {
+      return undefined;
+    }
+    const value = (state as Record<string, unknown>).__tachyonScrollKey;
+    return typeof value === "number" ? value : undefined;
+  };
+
+  const ensureScrollState = (): number => {
+    const existing = scrollKeyFor(history.state);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const key = nextScrollKey++;
+    history.replaceState(
+      { ...(history.state && typeof history.state === "object" ? history.state : {}), __tachyonScrollKey: key },
+      "",
+      location.href,
+    );
+    return key;
+  };
+
+  const currentScrollPosition = (): { x: number; y: number } => ({
+    x: window.scrollX ?? window.pageXOffset ?? 0,
+    y: window.scrollY ?? window.pageYOffset ?? 0,
+  });
+
+  const saveCurrentScrollPosition = (): void => {
+    scrollPositions.set(ensureScrollState(), currentScrollPosition());
+  };
+
+  const writeHistory = (url: URL, navigateOptions: NavigateOptions): void => {
+    const state = {
+      ...(history.state && typeof history.state === "object" ? history.state : {}),
+      __tachyonScrollKey: navigateOptions.restoreScroll
+        ? (scrollKeyFor(history.state) ?? nextScrollKey++)
+        : nextScrollKey++,
+    };
+    if (navigateOptions.restoreScroll) {
+      return;
+    }
+    if (navigateOptions.replace) {
+      history.replaceState(state, "", url);
+    } else if (location.pathname !== url.pathname || location.search !== url.search || location.hash !== url.hash) {
+      history.pushState(state, "", url);
+    }
+  };
+
+  const scrollHashIntoView = (url: URL): boolean => {
+    if (!url.hash) {
+      return false;
+    }
+    const id = decodeURIComponent(url.hash.slice(1));
+    const namedTarget =
+      typeof CSS !== "undefined" && typeof CSS.escape === "function"
+        ? document.querySelector(`[name="${CSS.escape(id)}"]`)
+        : null;
+    const target = document.getElementById(id) ?? namedTarget;
+    if (target instanceof HTMLElement || target instanceof SVGElement) {
+      target.scrollIntoView();
+      return true;
+    }
+    return false;
+  };
+
+  const restoreOrScroll = (url: URL, navigateOptions: NavigateOptions): void => {
+    if (navigateOptions.restoreScroll) {
+      const key = scrollKeyFor(history.state);
+      const position = key === undefined ? undefined : scrollPositions.get(key);
+      scrollTo(position?.x ?? 0, position?.y ?? 0);
+      return;
+    }
+    if (!scrollHashIntoView(url)) {
+      scrollTo(0, 0);
     }
   };
 
@@ -365,29 +449,25 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     return response;
   };
 
-  const navigate = async (href: string, navigateOptions: { replace?: boolean } = {}): Promise<void> => {
+  const navigate = async (href: string, navigateOptions: NavigateOptions = {}): Promise<void> => {
     controller?.abort();
     const nextController = new AbortController();
     controller = nextController;
     const url = toUrl(href, location.href || baseUrl);
+    if (!navigateOptions.restoreScroll) {
+      saveCurrentScrollPosition();
+    }
     if (location.pathname === url.pathname && location.search === url.search && location.hash !== url.hash) {
-      if (navigateOptions.replace) {
-        history.replaceState({}, "", url);
-      } else {
-        history.pushState({}, "", url);
-      }
+      writeHistory(url, navigateOptions);
+      restoreOrScroll(url, navigateOptions);
       return;
     }
     const match = matchClientRoute(routes, url.pathname);
     const task = (async () => {
       if (!match) {
-        if (navigateOptions.replace) {
-          history.replaceState({}, "", url);
-        } else if (location.pathname !== url.pathname || location.search !== url.search || location.hash !== url.hash) {
-          history.pushState({}, "", url);
-        }
+        writeHistory(url, navigateOptions);
         renderNotFound(url);
-        scrollTo(0, 0);
+        restoreOrScroll(url, navigateOptions);
         focusRouteContent(options.root, focusSelector);
         return;
       }
@@ -401,14 +481,10 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         if (nextController.signal.aborted) {
           return;
         }
-        if (navigateOptions.replace) {
-          history.replaceState({}, "", url);
-        } else if (location.pathname !== url.pathname || location.search !== url.search || location.hash !== url.hash) {
-          history.pushState({}, "", url);
-        }
+        writeHistory(url, navigateOptions);
         const target = routeTargetFor(options.root, match, url, data);
         renderInto(target, rendered);
-        scrollTo(0, 0);
+        restoreOrScroll(url, navigateOptions);
         focusRouteContent(target, focusSelector);
         updateA11y(url, data);
       } catch (error) {
@@ -482,7 +558,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   };
 
   const onPopState = (): void => {
-    void navigate(location.pathname + location.search + location.hash, { replace: true });
+    void navigate(location.pathname + location.search + location.hash, { replace: true, restoreScroll: true });
   };
 
   return {

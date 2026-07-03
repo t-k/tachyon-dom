@@ -98,11 +98,14 @@ describe("client router", () => {
   });
 
   it("updates hash-only same-route links without reloading route data", async () => {
-    document.body.innerHTML = `<main id="app"></main>`;
+    document.body.innerHTML = `<main id="app"></main><section id="section"></section>`;
     const root = document.querySelector("#app");
+    const section = document.querySelector("#section");
     if (!(root instanceof HTMLElement)) {
       throw new Error("Missing app root.");
     }
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(section, "scrollIntoView", { value: scrollIntoView });
     createWindow("/page?tab=a");
     let loads = 0;
     const scrolled: Array<[number, number]> = [];
@@ -129,6 +132,43 @@ describe("client router", () => {
     expect(location.hash).toBe("#section");
     expect(loads).toBe(1);
     expect(scrolled).toHaveLength(1);
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    router.dispose();
+  });
+
+  it("restores scroll position on popstate navigations", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    let scrollY = 0;
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => scrollY);
+    const scrolled: Array<[number, number]> = [];
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => rawHtml(`<h1>Home</h1>`) },
+        { path: "/long", render: () => rawHtml(`<h1>Long</h1>`) },
+      ],
+      scrollTo: (x, y) => {
+        scrolled.push([x, y]);
+        scrollY = y;
+      },
+    });
+
+    await router.start();
+    const homeState = history.state;
+    scrollY = 240;
+    await router.navigate("/long");
+    scrollY = 20;
+    history.replaceState(homeState, "", "/");
+    dispatchEvent(new PopStateEvent("popstate", { state: homeState }));
+    await router.settled();
+
+    expect(location.pathname).toBe("/");
+    expect(scrolled.at(-1)).toEqual([0, 240]);
     router.dispose();
   });
 
