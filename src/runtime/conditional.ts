@@ -8,6 +8,7 @@ type TextBinding = {
   kind: "text";
   path: number[];
   expression: string;
+  read?: (scope: Record<string, unknown>) => unknown;
 };
 
 type ClassBinding = {
@@ -15,6 +16,7 @@ type ClassBinding = {
   path: number[];
   className: string;
   expression: string;
+  read?: (scope: Record<string, unknown>) => unknown;
 };
 
 type EventBinding = {
@@ -22,6 +24,7 @@ type EventBinding = {
   path: number[];
   eventName: string;
   handler: string;
+  read?: (scope: Record<string, unknown>) => unknown;
 };
 
 type AttributeBinding = {
@@ -29,6 +32,7 @@ type AttributeBinding = {
   path: number[];
   name: string;
   expression: string;
+  read?: (scope: Record<string, unknown>) => unknown;
 };
 
 type StyleBinding = {
@@ -36,6 +40,7 @@ type StyleBinding = {
   path: number[];
   name: string;
   expression: string;
+  read?: (scope: Record<string, unknown>) => unknown;
 };
 
 type RefBinding = {
@@ -49,6 +54,8 @@ type ModelBinding = {
   path: number[];
   property: "value" | "checked";
   expression: string;
+  read?: (scope: Record<string, unknown>) => unknown;
+  write?: (scope: Record<string, unknown>, value: unknown) => void;
 };
 
 type ConditionalBinding =
@@ -61,6 +68,7 @@ type ConditionalBinding =
   | ModelBinding;
 
 export type ConditionalOptions = {
+  signature?: string;
   templateHtml: string;
   bindings: ConditionalBinding[];
 };
@@ -105,7 +113,23 @@ const writePath = (scope: Record<string, unknown>, expression: string, value: un
   }
 };
 
-const signatureFor = (options: ConditionalOptions): string => JSON.stringify(options);
+const signatureFor = (options: ConditionalOptions): string => options.signature ?? JSON.stringify(options);
+
+const readBinding = (
+  scope: Record<string, unknown>,
+  binding: Exclude<ConditionalBinding, EventBinding | RefBinding>,
+): unknown => (binding.read ? binding.read(scope) : readPath(scope, binding.expression));
+
+const readEvent = (scope: Record<string, unknown>, binding: EventBinding): unknown =>
+  binding.read ? binding.read(scope) : readPath(scope, binding.handler);
+
+const writeBinding = (scope: Record<string, unknown>, binding: ModelBinding, value: unknown): void => {
+  if (binding.write) {
+    binding.write(scope, value);
+    return;
+  }
+  writePath(scope, binding.expression, value);
+};
 
 const cleanup = (state: ConditionalState): void => {
   for (const cleanupFn of state.cleanups) {
@@ -136,27 +160,27 @@ const bindNodes = (
   }
   for (const binding of options.bindings) {
     if (binding.kind === "text") {
-      setText(textAt(firstElement, binding.path), readPath(scope, binding.expression));
+      setText(textAt(firstElement, binding.path), readBinding(scope, binding));
     } else if (binding.kind === "class") {
-      setClassPresence(elementAt(firstElement, binding.path), binding.className, readPath(scope, binding.expression));
+      setClassPresence(elementAt(firstElement, binding.path), binding.className, readBinding(scope, binding));
     } else if (binding.kind === "attr") {
-      setAttributeValue(elementAt(firstElement, binding.path), binding.name, readPath(scope, binding.expression));
+      setAttributeValue(elementAt(firstElement, binding.path), binding.name, readBinding(scope, binding));
     } else if (binding.kind === "style") {
-      setStyleValue(elementAt(firstElement, binding.path), binding.name, readPath(scope, binding.expression));
+      setStyleValue(elementAt(firstElement, binding.path), binding.name, readBinding(scope, binding));
     } else if (binding.kind === "ref") {
       setRef(scope, binding.expression, elementAt(firstElement, binding.path));
     } else if (binding.kind === "model") {
       setControlValue(
         elementAt(firstElement, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
         binding.property,
-        readPath(scope, binding.expression),
+        readBinding(scope, binding),
       );
     }
   }
   if (state.cleanups.length === 0) {
     for (const binding of options.bindings) {
       if (binding.kind === "event") {
-        const handler = readPath(scope, binding.handler);
+        const handler = readEvent(scope, binding);
         if (typeof handler === "function") {
           state.cleanups.push(delegate(firstElement, binding.eventName, binding.path, handler as EventListener));
         }
@@ -169,8 +193,8 @@ const bindNodes = (
           bindControl(
             element,
             binding.property,
-            () => readPath(scope, binding.expression),
-            (value) => writePath(scope, binding.expression, value),
+            () => readBinding(scope, binding),
+            (value) => writeBinding(scope, binding, value),
           ),
         );
       }

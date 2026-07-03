@@ -63,4 +63,34 @@ describe("mountConditional", () => {
 
     expect(root.querySelector("span")?.textContent).toBe("Again");
   });
+
+  it("uses precomputed signatures and compiled binding accessors", () => {
+    document.body.innerHTML = `<section><!----></section>`;
+    const root = document.querySelector("section");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing root.");
+    }
+    const stringify = vi.spyOn(JSON, "stringify");
+    const scope = { message: "Hello" };
+    const options = {
+      signature: "static-conditional",
+      templateHtml: `<span> </span>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          expression: "unused.path.that.would.not.resolve",
+          read: (localScope: typeof scope) => localScope.message,
+        },
+      ],
+    };
+
+    mountConditional(root, [0], true, scope, options);
+    scope.message = "Again";
+    mountConditional(root, [0], true, scope, options);
+
+    expect(root.querySelector("span")?.textContent).toBe("Again");
+    expect(stringify).not.toHaveBeenCalled();
+    stringify.mockRestore();
+  });
 });

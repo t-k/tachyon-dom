@@ -293,6 +293,23 @@ describe("HTML-first compiler", () => {
     expect(generateClientModule(withoutStore.value, { reactive: true })).not.toContain(`runtime/store`);
   });
 
+  it("hoists conditional options and emits compiled binding readers", () => {
+    const result = compileTemplate(`<section><if test={active}><button title={label}>{label}</button></if></section>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateClientModule(result.value, { reactive: true });
+
+    expect(code).toContain(`const conditionalOptions0 = {`);
+    expect(code).toContain(`signature: "if:`);
+    expect(code).toContain(`read: (scope) => scope.label`);
+    expect(code).toContain(
+      `cleanups.push(__tachyonEffect(() => __tachyonMountConditional(root, [0], __tachyonRead(scope.active), scope, conditionalOptions0)));`,
+    );
+    expect(code).not.toContain(`__tachyonMountConditional(root, [0], __tachyonRead(scope.active), scope, {`);
+  });
+
   it("generates a separate server target without client runtime imports", () => {
     const result = compileTemplate(`<button class:danger={selected}>{label}</button>`);
     if (!result.ok) {
@@ -569,7 +586,10 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value, { reactive: true });
     expect(code).toContain(`from "tachyon-dom/runtime/conditional"`);
-    expect(code).toContain(`__tachyonMountConditional(root, [0,0], __tachyonRead(scope.active), scope, {`);
+    expect(code).toContain(`const conditionalOptions0 = {`);
+    expect(code).toContain(
+      `__tachyonMountConditional(root, [0,0], __tachyonRead(scope.active), scope, conditionalOptions0)`,
+    );
   });
 
   it("rejects unsupported syntax before target generation", () => {

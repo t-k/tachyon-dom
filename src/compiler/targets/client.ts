@@ -425,6 +425,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`  const cleanups = [];`);
   }
   let listIndex = 0;
+  let conditionalIndex = 0;
   let targetIndex = 0;
   for (const binding of bindings) {
     if (binding.kind === "text") {
@@ -506,7 +507,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     } else if (binding.kind === "list") {
       lines.push(emitListBinding(binding, reactive, sourceName, listIndex++));
     } else {
-      lines.push(emitConditionalBinding(binding, reactive, sourceName));
+      lines.push(emitConditionalBinding(binding, reactive, sourceName, conditionalIndex++));
     }
   }
   if (reactive || needsEvent || needsModel) {
@@ -524,6 +525,19 @@ const listSignature = (binding: ListBinding): string =>
     each: binding.each,
     key: binding.key,
     itemName: binding.itemName,
+    templateHtml: binding.templateHtml,
+    bindings: binding.bindings.map((child) => {
+      if (child.kind === "list" || child.kind === "if") {
+        return { kind: child.kind };
+      }
+      return child;
+    }),
+  })}`;
+
+const conditionalSignature = (binding: ConditionalBinding): string =>
+  `if:${JSON.stringify({
+    path: binding.path,
+    test: binding.test,
     templateHtml: binding.templateHtml,
     bindings: binding.bindings.map((child) => {
       if (child.kind === "list" || child.kind === "if") {
@@ -586,13 +600,22 @@ const emitListBinding = (binding: ListBinding, reactive: boolean, sourceName: st
     : `${listOptions}\n  ${statement};`;
 };
 
-const emitConditionalBinding = (binding: ConditionalBinding, reactive: boolean, sourceName: string): string => {
+const emitConditionalBinding = (
+  binding: ConditionalBinding,
+  reactive: boolean,
+  sourceName: string,
+  index: number,
+): string => {
+  const optionsName = `conditionalOptions${index}`;
   const conditionalOptions = [
-    `{`,
+    `  const ${optionsName} = {`,
+    `    signature: ${JSON.stringify(conditionalSignature(binding))},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
-    `    bindings: ${JSON.stringify(binding.bindings)},`,
-    `  }`,
+    `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
+    `  };`,
   ].join("\n");
-  const statement = `${runtimeNames.mountConditional}(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.test, reactive, sourceName)}, ${sourceName}, ${conditionalOptions})`;
-  return reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`;
+  const statement = `${runtimeNames.mountConditional}(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.test, reactive, sourceName)}, ${sourceName}, ${optionsName})`;
+  return reactive
+    ? `${conditionalOptions}\n  cleanups.push(${runtimeNames.effect}(() => ${statement}));`
+    : `${conditionalOptions}\n  ${statement};`;
 };
