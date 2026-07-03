@@ -57,6 +57,8 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
 
   const onScroll = (): void => renderWindow();
   options.scroller.addEventListener("scroll", onScroll, { passive: true });
+  const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => renderWindow());
+  resizeObserver?.observe(options.scroller);
   renderWindow();
 
   return {
@@ -70,6 +72,7 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
     },
     destroy: () => {
       options.scroller.removeEventListener("scroll", onScroll);
+      resizeObserver?.disconnect();
       options.scroller.replaceChildren();
     },
   };

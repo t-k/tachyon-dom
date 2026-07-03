@@ -384,8 +384,13 @@ export const mountKeyedList = (
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];
   const canAdoptServerRows = state.records.size === 0 && container.children.length > 0;
+  const seenKeys = new Set<PropertyKey>();
   for (const item of items) {
     const key = keyFor(item, options);
+    if (seenKeys.has(key)) {
+      continue;
+    }
+    seenKeys.add(key);
     const existing = state.records.get(key);
     const adoptable = canAdoptServerRows ? container.children[orderedRecords.length] : undefined;
     const record = existing ?? createRecord(state, key, item, options, adoptable);

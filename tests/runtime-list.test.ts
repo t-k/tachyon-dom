@@ -80,6 +80,43 @@ describe("mountKeyedList", () => {
     expect(root.innerHTML).toBe(`<li><span>Three updated</span></li><li><span>One updated</span></li>`);
   });
 
+  it("does not leave orphaned rows after duplicate keys are removed", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [{ kind: "text" as const, path: [0, 0], expression: "item.label" }],
+    };
+
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 1, label: "One A" },
+        { id: 1, label: "One B" },
+        { id: 2, label: "Two" },
+      ],
+      options,
+    );
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 1, label: "One" },
+        { id: 2, label: "Two" },
+      ],
+      options,
+    );
+
+    expect(root.children.length).toBe(2);
+    expect(Array.from(root.children, (child) => child.textContent)).toEqual(["One", "Two"]);
+  });
+
   it("adopts matching SSR rows on the first mount before applying keyed updates", () => {
     document.body.innerHTML = `<ul id="items"><li><span>One</span></li><li><span>Two</span></li></ul>`;
     const root = document.querySelector("#items");
