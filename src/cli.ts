@@ -566,6 +566,7 @@ const starterPackageJsonSource = (): string =>
         vite: "^8.0.0",
         vitest: "^4.1.9",
       },
+      packageManager: "pnpm@10.32.1",
       type: "module",
     },
     null,

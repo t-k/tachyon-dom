@@ -638,15 +638,15 @@ describe("mountKeyedList", () => {
     );
   });
 
-  it("skips unchanged nested list and conditional bindings when parent rows update", () => {
+  it("keeps nested list and conditional DOM current without serializing signed bindings", () => {
     document.body.innerHTML = `<section><ul id="groups"></ul></section>`;
     const root = document.body.firstElementChild;
     if (!(root instanceof HTMLElement)) {
       throw new Error("Missing root.");
     }
     const items = [{ id: "a1", label: "A1" }];
-    let nestedListReads = 0;
-    let nestedIfReads = 0;
+    const json = vi.fn(stringify);
+    JSON.stringify = json as typeof JSON.stringify;
     const options = {
       signature: "groups-with-nested-bindings",
       key: "group.id",
@@ -668,10 +668,7 @@ describe("mountKeyedList", () => {
               kind: "text" as const,
               path: [0],
               expression: "item.label",
-              read: (scope: Record<string, unknown>) => {
-                nestedListReads++;
-                return (scope.item as { label: string }).label;
-              },
+              read: (scope: Record<string, unknown>) => (scope.item as { label: string }).label,
             },
           ],
         },
@@ -687,10 +684,7 @@ describe("mountKeyedList", () => {
               kind: "text" as const,
               path: [0],
               expression: "group.badge",
-              read: (scope: Record<string, unknown>) => {
-                nestedIfReads++;
-                return (scope.group as { badge: string }).badge;
-              },
+              read: (scope: Record<string, unknown>) => (scope.group as { badge: string }).badge,
             },
           ],
         },
@@ -698,12 +692,12 @@ describe("mountKeyedList", () => {
     };
 
     mountKeyedList(root, [0], [{ id: "a", name: "Group A", visible: true, badge: "visible", items }], options);
+    items[0] = { id: "a1", label: "A1 updated" };
     mountKeyedList(root, [0], [{ id: "a", name: "Group A updated", visible: true, badge: "visible", items }], options);
 
-    expect(nestedListReads).toBe(1);
-    expect(nestedIfReads).toBe(1);
+    expect(json).not.toHaveBeenCalled();
     expect(root.innerHTML).toBe(
-      `<ul id="groups"><li><span>Group A updated</span><ul><li>A1</li></ul><!----><em>visible</em></li></ul>`,
+      `<ul id="groups"><li><span>Group A updated</span><ul><li>A1 updated</li></ul><!----><em>visible</em></li></ul>`,
     );
   });
 });

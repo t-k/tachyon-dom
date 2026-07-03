@@ -167,7 +167,12 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     ...page,
     path: normalizeAppPath(page.path),
   }));
-  const pagesByPath = new Map(pages.map((page) => [page.path, page] as const));
+  const pagesByPath = new Map<string, TachyonAppPage>();
+  for (const page of pages) {
+    if (!pagesByPath.has(page.path)) {
+      pagesByPath.set(page.path, page);
+    }
+  }
   const renderers = new Map<string, (scope: Record<string, unknown>) => string>();
   const pageForPath = (path: string): TachyonAppPage | undefined => pagesByPath.get(normalizeAppPath(path));
 

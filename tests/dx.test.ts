@@ -478,6 +478,18 @@ const increment = (): void => {
     expect(app.entries({ minify: true })[1]?.source).not.toContain("\n  <");
   });
 
+  it("keeps first-match semantics for duplicate app page paths", () => {
+    const app = defineApp({
+      pages: [
+        { path: "/", fileName: "index.html", template: `<h1>{title}</h1>`, scope: { title: "First" } },
+        { path: "/index.html", fileName: "duplicate.html", template: `<h1>{title}</h1>`, scope: { title: "Second" } },
+      ],
+    });
+
+    expect(app.pageForPath("/")).toBe(app.pages[0]);
+    expect(app.renderRoute("/")).toBe("<h1>First</h1>");
+  });
+
   it("creates page definitions from route-local template files", () => {
     const pages = pagesFromRouteFiles(
       ["/repo/src/routes/index/page.td", "/repo/src/routes/counter/page.td", "/repo/src/routes/blog/[...slug]/page.td"],
@@ -609,6 +621,7 @@ export default { selected: false };
       expect(packageJson.dependencies).toHaveProperty("tachyon-dom");
       expect(packageJson.devDependencies).toHaveProperty("typescript");
       expect(packageJson.devDependencies).toHaveProperty("vite");
+      expect(packageJson).toHaveProperty("packageManager", "pnpm@10.32.1");
       await expect(readFile(path.join(dir, "public", "client", "main.js"), "utf8")).rejects.toThrow();
     } finally {
       await rm(dir, { recursive: true, force: true });

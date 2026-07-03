@@ -332,9 +332,7 @@ const applyRowBindings = (record: RowRecord, scope: Record<string, unknown>, opt
     } else if (binding.kind === "list") {
       const eachBinding = binding.read ? { expression: binding.each, read: binding.read } : { expression: binding.each };
       const value = readBinding(scope, eachBinding) as readonly unknown[] | undefined;
-      if (!shouldApplyValue(record, index, value)) {
-        continue;
-      }
+      shouldApplyValue(record, index, value);
       mountKeyedList(
         record.element,
         binding.path,
@@ -344,9 +342,7 @@ const applyRowBindings = (record: RowRecord, scope: Record<string, unknown>, opt
     } else if (binding.kind === "if") {
       const testBinding = binding.read ? { expression: binding.test, read: binding.read } : { expression: binding.test };
       const value = readBinding(scope, testBinding);
-      if (!shouldApplyValue(record, index, value)) {
-        continue;
-      }
+      shouldApplyValue(record, index, value);
       mountConditional(
         record.element,
         binding.path,
