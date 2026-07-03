@@ -25,9 +25,9 @@ describe("router security helpers", () => {
 
   it("requires factory-created TrustedHtml values at runtime", () => {
     expect(html(unsafeHtml("<strong>Safe</strong>")).body).toBe("<strong>Safe</strong>");
-    expect(() =>
-      html({ __tachyonTrustedHtml: true, value: "<img src=x onerror=alert(1)>" } as never),
-    ).toThrow("TrustedHtml values must be created by tachyon-dom helpers");
+    expect(() => html({ __tachyonTrustedHtml: true, value: "<img src=x onerror=alert(1)>" } as never)).toThrow(
+      "TrustedHtml values must be created by tachyon-dom helpers",
+    );
   });
 
   it("rejects protocol-relative and unapproved absolute sanitizer URLs", () => {
@@ -43,6 +43,12 @@ describe("router security helpers", () => {
         allowedUrlOrigins: ["https://assets.example"],
       }).value,
     ).toBe(`<a href="https://assets.example/path">approved</a>`);
+  });
+
+  it("escapes malformed or unclosed tags that the sanitizer cannot parse safely", () => {
+    expect(sanitizeHtml(`<img src=x onerror="alert(1)"`).value).toBe(`&lt;img src=x onerror=&quot;alert(1)&quot;`);
+    expect(sanitizeHtml(`<svg onload="alert(1)"`).value).toBe(`&lt;svg onload=&quot;alert(1)&quot;`);
+    expect(sanitizeHtml(`ok <img src=x onerror=alert(1) > done`).value).toBe(`ok <img> done`);
   });
 
   it("rejects unsafe redirect targets and restricts approved external origins", () => {
@@ -117,12 +123,8 @@ describe("router security helpers", () => {
 
   it("rejects cookie path and domain values that can inject attributes or headers", async () => {
     expect(() => serializeCookie("sid", "abc", { path: "/; SameSite=None" })).toThrow("Invalid cookie Path");
-    expect(() => serializeCookie("sid", "abc", { path: "/\r\nSet-Cookie: injected=1" })).toThrow(
-      "Invalid cookie Path",
-    );
-    expect(() => serializeCookie("sid", "abc", { domain: "example.test; Secure" })).toThrow(
-      "Invalid cookie Domain",
-    );
+    expect(() => serializeCookie("sid", "abc", { path: "/\r\nSet-Cookie: injected=1" })).toThrow("Invalid cookie Path");
+    expect(() => serializeCookie("sid", "abc", { domain: "example.test; Secure" })).toThrow("Invalid cookie Domain");
     expect(serializeCookie("sid", "abc", { path: "/", domain: "example.test" })).toBe(
       "sid=abc; Path=/; Domain=example.test",
     );
@@ -153,9 +155,9 @@ describe("router security helpers", () => {
     expect(() => createSecurityHeaders({ csp: true, frameAncestors: "'self'; script-src *" })).toThrow(
       "Invalid CSP frame-ancestors",
     );
-    expect(createSecurityHeaders({ csp: true, frameAncestors: "'self' https://app.example" }).get(
-      "content-security-policy",
-    )).toContain("frame-ancestors 'self' https://app.example");
+    expect(
+      createSecurityHeaders({ csp: true, frameAncestors: "'self' https://app.example" }).get("content-security-policy"),
+    ).toContain("frame-ancestors 'self' https://app.example");
   });
 
   it("signs cookie values and rejects tampered session cookies", async () => {

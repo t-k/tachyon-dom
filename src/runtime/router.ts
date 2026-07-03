@@ -7,6 +7,23 @@ export type ClientRouteContext<Data = unknown> = {
   signal: AbortSignal;
 };
 
+const clientHtmlBrand = Symbol("tachyon.clientHtml");
+
+export type ClientHtml = {
+  readonly [clientHtmlBrand]: true;
+  toString(): string;
+};
+
+export const rawHtml = (value: string): ClientHtml => ({
+  [clientHtmlBrand]: true,
+  toString: () => value,
+});
+
+const isClientHtml = (value: unknown): value is ClientHtml =>
+  Boolean(value && typeof value === "object" && (value as Record<symbol, unknown>)[clientHtmlBrand] === true);
+
+type ClientRenderValue = string | ClientHtml | Node | readonly Node[] | DocumentFragment;
+
 export type ClientRouteDefinition<Data = unknown> = {
   id?: string;
   path: string;
@@ -21,17 +38,15 @@ export type ClientRouteDefinition<Data = unknown> = {
     | "all"
     | readonly string[]
     | ((context: { url: URL; response: Response }) => readonly string[]);
-  render: (
-    context: ClientRouteContext<Data>,
-  ) => string | Node | readonly Node[] | DocumentFragment | Promise<string | Node | readonly Node[] | DocumentFragment>;
+  render: (context: ClientRouteContext<Data>) => ClientRenderValue | Promise<ClientRenderValue>;
 };
 
 export type ClientRouterOptions = {
   root: Element;
   routes: readonly ClientRouteDefinition[];
   baseUrl?: string;
-  notFound?: (context: { url: URL }) => string | Node | readonly Node[] | DocumentFragment;
-  error?: (context: { url: URL; error: unknown }) => string | Node | readonly Node[] | DocumentFragment;
+  notFound?: (context: { url: URL }) => ClientRenderValue;
+  error?: (context: { url: URL; error: unknown }) => ClientRenderValue;
   scrollTo?: (x: number, y: number) => void;
   focusSelector?: string;
   cache?: boolean;
@@ -164,10 +179,14 @@ const matchClientRoute = (routes: readonly ClientRouteDefinition[], pathname: st
 
 const toUrl = (href: string, baseUrl: string): URL => new URL(href, baseUrl);
 
-const renderInto = (root: Element, value: string | Node | readonly Node[] | DocumentFragment): void => {
+const renderInto = (root: Element, value: ClientRenderValue): void => {
   root.replaceChildren();
+  if (isClientHtml(value)) {
+    root.innerHTML = value.toString();
+    return;
+  }
   if (typeof value === "string") {
-    root.innerHTML = value;
+    root.textContent = value;
     return;
   }
   if (value instanceof DocumentFragment) {
@@ -226,11 +245,11 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   }
 
   const renderNotFound = (url: URL): void => {
-    renderInto(options.root, options.notFound ? options.notFound({ url }) : `<h1>Not Found</h1>`);
+    renderInto(options.root, options.notFound ? options.notFound({ url }) : rawHtml(`<h1>Not Found</h1>`));
   };
 
   const renderError = (url: URL, error: unknown): void => {
-    renderInto(options.root, options.error ? options.error({ url, error }) : `<h1>Navigation Error</h1>`);
+    renderInto(options.root, options.error ? options.error({ url, error }) : rawHtml(`<h1>Navigation Error</h1>`));
   };
 
   const loadData = async (url: URL, match: ClientMatch, signal: AbortSignal): Promise<unknown> => {

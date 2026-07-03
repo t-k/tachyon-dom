@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createClientRouter, type ClientRouteDefinition } from "../src/runtime/router";
+import { createClientRouter, rawHtml, type ClientRouteDefinition } from "../src/runtime/router";
 
 const createWindow = (path = "/") => {
   const domWindow = window;
@@ -8,6 +8,26 @@ const createWindow = (path = "/") => {
 };
 
 describe("client router", () => {
+  it("treats string route output as text instead of trusted HTML", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    const router = createClientRouter({
+      root,
+      routes: [{ path: "/", render: ({ url }) => `<img src=x onerror="alert(1)"> ${url.pathname}` }],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+
+    expect(root.querySelector("img")).toBeNull();
+    expect(root.textContent).toBe(`<img src=x onerror="alert(1)"> /`);
+    router.dispose();
+  });
+
   it("starts, navigates, updates history, and renders loader data", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");
@@ -16,12 +36,12 @@ describe("client router", () => {
     }
     createWindow("/");
     const routes: ClientRouteDefinition[] = [
-      { id: "home", path: "/", render: () => `<a href="/users/42">User</a>` },
+      { id: "home", path: "/", render: () => rawHtml(`<a href="/users/42">User</a>`) },
       {
         id: "user",
         path: "/users/:id",
         load: ({ params }) => ({ name: `User ${params.id}` }),
-        render: ({ data }) => `<h1 tabindex="-1">${(data as { name: string }).name}</h1>`,
+        render: ({ data }) => rawHtml(`<h1 tabindex="-1">${(data as { name: string }).name}</h1>`),
       },
     ];
     const scrolled: Array<[number, number]> = [];
@@ -47,8 +67,8 @@ describe("client router", () => {
     const router = createClientRouter({
       root,
       routes: [
-        { path: "/", render: () => `<a href="/next">Next</a>` },
-        { path: "/next", render: () => `<h1>Next</h1>` },
+        { path: "/", render: () => rawHtml(`<a href="/next">Next</a>`) },
+        { path: "/next", render: () => rawHtml(`<h1>Next</h1>`) },
       ],
     });
     await router.start();
@@ -88,7 +108,8 @@ describe("client router", () => {
         {
           path: "/page",
           load: () => ({ count: ++loads }),
-          render: ({ data }) => `<a href="/page?tab=a#section">Section ${(data as { count: number }).count}</a>`,
+          render: ({ data }) =>
+            rawHtml(`<a href="/page?tab=a#section">Section ${(data as { count: number }).count}</a>`),
         },
       ],
       scrollTo: (x, y) => scrolled.push([x, y]),
@@ -118,8 +139,8 @@ describe("client router", () => {
     const router = createClientRouter({
       root,
       routes: [
-        { path: "/", target: "#outlet", render: () => `<h1>Users</h1>` },
-        { path: "/orders", target: "#outlet", render: () => `<h1>Orders</h1>` },
+        { path: "/", target: "#outlet", render: () => rawHtml(`<h1>Users</h1>`) },
+        { path: "/orders", target: "#outlet", render: () => rawHtml(`<h1>Orders</h1>`) },
       ],
       scrollTo: () => undefined,
     });
@@ -146,12 +167,12 @@ describe("client router", () => {
     const router = createClientRouter({
       root,
       routes: [
-        { path: "/", target: "#outlet", render: () => `<h1>Users</h1>` },
+        { path: "/", target: "#outlet", render: () => rawHtml(`<h1>Users</h1>`) },
         {
           path: "/orders",
           target: "#outlet",
           load: () => ({ count: ++loads }),
-          render: ({ data }) => `<h1>Orders ${(data as { count: number }).count}</h1>`,
+          render: ({ data }) => rawHtml(`<h1>Orders ${(data as { count: number }).count}</h1>`),
         },
       ],
       cache: true,
@@ -192,9 +213,9 @@ describe("client router", () => {
             resolveSlow = resolve;
           });
         },
-        render: ({ data }) => `<h1>${(data as { label: string }).label}</h1>`,
+        render: ({ data }) => rawHtml(`<h1>${(data as { label: string }).label}</h1>`),
       },
-      { path: "/fast", render: () => `<h1>Fast</h1>` },
+      { path: "/fast", render: () => rawHtml(`<h1>Fast</h1>`) },
     ];
     const router = createClientRouter({ root, routes });
     await router.start();
@@ -220,10 +241,10 @@ describe("client router", () => {
     const router = createClientRouter({
       root,
       routes: [
-        { path: "/", render: () => `<h1>Home</h1>` },
-        { path: "/settings", render: () => `<h1>Settings</h1>` },
+        { path: "/", render: () => rawHtml(`<h1>Home</h1>`) },
+        { path: "/settings", render: () => rawHtml(`<h1>Settings</h1>`) },
       ],
-      notFound: ({ url }) => `<h1>Missing ${url.pathname}</h1>`,
+      notFound: ({ url }) => rawHtml(`<h1>Missing ${url.pathname}</h1>`),
     });
     await router.start();
     await router.navigate("/settings");
@@ -245,9 +266,9 @@ describe("client router", () => {
     const router = createClientRouter({
       root,
       routes: [
-        { path: "/users/:id", render: ({ params }) => `<h1>User ${params.id}</h1>` },
-        { path: "/users/new", render: () => `<h1>New user</h1>` },
-        { path: "/blog/*slug", render: ({ params }) => `<h1>${params.slug}</h1>` },
+        { path: "/users/:id", render: ({ params }) => rawHtml(`<h1>User ${params.id}</h1>`) },
+        { path: "/users/new", render: () => rawHtml(`<h1>New user</h1>`) },
+        { path: "/blog/*slug", render: ({ params }) => rawHtml(`<h1>${params.slug}</h1>`) },
       ],
     });
 
@@ -272,11 +293,11 @@ describe("client router", () => {
     const router = createClientRouter({
       root,
       routes: [
-        { path: "/", render: () => `<a href="/cached" data-prefetch="hover">Cached</a>` },
+        { path: "/", render: () => rawHtml(`<a href="/cached" data-prefetch="hover">Cached</a>`) },
         {
           path: "/cached",
           load: () => ({ count: ++loads }),
-          render: ({ data }) => `<h1>${(data as { count: number }).count}</h1>`,
+          render: ({ data }) => rawHtml(`<h1>${(data as { count: number }).count}</h1>`),
         },
       ],
       cache: true,
@@ -355,7 +376,7 @@ describe("client router", () => {
             return new Response("ok");
           },
           revalidateOnAction: "self",
-          render: ({ data }) => `<h1>${(data as { count: number }).count}</h1>`,
+          render: ({ data }) => rawHtml(`<h1>${(data as { count: number }).count}</h1>`),
         },
       ],
       cache: true,

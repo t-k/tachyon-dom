@@ -544,6 +544,28 @@ export default { selected: false };
     await expect(runCli(["--help"])).resolves.toBe(0);
   });
 
+  it("prints the package version and command-specific CLI help", async () => {
+    const messages: string[] = [];
+    const originalLog = console.log;
+    console.log = (message?: unknown) => {
+      messages.push(String(message));
+    };
+    try {
+      await expect(runCli(["--version"])).resolves.toBe(0);
+      await expect(runCli(["compile", "--help"])).resolves.toBe(0);
+      await expect(runCli(["dev", "--help"])).resolves.toBe(0);
+    } finally {
+      console.log = originalLog;
+    }
+
+    expect(messages[0]).toBe("0.1.0");
+    expect(messages[1]).toContain("tachyon-dom compile <input>");
+    expect(messages[1]).toContain("--target client|server|stream");
+    expect(messages[2]).toContain("tachyon-dom dev");
+    expect(messages[2]).toContain("--host");
+    expect(messages[2]).toContain("--port");
+  });
+
   it("detects CLI entrypoints through npm bin symlinks", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-bin-"));
     try {
@@ -762,11 +784,9 @@ void chunks;
       const program = ts.createProgram(parsed.fileNames, parsed.options);
       const diagnostics = ts.getPreEmitDiagnostics(program);
 
-      expect(
-        diagnostics.map((diagnostic) =>
-          ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
-        ),
-      ).toEqual([]);
+      expect(diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual(
+        [],
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -970,10 +990,7 @@ void chunks;
 
   it("serves request-scoped SSR through a Vite middleware preset", async () => {
     type TachyonSsrForTest = (options: {
-      fetch: (
-        request: Request,
-        context: { clientScript?: string },
-      ) => Response | Promise<Response>;
+      fetch: (request: Request, context: { clientScript?: string }) => Response | Promise<Response>;
       staticAssets?: { rootDir: string; basePath?: string; fallthroughOnNotFound?: boolean };
       clientScript?: string | ((request: Request) => string | Promise<string>);
     }) => Plugin;

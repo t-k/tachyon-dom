@@ -1,7 +1,16 @@
+const dangerousPropertyNames = new Set(["innerhtml", "outerhtml", "srcdoc"]);
+
+const shouldReflectProperty = (name: string): boolean => {
+  const normalized = name.toLowerCase();
+  return !normalized.startsWith("on") && !dangerousPropertyNames.has(normalized);
+};
+
+const isDangerousAttributeSink = (name: string): boolean => !shouldReflectProperty(name);
+
 export const setAttributeValue = (element: Element, name: string, value: unknown): void => {
   if (value == null || value === false) {
     element.removeAttribute(name);
-    if (name in element) {
+    if (shouldReflectProperty(name) && name in element) {
       try {
         const properties = element as unknown as Record<string, unknown>;
         const current = properties[name];
@@ -16,12 +25,16 @@ export const setAttributeValue = (element: Element, name: string, value: unknown
     }
     return;
   }
+  if (isDangerousAttributeSink(name)) {
+    element.removeAttribute(name);
+    return;
+  }
   if (value === true) {
     element.setAttribute(name, "");
   } else {
     element.setAttribute(name, String(value));
   }
-  if (name in element) {
+  if (shouldReflectProperty(name) && name in element) {
     try {
       (element as unknown as Record<string, unknown>)[name] = value;
     } catch {

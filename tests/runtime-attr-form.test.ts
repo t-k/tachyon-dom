@@ -46,6 +46,31 @@ describe("attribute and form runtime helpers", () => {
     expect(input.value).toBe("");
   });
 
+  it("does not reflect dangerous attribute names into executable DOM properties", () => {
+    document.body.innerHTML = `<div></div><iframe></iframe><button></button>`;
+    const div = document.querySelector("div");
+    const iframe = document.querySelector("iframe");
+    const button = document.querySelector("button");
+    if (
+      !(div instanceof HTMLDivElement) ||
+      !(iframe instanceof HTMLIFrameElement) ||
+      !(button instanceof HTMLButtonElement)
+    ) {
+      throw new Error("Missing elements.");
+    }
+
+    setAttributeValue(div, "innerHTML", `<img src=x onerror="alert(1)">`);
+    setAttributeValue(iframe, "srcdoc", `<script>alert(1)</script>`);
+    setAttributeValue(button, "onclick", "alert(1)");
+
+    expect(div.childElementCount).toBe(0);
+    expect(div.hasAttribute("innerHTML")).toBe(false);
+    expect(iframe.hasAttribute("srcdoc")).toBe(false);
+    expect(iframe.srcdoc).toBe("");
+    expect(button.hasAttribute("onclick")).toBe(false);
+    expect(button.onclick).toBeNull();
+  });
+
   it("binds text inputs and checkbox controls", () => {
     document.body.innerHTML = `<input id="name"><input id="active" type="checkbox">`;
     const name = document.querySelector("#name");

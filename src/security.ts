@@ -80,6 +80,14 @@ const defaultAllowedAttributes = [
 const escapeAttribute = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll(`"`, "&quot;").replaceAll("<", "&lt;");
 
+const escapeText = (value: string): string =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll(`"`, "&quot;")
+    .replaceAll("'", "&#39;");
+
 const isSafeUrl = (value: string, allowedOrigins: readonly string[] = []): boolean => {
   const trimmed = value.trim().toLowerCase();
   if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
@@ -128,19 +136,26 @@ export const sanitizeHtml = (markup: string, options: SanitizeHtmlOptions = {}):
   const allowedAttributes = new Set(options.allowedAttributes ?? defaultAllowedAttributes);
   const allowedUrlOrigins = options.allowedUrlOrigins ?? [];
   const withoutScripts = markup.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-  const sanitized = withoutScripts.replace(
-    /<\/?([a-zA-Z][\w:-]*)([^>]*)>/g,
-    (tag, rawName: string, rawAttributes: string) => {
-      const name = rawName.toLowerCase();
-      if (!allowedTags.has(name)) {
-        return "";
-      }
-      if (tag.startsWith("</")) {
-        return `</${name}>`;
-      }
-      return `<${name}${sanitizeAttributes(rawAttributes, allowedAttributes, allowedUrlOrigins)}>`;
-    },
-  );
+  const tagPattern = /<\/?([a-zA-Z][\w:-]*)([^>]*)>/g;
+  let sanitized = "";
+  let lastIndex = 0;
+  for (const match of withoutScripts.matchAll(tagPattern)) {
+    const index = match.index ?? 0;
+    sanitized += escapeText(withoutScripts.slice(lastIndex, index));
+    lastIndex = index + match[0].length;
+    const rawName = match[1] ?? "";
+    const rawAttributes = match[2] ?? "";
+    const name = rawName.toLowerCase();
+    if (!allowedTags.has(name)) {
+      continue;
+    }
+    if (match[0].startsWith("</")) {
+      sanitized += `</${name}>`;
+    } else {
+      sanitized += `<${name}${sanitizeAttributes(rawAttributes, allowedAttributes, allowedUrlOrigins)}>`;
+    }
+  }
+  sanitized += escapeText(withoutScripts.slice(lastIndex));
   return unsafeHtml(sanitized);
 };
 

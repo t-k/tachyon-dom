@@ -68,6 +68,28 @@ export type CliOptions =
 const usage =
   "Usage: tachyon-dom <compile|routes|dev|build|preview|add|typegen|init|language-server>. Use compile for templates, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, init for starters, and language-server for editor diagnostics.";
 
+const commandUsage: Record<string, string> = {
+  add: "Usage: tachyon-dom add page <name> [--routes-dir src/routes]",
+  build: "Usage: tachyon-dom build [--host 127.0.0.1] [--port 4173]",
+  compile:
+    "Usage: tachyon-dom compile <input> [--target client|server|stream] [--out file] [--reactive] [--no-sourcemap]",
+  dev: "Usage: tachyon-dom dev [--host 127.0.0.1] [--port 5173]",
+  init: "Usage: tachyon-dom init [--out dir] [--template basic|ssr]",
+  "language-server": "Usage: tachyon-dom language-server --stdio",
+  preview: "Usage: tachyon-dom preview [--host 127.0.0.1] [--port 4173]",
+  routes: "Usage: tachyon-dom routes <routes-dir> [--out route-manifest.json]",
+  typegen: "Usage: tachyon-dom typegen <input> [--out file] [--type TemplateScope] [--module]",
+};
+
+const packageVersion = async (): Promise<string> => {
+  const packageUrl = new URL("../package.json", import.meta.url);
+  const packagePath = packageUrl.protocol === "file:" ? packageUrl : join(process.cwd(), "package.json");
+  const packageJson = JSON.parse(await readFile(packagePath, "utf8")) as {
+    version?: string;
+  };
+  return packageJson.version ?? "0.0.0";
+};
+
 const parseCompileArgs = (input: string, rest: readonly string[]): Result<CliCompileOptions, string> => {
   if (!input) {
     return err(
@@ -230,6 +252,9 @@ const parseLanguageServerArgs = (rest: readonly string[]): Result<CliLanguageSer
 
 export const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
   const [command, input, ...rest] = argv;
+  if (input === "--help" || input === "-h" || input === "help") {
+    return err(commandUsage[command ?? ""] ?? usage);
+  }
   if (command === "compile") {
     return parseCompileArgs(input ?? "", rest);
   }
@@ -340,9 +365,10 @@ export const generateTemplateTypesFile = async (
   options: Omit<CliTypegenOptions, "command">,
 ): Promise<Result<string, string>> => {
   const source = await readFile(options.input, "utf8");
-  const result = options.module === true
-    ? generateTachyonModuleTypes(source, options.typeName ? { typeName: options.typeName } : {})
-    : generateTemplateTypes(source, options.typeName ? { typeName: options.typeName } : {});
+  const result =
+    options.module === true
+      ? generateTachyonModuleTypes(source, options.typeName ? { typeName: options.typeName } : {})
+      : generateTemplateTypes(source, options.typeName ? { typeName: options.typeName } : {});
   if (!result.ok) {
     return result;
   }
@@ -520,6 +546,14 @@ const startViteServer = async (options: CliServerOptions): Promise<Result<string
 export const runCli = async (argv: readonly string[] = process.argv.slice(2)): Promise<number> => {
   if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
     console.log(usage);
+    return 0;
+  }
+  if (argv[0] === "--version" || argv[0] === "-v") {
+    console.log(await packageVersion());
+    return 0;
+  }
+  if ((argv[1] === "--help" || argv[1] === "-h" || argv[1] === "help") && commandUsage[argv[0] ?? ""]) {
+    console.log(commandUsage[argv[0] ?? ""]);
     return 0;
   }
   const parsed = parseArgs(argv);
