@@ -151,6 +151,20 @@ export const hydrationBoundaryFor = (node: ElementNode, path: readonly number[])
   return boundary;
 };
 
+export const childPathEntries = (
+  children: readonly TemplateNode[],
+  basePath: readonly number[],
+): Array<{ child: TemplateNode; path: number[] }> => {
+  let domIndex = 0;
+  return children.map((child) => {
+    const path =
+      child.type === "element" && (child.tagName === "store" || child.tagName === "for")
+        ? [...basePath]
+        : [...basePath, domIndex++];
+    return { child, path };
+  });
+};
+
 export const isForNode = (node: TemplateNode): node is ElementNode => node.type === "element" && node.tagName === "for";
 
 export const isStoreNode = (node: TemplateNode): node is ElementNode =>

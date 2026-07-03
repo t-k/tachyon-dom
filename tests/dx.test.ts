@@ -192,6 +192,11 @@ describe("DX helpers", () => {
 
     expect(readme).toContain("tachyon-dom/typed");
     expect(readme).toContain("tachyon-dom/env");
+    expect(readme).toContain("createResource");
+    expect(readme).toContain("createErrorBoundary");
+    expect(readme).toContain("createI18n");
+    expect(readme).toContain("viewTransition");
+    expect(readme).toContain("restoreScroll");
     expect(readme).toContain("pnpm check:exports");
     expect(readme).toContain("pnpm check:size");
     expect(runtimeDocs).toContain("defineTemplate()");
@@ -214,8 +219,11 @@ describe("DX helpers", () => {
     expect(packageJson["size-limit"]?.map((entry) => entry.name)).toEqual([
       "index",
       "runtime/text",
+      "runtime/signal",
       "runtime/list",
+      "runtime/error-boundary",
       "runtime/router",
+      "i18n",
       "server/html",
     ]);
     expect(ci).toContain("pnpm check:exports");
@@ -560,6 +568,9 @@ export default { selected: false };
       const app = await readFile(path.join(dir, "src", "app.ts"), "utf8");
       const client = await readFile(path.join(dir, "src", "client", "main.ts"), "utf8");
       const viteConfig = await readFile(path.join(dir, "vite.config.ts"), "utf8");
+      const gitignore = await readFile(path.join(dir, ".gitignore"), "utf8");
+      const ci = await readFile(path.join(dir, ".github", "workflows", "ci.yml"), "utf8");
+      const smokeTest = await readFile(path.join(dir, "src", "app.test.ts"), "utf8");
       const tsconfig = JSON.parse(await readFile(path.join(dir, "tsconfig.json"), "utf8")) as {
         compilerOptions?: { types?: string[] };
       };
@@ -579,8 +590,14 @@ export default { selected: false };
       expect(viteConfig).toContain("tachyonDom({ reactive: true })");
       expect(viteConfig).toContain('tachyonApp(app, { appScript: "/src/client/main.ts" })');
       expect(viteConfig).toContain(`input: "src/client/main.ts"`);
+      expect(gitignore).toContain("node_modules/");
+      expect(gitignore).toContain("dist/");
+      expect(ci).toContain("pnpm typecheck");
+      expect(ci).toContain("pnpm test");
+      expect(smokeTest).toContain("renders the starter page");
       expect(tsconfig.compilerOptions?.types).toEqual(["vite/client"]);
       expect(readme).toContain("Edit `src/routes/index/page.td`");
+      expect(readme).toContain("Route registration");
       expect(readme).toContain("Do not put application code in `public/client/main.js`");
       expect(readme).toContain("Adapters are lower-level deployment APIs");
       expect(packageJson.scripts).toMatchObject({
@@ -593,6 +610,23 @@ export default { selected: false };
       expect(packageJson.devDependencies).toHaveProperty("typescript");
       expect(packageJson.devDependencies).toHaveProperty("vite");
       await expect(readFile(path.join(dir, "public", "client", "main.js"), "utf8")).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates an SSR starter with an explicit server entry", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-ssr-starter-"));
+    try {
+      const result = await createStarterFiles({ outDir: dir, template: "ssr" });
+
+      expect(result.ok).toBe(true);
+      const server = await readFile(path.join(dir, "src", "server.ts"), "utf8");
+      const readme = await readFile(path.join(dir, "README.md"), "utf8");
+
+      expect(server).toContain("renderAppDocument");
+      expect(readme).toContain("SSR entry");
+      expect(result.ok && result.value).not.toContain("same Vite SSR shape as basic");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1216,6 +1250,19 @@ void chunks;
     expect(code).toContain(`module: () => import("/src/routes/users/[id].tachyon.html")`);
     expect(code).toContain(`module: () => import("/src/routes/index.td")`);
     expect(code).toContain(`path: "/about"`);
+  });
+
+  it("wires hydration diagnostics into Vite entry modules", async () => {
+    const plugin = tachyonDom({ reactive: true });
+    if (typeof plugin.load !== "function") {
+      throw new Error("Missing load hook.");
+    }
+
+    const code = await plugin.load.call({} as never, "/src/view.td?entry", {} as never);
+
+    expect(code).toContain(`reportHydrationDiagnostics`);
+    expect(code).toContain(`import.meta.hot`);
+    expect(code).toContain(`module.hydrationBoundaries`);
   });
 
   it("sends route HMR updates for changed route modules", () => {

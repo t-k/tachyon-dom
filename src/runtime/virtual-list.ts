@@ -27,6 +27,8 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
   const overscan = options.overscan ?? 3;
   let items = [...options.items];
   let rendered = new Map<PropertyKey, Element>();
+  let lastRangeKey = "";
+  let animationFrame: number | undefined;
   const spacer = document.createElement("div");
   const windowEl = document.createElement("div");
   spacer.style.position = "relative";
@@ -35,11 +37,16 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
   windowEl.style.insetBlockStart = "0";
   options.scroller.replaceChildren(spacer);
 
-  const renderWindow = (): void => {
+  const renderWindow = (force = false): void => {
     const viewportHeight = viewportHeightFor(options);
     const visibleCount = Math.ceil(viewportHeight / options.itemHeight);
     const start = clamp(Math.floor(options.scroller.scrollTop / options.itemHeight) - overscan, 0, items.length);
     const end = clamp(start + visibleCount + overscan * 2, start, items.length);
+    const rangeKey = `${start}:${end}:${items.length}`;
+    if (!force && rangeKey === lastRangeKey) {
+      return;
+    }
+    lastRangeKey = rangeKey;
     spacer.style.height = `${items.length * options.itemHeight}px`;
     windowEl.style.transform = `translateY(${start * options.itemHeight}px)`;
     const nextRendered = new Map<PropertyKey, Element>();
@@ -61,7 +68,21 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
     }
   };
 
-  const onScroll = (): void => renderWindow();
+  const scheduleRenderWindow = (): void => {
+    if (animationFrame !== undefined) {
+      return;
+    }
+    if (typeof requestAnimationFrame !== "function") {
+      renderWindow();
+      return;
+    }
+    animationFrame = requestAnimationFrame(() => {
+      animationFrame = undefined;
+      renderWindow();
+    });
+  };
+
+  const onScroll = (): void => scheduleRenderWindow();
   options.scroller.addEventListener("scroll", onScroll, { passive: true });
   const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => renderWindow());
   resizeObserver?.observe(options.scroller);
@@ -71,13 +92,17 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
     update: (nextItems) => {
       items = [...nextItems];
       rendered = new Map();
-      renderWindow();
+      lastRangeKey = "";
+      renderWindow(true);
     },
     scrollToIndex: (index) => {
       options.scroller.scrollTop = clamp(index, 0, Math.max(0, items.length - 1)) * options.itemHeight;
-      renderWindow();
+      renderWindow(true);
     },
     destroy: () => {
+      if (animationFrame !== undefined && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(animationFrame);
+      }
       options.scroller.removeEventListener("scroll", onScroll);
       resizeObserver?.disconnect();
       options.scroller.replaceChildren();

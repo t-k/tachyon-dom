@@ -2,6 +2,7 @@ import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../t
 import {
   attrExpression,
   attrString,
+  childPathEntries,
   escapeHtml,
   escapeMarker,
   expressionToScopeAccess,
@@ -70,20 +71,6 @@ const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
     lastEmittedWasText = true;
   }
   return output;
-};
-
-const childPathEntries = (
-  children: readonly TemplateNode[],
-  basePath: readonly number[],
-): Array<{ child: TemplateNode; path: number[] }> => {
-  let domIndex = 0;
-  return children.map((child) => {
-    const path =
-      child.type === "element" && (child.tagName === "store" || child.tagName === "for")
-        ? [...basePath]
-        : [...basePath, domIndex++];
-    return { child, path };
-  });
 };
 
 const renderFor = (node: ElementNode, scope: Record<string, unknown>, path: number[]): string => {

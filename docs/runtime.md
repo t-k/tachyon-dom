@@ -12,17 +12,19 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/keyed-rows`: dependency-free keyed table-row list where the live DOM is the single source of truth (no shadow item/row arrays). Bulk creation binds and clones a reusable multi-row chunk; remove/swap/select are O(1) DOM operations. Suited to large data tables that do not need per-row reactivity.
 - `runtime/virtual-list`: fixed-height virtualized lists with overscan, imperative updates, index scrolling, and ARIA position metadata.
 - `runtime/conditional`: conditional DOM mounting.
-- `runtime/hydrate`: SSR boundary location, state handoff, and hydration scheduling.
-- `runtime/router`: client-side navigation with link interception, History API, abortable loaders, scroll hooks, focus restoration, and route HMR cache invalidation.
+- `runtime/hydrate`: SSR boundary location, state handoff, hydration scheduling, and dev diagnostics.
+- `runtime/router`: client-side navigation with link interception, History API, abortable loaders, scroll hooks, history-entry scroll restoration, focus restoration, optional view transitions, and route HMR cache invalidation.
 - `runtime/fragment`: wrapper-free fragment mounting.
 - `runtime/portal`: external target mounting.
-- `runtime/store` and `runtime/signal`: fine-grained store/signal helpers.
+- `runtime/store` and `runtime/signal`: fine-grained store/signal helpers, memoized computed accessors, async resources, and recoverable effect errors.
 - `runtime/stream-client`: browser stream chunk reading.
+- `runtime/error-boundary`: DOM-mounted client fallback boundaries.
 
 Related public utility subpaths:
 
 - `tachyon-dom/typed`: `defineTemplate()`, `templateScope()`, and `TypedTemplate<Scope>` for carrying template scope types through application code.
 - `tachyon-dom/env`: `defineEnvSchema()` and `readEnv()` for runtime environment validation with an explicit full-env/public-env split.
+- `tachyon-dom/i18n`: `createI18n()` and `localeMiddleware()` for dictionary lookup and request locale selection.
 
 ```ts
 import { defineEnvSchema, readEnv } from "tachyon-dom/env";
@@ -167,6 +169,8 @@ export const loginAction = formAction({
 - `eager: true` to navigate cache-hit links on `pointerdown`/`mousedown` before the later `click`.
 - `liveRegion` to announce navigations.
 - `title` to update `document.title` after route render.
+- `restoreScroll` for history-entry scroll restoration on `popstate` navigations with a bounded retained-position map.
+- `viewTransition` to opt into `document.startViewTransition()` when the browser supports it and reduced motion is not requested.
 
 In-flight prefetches are aborted when their cache entry is invalidated or when the router is disposed.
 
@@ -178,7 +182,13 @@ Routes can define `action()` and `revalidateOnAction`. `router.submit(href, init
 
 ## Signals
 
-`runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, and `read()`. Effects run once when registered, then subsequent signal notifications are queued. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. `createMemo()` exposes a cached computed accessor that updates before dependent effects observe the next flush.
+`runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, `read()`, `createResource()`, and `catchError()`. Effects run once when registered, then subsequent signal notifications are queued. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. `createMemo()` exposes a cached computed accessor that updates before dependent effects observe the next flush. `createResource()` ties an async loader to a source accessor and exposes `data`, `error`, `loading`, and `refetch`. `catchError()` wraps an effect body with an error callback while keeping the effect subscribed for later successful runs.
+
+## Error Boundaries and i18n
+
+`runtime/error-boundary` provides `createErrorBoundary()` for client enhancements that need a local fallback and reset hook instead of failing the whole mounted region.
+
+`tachyon-dom/i18n` provides `createI18n()` for dictionary lookup/interpolation and `localeMiddleware()` for request locale selection from route middleware.
 
 ## Deferred Data
 

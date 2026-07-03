@@ -2,6 +2,7 @@ import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../t
 import {
   attrExpression,
   attrString,
+  childPathEntries,
   expressionToScopeAccess,
   hydrationBoundaryFor,
   isVoidElement,
@@ -36,20 +37,6 @@ const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, 
     lastEmittedWasText = true;
   }
   return statements;
-};
-
-const childPathEntries = (
-  children: readonly TemplateNode[],
-  basePath: readonly number[],
-): Array<{ child: TemplateNode; path: number[] }> => {
-  let domIndex = 0;
-  return children.map((child) => {
-    const path =
-      child.type === "element" && (child.tagName === "store" || child.tagName === "for")
-        ? [...basePath]
-        : [...basePath, domIndex++];
-    return { child, path };
-  });
 };
 
 const renderForYieldStatements = (

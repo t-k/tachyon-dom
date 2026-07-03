@@ -283,6 +283,14 @@
       "limit": "2 KB"
     },
     {
+      "name": "runtime/signal",
+      "path": "dist/runtime/signal.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "6 KB"
+    },
+    {
       "name": "runtime/list",
       "path": "dist/runtime/list.js",
       "disablePlugins": [
@@ -291,12 +299,28 @@
       "limit": "12 KB"
     },
     {
+      "name": "runtime/error-boundary",
+      "path": "dist/runtime/error-boundary.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
+    },
+    {
       "name": "runtime/router",
       "path": "dist/runtime/router.js",
       "disablePlugins": [
         "@size-limit/esbuild"
       ],
       "limit": "18 KB"
+    },
+    {
+      "name": "i18n",
+      "path": "dist/i18n.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
     },
     {
       "name": "server/html",

@@ -215,6 +215,7 @@ const entryCodeFor = (id: string): string => {
   const query = queryForId(id);
   const mountName = query.get("mount") ?? "mount";
   return [
+    `import { reportHydrationDiagnostics as __tachyonReportHydrationDiagnostics } from "tachyon-dom/runtime/hydrate";`,
     `import * as module from ${JSON.stringify(moduleId)};`,
     `export * from ${JSON.stringify(moduleId)};`,
     `export default module;`,
@@ -222,6 +223,10 @@ const entryCodeFor = (id: string): string => {
     `const mount = module[${JSON.stringify(mountName)}] ?? module.mountApp ?? module.mountWebExample ?? module.mountAuthTodoExample ?? module.mountFullAppExample ?? module.default;`,
     `if (root instanceof HTMLElement && typeof mount === "function") {`,
     `  void mount(root);`,
+    `}`,
+    `const __tachyonHydrationIds = (module.hydrationBoundaries ?? []).map((boundary) => boundary && typeof boundary === "object" && boundary.idKind !== "expression" && typeof boundary.id === "string" ? boundary.id : undefined).filter((id) => typeof id === "string");`,
+    `if (root instanceof HTMLElement && import.meta.hot && __tachyonHydrationIds.length > 0) {`,
+    `  queueMicrotask(() => __tachyonReportHydrationDiagnostics(root, __tachyonHydrationIds, { hot: import.meta.hot }));`,
     `}`,
   ].join("\n");
 };

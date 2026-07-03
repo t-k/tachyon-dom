@@ -172,6 +172,43 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("drops old saved scroll positions after the retention limit", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    let scrollY = 0;
+    vi.spyOn(window, "scrollY", "get").mockImplementation(() => scrollY);
+    const scrolled: Array<[number, number]> = [];
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => rawHtml(`<h1>Home</h1>`) },
+        { path: "/page/:id", render: ({ params }) => rawHtml(`<h1>Page ${params.id}</h1>`) },
+      ],
+      scrollTo: (x, y) => {
+        scrolled.push([x, y]);
+        scrollY = y;
+      },
+    });
+
+    await router.start();
+    const homeState = history.state;
+    scrollY = 240;
+    for (let index = 0; index < 55; index++) {
+      await router.navigate(`/page/${index}`);
+      scrollY = index + 1;
+    }
+    history.replaceState(homeState, "", "/");
+    dispatchEvent(new PopStateEvent("popstate", { state: homeState }));
+    await router.settled();
+
+    expect(scrolled.at(-1)).toEqual([0, 0]);
+    router.dispose();
+  });
+
   it("updates route targets without replacing persistent shell DOM", async () => {
     document.body.innerHTML = `<main id="app"><nav data-shell="stable"><a href="/orders">Orders</a></nav><section id="outlet"></section></main>`;
     const root = document.querySelector("#app");

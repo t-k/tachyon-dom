@@ -12,6 +12,15 @@ import { TextDocument } from "vscode-languageserver-textdocument";
 import { diagnoseTachyonSfc } from "./diagnostics.js";
 
 const source = "tachyon-dom";
+type DiagnosticDocument = {
+  uri: string;
+  getText: () => string;
+};
+
+type DiagnosticPayload = {
+  uri: string;
+  diagnostics: Diagnostic[];
+};
 
 export const diagnosticsForTachyonDocument = (text: string): Diagnostic[] => {
   const result = diagnoseTachyonSfc(text);
@@ -34,8 +43,49 @@ export const diagnosticsForTachyonDocument = (text: string): Diagnostic[] => {
   ];
 };
 
+export const createDiagnosticsScheduler = (
+  sendDiagnostics: (payload: DiagnosticPayload) => void,
+  delayMs = 80,
+): {
+  schedule: (document: DiagnosticDocument) => void;
+  clear: (uri: string) => void;
+  dispose: () => void;
+} => {
+  const pending = new Map<string, ReturnType<typeof setTimeout>>();
+  const clear = (uri: string): void => {
+    const timer = pending.get(uri);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      pending.delete(uri);
+    }
+  };
+  return {
+    schedule: (document) => {
+      clear(document.uri);
+      pending.set(
+        document.uri,
+        setTimeout(() => {
+          pending.delete(document.uri);
+          sendDiagnostics({
+            uri: document.uri,
+            diagnostics: diagnosticsForTachyonDocument(document.getText()),
+          });
+        }, delayMs),
+      );
+    },
+    clear,
+    dispose: () => {
+      for (const timer of pending.values()) {
+        clearTimeout(timer);
+      }
+      pending.clear();
+    },
+  };
+};
+
 export const startLanguageServer = (connection: Connection = createConnection(ProposedFeatures.all)): void => {
   const documents = new TextDocuments(TextDocument);
+  const diagnostics = createDiagnosticsScheduler((payload) => connection.sendDiagnostics(payload));
 
   connection.onInitialize(
     (): InitializeResult => ({
@@ -53,13 +103,11 @@ export const startLanguageServer = (connection: Connection = createConnection(Pr
   });
 
   documents.onDidChangeContent((event) => {
-    connection.sendDiagnostics({
-      uri: event.document.uri,
-      diagnostics: diagnosticsForTachyonDocument(event.document.getText()),
-    });
+    diagnostics.schedule(event.document);
   });
 
   documents.onDidClose((event) => {
+    diagnostics.clear(event.document.uri);
     connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] });
   });
 

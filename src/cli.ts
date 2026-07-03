@@ -438,6 +438,22 @@ const starterClientSource = (): string => `// Client entry for Tachyon DOM runti
 // Add progressive enhancements, client routing, or island hydration imports here.
 `;
 
+const starterServerSource = (): string => `import { renderAppDocument } from "tachyon-dom/app";
+import { app } from "./app";
+
+export const render = (path = "/"): string => renderAppDocument(app, path, { minify: true });
+`;
+
+const starterSmokeTestSource = (): string => `import { describe, expect, it } from "vitest";
+import { app } from "./app";
+
+describe("starter app", () => {
+  it("renders the starter page", () => {
+    expect(app.renderRoute("/")).toContain("<h1>Welcome</h1>");
+  });
+});
+`;
+
 const starterViteConfigSource = (): string => `import { defineConfig } from "vite";
 import { app } from "./src/app";
 import { tachyonApp, tachyonDom } from "tachyon-dom/vite";
@@ -472,6 +488,34 @@ const starterTsConfigSource = (): string =>
     2,
   )}\n`;
 
+const starterGitignoreSource = (): string => `node_modules/
+dist/
+.vite/
+coverage/
+`;
+
+const starterCiSource = (): string => `name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+`;
+
 const starterReadmeSource = (template: CliInitOptions["template"]): string => `# Tachyon DOM Starter
 
 Edit \`src/routes/index/page.td\` to start building. Route-local \`.td\` files are the source of truth for page markup.
@@ -484,6 +528,7 @@ Run:
 pnpm install
 pnpm dev
 pnpm typecheck
+pnpm test
 pnpm build
 \`\`\`
 
@@ -493,9 +538,14 @@ Add a page with:
 tachyon-dom add page settings/profile
 \`\`\`
 
+## Route registration
+
+The starter keeps the initial route in \`src/app.ts\`. When you add a page, import that route template and add a page entry to \`defineApp({ pages: [...] })\`, or switch to \`pagesFromRouteFiles()\` if your build step already collects route files.
+
 Adapters are lower-level deployment APIs for Node, Workers, and Lambda composition. A standard Tachyon DOM app should keep \`.td\` templates and the Vite plugins on the main development path.
 
-Template: \`${template}\`. The \`ssr\` starter currently uses the same Vite SSR shape as \`basic\`.
+Template: \`${template}\`.
+${template === "ssr" ? "\n## SSR entry\n\nThe `ssr` template includes `src/server.ts` with a small `render(path)` helper for server-side composition.\n" : ""}
 `;
 
 const starterPackageJsonSource = (): string =>
@@ -505,6 +555,7 @@ const starterPackageJsonSource = (): string =>
         build: "vite build",
         dev: "vite",
         preview: "vite preview",
+        test: "vitest run",
         typecheck: "tsc --noEmit",
       },
       dependencies: {
@@ -513,6 +564,7 @@ const starterPackageJsonSource = (): string =>
       devDependencies: {
         typescript: "^5.8.3",
         vite: "^8.0.0",
+        vitest: "^4.1.9",
       },
       type: "module",
     },
@@ -523,18 +575,21 @@ const starterPackageJsonSource = (): string =>
 export const createStarterFiles = async (options: Omit<CliInitOptions, "command">): Promise<Result<string, string>> => {
   await mkdir(join(options.outDir, "src", "routes", "index"), { recursive: true });
   await mkdir(join(options.outDir, "src", "client"), { recursive: true });
+  await mkdir(join(options.outDir, ".github", "workflows"), { recursive: true });
   await writeFile(join(options.outDir, "src", "routes", "index", "page.td"), starterPageSource());
   await writeFile(join(options.outDir, "src", "app.ts"), starterAppSource());
   await writeFile(join(options.outDir, "src", "client", "main.ts"), starterClientSource());
+  await writeFile(join(options.outDir, "src", "app.test.ts"), starterSmokeTestSource());
+  if (options.template === "ssr") {
+    await writeFile(join(options.outDir, "src", "server.ts"), starterServerSource());
+  }
   await writeFile(join(options.outDir, "vite.config.ts"), starterViteConfigSource());
   await writeFile(join(options.outDir, "tsconfig.json"), starterTsConfigSource());
+  await writeFile(join(options.outDir, ".gitignore"), starterGitignoreSource());
+  await writeFile(join(options.outDir, ".github", "workflows", "ci.yml"), starterCiSource());
   await writeFile(join(options.outDir, "README.md"), starterReadmeSource(options.template));
   await writeFile(join(options.outDir, "package.json"), starterPackageJsonSource());
-  const templateNote =
-    options.template === "ssr" ? " The ssr starter currently uses the same Vite SSR shape as basic." : "";
-  return ok(
-    `Created Tachyon DOM starter in ${options.outDir}. Edit src/routes/index/page.td to start building.${templateNote}`,
-  );
+  return ok(`Created Tachyon DOM starter in ${options.outDir}. Edit src/routes/index/page.td to start building.`);
 };
 
 export const serverCommandMessage = (options: CliServerOptions): string =>

@@ -94,6 +94,7 @@ const ignoredIdentifiers = new Set([
   "true",
   "undefined",
 ]);
+const htmlEscapeMap: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
 export const normalizeAppPath = (path: string): string => {
   if (path === "" || path === "/" || path === "/index.html") {
@@ -103,13 +104,7 @@ export const normalizeAppPath = (path: string): string => {
   return withoutIndex.endsWith("/") ? withoutIndex : `${withoutIndex}/`;
 };
 
-const escapeHtml = (value: string): string =>
-  value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
+const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (char) => htmlEscapeMap[char] as string);
 
 export const minifyHtml = (html: string): string => {
   const preserved: string[] = [];
@@ -172,9 +167,9 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     ...page,
     path: normalizeAppPath(page.path),
   }));
+  const pagesByPath = new Map(pages.map((page) => [page.path, page] as const));
   const renderers = new Map<string, (scope: Record<string, unknown>) => string>();
-  const pageForPath = (path: string): TachyonAppPage | undefined =>
-    pages.find((page) => page.path === normalizeAppPath(path));
+  const pageForPath = (path: string): TachyonAppPage | undefined => pagesByPath.get(normalizeAppPath(path));
 
   const renderRoute = (path: string): string => {
     const page = pageForPath(path) ?? pageForPath("/");

@@ -105,4 +105,82 @@ describe("virtualized list runtime", () => {
     expect(scroller.querySelector(`[data-tachyon-virtual-item="3"]`)).toBe(before);
     list.destroy();
   });
+
+  it("coalesces scroll rendering with requestAnimationFrame", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) {
+      throw new Error("Missing scroller.");
+    }
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    let renderCount = 0;
+    const list = createVirtualizedList({
+      scroller,
+      items: Array.from({ length: 100 }, (_, index) => `Row ${index}`),
+      itemHeight: 20,
+      viewportHeight: 100,
+      overscan: 1,
+      renderItem: (item, index) => {
+        renderCount++;
+        const row = document.createElement("div");
+        row.textContent = `${index}:${item}`;
+        return row;
+      },
+    });
+    const initialRenderCount = renderCount;
+
+    scroller.scrollTop = 40;
+    scroller.dispatchEvent(new Event("scroll"));
+    scroller.scrollTop = 60;
+    scroller.dispatchEvent(new Event("scroll"));
+
+    expect(frames).toHaveLength(1);
+    expect(renderCount).toBe(initialRenderCount);
+    frames.shift()?.(0);
+    expect(scroller.textContent).toContain("2:Row 2");
+    list.destroy();
+  });
+
+  it("skips DOM replacement when the virtual window range is unchanged", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) {
+      throw new Error("Missing scroller.");
+    }
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const list = createVirtualizedList({
+      scroller,
+      items: Array.from({ length: 100 }, (_, index) => `Row ${index}`),
+      itemHeight: 20,
+      viewportHeight: 100,
+      overscan: 1,
+      renderItem: (item, index) => {
+        const row = document.createElement("div");
+        row.textContent = `${index}:${item}`;
+        return row;
+      },
+    });
+    const windowEl = scroller.firstElementChild?.firstElementChild;
+    if (!(windowEl instanceof HTMLElement)) {
+      throw new Error("Missing virtual window.");
+    }
+    const replaceChildren = vi.spyOn(windowEl, "replaceChildren");
+
+    scroller.scrollTop = 1;
+    scroller.dispatchEvent(new Event("scroll"));
+    frames.shift()?.(0);
+
+    expect(replaceChildren).not.toHaveBeenCalled();
+    list.destroy();
+  });
 });

@@ -8,7 +8,7 @@ export { cleanupEnhancements, createEnhancementRegistry, enhance, registerEnhanc
 export { createClientRouter } from "./runtime/router.js";
 export { createErrorBoundary } from "./runtime/error-boundary.js";
 export { createKeyedRows } from "./runtime/keyed-rows.js";
-export { batch, createMemo, createResource, createSignal, effect } from "./runtime/signal.js";
+export { batch, catchError, createMemo, createResource, createSignal, effect } from "./runtime/signal.js";
 export { createStore } from "./runtime/store.js";
 export { readTextStreamChunks } from "./runtime/stream-client.js";
 export { attr, booleanAttr, classList, html as serverHtml, join, rawHtml } from "./server/html.js";

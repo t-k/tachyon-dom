@@ -145,11 +145,17 @@ result.value.env.SESSION_SECRET;
 
 Only keys marked `public: true` are exposed under `result.value.publicEnv`. By default public keys must use the `PUBLIC_` prefix; pass `publicPrefix` to `readEnv()` when an app uses a different convention.
 
+## Runtime APIs
+
+The root entry exports the small reactive runtime: `createSignal()`, `createMemo()`, `effect()`, `batch()`, `createResource()`, and `catchError()`. Use `createResource(source, loader)` for signal-driven async data with `data`, `error`, `loading`, and `refetch` accessors. Use `catchError(fn, onError)` when an effect should recover and keep tracking after a thrown error.
+
+`createErrorBoundary()` is available from the root entry and `tachyon-dom/runtime/error-boundary` for DOM-mounted fallback UI around client enhancements. `createI18n()` and `localeMiddleware()` are available from the root entry and `tachyon-dom/i18n` for dictionary lookup, interpolation, and request locale selection.
+
 Adapters are lower-level deployment APIs for Node, Workers, and Lambda composition. They are useful when composing Tachyon DOM with an existing Request-to-Response handler, but an adapter-only app with TypeScript string templates is not the standard framework shape. If you are migrating an existing SSR app, start by replacing hand-written enhancement registries with `tachyon-dom/runtime/enhancement`, then move one screen at a time into `.td` templates, and finally wire those screens through the app or route layer.
 
 ## Routing
 
-Routing is provided as a separate layer instead of being baked into the template compiler. The server router in `tachyon-dom/router` supports static routes, `:param` routes, wildcard routes, nested layouts through `outlet`, route loaders, form actions, auth guards, 404/error boundaries, head descriptor rendering, route hydration state scripts, trusted HTML responses, backend HTML sanitization helpers and adapters, CSRF guards, signed cookie sessions, middleware, observability hooks, deferred data helpers, CSP nonce propagation, resource hints, streaming finalization, build manifests, typed href builders, route preload plans, and route type generation. The client router in `tachyon-dom/runtime/router` supports same-origin link interception, History API navigation, `popstate`, abortable route loaders/actions, action-driven revalidation, loader cache/prefetch/invalidation, Vite route HMR revalidation, scroll-to-top hooks, focus restoration, navigation announcements, title updates, and 404/error rendering.
+Routing is provided as a separate layer instead of being baked into the template compiler. The server router in `tachyon-dom/router` supports static routes, `:param` routes, wildcard routes, nested layouts through `outlet`, route loaders, form actions, auth guards, 404/error boundaries, head descriptor rendering, route hydration state scripts, trusted HTML responses, backend HTML sanitization helpers and adapters, CSRF guards, signed cookie sessions, middleware, observability hooks, deferred data helpers, CSP nonce propagation, resource hints, streaming finalization, build manifests, typed href builders, route preload plans, and route type generation. The client router in `tachyon-dom/runtime/router` supports same-origin link interception, History API navigation, `popstate`, abortable route loaders/actions, action-driven revalidation, loader cache/prefetch/invalidation, Vite route HMR revalidation, scroll-to-top hooks, focus restoration, history-entry `restoreScroll`, navigation announcements, title/head updates, nested layout outlets, optional `viewTransition`, and 404/error rendering.
 
 The Vite integration also exposes `tachyonDomRoutes()` for a `virtual:tachyon-dom/routes` module. It emits a manifest plus lazy dynamic imports, which keeps route modules split into separate chunks.
 
@@ -230,7 +236,7 @@ tachyon-dom preview --host 127.0.0.1 --port 4173
 tachyon-dom language-server --stdio
 ```
 
-`npm create tachyon-dom@latest my-app` and `pnpm create tachyon-dom my-app` create a route-local starter with `src/routes/index/page.td`, `src/client/main.ts`, `src/app.ts`, `vite.config.ts`, `tsconfig.json`, `README.md`, and `package.json`. `tachyon-dom init --template basic --out my-app` is the equivalent installed-package command. The `ssr` starter currently uses the same Vite SSR shape as `basic`.
+`npm create tachyon-dom@latest my-app` and `pnpm create tachyon-dom my-app` create a route-local starter with `src/routes/index/page.td`, `src/client/main.ts`, `src/app.ts`, `vite.config.ts`, `tsconfig.json`, `.gitignore`, a smoke test, CI workflow, `README.md`, and `package.json`. `tachyon-dom init --template basic --out my-app` is the equivalent installed-package command. Use `tachyon-dom init --template ssr --out my-app` when you also want a small `src/server.ts` SSR composition entry.
 
 Template files use the short `.td` extension. The Vite plugin and file router also accept `.tachyon` and `.tachyon.html` for compatibility.
 
@@ -248,7 +254,7 @@ Template files use the short `.td` extension. The Vite plugin and file router al
 
 The local benchmark prints row-operation timings plus auxiliary metrics for startup, JS heap usage, DOM node counts, and local source size. JSON output also keeps per-run values with mean, median, min, max, and p95.
 
-`pnpm check:exports` runs `publint --strict` and `attw --pack --no-emoji` against the package exports and declaration files. `pnpm check:size` runs per-subpath size budgets for the root entry, selected runtime helpers, the client router, and server HTML helper. CI runs both gates after `pnpm build` and `pnpm verify:package`.
+`pnpm check:exports` runs `publint --strict` and `attw --pack --no-emoji` against the package exports and declaration files. `pnpm check:size` runs per-subpath size budgets for the root entry, selected runtime helpers including `runtime/signal`, `runtime/list`, `runtime/error-boundary`, the client router, `i18n`, and the server HTML helper. CI runs both gates after `pnpm build` and `pnpm verify:package`.
 
 Version tags matching `v*` publish through GitHub Actions with `npm publish --provenance --access public` after the same build, package, exports, and size checks pass.
 

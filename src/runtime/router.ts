@@ -281,6 +281,7 @@ const focusRouteContent = (root: Element, selector: string): void => {
 };
 
 const managedHeadSelector = `[data-tachyon-head="route"]`;
+const maxScrollPositions = 50;
 
 const appendManagedHeadElement = (tagName: "meta" | "link" | "script", attributes: Record<string, string>): void => {
   const element = document.createElement(tagName);
@@ -494,8 +495,22 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     y: window.scrollY ?? window.pageYOffset ?? 0,
   });
 
+  const rememberScrollPosition = (key: number, position: { x: number; y: number }): void => {
+    if (scrollPositions.has(key)) {
+      scrollPositions.delete(key);
+    }
+    scrollPositions.set(key, position);
+    while (scrollPositions.size > maxScrollPositions) {
+      const oldestKey = scrollPositions.keys().next().value;
+      if (oldestKey === undefined) {
+        return;
+      }
+      scrollPositions.delete(oldestKey);
+    }
+  };
+
   const saveCurrentScrollPosition = (): void => {
-    scrollPositions.set(ensureScrollState(), currentScrollPosition());
+    rememberScrollPosition(ensureScrollState(), currentScrollPosition());
   };
 
   const writeHistory = (url: URL, navigateOptions: NavigateOptions): void => {
@@ -536,6 +551,9 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     if (navigateOptions.restoreScroll) {
       const key = scrollKeyFor(history.state);
       const position = key === undefined ? undefined : scrollPositions.get(key);
+      if (key !== undefined && position) {
+        rememberScrollPosition(key, position);
+      }
       scrollTo(position?.x ?? 0, position?.y ?? 0);
       return;
     }
