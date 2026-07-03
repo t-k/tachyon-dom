@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createLambdaHandler, createWorkersHandler } from "../src/adapters";
 import { enhanceForm } from "../src/runtime/form";
 import { diagnoseHydrationBoundaries } from "../src/runtime/hydrate";
-import { createClientRouter, type ClientRouteDefinition } from "../src/runtime/router";
+import { createClientRouter, rawHtml, type ClientRouteDefinition } from "../src/runtime/router";
 import { readTextStreamChunks } from "../src/runtime/stream-client";
 import { matchRoute, type RouteDefinition } from "../src/router";
 
@@ -22,10 +22,10 @@ describe("router compatibility matrix", () => {
       { id: "fallback", path: "*", render: () => "<h1>fallback:{}</h1>" },
     ];
     const clientRoutes: ClientRouteDefinition[] = [
-      { id: "user", path: "/users/:id", render: ({ params }) => `<h1>${params.id}</h1>` },
-      { id: "new-user", path: "/users/new", render: () => "<h1>new-user:{}</h1>" },
-      { id: "blog", path: "/blog/*slug", render: ({ params }) => `<h1>${params.slug}</h1>` },
-      { id: "fallback", path: "*", render: () => "<h1>fallback:{}</h1>" },
+      { id: "user", path: "/users/:id", render: ({ params }) => rawHtml(`<h1>${params.id}</h1>`) },
+      { id: "new-user", path: "/users/new", render: () => rawHtml("<h1>new-user:{}</h1>") },
+      { id: "blog", path: "/blog/*slug", render: ({ params }) => rawHtml(`<h1>${params.slug}</h1>`) },
+      { id: "fallback", path: "*", render: () => rawHtml("<h1>fallback:{}</h1>") },
     ];
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");
