@@ -75,6 +75,9 @@ describe("server form action helpers", () => {
   it("rejects unsafe redirect targets by default", () => {
     expect(() => redirectResponse("//evil.test/path")).toThrow("Unsafe redirect target");
     expect(() => redirectResponse("/%5C%5Cevil.test/path")).toThrow("Unsafe redirect target");
+    expect(() => redirectResponse("/\t/evil.test/path")).toThrow("Unsafe redirect target");
+    expect(() => redirectResponse("/\r/evil.test/path")).toThrow("Unsafe redirect target");
+    expect(() => redirectResponse("/%09/evil.test/path")).toThrow("Unsafe redirect target");
     expect(() => redirectResponse("https://evil.test/path", { allowExternal: true })).toThrow("Unsafe redirect target");
 
     const response = redirectResponse("https://accounts.example/callback", {

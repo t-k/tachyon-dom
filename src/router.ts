@@ -243,12 +243,13 @@ export type RedirectOptions = ResponseInit & {
 };
 
 const isSafePathRedirect = (location: string): boolean => {
-  if (!location.startsWith("/") || location.startsWith("//")) {
+  const controlCharacterPattern = /[\u0000-\u001F\u007F]/;
+  if (!location.startsWith("/") || location.startsWith("//") || controlCharacterPattern.test(location)) {
     return false;
   }
   try {
     const decoded = decodeURIComponent(location);
-    return !decoded.startsWith("//") && !decoded.includes("\\");
+    return !decoded.startsWith("//") && !decoded.includes("\\") && !controlCharacterPattern.test(decoded);
   } catch {
     return false;
   }
@@ -910,11 +911,15 @@ const headAttributeNamePattern = /^[A-Za-z_:][A-Za-z0-9_.:-]*$/;
 const urlAttributeNames = new Set(["href", "src", "action", "formaction"]);
 
 const isSafeAttributeUrl = (value: string): boolean => {
+  const controlCharacterPattern = /[\u0000-\u001F\u007F]/;
+  if (controlCharacterPattern.test(value)) {
+    return false;
+  }
   const trimmed = value.trim().toLowerCase();
   if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
     try {
       const decoded = decodeURIComponent(trimmed);
-      return !decoded.startsWith("//") && !decoded.includes("\\");
+      return !decoded.startsWith("//") && !decoded.includes("\\") && !controlCharacterPattern.test(decoded);
     } catch {
       return false;
     }

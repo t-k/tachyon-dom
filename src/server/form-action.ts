@@ -88,12 +88,13 @@ export const preserveFormValues = (
 };
 
 const isSafePathRedirect = (location: string): boolean => {
-  if (!location.startsWith("/") || location.startsWith("//")) {
+  const controlCharacterPattern = /[\u0000-\u001F\u007F]/;
+  if (!location.startsWith("/") || location.startsWith("//") || controlCharacterPattern.test(location)) {
     return false;
   }
   try {
     const decoded = decodeURIComponent(location);
-    return !decoded.startsWith("//") && !decoded.includes("\\");
+    return !decoded.startsWith("//") && !decoded.includes("\\") && !controlCharacterPattern.test(decoded);
   } catch {
     return false;
   }

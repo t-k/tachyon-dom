@@ -89,11 +89,15 @@ const escapeText = (value: string): string =>
     .replaceAll("'", "&#39;");
 
 const isSafeUrl = (value: string, allowedOrigins: readonly string[] = []): boolean => {
+  const controlCharacterPattern = /[\u0000-\u001F\u007F]/;
+  if (controlCharacterPattern.test(value)) {
+    return false;
+  }
   const trimmed = value.trim().toLowerCase();
   if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
     try {
       const decoded = decodeURIComponent(trimmed);
-      return !decoded.startsWith("//") && !decoded.includes("\\");
+      return !decoded.startsWith("//") && !decoded.includes("\\") && !controlCharacterPattern.test(decoded);
     } catch {
       return false;
     }

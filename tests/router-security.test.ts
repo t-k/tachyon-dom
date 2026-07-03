@@ -62,6 +62,9 @@ describe("router security helpers", () => {
   it("rejects unsafe redirect targets and restricts approved external origins", () => {
     expect(() => redirect("//evil.test/path")).toThrow("Unsafe redirect target");
     expect(() => redirect("/%5C%5Cevil.test/path")).toThrow("Unsafe redirect target");
+    expect(() => redirect("/\t/evil.test/path")).toThrow("Unsafe redirect target");
+    expect(() => redirect("/\n/evil.test/path")).toThrow("Unsafe redirect target");
+    expect(() => redirect("/%09/evil.test/path")).toThrow("Unsafe redirect target");
     expect(() => redirect("https://evil.test/path", { allowExternal: true })).toThrow("Unsafe redirect target");
     expect(() =>
       redirect("https://evil.test/path", { allowExternal: true, allowedOrigins: ["https://accounts.example"] }),
@@ -76,6 +79,13 @@ describe("router security helpers", () => {
         allowedOrigins: ["https://accounts.example"],
       }).headers.get("location"),
     ).toBe("https://accounts.example/callback");
+  });
+
+  it("rejects sanitizer URL attributes that contain control characters", () => {
+    expect(sanitizeHtml(`<a href="/\t/evil.test/path">tab</a><a href="/safe">safe</a>`).value).toBe(
+      `<a>tab</a><a href="/safe">safe</a>`,
+    );
+    expect(sanitizeHtml(`<a href="/%09/evil.test/path">encoded</a>`).value).toBe(`<a>encoded</a>`);
   });
 
   it("allows sanitizer adapters for production sanitizer backends", () => {
