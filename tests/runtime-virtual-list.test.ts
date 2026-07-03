@@ -75,4 +75,34 @@ describe("virtualized list runtime", () => {
     expect(scroller.textContent).toContain("11:Row 11");
     list.destroy();
   });
+
+  it("reuses unchanged item nodes while scrolling", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) {
+      throw new Error("Missing scroller.");
+    }
+    const list = createVirtualizedList({
+      scroller,
+      items: Array.from({ length: 100 }, (_, index) => ({ id: index, label: `Row ${index}` })),
+      itemHeight: 20,
+      viewportHeight: 100,
+      overscan: 1,
+      getKey: (item) => item.id,
+      renderItem: (item, index) => {
+        const row = document.createElement("div");
+        row.textContent = `${index}:${item.label}`;
+        return row;
+      },
+    });
+    const before = scroller.querySelector(`[data-tachyon-virtual-item="3"]`);
+    if (!(before instanceof HTMLElement)) {
+      throw new Error("Missing initial row.");
+    }
+
+    list.scrollToIndex(3);
+
+    expect(scroller.querySelector(`[data-tachyon-virtual-item="3"]`)).toBe(before);
+    list.destroy();
+  });
 });
