@@ -132,9 +132,9 @@ describe("DX helpers", () => {
     expect(packageJson.description).toBe("A small TypeScript UI runtime and HTML-first compiler.");
     expect(packageJson.repository).toEqual({
       type: "git",
-      url: "https://github.com/t-k/tachyon-dom.git",
+      url: "git+https://github.com/t-k/tachyon-dom.git",
     });
-    expect(packageJson.keywords).toEqual(["ui", "runtime", "compiler", "templates", "ssr"]);
+    expect(packageJson.keywords).toEqual(["compiler", "runtime", "ssr", "templates", "ui"]);
     expect(packageJson.engines?.node).toBe(">=24");
     expect(packageJson.publishConfig).toEqual({ access: "public" });
   });
@@ -157,6 +157,45 @@ describe("DX helpers", () => {
     expect(readme).toContain("src/client/main.ts");
     expect(readme).toContain("Do not put application code in `public/client/main.js`");
     expect(readme).toContain("Adapters are lower-level deployment APIs");
+  });
+
+  it("documents typed templates, environment validation, and release gates", async () => {
+    const readme = await readFile("README.md", "utf8");
+    const runtimeDocs = await readFile("docs/runtime.md", "utf8");
+    const releasingDocs = await readFile("docs/releasing.md", "utf8");
+
+    expect(readme).toContain("tachyon-dom/typed");
+    expect(readme).toContain("tachyon-dom/env");
+    expect(readme).toContain("pnpm check:exports");
+    expect(readme).toContain("pnpm check:size");
+    expect(runtimeDocs).toContain("defineTemplate()");
+    expect(runtimeDocs).toContain("readEnv()");
+    expect(releasingDocs).toContain("npm publish --provenance --access public");
+  });
+
+  it("runs package export/type and size gates in CI and release workflows", async () => {
+    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
+      scripts?: Record<string, string>;
+      "size-limit"?: Array<{ name?: string; path?: string; limit?: string }>;
+    };
+    const ci = await readFile(".github/workflows/ci.yml", "utf8");
+    const release = await readFile(".github/workflows/release.yml", "utf8");
+
+    expect(packageJson.scripts?.["check:exports"]).toBe(
+      "publint --strict && attw --pack --no-emoji --profile esm-only",
+    );
+    expect(packageJson.scripts?.["check:size"]).toBe("size-limit");
+    expect(packageJson["size-limit"]?.map((entry) => entry.name)).toEqual([
+      "index",
+      "runtime/text",
+      "runtime/list",
+      "runtime/router",
+      "server/html",
+    ]);
+    expect(ci).toContain("pnpm check:exports");
+    expect(ci).toContain("pnpm check:size");
+    expect(release).toContain("tags:");
+    expect(release).toContain("npm publish --provenance --access public");
   });
 
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {

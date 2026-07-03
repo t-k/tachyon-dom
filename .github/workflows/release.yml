@@ -1,13 +1,16 @@
-name: CI
+name: Release
 
 on:
-  pull_request:
   push:
-    branches:
-      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
-  test:
+  publish:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -21,12 +24,9 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+          registry-url: https://registry.npmjs.org
 
       - run: pnpm install --frozen-lockfile
-
-      - run: pnpm exec playwright install --with-deps chromium
-
-      - run: pnpm lint
 
       - run: pnpm build
 
@@ -36,6 +36,6 @@ jobs:
 
       - run: pnpm check:size
 
-      - run: pnpm test
-
-      - run: pnpm bench:local:smoke
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

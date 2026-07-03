@@ -1,4 +1,9 @@
+import { defineEnvSchema, readEnv } from "../src/env";
 import { renderRoute, type RouteDefinition } from "../src/router";
+
+const envSchema = defineEnvSchema({
+  PUBLIC_APP_NAME: { default: "Tachyon Router Example", public: true },
+});
 
 const routes: RouteDefinition[] = [
   {
@@ -19,11 +24,20 @@ const routes: RouteDefinition[] = [
 ];
 
 export const renderRouterExample = async (): Promise<string> => {
+  const env = readEnv({ PUBLIC_APP_NAME: process.env.PUBLIC_APP_NAME }, envSchema);
+  if (!env.ok) {
+    throw new Error(env.error.map((error) => error.message).join("\n"));
+  }
   const result = await renderRoute(routes, "https://example.com/app/users/42");
   if (!result.ok) {
     throw new Error(result.error.message);
   }
-  return result.value.html + result.value.headHtml + result.value.stateScript;
+  return (
+    `<!-- ${env.value.publicEnv.PUBLIC_APP_NAME} -->` +
+    result.value.html +
+    result.value.headHtml +
+    result.value.stateScript
+  );
 };
 
 if (import.meta.url === `file://${process.argv[1]}`) {

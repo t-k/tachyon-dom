@@ -1,25 +1,19 @@
 {
   "name": "tachyon-dom",
   "version": "0.1.0",
-  "description": "A small TypeScript UI runtime and HTML-first compiler.",
   "private": false,
+  "description": "A small TypeScript UI runtime and HTML-first compiler.",
+  "keywords": [
+    "compiler",
+    "runtime",
+    "ssr",
+    "templates",
+    "ui"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/t-k/tachyon-dom.git"
-  },
-  "keywords": [
-    "ui",
-    "runtime",
-    "compiler",
-    "templates",
-    "ssr"
-  ],
-  "engines": {
-    "node": ">=24"
-  },
-  "publishConfig": {
-    "access": "public"
+    "url": "git+https://github.com/t-k/tachyon-dom.git"
   },
   "bin": {
     "tachyon-dom": "./dist/cli.js"
@@ -182,6 +176,9 @@
       "import": "./dist/security.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json && node scripts/copy-td-modules.mjs",
     "bench:compiler": "tsx benchmark/compiler/compare-expression-backends.ts",
@@ -204,8 +201,10 @@
     "example:hacker-news:deploy": "wrangler deploy --config examples/hacker-news/wrangler.jsonc",
     "example:web": "vite --host 127.0.0.1",
     "test": "vitest run",
+    "check:exports": "publint --strict && attw --pack --no-emoji --profile esm-only",
+    "check:size": "size-limit",
     "verify:package": "node scripts/verify-package-artifacts.mjs",
-    "prepublishOnly": "pnpm build && pnpm verify:package",
+    "prepublishOnly": "pnpm build && pnpm verify:package && pnpm check:exports && pnpm check:size",
     "lint": "oxlint .",
     "format": "oxfmt --write ."
   },
@@ -216,6 +215,7 @@
     "vscode-languageserver-textdocument": "^1.0.12"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "0.18.4",
     "@marko/run": "^0.10.0",
     "@marko/runtime-tags": "^6.1.8",
     "@marko/vite": "^6.1.0",
@@ -224,6 +224,7 @@
     "@reckona/mreact-reactive-dom": "^0.0.181",
     "@reckona/mreact-router": "^0.0.181",
     "@reckona/mreact-shared": "^0.0.181",
+    "@size-limit/preset-small-lib": "12.1.0",
     "@solidjs/router": "^0.16.1",
     "@solidjs/start": "^1.3.2",
     "@tanstack/react-router": "^1.170.16",
@@ -239,8 +240,10 @@
     "oxfmt": "^0.55.0",
     "oxlint": "^1.70.0",
     "playwright": "^1.61.0",
+    "publint": "0.3.21",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
+    "size-limit": "12.1.0",
     "solid-js": "^1.9.13",
     "tsx": "^4.22.4",
     "vinxi": "^0.5.11",
@@ -248,6 +251,51 @@
     "vite-plugin-solid": "^2.11.12",
     "vitest": "^4.1.9",
     "wrangler": "^4.105.0"
+  },
+  "size-limit": [
+    {
+      "name": "index",
+      "path": "dist/index.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "8 KB"
+    },
+    {
+      "name": "runtime/text",
+      "path": "dist/runtime/text.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "2 KB"
+    },
+    {
+      "name": "runtime/list",
+      "path": "dist/runtime/list.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "12 KB"
+    },
+    {
+      "name": "runtime/router",
+      "path": "dist/runtime/router.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "18 KB"
+    },
+    {
+      "name": "server/html",
+      "path": "dist/server/html.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "8 KB"
+    }
+  ],
+  "engines": {
+    "node": ">=24"
   },
   "packageManager": "pnpm@10.32.1"
 }

@@ -97,6 +97,47 @@ Add Tachyon DOM template module types when TypeScript imports `.td` files direct
 
 For project-wide setup, add `"tachyon-dom/td-modules"` to `compilerOptions.types` alongside `"vite/client"`. The type entry covers `.td`, `.td?client`, `.td?server`, `.td?stream`, and `.td?raw` imports.
 
+## Typed Templates and Environment Validation
+
+`tachyon-dom/typed` exposes the typed-template helpers used by generated template declarations:
+
+```ts
+import { defineTemplate, templateScope, type TypedTemplate } from "tachyon-dom/typed";
+
+type PageScope = {
+  title: string;
+  count: number;
+};
+
+const page = defineTemplate<PageScope, "<h1>{title}</h1>">("<h1>{title}</h1>");
+const scoped = templateScope<PageScope>().define("<p>{count}</p>");
+
+const typed: TypedTemplate<PageScope> = page;
+void typed;
+void scoped;
+```
+
+`tachyon-dom/env` provides a small runtime environment validator with a public/private split:
+
+```ts
+import { defineEnvSchema, readEnv } from "tachyon-dom/env";
+
+const schema = defineEnvSchema({
+  PUBLIC_APP_NAME: { default: "Tachyon App", public: true },
+  SESSION_SECRET: { required: true },
+});
+
+const result = readEnv(process.env, schema);
+if (!result.ok) {
+  throw new Error(result.error.map((error) => error.message).join("\n"));
+}
+
+result.value.publicEnv.PUBLIC_APP_NAME;
+result.value.env.SESSION_SECRET;
+```
+
+Only keys marked `public: true` are exposed under `result.value.publicEnv`. By default public keys must use the `PUBLIC_` prefix; pass `publicPrefix` to `readEnv()` when an app uses a different convention.
+
 Adapters are lower-level deployment APIs for Node, Workers, and Lambda composition. They are useful when composing Tachyon DOM with an existing Request-to-Response handler, but an adapter-only app with TypeScript string templates is not the standard framework shape. If you are migrating an existing SSR app, start by replacing hand-written enhancement registries with `tachyon-dom/runtime/enhancement`, then move one screen at a time into `.td` templates, and finally wire those screens through the app or route layer.
 
 ## Routing
@@ -157,6 +198,8 @@ pnpm install
 pnpm test
 pnpm build
 pnpm lint
+pnpm check:exports
+pnpm check:size
 pnpm bench:local
 pnpm bench:local:dev
 pnpm bench:local:full
@@ -195,6 +238,10 @@ Template files use the short `.td` extension. The Vite plugin and file router al
 `pnpm bench:local:gate` runs the local comparison with operation and memory regression thresholds.
 
 The local benchmark prints row-operation timings plus auxiliary metrics for startup, JS heap usage, DOM node counts, and local source size. JSON output also keeps per-run values with mean, median, min, max, and p95.
+
+`pnpm check:exports` runs `publint --strict` and `attw --pack --no-emoji` against the package exports and declaration files. `pnpm check:size` runs per-subpath size budgets for the root entry, selected runtime helpers, the client router, and server HTML helper. CI runs both gates after `pnpm build` and `pnpm verify:package`.
+
+Version tags matching `v*` publish through GitHub Actions with `npm publish --provenance --access public` after the same build, package, exports, and size checks pass.
 
 ## Example
 

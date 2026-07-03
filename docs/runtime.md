@@ -19,6 +19,38 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/store` and `runtime/signal`: fine-grained store/signal helpers.
 - `runtime/stream-client`: browser stream chunk reading.
 
+Related public utility subpaths:
+
+- `tachyon-dom/typed`: `defineTemplate()`, `templateScope()`, and `TypedTemplate<Scope>` for carrying template scope types through application code.
+- `tachyon-dom/env`: `defineEnvSchema()` and `readEnv()` for runtime environment validation with an explicit full-env/public-env split.
+
+```ts
+import { defineEnvSchema, readEnv } from "tachyon-dom/env";
+import { defineTemplate, templateScope, type TypedTemplate } from "tachyon-dom/typed";
+
+type Scope = { title: string };
+
+const template = defineTemplate<Scope, "<h1>{title}</h1>">("<h1>{title}</h1>");
+const scoped = templateScope<Scope>().define("<p>{title}</p>");
+const typed: TypedTemplate<Scope> = template;
+
+const env = readEnv(
+  process.env,
+  defineEnvSchema({
+    PUBLIC_APP_NAME: { default: "Tachyon App", public: true },
+    SESSION_SECRET: { required: true },
+  }),
+);
+if (!env.ok) {
+  throw new Error(env.error.map((error) => error.message).join("\n"));
+}
+
+void scoped;
+void typed;
+void env.value.publicEnv.PUBLIC_APP_NAME;
+void env.value.env.SESSION_SECRET;
+```
+
 ## Hydration Strategies
 
 `scheduleHydration(handle, options)` supports:
@@ -82,7 +114,11 @@ import { attr, booleanAttr, html, rawHtml } from "tachyon-dom/server/html";
 const fieldId = "email";
 const view = html`<label for=${fieldId}>${"Email"}</label>
   <input${attr("id", fieldId)}${attr("name", "email")}${booleanAttr("required", true)}>
-  ${rawHtml("<!-- trusted framework output only -->")}`;
+    ${rawHtml("<!-- trusted framework output only -->")}</input${attr("id", fieldId)}${attr(
+      "name",
+      "email",
+    )}${booleanAttr("required", true)}
+  >`;
 ```
 
 This helper escapes values; it is not an arbitrary HTML sanitizer. Do not pass user-generated HTML to `rawHtml()`. For untrusted HTML, sanitize before rendering and keep the sanitizer choice explicit at the application boundary.
@@ -100,18 +136,22 @@ export const loginAction = formAction({
   parse: async (formData) => {
     const email = String(formData.get("email") ?? "");
     if (!email.includes("@")) {
-      return err(formState({
-        values: preserveFormValues(formData),
-        fieldErrors: { email: "Enter a valid email address." },
-        formError: "Sign in could not continue.",
-      }));
+      return err(
+        formState({
+          values: preserveFormValues(formData),
+          fieldErrors: { email: "Enter a valid email address." },
+          formError: "Sign in could not continue.",
+        }),
+      );
     }
     return ok({ email });
   },
   onSuccess: () => redirectResponse("/dashboard"),
   onError: ({ error }) => {
     const email = formField(error, "email", { id: "login-email" });
-    return new Response(String(html`<input${email.inputAttrs()}>${email.error()}`), { status: 422 });
+    return new Response(String(html`<input${email.inputAttrs()}>${email.error()}</input${email.inputAttrs()}>`), {
+      status: 422,
+    });
   },
 });
 ```
