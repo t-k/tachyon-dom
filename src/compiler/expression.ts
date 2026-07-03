@@ -580,9 +580,10 @@ export const parseExpression = (
 
 const readPath = (scope: Record<string, unknown>, path: readonly string[]): unknown => {
   let current: unknown = scope;
-  for (const part of path) {
+  for (let index = 0; index < path.length; index++) {
+    const part = path[index] as string;
     if (current == null || typeof current !== "object") {
-      return undefined;
+      throw new TypeError(`Cannot read properties of ${current}.`);
     }
     current = (current as Record<string, unknown>)[part];
   }
@@ -621,12 +622,12 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
   if (node.type === "member") {
     const object = evaluateExpressionNode(node.object, scope);
     if (object == null) {
-      return undefined;
+      if (node.optional) {
+        return undefined;
+      }
+      throw new TypeError(`Cannot read properties of ${object}.`);
     }
     const property = evaluateExpressionNode(node.property, scope);
-    if (property == null) {
-      return undefined;
-    }
     return (object as Record<PropertyKey, unknown>)[property as PropertyKey];
   }
   if (node.type === "template") {
@@ -646,9 +647,7 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
   if (node.operator === "&&") return left && right;
   if (node.operator === "||") return left || right;
   if (node.operator === "+") {
-    return typeof left === "string" || typeof right === "string"
-      ? `${left ?? ""}${right ?? ""}`
-      : Number(left) + Number(right);
+    return (left as string | number) + (right as string | number);
   }
   if (node.operator === "-") return Number(left) - Number(right);
   if (node.operator === "*") return Number(left) * Number(right);

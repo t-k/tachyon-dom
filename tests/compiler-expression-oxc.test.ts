@@ -56,4 +56,16 @@ describe("compiler expression OXC backend", () => {
     expect(evaluateExpression(String.raw`'a\nb'`, {})).toBe("a\nb");
     expect(evaluateExpression(String.raw`'it\'s ok'`, {})).toBe("it's ok");
   });
+
+  it("aligns interpreter plus and member access semantics with generated JavaScript", () => {
+    const plusScope = { label: "n=" };
+    const plusJs = expressionToJs("label + count", new Set(), "scope");
+
+    expect(evaluateExpression("label + count", plusScope)).toBe(Function("scope", `return ${plusJs}`)(plusScope));
+    expect(evaluateExpression("label + count", plusScope)).toBe("n=undefined");
+
+    const memberJs = expressionToJs("user.name", new Set(), "scope");
+    expect(() => evaluateExpression("user.name", {})).toThrow(TypeError);
+    expect(() => Function("scope", `return ${memberJs}`)({})).toThrow(TypeError);
+  });
 });
