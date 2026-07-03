@@ -12,6 +12,7 @@ import {
   compileFile,
   generateTemplateTypesFile,
   isCliEntrypoint,
+  normalizeCliArgv,
   parseArgs,
   runCli,
   serverCommandMessage,
@@ -570,6 +571,21 @@ export default { selected: false };
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("maps the create-tachyon-dom bin to init arguments", () => {
+    expect(normalizeCliArgv(["my-app", "--template", "ssr"], "/repo/node_modules/.bin/create-tachyon-dom")).toEqual([
+      "init",
+      "--out",
+      "my-app",
+      "--template",
+      "ssr",
+    ]);
+    expect(normalizeCliArgv(["--template", "basic"], "/repo/node_modules/.bin/create-tachyon-dom")).toEqual([
+      "init",
+      "--template",
+      "basic",
+    ]);
   });
 
   it("describes real dev and preview CLI commands", () => {

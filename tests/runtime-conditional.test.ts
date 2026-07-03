@@ -80,7 +80,7 @@ describe("mountConditional", () => {
           kind: "text" as const,
           path: [0],
           expression: "unused.path.that.would.not.resolve",
-          read: (localScope: typeof scope) => localScope.message,
+          read: (localScope: Record<string, unknown>) => localScope.message,
         },
       ],
     };

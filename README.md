@@ -214,6 +214,8 @@ tachyon-dom compile view.td --target client --out view.js
 tachyon-dom routes src/routes --out route-manifest.json
 tachyon-dom typegen src/routes/index/page.td --out src/routes/index/page.td.ts
 tachyon-dom add page settings/profile --routes-dir src/routes
+npm create tachyon-dom@latest my-app
+pnpm create tachyon-dom my-app
 tachyon-dom init --template basic --out my-app
 tachyon-dom dev --host 127.0.0.1 --port 5173
 tachyon-dom build
@@ -221,7 +223,7 @@ tachyon-dom preview --host 127.0.0.1 --port 4173
 tachyon-dom language-server --stdio
 ```
 
-`tachyon-dom init --template basic --out my-app` creates a route-local starter with `src/routes/index/page.td`, `src/client/main.ts`, `src/app.ts`, `vite.config.ts`, `tsconfig.json`, `README.md`, and `package.json`. The `ssr` starter currently uses the same Vite SSR shape as `basic`.
+`npm create tachyon-dom@latest my-app` and `pnpm create tachyon-dom my-app` create a route-local starter with `src/routes/index/page.td`, `src/client/main.ts`, `src/app.ts`, `vite.config.ts`, `tsconfig.json`, `README.md`, and `package.json`. `tachyon-dom init --template basic --out my-app` is the equivalent installed-package command. The `ssr` starter currently uses the same Vite SSR shape as `basic`.
 
 Template files use the short `.td` extension. The Vite plugin and file router also accept `.tachyon` and `.tachyon.html` for compatibility.
 

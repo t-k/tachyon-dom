@@ -16,6 +16,7 @@
     "url": "git+https://github.com/t-k/tachyon-dom.git"
   },
   "bin": {
+    "create-tachyon-dom": "./dist/cli.js",
     "tachyon-dom": "./dist/cli.js"
   },
   "files": [

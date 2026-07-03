@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { generateTachyonModuleTypes, generateTemplateTypes } from "./app.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
@@ -79,6 +79,28 @@ const commandUsage: Record<string, string> = {
   preview: "Usage: tachyon-dom preview [--host 127.0.0.1] [--port 4173]",
   routes: "Usage: tachyon-dom routes <routes-dir> [--out route-manifest.json]",
   typegen: "Usage: tachyon-dom typegen <input> [--out file] [--type TemplateScope] [--module]",
+};
+
+export const isCreateEntrypoint = (entrypoint: string | undefined): boolean => {
+  if (!entrypoint) {
+    return false;
+  }
+  const name = basename(entrypoint).replace(/\.(cmd|ps1)$/i, "");
+  return name === "create-tachyon-dom";
+};
+
+export const normalizeCliArgv = (argv: readonly string[], entrypoint = process.argv[1]): readonly string[] => {
+  if (!isCreateEntrypoint(entrypoint)) {
+    return argv;
+  }
+  if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
+    return ["init", "--help"];
+  }
+  const [outDir, ...rest] = argv;
+  if (!outDir || outDir.startsWith("-")) {
+    return ["init", ...argv];
+  }
+  return ["init", "--out", outDir, ...rest];
 };
 
 const packageVersion = async (): Promise<string> => {
@@ -543,7 +565,11 @@ const startViteServer = async (options: CliServerOptions): Promise<Result<string
   return ok(urls?.join("\n") ?? serverCommandMessage(options));
 };
 
-export const runCli = async (argv: readonly string[] = process.argv.slice(2)): Promise<number> => {
+export const runCli = async (
+  argv: readonly string[] = process.argv.slice(2),
+  entrypoint = process.argv[1],
+): Promise<number> => {
+  argv = normalizeCliArgv(argv, entrypoint);
   if (argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
     console.log(usage);
     return 0;

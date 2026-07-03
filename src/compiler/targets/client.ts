@@ -539,12 +539,7 @@ const conditionalSignature = (binding: ConditionalBinding): string =>
     path: binding.path,
     test: binding.test,
     templateHtml: binding.templateHtml,
-    bindings: binding.bindings.map((child) => {
-      if (child.kind === "list" || child.kind === "if") {
-        return { kind: child.kind };
-      }
-      return child;
-    }),
+    bindings: binding.bindings,
   })}`;
 
 const bindingReadExpression = (expression: string): string => expressionToScopeAccess(expression, new Set(), "scope");
