@@ -2,6 +2,7 @@ import { setClassPresence } from "./class.js";
 import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
 import { setText } from "./text.js";
 import { bindControl, setControlValue } from "./form.js";
+import { mountConditional } from "./conditional.js";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void;
@@ -60,7 +61,36 @@ type ModelBinding = {
   write?: ExpressionWriter;
 };
 
-type Binding = TextBinding | ClassBinding | EventBinding | AttributeBinding | StyleBinding | RefBinding | ModelBinding;
+type NestedListBinding = {
+  kind: "list";
+  path: number[];
+  each: string;
+  key: string;
+  keyRead?: ExpressionReader;
+  itemName: string;
+  templateHtml: string;
+  bindings: Binding[];
+};
+
+type NestedConditionalBinding = {
+  kind: "if";
+  path: number[];
+  test: string;
+  read?: ExpressionReader;
+  templateHtml: string;
+  bindings: Binding[];
+};
+
+type Binding =
+  | TextBinding
+  | ClassBinding
+  | EventBinding
+  | AttributeBinding
+  | StyleBinding
+  | RefBinding
+  | ModelBinding
+  | NestedListBinding
+  | NestedConditionalBinding;
 
 type KeyedListOptions = {
   signature?: string;
@@ -296,6 +326,21 @@ const applyRowBindings = (record: RowRecord, scope: Record<string, unknown>, opt
           value,
         );
       }
+    } else if (binding.kind === "list") {
+      mountKeyedList(
+        record.element,
+        binding.path,
+        readBinding(scope, { expression: binding.each, read: binding.read }) as readonly unknown[] | undefined,
+        { ...binding, scope },
+      );
+    } else if (binding.kind === "if") {
+      mountConditional(
+        record.element,
+        binding.path,
+        readBinding(scope, { expression: binding.test, read: binding.read }),
+        scope,
+        binding,
+      );
     }
   }
 };

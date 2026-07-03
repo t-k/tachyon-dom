@@ -90,7 +90,7 @@ describe("HTML-first compiler", () => {
       }
     }
     expect(generateServerModule(result.value)).toContain(`"<!---->"`);
-    expect(generateServerStreamModule(result.value)).toContain(`yield "<!---->";`);
+    expect(generateServerStreamModule(result.value)).toContain(`__tachyonPush("<!---->");`);
   });
 
   it("omits closing tags for void elements in client and server targets", () => {
@@ -274,6 +274,32 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`return () => {`);
   });
 
+  it("keeps nested client control-flow bindings instead of dropping them", () => {
+    const result = compileTemplate(
+      `<section><if test={visible}><ul><for each={groups} key={group.id}><li>{group.name}<ul><for each={group.items} key={item.id}><li>{item.label}</li></for></ul></li></for></ul><if test={showNote}><p>{note}</p></if></if></section>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const [outer] = result.value.client.bindings;
+    expect(outer?.kind).toBe("if");
+    if (outer?.kind !== "if") {
+      throw new Error("Missing outer conditional binding.");
+    }
+    expect(outer.bindings.map((binding) => binding.kind)).toEqual(["list", "if"]);
+    const [list] = outer.bindings;
+    expect(list?.kind).toBe("list");
+    if (list?.kind !== "list") {
+      throw new Error("Missing nested list binding.");
+    }
+    expect(list.bindings.some((binding) => binding.kind === "list")).toBe(true);
+
+    const code = generateClientModule(result.value);
+    expect(code).toContain(`kind: "list"`);
+    expect(code).toContain(`kind: "if"`);
+  });
+
   it("hoists reactive binding node lookups outside effect bodies", () => {
     const result = compileTemplate(
       `<section><h1>{title}</h1><button class:active={active} title={title} style:width={width} bind:value={title}></button></section>`,
@@ -386,7 +412,7 @@ describe("HTML-first compiler", () => {
 
     expect(code).toContain(`export const stream = async function* (scope)`);
     expect(code).toContain(`for (const row of scope.rows)`);
-    expect(code).toContain(`yield escapeHtml(row.id);`);
+    expect(code).toContain(`__tachyonPush(escapeHtml(row.id));`);
     expect(code).not.toContain(`tachyon-dom/runtime`);
   });
 
@@ -404,8 +430,8 @@ describe("HTML-first compiler", () => {
 
     const code = generateServerStreamModule(result.value);
 
-    expect(code).toContain(`yield "<!--tachyon-hydrate:" + escapeMarker(scope.islandId) + ":start-->";`);
-    expect(code).toContain(`yield "<!--tachyon-hydrate:" + escapeMarker(scope.islandId) + ":end-->";`);
+    expect(code).toContain(`__tachyonPush("<!--tachyon-hydrate:" + escapeMarker(scope.islandId) + ":start-->");`);
+    expect(code).toContain(`__tachyonPush("<!--tachyon-hydrate:" + escapeMarker(scope.islandId) + ":end-->");`);
   });
 
   it("generates stable hydrate ids and records shorthand hydration strategies", () => {
@@ -463,8 +489,8 @@ describe("HTML-first compiler", () => {
     expect(serverCode).toContain(`String(scope.outlet ?? "")`);
 
     const streamCode = generateServerStreamModule(result.value);
-    expect(streamCode).toContain(`yield String(scope.slots?.header ?? "");`);
-    expect(streamCode).toContain(`yield String(scope.outlet ?? "");`);
+    expect(streamCode).toContain(`__tachyonPush(String(scope.slots?.header ?? ""));`);
+    expect(streamCode).toContain(`__tachyonPush(String(scope.outlet ?? ""));`);
   });
 
   it("generates bracket slot access for non-identifier slot names", () => {
@@ -477,7 +503,9 @@ describe("HTML-first compiler", () => {
       `<main><h1>Title</h1></main>`,
     );
     expect(generateServerModule(result.value)).toContain(`String(scope.slots?.["header-title"] ?? "")`);
-    expect(generateServerStreamModule(result.value)).toContain(`yield String(scope.slots?.["header-title"] ?? "");`);
+    expect(generateServerStreamModule(result.value)).toContain(
+      `__tachyonPush(String(scope.slots?.["header-title"] ?? ""));`,
+    );
   });
 
   it("rejects component prop and store names that cannot become local bindings", () => {
@@ -743,9 +771,9 @@ describe("HTML-first compiler", () => {
     });
 
     const code = generateServerStreamModule(result.value);
-    expect(code).toContain(`yield "Loading";`);
+    expect(code).toContain(`__tachyonPush("Loading");`);
     expect(code).toContain(`} catch {`);
-    expect(code).toContain(`yield "Failed";`);
+    expect(code).toContain(`__tachyonPush("Failed");`);
 
     const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
       stream: (scope: { messagePromise: Promise<string> }) => AsyncIterable<string>;

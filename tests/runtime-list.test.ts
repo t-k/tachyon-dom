@@ -584,4 +584,57 @@ describe("mountKeyedList", () => {
     expect(json).not.toHaveBeenCalled();
     expect(root.innerHTML).toBe(`<li><span>One updated</span></li>`);
   });
+
+  it("mounts nested lists and conditionals inside keyed rows", () => {
+    document.body.innerHTML = `<section><ul id="groups"></ul></section>`;
+    const root = document.body.firstElementChild;
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing root.");
+    }
+
+    mountKeyedList(
+      root,
+      [0],
+      [
+        {
+          id: "a",
+          name: "Group A",
+          visible: true,
+          items: [
+            { id: "a1", label: "A1" },
+            { id: "a2", label: "A2" },
+          ],
+        },
+        { id: "b", name: "Group B", visible: false, items: [{ id: "b1", label: "B1" }] },
+      ],
+      {
+        key: "group.id",
+        itemName: "group",
+        templateHtml: `<li><span> </span><ul></ul><!----></li>`,
+        bindings: [
+          { kind: "text", path: [0, 0], expression: "group.name" },
+          {
+            kind: "list",
+            path: [1],
+            each: "group.items",
+            itemName: "item",
+            key: "item.id",
+            templateHtml: `<li> </li>`,
+            bindings: [{ kind: "text", path: [0], expression: "item.label" }],
+          },
+          {
+            kind: "if",
+            path: [2],
+            test: "group.visible",
+            templateHtml: `<em>visible</em>`,
+            bindings: [],
+          },
+        ],
+      },
+    );
+
+    expect(root.innerHTML).toBe(
+      `<ul id="groups"><li><span>Group A</span><ul><li>A1</li><li>A2</li></ul><!----><em>visible</em></li><li><span>Group B</span><ul><li>B1</li></ul><!----></li></ul>`,
+    );
+  });
 });

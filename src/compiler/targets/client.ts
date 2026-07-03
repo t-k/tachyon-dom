@@ -136,16 +136,7 @@ const lowerIf = (node: ElementNode, path: number[], context: LoweringContext): s
     path: [...path],
     test: attrExpression(node, "test") ?? "false",
     templateHtml,
-    bindings: childContext.bindings.filter(
-      (binding): binding is ConditionalBinding["bindings"][number] =>
-        binding.kind === "text" ||
-        binding.kind === "class" ||
-        binding.kind === "event" ||
-        binding.kind === "attr" ||
-        binding.kind === "style" ||
-        binding.kind === "ref" ||
-        binding.kind === "model",
-    ),
+    bindings: childContext.bindings,
   });
   return "<!---->";
 };
@@ -166,11 +157,6 @@ const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
     templateHtml += lowered.html;
     domIndex += lowered.nodeCount;
   }
-  for (const child of node.children) {
-    if (isForNode(child)) {
-      childContext.bindings.push(lowerList(child, []));
-    }
-  }
   return {
     kind: "list",
     path: [...containerPath],
@@ -190,6 +176,7 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
     return `<!--tachyon-slot:${attrString(node, "name") ?? "default"}-->`;
   }
   if (node.tagName === "for") {
+    context.bindings.push(lowerList(node, path));
     return "";
   }
   if (node.tagName === "if") {
@@ -572,6 +559,19 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     fields.push(`expression: ${JSON.stringify(binding.expression)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression)}`);
     fields.push(`write: (scope, value) => { ${bindingReadExpression(binding.expression)} = value; }`);
+  } else if (binding.kind === "list") {
+    fields.push(`each: ${JSON.stringify(binding.each)}`);
+    fields.push(`read: (scope) => ${bindingReadExpression(binding.each)}`);
+    fields.push(`itemName: ${JSON.stringify(binding.itemName)}`);
+    fields.push(`key: ${JSON.stringify(binding.key)}`);
+    fields.push(`keyRead: (scope) => ${bindingReadExpression(binding.key)}`);
+    fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
+    fields.push(`bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}]`);
+  } else if (binding.kind === "if") {
+    fields.push(`test: ${JSON.stringify(binding.test)}`);
+    fields.push(`read: (scope) => ${bindingReadExpression(binding.test)}`);
+    fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
+    fields.push(`bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}]`);
   }
   return `{ ${fields.join(", ")} }`;
 };

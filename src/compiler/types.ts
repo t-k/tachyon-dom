@@ -84,9 +84,7 @@ export type ConditionalBinding = {
   path: number[];
   test: string;
   templateHtml: string;
-  bindings: Array<
-    TextBinding | ClassBinding | EventBinding | AttributeBinding | StyleBinding | RefBinding | ModelBinding
-  >;
+  bindings: ClientBinding[];
 };
 
 export type ClientBinding =

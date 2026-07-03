@@ -2,6 +2,7 @@ import { elementAt, setClassPresence } from "./class.js";
 import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
 import { delegate } from "./event.js";
 import { bindControl, setControlValue } from "./form.js";
+import { mountKeyedList } from "./list.js";
 import { setText, textAt } from "./text.js";
 
 type TextBinding = {
@@ -58,6 +59,27 @@ type ModelBinding = {
   write?: (scope: Record<string, unknown>, value: unknown) => void;
 };
 
+type NestedListBinding = {
+  kind: "list";
+  path: number[];
+  each: string;
+  key: string;
+  keyRead?: (scope: Record<string, unknown>) => unknown;
+  itemName: string;
+  templateHtml: string;
+  bindings: ConditionalBinding[];
+  read?: (scope: Record<string, unknown>) => unknown;
+};
+
+type NestedConditionalBinding = {
+  kind: "if";
+  path: number[];
+  test: string;
+  templateHtml: string;
+  bindings: ConditionalBinding[];
+  read?: (scope: Record<string, unknown>) => unknown;
+};
+
 type ConditionalBinding =
   | TextBinding
   | ClassBinding
@@ -65,7 +87,9 @@ type ConditionalBinding =
   | AttributeBinding
   | StyleBinding
   | RefBinding
-  | ModelBinding;
+  | ModelBinding
+  | NestedListBinding
+  | NestedConditionalBinding;
 
 export type ConditionalOptions = {
   signature?: string;
@@ -117,8 +141,14 @@ const signatureFor = (options: ConditionalOptions): string => options.signature 
 
 const readBinding = (
   scope: Record<string, unknown>,
-  binding: Exclude<ConditionalBinding, EventBinding | RefBinding>,
+  binding: Exclude<ConditionalBinding, EventBinding | RefBinding | NestedListBinding | NestedConditionalBinding>,
 ): unknown => (binding.read ? binding.read(scope) : readPath(scope, binding.expression));
+
+const readExpression = (
+  scope: Record<string, unknown>,
+  expression: string,
+  read: ((scope: Record<string, unknown>) => unknown) | undefined,
+): unknown => (read ? read(scope) : readPath(scope, expression));
 
 const readEvent = (scope: Record<string, unknown>, binding: EventBinding): unknown =>
   binding.read ? binding.read(scope) : readPath(scope, binding.handler);
@@ -175,6 +205,15 @@ const bindNodes = (
         binding.property,
         readBinding(scope, binding),
       );
+    } else if (binding.kind === "list") {
+      mountKeyedList(
+        firstElement,
+        binding.path,
+        readExpression(scope, binding.each, binding.read) as readonly unknown[] | undefined,
+        { ...binding, scope },
+      );
+    } else if (binding.kind === "if") {
+      mountConditional(firstElement, binding.path, readExpression(scope, binding.test, binding.read), scope, binding);
     }
   }
   if (state.cleanups.length === 0) {
