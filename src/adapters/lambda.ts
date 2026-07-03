@@ -39,11 +39,13 @@ export type LambdaProxyResponseV2 = {
 
 export type LambdaHandlerOptions = WorkersHandlerOptions & {
   origin?: string | ((event: LambdaHttpEventV2) => string);
+  trustedHosts?: readonly string[];
 };
 
 export type LambdaFetchHandlerOptions = Omit<WorkersFetchHandlerOptions, "fetch"> & {
   fetch: AdapterFetchHandler;
   origin?: string | ((event: LambdaHttpEventV2) => string);
+  trustedHosts?: readonly string[];
 };
 
 export type LambdaResponseStream = {
@@ -98,14 +100,38 @@ const normalizeOrigin = (origin: string): string => {
   return new URL(candidate).origin;
 };
 
-const originForEvent = (event: LambdaHttpEventV2, options?: Pick<LambdaHandlerOptions, "origin">): string => {
+const hostName = (host: string): string => host.toLowerCase().replace(/:\d+$/, "");
+
+const isTrustedHost = (host: string, trustedHosts: readonly string[] | undefined): boolean => {
+  if (!trustedHosts || trustedHosts.length === 0) {
+    return true;
+  }
+  const normalized = host.toLowerCase();
+  const normalizedName = hostName(normalized);
+  return trustedHosts.some((trusted) => {
+    const candidate = trusted.toLowerCase();
+    return normalized === candidate || normalizedName === candidate;
+  });
+};
+
+const originForEvent = (
+  event: LambdaHttpEventV2,
+  options?: Pick<LambdaHandlerOptions, "origin" | "trustedHosts">,
+): string => {
   if (typeof options?.origin === "function") {
     return normalizeOrigin(options.origin(event));
   }
   if (options?.origin) {
     return normalizeOrigin(options.origin);
   }
-  const host = event.requestContext?.domainName ?? headerValue(event.headers, "host") ?? "localhost";
+  const domainName = event.requestContext?.domainName;
+  if (domainName) {
+    return normalizeOrigin(domainName);
+  }
+  const host = headerValue(event.headers, "host") ?? "localhost";
+  if (!isTrustedHost(host, options?.trustedHosts)) {
+    throw new Error("Untrusted Host header");
+  }
   return normalizeOrigin(host);
 };
 
@@ -134,7 +160,7 @@ const bodyForEvent = (event: LambdaHttpEventV2): BodyInit | undefined => {
 
 export const requestFromLambdaEvent = (
   event: LambdaHttpEventV2,
-  options?: Pick<LambdaHandlerOptions, "origin">,
+  options?: Pick<LambdaHandlerOptions, "origin" | "trustedHosts">,
 ): Request => {
   const method = methodForEvent(event);
   const path = normalizePath(event.rawPath ?? event.requestContext?.http?.path);

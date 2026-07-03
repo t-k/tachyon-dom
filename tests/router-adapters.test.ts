@@ -327,6 +327,27 @@ describe("server adapters", () => {
     expect(seenUrls.at(-1)).toBe("https://app.example/account");
   });
 
+  it("rejects untrusted Lambda fallback Host headers", () => {
+    expect(() =>
+      requestFromLambdaEvent(
+        lambdaEvent({
+          headers: { host: "evil.example" },
+          requestContext: { http: { method: "GET", path: "/" } },
+        }),
+        { trustedHosts: ["app.example"] },
+      ),
+    ).toThrow("Untrusted Host header");
+
+    const request = requestFromLambdaEvent(
+      lambdaEvent({
+        headers: { host: "app.example" },
+        requestContext: { http: { method: "GET", path: "/" } },
+      }),
+      { trustedHosts: ["app.example"] },
+    );
+    expect(request.url).toBe("https://app.example/");
+  });
+
   it("preserves Set-Cookie arrays for Node static routes and assets", async () => {
     const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
       method: string;
