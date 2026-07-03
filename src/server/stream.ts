@@ -2,6 +2,7 @@ export type HtmlChunk = string | Uint8Array;
 export type HtmlChunkSource = Iterable<HtmlChunk | Promise<HtmlChunk>> | AsyncIterable<HtmlChunk>;
 
 const encoder = new TextEncoder();
+const coalescedChunkTargetBytes = 8192;
 
 const isAsyncIterable = (value: HtmlChunkSource): value is AsyncIterable<HtmlChunk> => Symbol.asyncIterator in value;
 
@@ -12,9 +13,32 @@ async function* toAsyncChunks(source: HtmlChunkSource): AsyncIterable<HtmlChunk>
     yield* source;
     return;
   }
+  let textBuffer = "";
+  let textBufferBytes = 0;
+  const flush = function* (): Generator<string> {
+    if (textBufferBytes > 0) {
+      yield textBuffer;
+      textBuffer = "";
+      textBufferBytes = 0;
+    }
+  };
   for (const chunk of source) {
-    yield await chunk;
+    const resolved = await chunk;
+    if (typeof resolved !== "string") {
+      yield* flush();
+      yield resolved;
+      continue;
+    }
+    if (resolved.length === 0) {
+      continue;
+    }
+    textBuffer += resolved;
+    textBufferBytes += toBytes(resolved).byteLength;
+    if (textBufferBytes >= coalescedChunkTargetBytes) {
+      yield* flush();
+    }
   }
+  yield* flush();
 }
 
 export const renderToReadableStream = (chunks: HtmlChunkSource): ReadableStream<Uint8Array> => {

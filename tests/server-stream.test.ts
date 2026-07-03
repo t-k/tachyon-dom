@@ -22,7 +22,7 @@ async function* delayedChunks(): AsyncIterable<string> {
 }
 
 describe("server stream adapter", () => {
-  it("streams iterable chunks without building one HTML string first", async () => {
+  it("coalesces synchronous iterable chunks", async () => {
     const stream = renderToReadableStream(["<h1>", "Hello", "</h1>"]);
     const reader = stream.getReader();
     const decoder = new TextDecoder();
@@ -31,9 +31,32 @@ describe("server stream adapter", () => {
     const second = await reader.read();
 
     expect(first.done).toBe(false);
+    expect(decoder.decode(first.value)).toBe("<h1>Hello</h1>");
+    expect(second.done).toBe(true);
+  });
+
+  it("flushes before unresolved async boundaries", async () => {
+    let resolveLate!: () => void;
+    const late = new Promise<void>((resolve) => {
+      resolveLate = resolve;
+    });
+    async function* chunks(): AsyncIterable<string> {
+      yield "<main>";
+      await late;
+      yield "<section>late</section>";
+    }
+
+    const reader = renderToReadableStream(chunks()).getReader();
+    const decoder = new TextDecoder();
+
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(decoder.decode(first.value)).toBe("<main>");
+
+    resolveLate();
+    const second = await reader.read();
     expect(second.done).toBe(false);
-    expect(decoder.decode(first.value)).toBe("<h1>");
-    expect(decoder.decode(second.value)).toBe("Hello");
+    expect(decoder.decode(second.value)).toBe("<section>late</section>");
   });
 
   it("adapts async chunks into an HTML response", async () => {
