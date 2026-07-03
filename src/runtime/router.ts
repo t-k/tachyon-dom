@@ -34,6 +34,7 @@ export type ClientHeadDescriptor = {
 export type ClientRouteDefinition<Data = unknown> = {
   id?: string;
   path: string;
+  children?: readonly ClientRouteDefinition[];
   target?:
     | string
     | Element
@@ -109,6 +110,7 @@ export type RouteHotApi = {
 
 type ClientMatch = {
   route: ClientRouteDefinition;
+  branch: readonly ClientRouteDefinition[];
   params: ClientRouteParams;
 };
 
@@ -118,6 +120,8 @@ type RankedClientRoute = {
 };
 
 type CompiledClientRoute = RankedClientRoute & {
+  branch: readonly ClientRouteDefinition[];
+  fullPath: string;
   regex: RegExp;
   names: string[];
   wildcard: boolean;
@@ -125,6 +129,17 @@ type CompiledClientRoute = RankedClientRoute & {
 };
 
 const trimSlashes = (value: string): string => value.replace(/^\/+|\/+$/g, "");
+
+const joinRoutePaths = (parent: string, child: string): string => {
+  if (child === "*") {
+    return "*";
+  }
+  if (child.startsWith("/")) {
+    return child === "/" ? "/" : `/${trimSlashes(child)}`;
+  }
+  const joined = [trimSlashes(parent), trimSlashes(child)].filter(Boolean).join("/");
+  return joined ? `/${joined}` : "/";
+};
 
 const compileRoutePath = (path: string): { regex: RegExp; names: string[]; wildcard: boolean } => {
   if (path === "*") {
@@ -184,20 +199,36 @@ const compareCompiledClientRoutes = (left: CompiledClientRoute, right: CompiledC
   return left.order - right.order;
 };
 
+const flattenClientRoutes = (
+  routes: readonly ClientRouteDefinition[],
+  parentPath = "",
+  parentBranch: readonly ClientRouteDefinition[] = [],
+  orderOffset = { value: 0 },
+): CompiledClientRoute[] => {
+  const entries: CompiledClientRoute[] = [];
+  for (const route of routes) {
+    const fullPath = joinRoutePaths(parentPath, route.path);
+    const compiled = compileRoutePath(fullPath);
+    const branch = [...parentBranch, route];
+    entries.push({
+      route,
+      branch,
+      fullPath,
+      order: orderOffset.value++,
+      names: compiled.names,
+      regex: compiled.regex,
+      specificity: routeSpecificity(fullPath),
+      wildcard: compiled.wildcard,
+    });
+    if (route.children) {
+      entries.push(...flattenClientRoutes(route.children, fullPath, branch, orderOffset));
+    }
+  }
+  return entries;
+};
+
 const compileClientRoutes = (routes: readonly ClientRouteDefinition[]): readonly CompiledClientRoute[] =>
-  routes
-    .map((route, order): CompiledClientRoute => {
-      const compiled = compileRoutePath(route.path);
-      return {
-        route,
-        order,
-        names: compiled.names,
-        regex: compiled.regex,
-        specificity: routeSpecificity(route.path),
-        wildcard: compiled.wildcard,
-      };
-    })
-    .sort(compareCompiledClientRoutes);
+  flattenClientRoutes(routes).sort(compareCompiledClientRoutes);
 
 const matchClientRoute = (routes: readonly CompiledClientRoute[], pathname: string): ClientMatch | undefined => {
   let fallback: ClientMatch | undefined;
@@ -209,7 +240,7 @@ const matchClientRoute = (routes: readonly CompiledClientRoute[], pathname: stri
     const params = Object.fromEntries(
       routeEntry.names.map((name, index) => [name, decodeURIComponent(match[index + 1] ?? "")]),
     );
-    const matched = { route: routeEntry.route, params };
+    const matched = { route: routeEntry.route, branch: routeEntry.branch, params };
     if (routeEntry.wildcard) {
       fallback = matched;
       continue;
@@ -296,6 +327,9 @@ const routeTargetFor = (root: Element, match: ClientMatch, url: URL, data: unkno
   return target({ root, url, params: match.params, data }) ?? root;
 };
 
+const outletFor = (root: Element): Element | undefined =>
+  root.querySelector("[data-tachyon-outlet], [data-tachyon-route-outlet], tachyon-outlet") ?? undefined;
+
 const isModifiedClick = (event: MouseEvent): boolean =>
   event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
 
@@ -313,6 +347,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   let controller: AbortController | undefined;
   let currentNavigation: Promise<void> = Promise.resolve();
   const cache = new Map<string, unknown>();
+  const layoutRoots = new WeakMap<ClientRouteDefinition, Element>();
   const prefetchControllers = new Map<string, AbortController>();
   const eagerlyNavigated = new WeakSet<HTMLAnchorElement>();
   const scrollPositions = new Map<number, { x: number; y: number }>();
@@ -385,14 +420,43 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     signal: AbortSignal,
   ): Promise<void> => {
     const target = routeTargetFor(options.root, match, url, data);
+    let committedTarget = target;
+    const renderNestedBranch = async (): Promise<void> => {
+      let parentTarget = target;
+      for (const layoutRoute of match.branch.slice(0, -1)) {
+        let layoutRoot = layoutRoots.get(layoutRoute);
+        if (!layoutRoot?.isConnected) {
+          const layoutValue = await layoutRoute.render({
+            url,
+            params: match.params,
+            data,
+            signal,
+          } as ClientRouteContext);
+          renderInto(parentTarget, layoutValue);
+          layoutRoot = parentTarget.firstElementChild ?? parentTarget;
+          layoutRoots.set(layoutRoute, layoutRoot);
+        }
+        const outlet = outletFor(layoutRoot);
+        if (!outlet) {
+          throw new Error(`Nested client route ${layoutRoute.id ?? layoutRoute.path} must render a route outlet.`);
+        }
+        parentTarget = outlet;
+      }
+      renderInto(parentTarget, rendered);
+      committedTarget = parentTarget;
+    };
     const commit = async (): Promise<void> => {
-      renderInto(target, rendered);
+      if (match.branch.length > 1) {
+        await renderNestedBranch();
+      } else {
+        renderInto(target, rendered);
+      }
       await updateHead(url, match, data, signal);
       if (signal.aborted) {
         return;
       }
       restoreOrScroll(url, navigateOptions);
-      focusRouteContent(target, focusSelector);
+      focusRouteContent(committedTarget, focusSelector);
       updateA11y(url, data);
     };
     if (!shouldUseViewTransition(url, match, data)) {

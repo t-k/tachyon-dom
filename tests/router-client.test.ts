@@ -200,6 +200,43 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("renders nested layout routes into a stable client outlet", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/app/users");
+    let layoutRenders = 0;
+    const router = createClientRouter({
+      root,
+      routes: [
+        {
+          id: "app",
+          path: "/app",
+          render: () => {
+            layoutRenders += 1;
+            return rawHtml(`<section data-layout><nav><a href="/app/orders">Orders</a></nav><div data-tachyon-outlet></div></section>`);
+          },
+          children: [
+            { id: "users", path: "users", render: () => rawHtml(`<h1>Users</h1>`) },
+            { id: "orders", path: "orders", render: () => rawHtml(`<h1>Orders</h1>`) },
+          ],
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    const layout = root.querySelector("[data-layout]");
+    await router.navigate("/app/orders");
+
+    expect(root.querySelector("[data-layout]")).toBe(layout);
+    expect(root.querySelector("[data-tachyon-outlet]")?.innerHTML).toBe("<h1>Orders</h1>");
+    expect(layoutRenders).toBe(1);
+    router.dispose();
+  });
+
   it("eagerly navigates prefetched route targets on primary pointer down", async () => {
     document.body.innerHTML = `<main id="app"><nav><a href="/orders">Orders</a></nav><section id="outlet"></section></main>`;
     const root = document.querySelector("#app");
