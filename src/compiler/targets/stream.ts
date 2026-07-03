@@ -224,12 +224,29 @@ const renderNodeYieldStatements = (
 };
 
 export const generateServerStreamModule = (template: CompiledTemplate): string => {
+  const coalescedStatements = renderNodeYieldStatements(template.root, new Set(), "  ").flatMap((line) => {
+    const yieldMatch = /^(\s*)yield (.*);$/.exec(line);
+    if (yieldMatch) {
+      return [`${yieldMatch[1]}__tachyonPush(${yieldMatch[2]});`];
+    }
+    if (line.includes(" await ")) {
+      const indent = line.match(/^\s*/)?.[0] ?? "";
+      return [
+        `${indent}if (__tachyonBuffer) { yield __tachyonBuffer; __tachyonBuffer = ""; }`,
+        line,
+      ];
+    }
+    return [line];
+  });
   const lines = [
     `const HTML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };`,
     `const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => HTML_ESCAPE[char]);`,
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `export const stream = async function* (scope) {`,
-    ...renderNodeYieldStatements(template.root, new Set(), "  "),
+    `  let __tachyonBuffer = "";`,
+    `  const __tachyonPush = (chunk) => { __tachyonBuffer += String(chunk ?? ""); };`,
+    ...coalescedStatements,
+    `  if (__tachyonBuffer) { yield __tachyonBuffer; }`,
     `};`,
   ];
   return `${lines.join("\n")}\n`;

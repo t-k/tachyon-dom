@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { compileTemplate, generateServerStreamModule } from "../src/compiler";
 import { renderToReadableStream, renderToResponse } from "../src/server/stream";
 
 const readStream = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
@@ -83,5 +84,21 @@ describe("server stream adapter", () => {
     await reader.cancel();
 
     expect(cancelled).toBe(true);
+  });
+
+  it("coalesces synchronous chunks emitted by the generated stream target", async () => {
+    const result = compileTemplate(`<main><h1>{title}</h1><p>Ready</p></main>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+    const module = generateServerStreamModule(result.value).replace("export const stream", "const stream");
+    const stream = new Function(`${module}; return stream;`)() as (scope: Record<string, unknown>) => AsyncIterable<string>;
+    const chunks: string[] = [];
+
+    for await (const chunk of stream({ title: "Hello" })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual(["<main><h1>Hello</h1><p>Ready</p></main>"]);
   });
 });
