@@ -2,15 +2,26 @@ import { compileTemplate, renderServerTemplate } from "./compiler/index.js";
 import { compileTachyonSfc, generateSfcScriptDeclarations } from "./compiler/sfc.js";
 import type { ClientBinding, CompiledTemplate } from "./compiler/types.js";
 import { err, ok, type Result } from "./result.js";
+import type { TemplateScope, TypedTemplate } from "./typed.js";
 
-export type TachyonAppPage = {
+type TachyonAppPageBase = {
   path: string;
   fileName: string;
-  template: string;
-  scope?: Record<string, unknown>;
   title?: string;
   assetPrefix?: string;
 };
+
+export type TachyonAppPage<Scope extends TemplateScope = TemplateScope> = TachyonAppPageBase &
+  (
+    | {
+        template: string;
+        scope?: Record<string, unknown>;
+      }
+    | {
+        template: TypedTemplate<Scope>;
+        scope: Scope;
+      }
+  );
 
 export type TachyonAppPageFile = {
   path: string;
@@ -19,10 +30,10 @@ export type TachyonAppPageFile = {
   assetPrefix?: string;
 };
 
-export type TachyonAppDefinition = {
+export type TachyonAppDefinition<Pages extends readonly TachyonAppPage<any>[] = readonly TachyonAppPage[]> = {
   lang?: string;
   title?: string | ((page: TachyonAppPage) => string);
-  pages: readonly TachyonAppPage[];
+  pages: Pages;
   shell?: (context: TachyonAppShellContext) => string;
   assets?: TachyonAppAssets | ((page: TachyonAppPage) => TachyonAppAssets);
 };
@@ -55,6 +66,14 @@ export type TachyonApp = {
   renderShell: (path: string) => string;
   renderDocument: (path: string, options?: TachyonAppDocumentOptions) => string;
   entries: (options?: TachyonAppDocumentOptions) => TachyonAppHtmlEntry[];
+};
+
+type ValidateTypedPageScopes<Pages extends readonly TachyonAppPage<any>[]> = {
+  readonly [Index in keyof Pages]: Pages[Index] extends { template: TypedTemplate<infer Scope>; scope: infer Given }
+    ? Given extends Scope
+      ? Pages[Index]
+      : never
+    : Pages[Index];
 };
 
 export type TemplateTypeOptions = {
@@ -109,8 +128,11 @@ export const minifyHtml = (html: string): string => {
   return `${minified}\n`;
 };
 
+const templateSource = (template: string | TypedTemplate<TemplateScope>): string =>
+  typeof template === "string" ? template : template.source;
+
 const compilePage = (page: TachyonAppPage): CompiledTemplate => {
-  const result = compileTemplate(page.template);
+  const result = compileTemplate(templateSource(page.template));
   if (!result.ok) {
     throw new Error(result.error.message);
   }
@@ -140,7 +162,9 @@ const titleForPage = (app: TachyonAppDefinition, page: TachyonAppPage): string =
 export const renderAppDocument = (app: TachyonApp, path: string, options: TachyonAppDocumentOptions = {}): string =>
   app.renderDocument(path, options);
 
-export const defineApp = (definition: TachyonAppDefinition): TachyonApp => {
+export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
+  definition: Omit<TachyonAppDefinition<Pages>, "pages"> & { pages: ValidateTypedPageScopes<Pages> },
+): TachyonApp => {
   const pages = definition.pages.map((page) => ({
     ...page,
     path: normalizeAppPath(page.path),
@@ -325,8 +349,6 @@ export const generateTachyonModuleTypes = (
     `export declare const bind: (root: Element, scope: ${typeName} & Record<string, unknown>) => void | (() => void);`,
   ].join("\n");
   return ok(
-    [scriptTypes.value, scopeTypes.value.trim(), templateExports]
-      .filter((part) => part.length > 0)
-      .join("\n\n") + "\n",
+    [scriptTypes.value, scopeTypes.value.trim(), templateExports].filter((part) => part.length > 0).join("\n\n") + "\n",
   );
 };

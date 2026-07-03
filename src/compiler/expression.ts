@@ -647,7 +647,7 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
   if (node.operator === "&&") return left && right;
   if (node.operator === "||") return left || right;
   if (node.operator === "+") {
-    return (left as string | number) + (right as string | number);
+    return (left as any) + (right as any);
   }
   if (node.operator === "-") return Number(left) - Number(right);
   if (node.operator === "*") return Number(left) * Number(right);

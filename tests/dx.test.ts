@@ -108,6 +108,16 @@ describe("DX helpers", () => {
 
     expect(typed satisfies TypedTemplate<PanelScope>).toEqual({ source: `<h1>{title}</h1>` });
     expect(scoped.source).toBe(`<button>{count}</button>`);
+
+    defineApp({
+      pages: [{ path: "/", fileName: "index.html", template: typed, scope: { title: "Home", count: 1 } }],
+    });
+    defineApp({
+      pages: [
+        // @ts-expect-error typed templates require a matching page scope
+        { path: "/", fileName: "index.html", template: typed, scope: { count: 1 } },
+      ],
+    });
   });
 
   it("marks the package as tree-shakable for bundlers", async () => {
