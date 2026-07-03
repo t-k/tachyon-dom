@@ -23,5 +23,5 @@ export const compileTemplate = (source: string): Result<CompiledTemplate, Compil
 
 export * from "./types.js";
 export { generateClientModule } from "./targets/client.js";
-export { generateServerModule, renderServerTemplate } from "./targets/server.js";
+export { compileServerTemplate, generateServerModule, renderServerTemplate } from "./targets/server.js";
 export { generateServerStreamModule } from "./targets/stream.js";

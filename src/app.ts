@@ -1,4 +1,4 @@
-import { compileTemplate, renderServerTemplate } from "./compiler/index.js";
+import { compileServerTemplate, compileTemplate } from "./compiler/index.js";
 import { compileTachyonSfc, generateSfcScriptDeclarations } from "./compiler/sfc.js";
 import type { ClientBinding, CompiledTemplate } from "./compiler/types.js";
 import { err, ok, type Result } from "./result.js";
@@ -139,6 +139,9 @@ const compilePage = (page: TachyonAppPage): CompiledTemplate => {
   return result.value;
 };
 
+const compilePageRenderer = (page: TachyonAppPage): ((scope: Record<string, unknown>) => string) =>
+  compileServerTemplate(compilePage(page));
+
 const defaultShell = ({ routeHtml }: TachyonAppShellContext): string => `<main id="app">${routeHtml}</main>`;
 
 const assetsForPage = (
@@ -169,7 +172,7 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     ...page,
     path: normalizeAppPath(page.path),
   }));
-  const compiled = new Map<string, CompiledTemplate>();
+  const renderers = new Map<string, (scope: Record<string, unknown>) => string>();
   const pageForPath = (path: string): TachyonAppPage | undefined =>
     pages.find((page) => page.path === normalizeAppPath(path));
 
@@ -178,9 +181,9 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     if (!page) {
       return "";
     }
-    const cached = compiled.get(page.path) ?? compilePage(page);
-    compiled.set(page.path, cached);
-    return renderServerTemplate(cached, page.scope ?? {});
+    const render = renderers.get(page.path) ?? compilePageRenderer(page);
+    renderers.set(page.path, render);
+    return render(page.scope ?? {});
   };
 
   const renderShell = (path: string): string => {

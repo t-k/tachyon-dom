@@ -433,3 +433,15 @@ export const generateServerModule = (template: CompiledTemplate): string => {
   ];
   return `${lines.join("\n")}\n`;
 };
+
+export type ServerRenderer = (scope: Record<string, unknown>) => string;
+
+export const compileServerTemplate = (template: CompiledTemplate): ServerRenderer => {
+  const body = [
+    `const HTML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };`,
+    `const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => HTML_ESCAPE[char]);`,
+    `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
+    `return ${renderElementExpression(template.root)};`,
+  ].join("\n");
+  return new Function("scope", body) as ServerRenderer;
+};
