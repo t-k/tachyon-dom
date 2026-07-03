@@ -227,12 +227,15 @@ export const generateServerStreamModule = (template: CompiledTemplate): string =
   const coalescedStatements = renderNodeYieldStatements(template.root, new Set(), "  ").flatMap((line) => {
     const yieldMatch = /^(\s*)yield (.*);$/.exec(line);
     if (yieldMatch) {
-      return [`${yieldMatch[1]}__tachyonPush(${yieldMatch[2]});`];
+      return [
+        `${yieldMatch[1]}__tachyonPush(${yieldMatch[2]});`,
+        `${yieldMatch[1]}if (__tachyonBufferBytes >= __tachyonFlushBytes) { yield __tachyonBuffer; __tachyonBuffer = ""; __tachyonBufferBytes = 0; }`,
+      ];
     }
     if (line.includes(" await ")) {
       const indent = line.match(/^\s*/)?.[0] ?? "";
       return [
-        `${indent}if (__tachyonBuffer) { yield __tachyonBuffer; __tachyonBuffer = ""; }`,
+        `${indent}if (__tachyonBuffer) { yield __tachyonBuffer; __tachyonBuffer = ""; __tachyonBufferBytes = 0; }`,
         line,
       ];
     }
@@ -243,8 +246,11 @@ export const generateServerStreamModule = (template: CompiledTemplate): string =
     `const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => HTML_ESCAPE[char]);`,
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `export const stream = async function* (scope) {`,
+    `  const __tachyonEncoder = new TextEncoder();`,
+    `  const __tachyonFlushBytes = 8192;`,
     `  let __tachyonBuffer = "";`,
-    `  const __tachyonPush = (chunk) => { __tachyonBuffer += String(chunk ?? ""); };`,
+    `  let __tachyonBufferBytes = 0;`,
+    `  const __tachyonPush = (chunk) => { const text = String(chunk ?? ""); __tachyonBuffer += text; __tachyonBufferBytes += __tachyonEncoder.encode(text).byteLength; };`,
     ...coalescedStatements,
     `  if (__tachyonBuffer) { yield __tachyonBuffer; }`,
     `};`,

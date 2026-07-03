@@ -560,6 +560,7 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression)}`);
     fields.push(`write: (scope, value) => { ${bindingReadExpression(binding.expression)} = value; }`);
   } else if (binding.kind === "list") {
+    fields.push(`signature: ${JSON.stringify(listSignature(binding))}`);
     fields.push(`each: ${JSON.stringify(binding.each)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.each)}`);
     fields.push(`itemName: ${JSON.stringify(binding.itemName)}`);
@@ -568,6 +569,7 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
     fields.push(`bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}]`);
   } else if (binding.kind === "if") {
+    fields.push(`signature: ${JSON.stringify(conditionalSignature(binding))}`);
     fields.push(`test: ${JSON.stringify(binding.test)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.test)}`);
     fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);

@@ -101,4 +101,21 @@ describe("server stream adapter", () => {
 
     expect(chunks).toEqual(["<main><h1>Hello</h1><p>Ready</p></main>"]);
   });
+
+  it("flushes generated stream chunks at the byte threshold even without await boundaries", async () => {
+    const result = compileTemplate(`<main>${"<p>Ready</p>".repeat(900)}</main>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+    const module = generateServerStreamModule(result.value).replace("export const stream", "const stream");
+    const stream = new Function(`${module}; return stream;`)() as (scope: Record<string, unknown>) => AsyncIterable<string>;
+    const chunks: string[] = [];
+
+    for await (const chunk of stream({})) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join("")).toBe(`<main>${"<p>Ready</p>".repeat(900)}</main>`);
+  });
 });

@@ -637,4 +637,73 @@ describe("mountKeyedList", () => {
       `<ul id="groups"><li><span>Group A</span><ul><li>A1</li><li>A2</li></ul><!----><em>visible</em></li><li><span>Group B</span><ul><li>B1</li></ul><!----></li></ul>`,
     );
   });
+
+  it("skips unchanged nested list and conditional bindings when parent rows update", () => {
+    document.body.innerHTML = `<section><ul id="groups"></ul></section>`;
+    const root = document.body.firstElementChild;
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing root.");
+    }
+    const items = [{ id: "a1", label: "A1" }];
+    let nestedListReads = 0;
+    let nestedIfReads = 0;
+    const options = {
+      signature: "groups-with-nested-bindings",
+      key: "group.id",
+      itemName: "group",
+      templateHtml: `<li><span> </span><ul></ul><!----></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "group.name" },
+        {
+          kind: "list" as const,
+          signature: "nested-items",
+          path: [1],
+          each: "group.items",
+          read: (scope: Record<string, unknown>) => (scope.group as { items: typeof items }).items,
+          itemName: "item",
+          key: "item.id",
+          templateHtml: `<li> </li>`,
+          bindings: [
+            {
+              kind: "text" as const,
+              path: [0],
+              expression: "item.label",
+              read: (scope: Record<string, unknown>) => {
+                nestedListReads++;
+                return (scope.item as { label: string }).label;
+              },
+            },
+          ],
+        },
+        {
+          kind: "if" as const,
+          signature: "nested-visible",
+          path: [2],
+          test: "group.visible",
+          read: (scope: Record<string, unknown>) => (scope.group as { visible: boolean }).visible,
+          templateHtml: `<em> </em>`,
+          bindings: [
+            {
+              kind: "text" as const,
+              path: [0],
+              expression: "group.badge",
+              read: (scope: Record<string, unknown>) => {
+                nestedIfReads++;
+                return (scope.group as { badge: string }).badge;
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    mountKeyedList(root, [0], [{ id: "a", name: "Group A", visible: true, badge: "visible", items }], options);
+    mountKeyedList(root, [0], [{ id: "a", name: "Group A updated", visible: true, badge: "visible", items }], options);
+
+    expect(nestedListReads).toBe(1);
+    expect(nestedIfReads).toBe(1);
+    expect(root.innerHTML).toBe(
+      `<ul id="groups"><li><span>Group A updated</span><ul><li>A1</li></ul><!----><em>visible</em></li></ul>`,
+    );
+  });
 });

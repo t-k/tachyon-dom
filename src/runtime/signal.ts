@@ -14,6 +14,7 @@ const signalBrand = Symbol("tachyon.signal");
 let activeEffect: EffectRunner | undefined;
 let batchDepth = 0;
 let flushing = false;
+const pendingComputedEffects = new Set<EffectRunner>();
 const pendingEffects = new Set<EffectRunner>();
 
 export type Accessor<T> = (() => T) & {
@@ -58,13 +59,16 @@ const flushPendingEffects = (): void => {
   }
   flushing = true;
   try {
-    while (pendingEffects.size > 0) {
-      const runner =
-        Array.from(pendingEffects).find((effect) => effect.computed) ?? pendingEffects.values().next().value;
+    while (pendingComputedEffects.size > 0 || pendingEffects.size > 0) {
+      const runner = pendingComputedEffects.values().next().value ?? pendingEffects.values().next().value;
       if (!runner) {
         break;
       }
-      pendingEffects.delete(runner);
+      if (runner.computed) {
+        pendingComputedEffects.delete(runner);
+      } else {
+        pendingEffects.delete(runner);
+      }
       runner.run();
     }
   } finally {
@@ -82,7 +86,11 @@ const notify = (subscribers: SubscriberSet): void => {
   const snapshot = Array.from(subscribers);
   for (const subscriber of snapshot) {
     if (!subscriber.disposed) {
-      pendingEffects.add(subscriber);
+      if (subscriber.computed) {
+        pendingComputedEffects.add(subscriber);
+      } else {
+        pendingEffects.add(subscriber);
+      }
     }
   }
   scheduleFlush();

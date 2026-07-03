@@ -298,6 +298,8 @@ describe("HTML-first compiler", () => {
     const code = generateClientModule(result.value);
     expect(code).toContain(`kind: "list"`);
     expect(code).toContain(`kind: "if"`);
+    expect(code).toContain(`signature: "list:`);
+    expect(code).toContain(`signature: "if:`);
   });
 
   it("hoists reactive binding node lookups outside effect bodies", () => {

@@ -63,6 +63,7 @@ type ModelBinding = {
 
 type NestedListBinding = {
   kind: "list";
+  signature?: string;
   path: number[];
   each: string;
   read?: ExpressionReader;
@@ -75,6 +76,7 @@ type NestedListBinding = {
 
 type NestedConditionalBinding = {
   kind: "if";
+  signature?: string;
   path: number[];
   test: string;
   read?: ExpressionReader;
@@ -329,18 +331,26 @@ const applyRowBindings = (record: RowRecord, scope: Record<string, unknown>, opt
       }
     } else if (binding.kind === "list") {
       const eachBinding = binding.read ? { expression: binding.each, read: binding.read } : { expression: binding.each };
+      const value = readBinding(scope, eachBinding) as readonly unknown[] | undefined;
+      if (!shouldApplyValue(record, index, value)) {
+        continue;
+      }
       mountKeyedList(
         record.element,
         binding.path,
-        readBinding(scope, eachBinding) as readonly unknown[] | undefined,
+        value,
         { ...binding, scope },
       );
     } else if (binding.kind === "if") {
       const testBinding = binding.read ? { expression: binding.test, read: binding.read } : { expression: binding.test };
+      const value = readBinding(scope, testBinding);
+      if (!shouldApplyValue(record, index, value)) {
+        continue;
+      }
       mountConditional(
         record.element,
         binding.path,
-        readBinding(scope, testBinding),
+        value,
         scope,
         binding,
       );

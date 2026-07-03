@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { batch, catchError, createMemo, createResource, createSignal, effect, read } from "../src/runtime/signal";
+
+const arrayFrom = Array.from;
+
+afterEach(() => {
+  Array.from = arrayFrom;
+});
 
 describe("signal runtime", () => {
   it("re-runs effects only while they are active", () => {
@@ -138,6 +144,34 @@ describe("signal runtime", () => {
     source.set(2);
 
     expect(seen).toEqual(["s=2 m=20"]);
+  });
+
+  it("flushes batched pending effects without scanning the whole pending queue per effect", () => {
+    const sources = Array.from({ length: 64 }, () => createSignal(0));
+    const seen: number[] = [];
+    let largestSetSnapshot = 0;
+    const from = vi.fn((value: Iterable<unknown> | ArrayLike<unknown>) => {
+      if (value instanceof Set) {
+        largestSetSnapshot = Math.max(largestSetSnapshot, value.size);
+      }
+      return arrayFrom(value);
+    }) as typeof Array.from;
+    Array.from = from;
+
+    for (const [index, source] of sources.entries()) {
+      effect(() => {
+        seen[index] = source();
+      });
+    }
+
+    batch(() => {
+      for (const [index, source] of sources.entries()) {
+        source.set(index + 1);
+      }
+    });
+
+    expect(seen).toEqual(sources.map((_, index) => index + 1));
+    expect(largestSetSnapshot).toBeLessThanOrEqual(1);
   });
 
   it("tracks createResource loading, data, and error states through effects", async () => {

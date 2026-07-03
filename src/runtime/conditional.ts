@@ -61,6 +61,7 @@ type ModelBinding = {
 
 type NestedListBinding = {
   kind: "list";
+  signature?: string;
   path: number[];
   each: string;
   key: string;
@@ -73,6 +74,7 @@ type NestedListBinding = {
 
 type NestedConditionalBinding = {
   kind: "if";
+  signature?: string;
   path: number[];
   test: string;
   templateHtml: string;
