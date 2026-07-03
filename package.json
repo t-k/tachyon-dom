@@ -77,6 +77,10 @@
       "types": "./dist/language-server.d.ts",
       "import": "./dist/language-server.js"
     },
+    "./i18n": {
+      "types": "./dist/i18n.d.ts",
+      "import": "./dist/i18n.js"
+    },
     "./vite": {
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.js"

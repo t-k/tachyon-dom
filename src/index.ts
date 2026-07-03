@@ -1,6 +1,7 @@
 import { err, ok } from "./result.js";
 export * from "./app.js";
 export { compileTachyonSfc } from "./compiler/sfc.js";
+export { createI18n, localeMiddleware } from "./i18n.js";
 export { generateClientModule, generateServerStreamModule, renderServerTemplate } from "./compiler/index.js";
 export { enhanceForm, validateFormData } from "./runtime/form.js";
 export { cleanupEnhancements, createEnhancementRegistry, enhance, registerEnhancement } from "./runtime/enhancement.js";
