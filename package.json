@@ -120,6 +120,10 @@
       "types": "./dist/runtime/enhancement.d.ts",
       "import": "./dist/runtime/enhancement.js"
     },
+    "./runtime/error-boundary": {
+      "types": "./dist/runtime/error-boundary.d.ts",
+      "import": "./dist/runtime/error-boundary.js"
+    },
     "./runtime/fragment": {
       "types": "./dist/runtime/fragment.d.ts",
       "import": "./dist/runtime/fragment.js"

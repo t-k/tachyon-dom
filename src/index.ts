@@ -5,6 +5,7 @@ export { generateClientModule, generateServerStreamModule, renderServerTemplate 
 export { enhanceForm, validateFormData } from "./runtime/form.js";
 export { cleanupEnhancements, createEnhancementRegistry, enhance, registerEnhancement } from "./runtime/enhancement.js";
 export { createClientRouter } from "./runtime/router.js";
+export { createErrorBoundary } from "./runtime/error-boundary.js";
 export { createKeyedRows } from "./runtime/keyed-rows.js";
 export { batch, createMemo, createResource, createSignal, effect } from "./runtime/signal.js";
 export { createStore } from "./runtime/store.js";
