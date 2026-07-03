@@ -271,6 +271,62 @@ describe("server adapters", () => {
     expect(res.setHeader).toHaveBeenCalledWith("content-type", "text/plain; charset=utf-8");
   });
 
+  it("rejects untrusted Node Host headers and gates forwarded proto trust", async () => {
+    const seenUrls: string[] = [];
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/account";
+    req.headers = { host: "evil.example", "x-forwarded-proto": "https" };
+    const rejected = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    };
+
+    await createNodeFetchHandler({
+      trustedHosts: ["app.example"],
+      fetch: (request) => {
+        seenUrls.push(request.url);
+        return new Response("ok");
+      },
+    })(req as never, rejected as never);
+
+    expect(rejected.statusCode).toBe(400);
+    expect(seenUrls).toEqual([]);
+
+    req.headers = { host: "app.example", "x-forwarded-proto": "https" };
+    const accepted = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    };
+
+    await createNodeFetchHandler({
+      trustedHosts: ["app.example"],
+      fetch: (request) => {
+        seenUrls.push(request.url);
+        return new Response("ok");
+      },
+    })(req as never, accepted as never);
+
+    expect(seenUrls.at(-1)).toBe("http://app.example/account");
+
+    await createNodeFetchHandler({
+      trustProxy: true,
+      trustedHosts: ["app.example"],
+      fetch: (request) => {
+        seenUrls.push(request.url);
+        return new Response("ok");
+      },
+    })(req as never, accepted as never);
+
+    expect(seenUrls.at(-1)).toBe("https://app.example/account");
+  });
+
   it("preserves Set-Cookie arrays for Node static routes and assets", async () => {
     const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
       method: string;
@@ -322,10 +378,7 @@ describe("server adapters", () => {
         fetch: () => new Response("dynamic"),
       })(req as never, assetRes as never);
 
-      expect(assetRes.setHeader).toHaveBeenCalledWith("set-cookie", [
-        "asset=1; Path=/",
-        "asset2=1; Path=/",
-      ]);
+      expect(assetRes.setHeader).toHaveBeenCalledWith("set-cookie", ["asset=1; Path=/", "asset2=1; Path=/"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

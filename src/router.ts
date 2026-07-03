@@ -871,10 +871,56 @@ const requestFor = (input: Request | URL | string): Request => {
   return new Request(input instanceof URL ? input : new URL(input, "http://tachyon.local"));
 };
 
-const renderAttributes = (attrs: Record<string, string>): string =>
-  Object.entries(attrs)
+const headAttributeNamePattern = /^[A-Za-z_:][A-Za-z0-9_.:-]*$/;
+const urlAttributeNames = new Set(["href", "src", "action", "formaction"]);
+
+const isSafeAttributeUrl = (value: string): boolean => {
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
+    try {
+      const decoded = decodeURIComponent(trimmed);
+      return !decoded.startsWith("//") && !decoded.includes("\\");
+    } catch {
+      return false;
+    }
+  }
+  if (trimmed.startsWith("#") || trimmed.startsWith("mailto:")) {
+    return true;
+  }
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+};
+
+const isSafeHeadAttribute = (name: string, value: string): boolean => {
+  const normalized = name.toLowerCase();
+  if (!headAttributeNamePattern.test(name) || normalized.startsWith("on")) {
+    return false;
+  }
+  return !urlAttributeNames.has(normalized) || isSafeAttributeUrl(value);
+};
+
+const hasUnsafeUrlAttribute = (attrs: Record<string, string>): boolean =>
+  Object.entries(attrs).some(([name, value]) => {
+    const normalized = name.toLowerCase();
+    return urlAttributeNames.has(normalized) && !isSafeAttributeUrl(value);
+  });
+
+const renderAttributes = (
+  attrs: Record<string, string>,
+  options: { dropOnUnsafeUrl?: boolean } = {},
+): string | undefined => {
+  if (options.dropOnUnsafeUrl && hasUnsafeUrlAttribute(attrs)) {
+    return undefined;
+  }
+  return Object.entries(attrs)
+    .filter(([name, value]) => isSafeHeadAttribute(name, value))
     .map(([name, value]) => ` ${name}="${escapeHtml(value)}"`)
     .join("");
+};
 
 export const renderHead = (descriptor: RouteHeadDescriptor, options: { nonce?: string } = {}): string => {
   const chunks: string[] = [];
@@ -882,14 +928,17 @@ export const renderHead = (descriptor: RouteHeadDescriptor, options: { nonce?: s
     chunks.push(`<title>${escapeHtml(descriptor.title)}</title>`);
   }
   for (const meta of descriptor.metas ?? []) {
-    chunks.push(`<meta${renderAttributes(meta)}>`);
+    chunks.push(`<meta${renderAttributes(meta) ?? ""}>`);
   }
   for (const link of descriptor.links ?? []) {
-    chunks.push(`<link${renderAttributes(link)}>`);
+    const attrs = renderAttributes(link, { dropOnUnsafeUrl: true });
+    if (attrs !== undefined) {
+      chunks.push(`<link${attrs}>`);
+    }
   }
   for (const script of descriptor.scripts ?? []) {
     chunks.push(
-      `<script${renderAttributes({ ...script, ...(options.nonce && !script.nonce ? { nonce: options.nonce } : {}) })}></script>`,
+      `<script${renderAttributes({ ...script, ...(options.nonce && !script.nonce ? { nonce: options.nonce } : {}) }) ?? ""}></script>`,
     );
   }
   return chunks.join("");
@@ -905,7 +954,8 @@ export const renderResourceHints = (resources: readonly RouteResource[]): string
           attrs[name] = value;
         }
       }
-      return `<link${renderAttributes(attrs)}>`;
+      const rendered = renderAttributes(attrs, { dropOnUnsafeUrl: true });
+      return rendered === undefined ? "" : `<link${rendered}>`;
     })
     .join("");
 
@@ -1026,6 +1076,19 @@ export const renderRoute = async (
   if (options.maxActionBodyBytes !== undefined && contentLength > options.maxActionBodyBytes) {
     return ok(payloadTooLargeResult(emptyMatch()));
   }
+  if (
+    options.maxActionBodyBytes !== undefined &&
+    request.method !== "GET" &&
+    request.method !== "HEAD" &&
+    request.body
+  ) {
+    const limitedRequest = await readLimitedRequest(request, options.maxActionBodyBytes);
+    if (!limitedRequest) {
+      return ok(payloadTooLargeResult(emptyMatch()));
+    }
+    request = limitedRequest;
+    url = new URL(request.url);
+  }
   const match = matchRoute(routes, url);
   if (!match.ok) {
     const html = options.notFound ? await options.notFound({ request, url }) : `<h1>Not Found</h1>`;
@@ -1046,13 +1109,6 @@ export const renderRoute = async (
     let actionResult: unknown;
     const loaderData: Record<string, unknown> = {};
     if (request.method !== "GET" && request.method !== "HEAD" && match.value.route.action) {
-      if (options.maxActionBodyBytes !== undefined) {
-        const limitedRequest = await readLimitedRequest(request, options.maxActionBodyBytes);
-        if (!limitedRequest) {
-          return ok(payloadTooLargeResult(match.value));
-        }
-        request = limitedRequest;
-      }
       if (options.csrf && !(await verifyCsrf(request, options.csrf))) {
         return ok({
           status: 403,
@@ -1235,7 +1291,8 @@ export const renderRouteStream = async (
   type SettledRender =
     | { settled: true; rendered: Awaited<typeof renderedPromise> }
     | { settled: false; rendered?: undefined };
-  const pending = (): Promise<SettledRender> => new Promise((resolve) => setTimeout(() => resolve({ settled: false }), 0));
+  const pending = (): Promise<SettledRender> =>
+    new Promise((resolve) => setTimeout(() => resolve({ settled: false }), 0));
   const settle = (rendered: Awaited<typeof renderedPromise>): SettledRender => ({ settled: true, rendered });
   const immediate = await Promise.race([renderedPromise.then(settle), pending()]);
   if (immediate.settled) {

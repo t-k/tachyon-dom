@@ -8,7 +8,15 @@ import {
   verifySignedCookieValue,
 } from "../src/cookies";
 import { createCsrfToken, createHtmlSanitizer, csrfInput, sanitizeHtml, verifyCsrfRequest } from "../src/security";
-import { createSecurityHeaders, html, redirect, renderRoute, unsafeHtml, type RouteDefinition } from "../src/router";
+import {
+  createSecurityHeaders,
+  html,
+  redirect,
+  renderHead,
+  renderRoute,
+  unsafeHtml,
+  type RouteDefinition,
+} from "../src/router";
 
 describe("router security helpers", () => {
   it("sanitizes route HTML before creating trusted HTML responses", async () => {
@@ -104,6 +112,36 @@ describe("router security helpers", () => {
     });
 
     expect(result.ok && result.value).toMatchObject({ status: 403, html: "<h1>Forbidden</h1>" });
+  });
+
+  it("applies the configured body byte cap before POST loaders consume the stream", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        path: "/upload",
+        loader: async ({ request }) => ({ body: await request.text() }),
+        render: ({ data }) => `<p>${(data as { body: string }).body}</p>`,
+      },
+    ];
+    const request = new Request("https://x.test/upload", {
+      method: "POST",
+      body: "abcdef",
+    });
+
+    const result = await renderRoute(routes, request, { maxActionBodyBytes: 3 });
+
+    expect(result.ok && result.value).toMatchObject({ status: 413, html: "<h1>Payload Too Large</h1>" });
+  });
+
+  it("drops unsafe URL and event-handler attributes from rendered head descriptors", () => {
+    expect(
+      renderHead({
+        links: [
+          { rel: "preload", href: "javascript:alert(1)", onload: "alert(1)" },
+          { rel: "stylesheet", href: "/app.css" },
+        ],
+        scripts: [{ src: "javascript:alert(1)", type: "module", onload: "alert(1)" }],
+      }),
+    ).toBe(`<link rel="stylesheet" href="/app.css"><script type="module"></script>`);
   });
 
   it("parses cookies and commits in-memory sessions", async () => {

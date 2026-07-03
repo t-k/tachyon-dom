@@ -14,11 +14,17 @@ import {
 
 export type NodeHandlerOptions = WorkersHandlerOptions & {
   staticAssets?: StaticAssetOptions;
+  origin?: string | ((request: IncomingMessage) => string);
+  trustedHosts?: readonly string[];
+  trustProxy?: boolean;
 };
 
 export type NodeFetchHandlerOptions = Omit<WorkersFetchHandlerOptions, "fetch"> & {
   fetch: AdapterFetchHandler;
   staticAssets?: StaticAssetOptions;
+  origin?: string | ((request: IncomingMessage) => string);
+  trustedHosts?: readonly string[];
+  trustProxy?: boolean;
 };
 
 export type StaticAssetOptions = {
@@ -197,20 +203,58 @@ const requestBody = (request: IncomingMessage): BodyInit | undefined => {
   return Readable.toWeb(request) as ReadableStream<Uint8Array>;
 };
 
-const requestUrl = (request: IncomingMessage): string => {
-  const host = request.headers.host ?? "localhost";
-  const protocol = request.headers["x-forwarded-proto"] ?? "http";
-  return `${Array.isArray(protocol) ? protocol[0] : protocol}://${host}${request.url ?? "/"}`;
+type RequestUrlOptions = Pick<NodeHandlerOptions, "origin" | "trustedHosts" | "trustProxy">;
+
+const firstHeaderValue = (value: string | string[] | undefined): string | undefined =>
+  Array.isArray(value) ? value[0] : value;
+
+const normalizeOrigin = (origin: string): string => {
+  const candidate = origin.includes("://") ? origin : `https://${origin}`;
+  return new URL(candidate).origin;
 };
 
-const webRequestFor = (request: IncomingMessage): Request => {
+const hostName = (host: string): string => host.toLowerCase().replace(/:\d+$/, "");
+
+const isTrustedHost = (host: string, trustedHosts: readonly string[] | undefined): boolean => {
+  if (!trustedHosts || trustedHosts.length === 0) {
+    return true;
+  }
+  const normalized = host.toLowerCase();
+  const normalizedName = hostName(normalized);
+  return trustedHosts.some((trusted) => {
+    const candidate = trusted.toLowerCase();
+    return normalized === candidate || normalizedName === candidate;
+  });
+};
+
+const badRequestResponse = (message: string): Response => new Response(message, { status: 400 });
+
+const requestUrl = (request: IncomingMessage, options: RequestUrlOptions = {}): string | Response => {
+  const host = firstHeaderValue(request.headers.host) ?? "localhost";
+  if (!isTrustedHost(host, options.trustedHosts)) {
+    return badRequestResponse("Untrusted Host header");
+  }
+  const protocol = options.trustProxy
+    ? (firstHeaderValue(request.headers["x-forwarded-proto"]) ?? "http").split(",")[0]?.trim() || "http"
+    : "http";
+  const origin = options.origin
+    ? normalizeOrigin(typeof options.origin === "function" ? options.origin(request) : options.origin)
+    : `${protocol}://${host}`;
+  return `${origin}${request.url ?? "/"}`;
+};
+
+const webRequestFor = (request: IncomingMessage, options: RequestUrlOptions = {}): Request | Response => {
+  const url = requestUrl(request, options);
+  if (url instanceof Response) {
+    return url;
+  }
   const body = requestBody(request);
   const init: RequestInit = {
     method: request.method ?? "GET",
     headers: request.headers as HeadersInit,
     ...(body ? { body, duplex: "half" } : {}),
   } as RequestInit;
-  return new Request(requestUrl(request), init);
+  return new Request(url, init);
 };
 
 const nodeObservability = (
@@ -221,12 +265,21 @@ const nodeObservability = (
 export const createNodeHandler =
   (options: NodeHandlerOptions) =>
   async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
-    const staticRoute = findStaticRoute(options.staticRoutes, request.method ?? "GET", new URL(requestUrl(request)));
+    const url = requestUrl(request, options);
+    if (url instanceof Response) {
+      await writeNodeResponse(url, response);
+      return;
+    }
+    const staticRoute = findStaticRoute(options.staticRoutes, request.method ?? "GET", new URL(url));
     if (staticRoute) {
       writeNodeStaticRoute(staticRoute, request, response, options.securityHeaders);
       return;
     }
-    const webRequest = webRequestFor(request);
+    const webRequest = webRequestFor(request, options);
+    if (webRequest instanceof Response) {
+      await writeNodeResponse(webRequest, response);
+      return;
+    }
     if (options.staticAssets) {
       const asset = await createStaticAssetHandler(options.staticAssets)(webRequest);
       if (asset) {
@@ -254,7 +307,11 @@ export const createNodeFetchHandler = (
     },
   });
   return async (request, response) => {
-    const webRequest = webRequestFor(request);
+    const webRequest = webRequestFor(request, options);
+    if (webRequest instanceof Response) {
+      await writeNodeResponse(webRequest, response);
+      return;
+    }
     const webResponse = await fetchHandler.fetch(webRequest);
     await writeNodeResponse(webResponse, response);
   };
