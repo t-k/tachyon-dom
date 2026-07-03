@@ -210,7 +210,13 @@ const renderNodeYieldStatements = (
   return renderElementYieldStatements(node, locals, indent, path);
 };
 
+const streamModuleCache = new WeakMap<CompiledTemplate, string>();
+
 export const generateServerStreamModule = (template: CompiledTemplate): string => {
+  const cached = streamModuleCache.get(template);
+  if (cached) {
+    return cached;
+  }
   const coalescedStatements = renderNodeYieldStatements(template.root, new Set(), "  ").flatMap((line) => {
     const yieldMatch = /^(\s*)yield (.*);$/.exec(line);
     if (yieldMatch) {
@@ -242,5 +248,7 @@ export const generateServerStreamModule = (template: CompiledTemplate): string =
     `  if (__tachyonBuffer) { yield __tachyonBuffer; }`,
     `};`,
   ];
-  return `${lines.join("\n")}\n`;
+  const code = `${lines.join("\n")}\n`;
+  streamModuleCache.set(template, code);
+  return code;
 };

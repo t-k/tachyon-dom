@@ -325,7 +325,18 @@ const runtimeValueExpression = (expression: string, reactive: boolean, sourceNam
   return reactive ? `${runtimeNames.read}(${value})` : value;
 };
 
+const clientModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
+
+const clientModuleCacheKey = (options: GenerateClientModuleOptions): string =>
+  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}`;
+
 export const generateClientModule = (template: CompiledTemplate, options: GenerateClientModuleOptions = {}): string => {
+  const cacheKey = clientModuleCacheKey(options);
+  const cachedByOptions = clientModuleCache.get(template);
+  const cached = cachedByOptions?.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
   const bindings = template.client.bindings;
   const reactive = options.reactive === true;
   const needsStore = template.client.stores.length > 0;
@@ -503,7 +514,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`  };`);
   }
   lines.push(`};`);
-  return `${lines.join("\n")}\n`;
+  const code = `${lines.join("\n")}\n`;
+  const nextCache = cachedByOptions ?? new Map<string, string>();
+  nextCache.set(cacheKey, code);
+  clientModuleCache.set(template, nextCache);
+  return code;
 };
 
 const listSignature = (binding: ListBinding): string =>

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compileTemplate,
+  compileServerTemplate,
   generateClientModule,
   generateServerModule,
   generateServerStreamModule,
@@ -35,6 +36,26 @@ describe("HTML-first compiler", () => {
 
     expect(first.ok).toBe(true);
     expect(second).toBe(first);
+  });
+
+  it("caches generated target modules for repeated compiled template objects", () => {
+    const result = compileTemplate(`<section><h1>{title}</h1></section>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const firstClientCode = generateClientModule(result.value, { reactive: true });
+    const firstServerCode = generateServerModule(result.value);
+    const firstStreamCode = generateServerStreamModule(result.value);
+    const firstRenderer = compileServerTemplate(result.value);
+
+    result.value.root.tagName = "article";
+    result.value.client.templateHtml = "<article></article>";
+
+    expect(generateClientModule(result.value, { reactive: true })).toBe(firstClientCode);
+    expect(generateServerModule(result.value)).toBe(firstServerCode);
+    expect(generateServerStreamModule(result.value)).toBe(firstStreamCode);
+    expect(compileServerTemplate(result.value)).toBe(firstRenderer);
   });
 
   it("extracts text bindings while keeping a static client template", () => {

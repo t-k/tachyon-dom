@@ -207,25 +207,24 @@ describe("DX helpers", () => {
   it("runs package export/type and size gates in CI and release workflows", async () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
       scripts?: Record<string, string>;
+      exports?: Record<string, { import?: string }>;
       "size-limit"?: Array<{ name?: string; path?: string; limit?: string }>;
     };
     const ci = await readFile(".github/workflows/ci.yml", "utf8");
     const release = await readFile(".github/workflows/release.yml", "utf8");
+    const publicJsExportNames = Object.entries(packageJson.exports ?? {}).flatMap(([specifier, target]) => {
+      if (!target.import) {
+        return [];
+      }
+      return specifier === "." ? ["index"] : [specifier.replace(/^\.\//, "")];
+    });
 
     expect(packageJson.scripts?.["check:exports"]).toBe(
       "publint --strict && attw --pack --no-emoji --profile esm-only",
     );
     expect(packageJson.scripts?.["check:size"]).toBe("size-limit");
-    expect(packageJson["size-limit"]?.map((entry) => entry.name)).toEqual([
-      "index",
-      "runtime/text",
-      "runtime/signal",
-      "runtime/list",
-      "runtime/error-boundary",
-      "runtime/router",
-      "i18n",
-      "server/html",
-    ]);
+    expect(packageJson["size-limit"]?.map((entry) => entry.name)).toEqual(publicJsExportNames);
+    expect(packageJson["size-limit"]?.some((entry) => entry.name === "td-modules")).toBe(false);
     expect(ci).toContain("pnpm check:exports");
     expect(ci).toContain("pnpm check:size");
     expect(release).toContain("tags:");

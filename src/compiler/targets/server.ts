@@ -406,7 +406,13 @@ const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string
   return `(() => { ${declarations.join(" ")} return ${expression}; })()`;
 };
 
+const serverModuleCache = new WeakMap<CompiledTemplate, string>();
+
 export const generateServerModule = (template: CompiledTemplate): string => {
+  const cached = serverModuleCache.get(template);
+  if (cached) {
+    return cached;
+  }
   const lines = [
     `const HTML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };`,
     `const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => HTML_ESCAPE[char]);`,
@@ -418,17 +424,27 @@ export const generateServerModule = (template: CompiledTemplate): string => {
     `export const renderHydrationState = (id, state) => '<script type="application/json" data-tachyon-state="' + escapeAttribute(id) + '">' + escapeScriptJson(JSON.stringify(state) ?? "null") + '</script>';`,
     `export const render = (scope) => ${renderElementExpression(template.root)};`,
   ];
-  return `${lines.join("\n")}\n`;
+  const code = `${lines.join("\n")}\n`;
+  serverModuleCache.set(template, code);
+  return code;
 };
 
 export type ServerRenderer = (scope: Record<string, unknown>) => string;
 
+const serverRendererCache = new WeakMap<CompiledTemplate, ServerRenderer>();
+
 export const compileServerTemplate = (template: CompiledTemplate): ServerRenderer => {
+  const cached = serverRendererCache.get(template);
+  if (cached) {
+    return cached;
+  }
   const body = [
     `const HTML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };`,
     `const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => HTML_ESCAPE[char]);`,
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `return ${renderElementExpression(template.root)};`,
   ].join("\n");
-  return new Function("scope", body) as ServerRenderer;
+  const renderer = new Function("scope", body) as ServerRenderer;
+  serverRendererCache.set(template, renderer);
+  return renderer;
 };

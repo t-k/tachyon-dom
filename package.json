@@ -275,6 +275,142 @@
       "limit": "8 KB"
     },
     {
+      "name": "compiler",
+      "path": "dist/compiler.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "2 KB"
+    },
+    {
+      "name": "cli",
+      "path": "dist/cli.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "30 KB"
+    },
+    {
+      "name": "app",
+      "path": "dist/app.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "14 KB"
+    },
+    {
+      "name": "cookies",
+      "path": "dist/cookies.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "8 KB"
+    },
+    {
+      "name": "adapters",
+      "path": "dist/adapters.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "2 KB"
+    },
+    {
+      "name": "adapters/workers",
+      "path": "dist/adapters/workers.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "14 KB"
+    },
+    {
+      "name": "adapters/node",
+      "path": "dist/adapters/node.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "14 KB"
+    },
+    {
+      "name": "adapters/lambda",
+      "path": "dist/adapters/lambda.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "12 KB"
+    },
+    {
+      "name": "diagnostics",
+      "path": "dist/diagnostics.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
+    },
+    {
+      "name": "env",
+      "path": "dist/env.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
+    },
+    {
+      "name": "typed",
+      "path": "dist/typed.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "2 KB"
+    },
+    {
+      "name": "testing",
+      "path": "dist/testing.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
+    },
+    {
+      "name": "language-server",
+      "path": "dist/language-server.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "6 KB"
+    },
+    {
+      "name": "i18n",
+      "path": "dist/i18n.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "6 KB"
+    },
+    {
+      "name": "vite",
+      "path": "dist/vite.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "22 KB"
+    },
+    {
+      "name": "router",
+      "path": "dist/router.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "48 KB"
+    },
+    {
+      "name": "router/node",
+      "path": "dist/router-node.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "2 KB"
+    },
+    {
       "name": "runtime/text",
       "path": "dist/runtime/text.js",
       "disablePlugins": [
@@ -283,20 +419,52 @@
       "limit": "2 KB"
     },
     {
-      "name": "runtime/signal",
-      "path": "dist/runtime/signal.js",
+      "name": "runtime/class",
+      "path": "dist/runtime/class.js",
       "disablePlugins": [
         "@size-limit/esbuild"
       ],
-      "limit": "6 KB"
+      "limit": "2 KB"
     },
     {
-      "name": "runtime/list",
-      "path": "dist/runtime/list.js",
+      "name": "runtime/event",
+      "path": "dist/runtime/event.js",
       "disablePlugins": [
         "@size-limit/esbuild"
       ],
-      "limit": "12 KB"
+      "limit": "2 KB"
+    },
+    {
+      "name": "runtime/conditional",
+      "path": "dist/runtime/conditional.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "8 KB"
+    },
+    {
+      "name": "runtime/attr",
+      "path": "dist/runtime/attr.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
+    },
+    {
+      "name": "runtime/form",
+      "path": "dist/runtime/form.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "8 KB"
+    },
+    {
+      "name": "runtime/enhancement",
+      "path": "dist/runtime/enhancement.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
     },
     {
       "name": "runtime/error-boundary",
@@ -307,16 +475,88 @@
       "limit": "4 KB"
     },
     {
+      "name": "runtime/fragment",
+      "path": "dist/runtime/fragment.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "2 KB"
+    },
+    {
+      "name": "runtime/hydrate",
+      "path": "dist/runtime/hydrate.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "10 KB"
+    },
+    {
+      "name": "runtime/list",
+      "path": "dist/runtime/list.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "16 KB"
+    },
+    {
+      "name": "runtime/keyed-rows",
+      "path": "dist/runtime/keyed-rows.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "8 KB"
+    },
+    {
+      "name": "runtime/virtual-list",
+      "path": "dist/runtime/virtual-list.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "6 KB"
+    },
+    {
+      "name": "runtime/portal",
+      "path": "dist/runtime/portal.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "2 KB"
+    },
+    {
       "name": "runtime/router",
       "path": "dist/runtime/router.js",
       "disablePlugins": [
         "@size-limit/esbuild"
       ],
-      "limit": "18 KB"
+      "limit": "28 KB"
     },
     {
-      "name": "i18n",
-      "path": "dist/i18n.js",
+      "name": "runtime/signal",
+      "path": "dist/runtime/signal.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "8 KB"
+    },
+    {
+      "name": "runtime/store",
+      "path": "dist/runtime/store.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "2 KB"
+    },
+    {
+      "name": "runtime/stream-client",
+      "path": "dist/runtime/stream-client.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
+    },
+    {
+      "name": "server/stream",
+      "path": "dist/server/stream.js",
       "disablePlugins": [
         "@size-limit/esbuild"
       ],
@@ -325,6 +565,22 @@
     {
       "name": "server/html",
       "path": "dist/server/html.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "8 KB"
+    },
+    {
+      "name": "server/form-action",
+      "path": "dist/server/form-action.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "6 KB"
+    },
+    {
+      "name": "security",
+      "path": "dist/security.js",
       "disablePlugins": [
         "@size-limit/esbuild"
       ],
