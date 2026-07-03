@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batch, createMemo, createSignal, effect, read } from "../src/runtime/signal";
+import { batch, catchError, createMemo, createSignal, effect, read } from "../src/runtime/signal";
 
 describe("signal runtime", () => {
   it("re-runs effects only while they are active", () => {
@@ -94,5 +94,32 @@ describe("signal runtime", () => {
 
     expect(seen).toEqual([0, 1, 2]);
     expect(reentered).toBe(false);
+  });
+
+  it("recovers throwing effects with catchError", () => {
+    const value = createSignal("ok");
+    const seen: string[] = [];
+    const errors: string[] = [];
+
+    const dispose = catchError(
+      () => {
+        const current = value();
+        if (current === "bad") {
+          throw new Error("broken");
+        }
+        seen.push(current);
+      },
+      (error) => {
+        errors.push(error instanceof Error ? error.message : String(error));
+      },
+    );
+
+    value.set("bad");
+    value.set("again");
+    dispose();
+    value.set("ignored");
+
+    expect(seen).toEqual(["ok", "again"]);
+    expect(errors).toEqual(["broken"]);
   });
 });

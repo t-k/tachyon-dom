@@ -196,3 +196,12 @@ export const effect = (fn: () => void): (() => void) => {
   runner.run();
   return () => disposeRunner(runner);
 };
+
+export const catchError = (fn: () => void, onError: (error: unknown) => void): (() => void) =>
+  effect(() => {
+    try {
+      fn();
+    } catch (error) {
+      onError(error);
+    }
+  });
