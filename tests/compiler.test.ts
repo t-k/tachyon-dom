@@ -70,6 +70,29 @@ describe("HTML-first compiler", () => {
     expect(root.textContent).toBe("x and y");
   });
 
+  it("matches SSR text node layout to client bindings for mixed text", () => {
+    const result = compileTemplate(`<section><p>Hello {name}!</p><span>{a} {b}</span></section>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const html = renderServerTemplate(result.value, { name: "World", a: "x", b: "y" });
+    document.body.innerHTML = html;
+    const root = document.body.firstElementChild;
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing SSR root.");
+    }
+
+    expect(html).toBe(`<section><p>Hello <!---->World<!---->!</p><span>x<!----> <!---->y</span></section>`);
+    for (const binding of result.value.client.bindings) {
+      if (binding.kind === "text") {
+        expect(textAt(root, binding.path)).toBeInstanceOf(Text);
+      }
+    }
+    expect(generateServerModule(result.value)).toContain(`"<!---->"`);
+    expect(generateServerStreamModule(result.value)).toContain(`yield "<!---->";`);
+  });
+
   it("omits closing tags for void elements in client and server targets", () => {
     const result = compileTemplate(`<div><br/>{label}<hr/></div>`);
     if (!result.ok) {

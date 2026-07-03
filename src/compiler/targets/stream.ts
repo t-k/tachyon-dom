@@ -16,14 +16,24 @@ import { renderOpenTagExpression } from "./server.js";
 
 const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, indent: string): string[] => {
   const statements: string[] = [];
+  let lastEmittedWasText = false;
+  const separateTextNode = (): void => {
+    if (lastEmittedWasText) {
+      statements.push(`${indent}yield "<!---->";`);
+    }
+  };
   for (const segment of textExpressionSegments(node.value)) {
     if (segment.kind === "text") {
       if (segment.value) {
+        separateTextNode();
         statements.push(`${indent}yield ${jsString(segment.value)};`);
+        lastEmittedWasText = true;
       }
       continue;
     }
+    separateTextNode();
     statements.push(`${indent}yield escapeHtml(${expressionToScopeAccess(segment.value, locals)});`);
+    lastEmittedWasText = true;
   }
   return statements;
 };

@@ -49,12 +49,25 @@ const componentScope = (node: ElementNode, scope: Record<string, unknown>): Reco
 
 const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
   let output = "";
+  let lastEmittedWasText = false;
+  const separateTextNode = (): void => {
+    if (lastEmittedWasText) {
+      output += "<!---->";
+    }
+  };
   for (const segment of textExpressionSegments(node.value)) {
     if (segment.kind === "text") {
+      if (!segment.value) {
+        continue;
+      }
+      separateTextNode();
       output += segment.value;
+      lastEmittedWasText = true;
       continue;
     }
+    separateTextNode();
     output += escapeHtml(readPath(scope, segment.value));
+    lastEmittedWasText = true;
   }
   return output;
 };
@@ -199,14 +212,24 @@ export const renderServerTemplate = (template: CompiledTemplate, scope: Record<s
 
 const renderTextExpression = (node: TextNode, locals: ReadonlySet<string> = new Set()): string => {
   const parts: string[] = [];
+  let lastEmittedWasText = false;
+  const separateTextNode = (): void => {
+    if (lastEmittedWasText) {
+      parts.push(jsString("<!---->"));
+    }
+  };
   for (const segment of textExpressionSegments(node.value)) {
     if (segment.kind === "text") {
       if (segment.value) {
+        separateTextNode();
         parts.push(jsString(segment.value));
+        lastEmittedWasText = true;
       }
       continue;
     }
+    separateTextNode();
     parts.push(`escapeHtml(${expressionToScopeAccess(segment.value, locals)})`);
+    lastEmittedWasText = true;
   }
   return parts.length > 0 ? parts.join(" + ") : `""`;
 };
