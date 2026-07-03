@@ -398,10 +398,12 @@ const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string
 
 export const generateServerModule = (template: CompiledTemplate): string => {
   const lines = [
-    `const escapeHtml = (value) => String(value ?? "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");`,
+    `const HTML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };`,
+    `const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => HTML_ESCAPE[char]);`,
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll(">", "\\\\u003e");`,
-    `const escapeAttribute = (value) => String(value).replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");`,
+    `const ATTRIBUTE_ESCAPE = { "&": "&amp;", '"': "&quot;", "<": "&lt;" };`,
+    `const escapeAttribute = (value) => String(value).replace(/[&"<]/g, (char) => ATTRIBUTE_ESCAPE[char]);`,
     `export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`,
     `export const renderHydrationState = (id, state) => '<script type="application/json" data-tachyon-state="' + escapeAttribute(id) + '">' + escapeScriptJson(JSON.stringify(state) ?? "null") + '</script>';`,
     `export const render = (scope) => ${renderElementExpression(template.root)};`,

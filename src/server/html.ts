@@ -33,15 +33,24 @@ const isHtmlFragment = (value: unknown): value is HtmlFragment =>
 const isHtmlAttribute = (value: unknown): value is HtmlAttribute =>
   Boolean(value && typeof value === "object" && (value as Record<symbol, unknown>)[htmlAttributeBrand] === true);
 
-const escapeText = (value: unknown): string =>
-  String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll(`"`, "&quot;")
-    .replaceAll("'", "&#39;");
+const textEscapeMap: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
 
-const escapeAttribute = (value: unknown): string => escapeText(value).replaceAll("'", "&#39;").replaceAll("`", "&#96;");
+const attributeEscapeMap: Record<string, string> = {
+  ...textEscapeMap,
+  "`": "&#96;",
+};
+
+const escapeText = (value: unknown): string =>
+  String(value ?? "").replace(/[&<>"']/g, (char) => textEscapeMap[char] ?? char);
+
+const escapeAttribute = (value: unknown): string =>
+  String(value ?? "").replace(/[&<>"'`]/g, (char) => attributeEscapeMap[char] ?? char);
 
 const assertAttributeName = (name: string): void => {
   if (!attributeNamePattern.test(name)) {

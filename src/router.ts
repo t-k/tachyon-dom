@@ -286,12 +286,15 @@ export const json = (data: unknown, init: ResponseInit = {}): RouteResponse => {
   return routeResponse(JSON.stringify(data), { ...init, headers });
 };
 
+const htmlEscapeMap: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+};
+
 const escapeHtml = (value: unknown): string =>
-  String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll(`"`, "&quot;");
+  String(value ?? "").replace(/[&<>"]/g, (char) => htmlEscapeMap[char] ?? char);
 
 const trustedHtmlValues = new WeakSet<TrustedHtml>();
 
@@ -387,8 +390,13 @@ export const resolveDeferredData = async <T extends Record<string, unknown>>(dat
 
 const escapeScriptJson = (value: string): string => value.replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
 
-const escapeAttribute = (value: string): string =>
-  value.replaceAll("&", "&amp;").replaceAll(`"`, "&quot;").replaceAll("<", "&lt;");
+const attributeEscapeMap: Record<string, string> = {
+  "&": "&amp;",
+  '"': "&quot;",
+  "<": "&lt;",
+};
+
+const escapeAttribute = (value: string): string => value.replace(/[&"<]/g, (char) => attributeEscapeMap[char] ?? char);
 
 export const renderDeferredDataScript = async <T extends Record<string, unknown>>(
   id: string,

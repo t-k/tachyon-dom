@@ -272,6 +272,21 @@ describe("HTML-first compiler", () => {
     expect(code).not.toContain(`tachyon-dom/runtime`);
   });
 
+  it("generates single-pass HTML escaping helpers for server targets", () => {
+    const result = compileTemplate(`<p>{label}</p>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const serverCode = generateServerModule(result.value);
+    const streamCode = generateServerStreamModule(result.value);
+
+    expect(serverCode).toContain(`replace(/[&<>"']/g`);
+    expect(streamCode).toContain(`replace(/[&<>"']/g`);
+    expect(serverCode).not.toContain(`replaceAll("&", "&amp;").replaceAll("<", "&lt;")`);
+    expect(streamCode).not.toContain(`replaceAll("&", "&amp;").replaceAll("<", "&lt;")`);
+  });
+
   it("generates server list code that uses loop-local item scope", () => {
     const result = compileTemplate(`<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td></tr></for></tbody>`);
     if (!result.ok) {
