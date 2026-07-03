@@ -269,6 +269,40 @@ describe("mountKeyedList", () => {
     expect(calls).toEqual(["new"]);
   });
 
+  it("skips unchanged row binding writes when keyed rows are reused", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [{ kind: "text" as const, path: [0, 0], expression: "item.label" }],
+    };
+
+    mountKeyedList(root, [], [{ id: 1, label: "One" }], options);
+    const text = root.querySelector("span")?.firstChild;
+    if (!(text instanceof Text)) {
+      throw new Error("Missing text node.");
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(Node.prototype, "nodeValue");
+    let writes = 0;
+    Object.defineProperty(text, "nodeValue", {
+      configurable: true,
+      get: () => descriptor?.get?.call(text),
+      set: (value) => {
+        writes++;
+        descriptor?.set?.call(text, value);
+      },
+    });
+
+    mountKeyedList(root, [], [{ id: 1, label: "One" }], options);
+
+    expect(writes).toBe(0);
+  });
+
   it("allows row bindings to read handlers and values from the outer scope", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

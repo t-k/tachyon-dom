@@ -78,6 +78,7 @@ type RowRecord = {
   nodes: Node[];
   scope: Record<string, unknown>;
   cleanups: Array<() => void>;
+  lastValues: unknown[];
 };
 
 type ListState = {
@@ -253,24 +254,48 @@ const cleanupRecord = (record: RowRecord): void => {
   }
 };
 
+const shouldApplyValue = (record: RowRecord, index: number, value: unknown): boolean => {
+  if (Object.is(record.lastValues[index], value)) {
+    return false;
+  }
+  record.lastValues[index] = value;
+  return true;
+};
+
 const applyRowBindings = (record: RowRecord, scope: Record<string, unknown>, options: KeyedListOptions): void => {
-  for (const binding of options.bindings) {
+  for (let index = 0; index < options.bindings.length; index++) {
+    const binding = options.bindings[index] as Binding;
     if (binding.kind === "text") {
-      setText(nodeAtRecord(record, binding.path) as Text, readBinding(scope, binding));
+      const value = readBinding(scope, binding);
+      if (shouldApplyValue(record, index, value)) {
+        setText(nodeAtRecord(record, binding.path) as Text, value);
+      }
     } else if (binding.kind === "class") {
-      setClassPresence(nodeAtRecord(record, binding.path) as Element, binding.className, readBinding(scope, binding));
+      const value = readBinding(scope, binding);
+      if (shouldApplyValue(record, index, value)) {
+        setClassPresence(nodeAtRecord(record, binding.path) as Element, binding.className, value);
+      }
     } else if (binding.kind === "attr") {
-      setAttributeValue(nodeAtRecord(record, binding.path) as Element, binding.name, readBinding(scope, binding));
+      const value = readBinding(scope, binding);
+      if (shouldApplyValue(record, index, value)) {
+        setAttributeValue(nodeAtRecord(record, binding.path) as Element, binding.name, value);
+      }
     } else if (binding.kind === "style") {
-      setStyleValue(nodeAtRecord(record, binding.path) as Element, binding.name, readBinding(scope, binding));
+      const value = readBinding(scope, binding);
+      if (shouldApplyValue(record, index, value)) {
+        setStyleValue(nodeAtRecord(record, binding.path) as Element, binding.name, value);
+      }
     } else if (binding.kind === "ref") {
       setRef(scope, binding.expression, nodeAtRecord(record, binding.path) as Element);
     } else if (binding.kind === "model") {
-      setControlValue(
-        nodeAtRecord(record, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
-        binding.property,
-        readBinding(scope, binding),
-      );
+      const value = readBinding(scope, binding);
+      if (shouldApplyValue(record, index, value)) {
+        setControlValue(
+          nodeAtRecord(record, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+          binding.property,
+          value,
+        );
+      }
     }
   }
 };
@@ -328,6 +353,7 @@ const createRecord = (
     nodes,
     scope,
     cleanups: [],
+    lastValues: [],
   };
   for (const node of nodes) {
     if (node instanceof Element) {
