@@ -143,8 +143,7 @@ export const createKeyedRows = <T>(options: KeyedRowsOptions<T>): KeyedRows<T> =
     build(items.length, (index) => items[index - start] as T, start);
   };
 
-  const appendEach = (count: number, make: (index: number) => T): void =>
-    build(count, make, tbody.childElementCount);
+  const appendEach = (count: number, make: (index: number) => T): void => build(count, make, tbody.childElementCount);
 
   const update = (stride: number, patch: (row: HTMLTableRowElement, index: number) => void): void => {
     const rows = tbody.children;
@@ -198,11 +197,11 @@ export const createKeyedRows = <T>(options: KeyedRowsOptions<T>): KeyedRows<T> =
       return;
     }
     if (selectedRow) {
-      selectedRow.className = "";
+      selectedRow.classList.remove(selectedClass);
     }
     selectedRow = row ?? undefined;
     if (selectedRow) {
-      selectedRow.className = selectedClass;
+      selectedRow.classList.add(selectedClass);
     }
   };
 

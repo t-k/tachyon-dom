@@ -81,6 +81,21 @@ describe("HTML-first compiler", () => {
     expect(generateServerStreamModule(result.value)).not.toContain(`</hr>`);
   });
 
+  it("accepts bare void elements and drops HTML comments without shifting bindings", () => {
+    const result = compileTemplate(`<div><!-- note --><br><input type="text"><param name="movie">{label}</div>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.templateHtml).toBe(`<div><br><input type="text"><param name="movie"> </div>`);
+    expect(result.value.client.bindings).toEqual([{ kind: "text", path: [3], expression: "label" }]);
+    expect(renderServerTemplate(result.value, { label: "Ready" })).toBe(
+      `<div><br><input type="text"><param name="movie">Ready</div>`,
+    );
+    expect(generateServerModule(result.value)).not.toContain(`</param>`);
+    expect(generateServerStreamModule(result.value)).not.toContain(`</param>`);
+  });
+
   it("escapes quoted static attributes in generated markup", () => {
     const result = compileTemplate(`<button title='say "hi"' data-note="rock & roll">Save</button>`);
     if (!result.ok) {

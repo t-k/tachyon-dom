@@ -113,4 +113,31 @@ describe("attribute and form runtime helpers", () => {
     cleanupName();
     cleanupActive();
   });
+
+  it("defers text input writes while IME composition is active", () => {
+    document.body.innerHTML = `<input id="name">`;
+    const name = document.querySelector("#name");
+    if (!(name instanceof HTMLInputElement)) {
+      throw new Error("Missing input.");
+    }
+    const scope = { name: "Ada" };
+
+    const cleanup = bindControl(
+      name,
+      "value",
+      () => scope.name,
+      (value) => {
+        scope.name = String(value);
+      },
+    );
+
+    name.value = "あ";
+    name.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true }));
+    expect(scope.name).toBe("Ada");
+
+    name.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+    expect(scope.name).toBe("あ");
+
+    cleanup();
+  });
 });

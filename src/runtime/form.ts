@@ -26,11 +26,33 @@ export const bindControl = (
   const control = element;
   setControlValue(control, property, read());
   const eventName = property === "checked" ? "change" : "input";
-  const listener = (): void => {
+  let composing = false;
+  const commit = (): void => {
     write(property === "checked" && control instanceof HTMLInputElement ? control.checked : control.value);
   };
+  const listener = (event: Event): void => {
+    if (property === "value" && ((event as InputEvent).isComposing || composing)) {
+      return;
+    }
+    commit();
+  };
+  const onCompositionStart = (): void => {
+    composing = true;
+  };
+  const onCompositionEnd = (): void => {
+    composing = false;
+    commit();
+  };
   control.addEventListener(eventName, listener);
-  return () => control.removeEventListener(eventName, listener);
+  if (property === "value") {
+    control.addEventListener("compositionstart", onCompositionStart);
+    control.addEventListener("compositionend", onCompositionEnd);
+  }
+  return () => {
+    control.removeEventListener(eventName, listener);
+    control.removeEventListener("compositionstart", onCompositionStart);
+    control.removeEventListener("compositionend", onCompositionEnd);
+  };
 };
 
 export type EnhancedFormContext = {

@@ -1,5 +1,6 @@
 import { err, ok, type Result } from "../result.js";
 import type { Attribute, CompilerError, ElementNode, TextNode } from "./types.js";
+import { voidElementNames } from "./utils.js";
 
 type Parser = {
   source: string;
@@ -140,9 +141,37 @@ const parseText = (parser: Parser): TextNode => {
   return { type: "text", value: parser.source.slice(start, parser.offset) };
 };
 
+const consumeComment = (parser: Parser): Result<void, CompilerError> => {
+  if (!startsWith(parser, "<!--")) {
+    return parserError(parser, "Expected an HTML comment.");
+  }
+  const end = parser.source.indexOf("-->", parser.offset + 4);
+  if (end === -1) {
+    return parserError(parser, "Unclosed HTML comment.");
+  }
+  parser.offset = end + 3;
+  return ok(undefined);
+};
+
+const consumeClosingTag = (parser: Parser, tagName: string): Result<void, CompilerError> => {
+  if (!startsWith(parser, `</${tagName}`)) {
+    return parserError(parser, `Missing closing tag for <${tagName}>.`);
+  }
+  parser.offset += tagName.length + 2;
+  consumeWhitespace(parser);
+  if (peek(parser) !== ">") {
+    return parserError(parser, "Expected end of closing tag.");
+  }
+  parser.offset++;
+  return ok(undefined);
+};
+
 const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
   if (peek(parser) !== "<") {
     return parserError(parser, "Expected an opening tag.");
+  }
+  if (startsWith(parser, "<!--")) {
+    return parserError(parser, "Unexpected HTML comment.");
   }
   parser.offset++;
   if (peek(parser) === "/") {
@@ -165,10 +194,24 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
     return parserError(parser, "Expected end of opening tag.");
   }
   parser.offset++;
+  if (voidElementNames.has(tagNameResult.value)) {
+    if (startsWith(parser, `</${tagNameResult.value}`)) {
+      const closing = consumeClosingTag(parser, tagNameResult.value);
+      if (!closing.ok) {
+        return err(closing.error);
+      }
+    }
+    return ok({ type: "element", tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
+  }
 
   const children = [];
   while (parser.offset < parser.source.length && !startsWith(parser, `</${tagNameResult.value}`)) {
-    if (peek(parser) === "<") {
+    if (startsWith(parser, "<!--")) {
+      const comment = consumeComment(parser);
+      if (!comment.ok) {
+        return err(comment.error);
+      }
+    } else if (peek(parser) === "<") {
       const childResult = parseElement(parser);
       if (!childResult.ok) {
         return err(childResult.error);
@@ -179,15 +222,10 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
     }
   }
 
-  if (!startsWith(parser, `</${tagNameResult.value}`)) {
-    return parserError(parser, `Missing closing tag for <${tagNameResult.value}>.`);
+  const closing = consumeClosingTag(parser, tagNameResult.value);
+  if (!closing.ok) {
+    return err(closing.error);
   }
-  parser.offset += tagNameResult.value.length + 2;
-  consumeWhitespace(parser);
-  if (peek(parser) !== ">") {
-    return parserError(parser, "Expected end of closing tag.");
-  }
-  parser.offset++;
   return ok({ type: "element", tagName: tagNameResult.value, attrs: attrsResult.value, children });
 };
 

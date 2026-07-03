@@ -77,7 +77,16 @@ describe("createKeyedRows", () => {
       text.data = `${text.data}!`;
     });
     expect(labels(tbody)).toEqual([
-      "row 1!", "row 2", "row 3", "row 4!", "row 5", "row 6", "row 7!", "row 8", "row 9", "row 10!",
+      "row 1!",
+      "row 2",
+      "row 3",
+      "row 4!",
+      "row 5",
+      "row 6",
+      "row 7!",
+      "row 8",
+      "row 9",
+      "row 10!",
     ]);
   });
 
@@ -125,6 +134,22 @@ describe("createKeyedRows", () => {
     list.selectRow(null);
     expect(list.selectedIndex()).toBe(-1);
     expect(tbody.querySelector(".sel")).toBeNull();
+  });
+
+  it("preserves non-selection classes when selecting and clearing rows", () => {
+    const { tbody, list } = setup();
+    list.replace(items(2));
+    tbody.rows[0]?.classList.add("row-base", "priority");
+    tbody.rows[1]?.classList.add("row-base");
+
+    list.selectAt(0);
+    expect(tbody.rows[0]?.className).toBe("row-base priority sel");
+    list.selectAt(1);
+
+    expect(tbody.rows[0]?.className).toBe("row-base priority");
+    expect(tbody.rows[1]?.className).toBe("row-base sel");
+    list.selectRow(null);
+    expect(tbody.rows[1]?.className).toBe("row-base");
   });
 
   it("clears all rows and selection", () => {
