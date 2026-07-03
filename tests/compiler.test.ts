@@ -500,6 +500,40 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`escapeMarker("td-h-2")`);
   });
 
+  it("generates stable hydrate ids and records shorthand hydration strategies", () => {
+    const result = compileTemplate(
+      `<main><section hydrate><button>{label}</button></section><aside hydrate:visible="128px">{summary}</aside><footer hydrate:interaction="pointerenter">{status}</footer></main>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.client.templateHtml).toBe(
+      `<main><section><button> </button></section><aside> </aside><footer> </footer></main>`,
+    );
+    expect(result.value.client.hydrationBoundaries).toEqual([
+      { path: [0], id: "td-h-0", idKind: "static" },
+      { path: [1], id: "td-h-1", idKind: "static", strategy: "visible", rootMargin: "128px" },
+      { path: [2], id: "td-h-2", idKind: "static", strategy: "interaction", interaction: "pointerenter" },
+    ]);
+    expect(result.value.ir.directives).toContainEqual({
+      kind: "hydrate",
+      path: [1],
+      id: "td-h-1",
+      idKind: "static",
+      strategy: "visible",
+      rootMargin: "128px",
+    });
+    expect(renderServerTemplate(result.value, { label: "Buy", summary: "Ready", status: "Idle" })).toBe(
+      `<main><!--tachyon-hydrate:td-h-0:start--><section><button>Buy</button></section><!--tachyon-hydrate:td-h-0:end--><!--tachyon-hydrate:td-h-1:start--><aside>Ready</aside><!--tachyon-hydrate:td-h-1:end--><!--tachyon-hydrate:td-h-2:start--><footer>Idle</footer><!--tachyon-hydrate:td-h-2:end--></main>`,
+    );
+
+    const code = generateServerStreamModule(result.value);
+    expect(code).toContain(`escapeMarker("td-h-0")`);
+    expect(code).toContain(`escapeMarker("td-h-1")`);
+    expect(code).toContain(`escapeMarker("td-h-2")`);
+  });
+
   it("renders outlet and named slots on server targets", () => {
     const result = compileTemplate(`<main><header><slot name="header"></slot></header><outlet></outlet></main>`);
     if (!result.ok) {
