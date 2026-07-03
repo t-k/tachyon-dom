@@ -227,7 +227,7 @@ export const createResource = <Source, T>(
   const loading = createSignal(true);
   let current: Promise<T | undefined> | undefined;
   let version = 0;
-  const sourceValue = (): Source => read(source);
+  const sourceValue = (): Source => (isSignal(source) ? source() : source);
   const run = (): Promise<T | undefined> => {
     if (loading() && current) {
       return current;

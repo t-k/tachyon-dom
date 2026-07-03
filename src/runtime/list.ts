@@ -65,6 +65,7 @@ type NestedListBinding = {
   kind: "list";
   path: number[];
   each: string;
+  read?: ExpressionReader;
   key: string;
   keyRead?: ExpressionReader;
   itemName: string;
@@ -327,17 +328,19 @@ const applyRowBindings = (record: RowRecord, scope: Record<string, unknown>, opt
         );
       }
     } else if (binding.kind === "list") {
+      const eachBinding = binding.read ? { expression: binding.each, read: binding.read } : { expression: binding.each };
       mountKeyedList(
         record.element,
         binding.path,
-        readBinding(scope, { expression: binding.each, read: binding.read }) as readonly unknown[] | undefined,
+        readBinding(scope, eachBinding) as readonly unknown[] | undefined,
         { ...binding, scope },
       );
     } else if (binding.kind === "if") {
+      const testBinding = binding.read ? { expression: binding.test, read: binding.read } : { expression: binding.test };
       mountConditional(
         record.element,
         binding.path,
-        readBinding(scope, { expression: binding.test, read: binding.read }),
+        readBinding(scope, testBinding),
         scope,
         binding,
       );
