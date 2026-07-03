@@ -94,6 +94,13 @@ type RankedClientRoute = {
   order: number;
 };
 
+type CompiledClientRoute = RankedClientRoute & {
+  regex: RegExp;
+  names: string[];
+  wildcard: boolean;
+  specificity: number[];
+};
+
 const trimSlashes = (value: string): string => value.replace(/^\/+|\/+$/g, "");
 
 const compileRoutePath = (path: string): { regex: RegExp; names: string[]; wildcard: boolean } => {
@@ -144,11 +151,9 @@ const routeSpecificity = (path: string): number[] => {
   ];
 };
 
-const compareClientRoutes = (left: RankedClientRoute, right: RankedClientRoute): number => {
-  const leftScores = routeSpecificity(left.route.path);
-  const rightScores = routeSpecificity(right.route.path);
-  for (let index = 0; index < leftScores.length; index += 1) {
-    const difference = (rightScores[index] ?? 0) - (leftScores[index] ?? 0);
+const compareCompiledClientRoutes = (left: CompiledClientRoute, right: CompiledClientRoute): number => {
+  for (let index = 0; index < left.specificity.length; index += 1) {
+    const difference = (right.specificity[index] ?? 0) - (left.specificity[index] ?? 0);
     if (difference !== 0) {
       return difference;
     }
@@ -156,19 +161,33 @@ const compareClientRoutes = (left: RankedClientRoute, right: RankedClientRoute):
   return left.order - right.order;
 };
 
-const matchClientRoute = (routes: readonly ClientRouteDefinition[], pathname: string): ClientMatch | undefined => {
+const compileClientRoutes = (routes: readonly ClientRouteDefinition[]): readonly CompiledClientRoute[] =>
+  routes
+    .map((route, order): CompiledClientRoute => {
+      const compiled = compileRoutePath(route.path);
+      return {
+        route,
+        order,
+        names: compiled.names,
+        regex: compiled.regex,
+        specificity: routeSpecificity(route.path),
+        wildcard: compiled.wildcard,
+      };
+    })
+    .sort(compareCompiledClientRoutes);
+
+const matchClientRoute = (routes: readonly CompiledClientRoute[], pathname: string): ClientMatch | undefined => {
   let fallback: ClientMatch | undefined;
-  for (const { route } of routes.map((route, order) => ({ route, order })).sort(compareClientRoutes)) {
-    const compiled = compileRoutePath(route.path);
-    const match = compiled.regex.exec(pathname);
+  for (const routeEntry of routes) {
+    const match = routeEntry.regex.exec(pathname);
     if (!match) {
       continue;
     }
     const params = Object.fromEntries(
-      compiled.names.map((name, index) => [name, decodeURIComponent(match[index + 1] ?? "")]),
+      routeEntry.names.map((name, index) => [name, decodeURIComponent(match[index + 1] ?? "")]),
     );
-    const matched = { route, params };
-    if (compiled.wildcard) {
+    const matched = { route: routeEntry.route, params };
+    if (routeEntry.wildcard) {
       fallback = matched;
       continue;
     }
@@ -226,6 +245,7 @@ const isModifiedClick = (event: MouseEvent): boolean =>
 
 export const createClientRouter = (options: ClientRouterOptions): ClientRouter => {
   const baseUrl = options.baseUrl ?? location.href;
+  const routes = compileClientRoutes(options.routes);
   const scrollTo =
     options.scrollTo ??
     ((x: number, y: number) => {
@@ -275,7 +295,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
 
   const prefetch = async (href: string): Promise<void> => {
     const url = toUrl(href, location.href || baseUrl);
-    const match = matchClientRoute(options.routes, url.pathname);
+    const match = matchClientRoute(routes, url.pathname);
     if (!match) {
       return;
     }
@@ -329,7 +349,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
 
   const submit = async (href: string, init: RequestInit = {}): Promise<Response> => {
     const url = toUrl(href, location.href || baseUrl);
-    const match = matchClientRoute(options.routes, url.pathname);
+    const match = matchClientRoute(routes, url.pathname);
     if (!match?.route.action) {
       throw new Error(`No action route matched ${url.pathname}.`);
     }
@@ -358,7 +378,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
       }
       return;
     }
-    const match = matchClientRoute(options.routes, url.pathname);
+    const match = matchClientRoute(routes, url.pathname);
     const task = (async () => {
       if (!match) {
         if (navigateOptions.replace) {
@@ -414,7 +434,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
       return undefined;
     }
     const url = new URL(link.href);
-    if (url.origin !== location.origin || !matchClientRoute(options.routes, url.pathname)) {
+    if (url.origin !== location.origin || !matchClientRoute(routes, url.pathname)) {
       return undefined;
     }
     return { link, url };

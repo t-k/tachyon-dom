@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createClientRouter, rawHtml, type ClientRouteDefinition } from "../src/runtime/router";
 
 const createWindow = (path = "/") => {
@@ -8,6 +8,10 @@ const createWindow = (path = "/") => {
 };
 
 describe("client router", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("treats string route output as text instead of trusted HTML", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");
@@ -278,6 +282,38 @@ describe("client router", () => {
 
     await router.navigate("/blog/2026/launch");
     expect(root.innerHTML).toBe("<h1>2026/launch</h1>");
+    router.dispose();
+  });
+
+  it("reuses compiled client route matchers across navigations", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    const NativeRegExp = RegExp;
+    let constructed = 0;
+    vi.stubGlobal("RegExp", function RegExpSpy(pattern: string, flags?: string) {
+      constructed += 1;
+      return new NativeRegExp(pattern, flags);
+    } as unknown as RegExpConstructor);
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => rawHtml(`<a href="/users/1">User</a>`) },
+        { path: "/users/:id", render: ({ params }) => rawHtml(`<h1>${params.id}</h1>`) },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    expect(constructed).toBeGreaterThan(0);
+    constructed = 0;
+    await router.navigate("/users/1");
+    await router.navigate("/users/2");
+
+    expect(constructed).toBe(0);
     router.dispose();
   });
 

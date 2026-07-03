@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRouteManifest, matchRoute, renderHead, renderRoute, type RouteDefinition } from "../src/router";
 
 describe("server router", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("matches static, dynamic, nested, and wildcard routes", () => {
     const routes: RouteDefinition[] = [
       { id: "home", path: "/", render: () => "home" },
@@ -21,6 +25,27 @@ describe("server router", () => {
     expect(createRouteManifest(routes).map((route) => route.path)).toEqual(["/", "/app", "/app/settings/:tab", "*"]);
     const missing = matchRoute(routes, "/missing");
     expect(missing.ok && missing.value.route.id).toBe("fallback");
+  });
+
+  it("reuses compiled route matchers across requests for the same route table", () => {
+    const NativeRegExp = RegExp;
+    let constructed = 0;
+    vi.stubGlobal("RegExp", function RegExpSpy(pattern: string, flags?: string) {
+      constructed += 1;
+      return new NativeRegExp(pattern, flags);
+    } as unknown as RegExpConstructor);
+    const routes: RouteDefinition[] = [
+      { path: "/users/new", render: () => "new" },
+      { path: "/users/:id", render: () => "user" },
+      { path: "*", render: () => "fallback" },
+    ];
+
+    expect(matchRoute(routes, "/users/1").ok).toBe(true);
+    expect(constructed).toBeGreaterThan(0);
+    constructed = 0;
+    expect(matchRoute(routes, "/users/2").ok).toBe(true);
+
+    expect(constructed).toBe(0);
   });
 
   it("returns a route error instead of throwing for invalid encoded params", () => {

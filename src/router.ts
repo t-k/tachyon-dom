@@ -779,6 +779,13 @@ type FlatRoute = {
   order: number;
 };
 
+type CompiledRoute = FlatRoute & {
+  regex: RegExp;
+  names: string[];
+  wildcard: boolean;
+  specificity: number[];
+};
+
 const flattenRoutes = (
   routes: readonly RouteDefinition[],
   parentPath = "",
@@ -820,16 +827,37 @@ const routeSpecificity = (path: string): number[] => {
   ];
 };
 
-const compareSpecificity = (left: FlatRoute, right: FlatRoute): number => {
-  const leftScores = routeSpecificity(left.path);
-  const rightScores = routeSpecificity(right.path);
-  for (let index = 0; index < leftScores.length; index += 1) {
-    const difference = (rightScores[index] ?? 0) - (leftScores[index] ?? 0);
+const compareCompiledRoutes = (left: CompiledRoute, right: CompiledRoute): number => {
+  for (let index = 0; index < left.specificity.length; index += 1) {
+    const difference = (right.specificity[index] ?? 0) - (left.specificity[index] ?? 0);
     if (difference !== 0) {
       return difference;
     }
   }
   return left.order - right.order;
+};
+
+const compiledRouteCache = new WeakMap<readonly RouteDefinition[], readonly CompiledRoute[]>();
+
+const compiledRoutesFor = (routes: readonly RouteDefinition[]): readonly CompiledRoute[] => {
+  const cached = compiledRouteCache.get(routes);
+  if (cached) {
+    return cached;
+  }
+  const compiled = flattenRoutes(routes)
+    .map((candidate): CompiledRoute => {
+      const compiledPath = compileRoutePath(candidate.path);
+      return {
+        ...candidate,
+        names: compiledPath.names,
+        regex: compiledPath.regex,
+        specificity: routeSpecificity(candidate.path),
+        wildcard: compiledPath.wildcard,
+      };
+    })
+    .sort(compareCompiledRoutes);
+  compiledRouteCache.set(routes, compiled);
+  return compiled;
 };
 
 export const matchRoute = (
@@ -839,14 +867,13 @@ export const matchRoute = (
   const url = typeof input === "string" ? new URL(input, "http://tachyon.local") : input;
   const pathname = url.pathname;
   let fallback: MatchedRoute | undefined;
-  for (const candidate of [...flattenRoutes(routes)].sort(compareSpecificity)) {
-    const compiled = compileRoutePath(candidate.path);
-    const match = compiled.regex.exec(pathname);
+  for (const candidate of compiledRoutesFor(routes)) {
+    const match = candidate.regex.exec(pathname);
     if (!match) {
       continue;
     }
     const params: RouteParams = {};
-    for (const [index, name] of compiled.names.entries()) {
+    for (const [index, name] of candidate.names.entries()) {
       try {
         params[name] = decodeURIComponent(match[index + 1] ?? "");
       } catch {
@@ -855,7 +882,7 @@ export const matchRoute = (
     }
     const branch = candidate.branch.map((entry) => ({ ...entry, params }));
     const matched = { route: candidate.route, branch, params, pathname };
-    if (compiled.wildcard) {
+    if (candidate.wildcard) {
       fallback = matched;
       continue;
     }
