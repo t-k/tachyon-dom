@@ -2,6 +2,7 @@ type SubscriberSet = Set<EffectRunner>;
 
 type EffectRunner = {
   disposed: boolean;
+  computed: boolean;
   dependencies: Set<SubscriberSet>;
   children: Set<EffectRunner>;
   parent: EffectRunner | undefined;
@@ -58,7 +59,8 @@ const flushPendingEffects = (): void => {
   flushing = true;
   try {
     while (pendingEffects.size > 0) {
-      const [runner] = pendingEffects;
+      const runner =
+        Array.from(pendingEffects).find((effect) => effect.computed) ?? pendingEffects.values().next().value;
       if (!runner) {
         break;
       }
@@ -126,9 +128,9 @@ export const createSignal = <T>(initial: T): Signal<T> => {
 
 export const createMemo = <T>(fn: () => T): Accessor<T> => {
   const value = createSignal<T>(undefined as T);
-  effect(() => {
+  createEffect(() => {
     value.set(fn());
-  });
+  }, true);
   const memo = (() => value()) as Accessor<T>;
   Object.defineProperty(memo, signalBrand, { value: true });
   return memo;
@@ -168,10 +170,11 @@ export const createStore = <T extends Record<PropertyKey, unknown>>(initial: T):
   }) as T;
 };
 
-export const effect = (fn: () => void): (() => void) => {
+const createEffect = (fn: () => void, computed: boolean): (() => void) => {
   const parent = activeEffect && !activeEffect.disposed ? activeEffect : undefined;
   const runner: EffectRunner = {
     disposed: false,
+    computed,
     dependencies: new Set(),
     children: new Set(),
     parent,
@@ -196,6 +199,8 @@ export const effect = (fn: () => void): (() => void) => {
   runner.run();
   return () => disposeRunner(runner);
 };
+
+export const effect = (fn: () => void): (() => void) => createEffect(fn, false);
 
 export const catchError = (fn: () => void, onError: (error: unknown) => void): (() => void) =>
   effect(() => {

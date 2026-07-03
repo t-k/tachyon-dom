@@ -122,4 +122,21 @@ describe("signal runtime", () => {
     expect(seen).toEqual(["ok", "again"]);
     expect(errors).toEqual(["broken"]);
   });
+
+  it("runs memo updates before dependent effects subscribed earlier", () => {
+    const source = createSignal(1);
+    let memo: (() => number) | undefined;
+    const seen: string[] = [];
+
+    effect(() => {
+      const value = source();
+      seen.push(memo ? `s=${value} m=${memo()}` : `s=${value}`);
+    });
+    memo = createMemo(() => source() * 10);
+    seen.length = 0;
+
+    source.set(2);
+
+    expect(seen).toEqual(["s=2 m=20"]);
+  });
 });
