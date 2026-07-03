@@ -241,13 +241,33 @@ describe("HTML-first compiler", () => {
       `import { effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
     );
     expect(code).toContain(`const cleanups = [];`);
+    expect(code).toContain(`const __tachyonTarget0 = __tachyonTextAt(root, [0,0]);`);
     expect(code).toContain(
-      `cleanups.push(__tachyonEffect(() => __tachyonSetText(__tachyonTextAt(root, [0,0]), __tachyonRead(scope.title))));`,
+      `cleanups.push(__tachyonEffect(() => __tachyonSetText(__tachyonTarget0, __tachyonRead(scope.title))));`,
     );
     expect(code).toContain(
       `cleanups.push(__tachyonEffect(() => __tachyonMountKeyedList(root, [1], __tachyonRead(scope.rows)`,
     );
     expect(code).toContain(`return () => {`);
+  });
+
+  it("hoists reactive binding node lookups outside effect bodies", () => {
+    const result = compileTemplate(
+      `<section><h1>{title}</h1><button class:active={active} title={title} style:width={width} bind:value={title}></button></section>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateClientModule(result.value, { reactive: true });
+
+    expect(code).toContain(`const __tachyonTarget0 = __tachyonTextAt(root, [0,0]);`);
+    expect(code).toContain(`cleanups.push(__tachyonEffect(() => __tachyonSetText(__tachyonTarget0`);
+    expect(code).not.toContain(`__tachyonEffect(() => __tachyonSetText(__tachyonTextAt(root`);
+    expect(code).not.toContain(`__tachyonEffect(() => __tachyonSetClassPresence(__tachyonElementAt(root`);
+    expect(code).not.toContain(`__tachyonEffect(() => __tachyonSetAttributeValue(__tachyonElementAt(root`);
+    expect(code).not.toContain(`__tachyonEffect(() => __tachyonSetStyleValue(__tachyonElementAt(root`);
+    expect(code).not.toContain(`__tachyonEffect(() => __tachyonSetControlValue(__tachyonElementAt(root`);
   });
 
   it("extracts store tags without adding client DOM nodes", () => {
@@ -263,7 +283,8 @@ describe("HTML-first compiler", () => {
 
     expect(code).toContain(`import { createStore as __tachyonCreateStore } from "tachyon-dom/runtime/store";`);
     expect(code).toContain(`const state = __tachyonCreateStore({ ...scope, count: scope.initialCount });`);
-    expect(code).toContain(`__tachyonSetText(__tachyonTextAt(root, [0,0]), __tachyonRead(state.count))`);
+    expect(code).toContain(`const __tachyonTarget0 = __tachyonTextAt(root, [0,0]);`);
+    expect(code).toContain(`__tachyonSetText(__tachyonTarget0, __tachyonRead(state.count))`);
 
     const withoutStore = compileTemplate(`<section><button>{count}</button></section>`);
     if (!withoutStore.ok) {

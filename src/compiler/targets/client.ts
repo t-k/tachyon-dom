@@ -425,22 +425,63 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`  const cleanups = [];`);
   }
   let listIndex = 0;
+  let targetIndex = 0;
   for (const binding of bindings) {
     if (binding.kind === "text") {
-      const statement = `${runtimeNames.setText}(${runtimeNames.textAt}(root, ${JSON.stringify(binding.path)}), ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
-      lines.push(reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`);
+      const target = `${runtimeNames.textAt}(root, ${JSON.stringify(binding.path)})`;
+      if (reactive) {
+        const targetName = `__tachyonTarget${targetIndex++}`;
+        lines.push(`  const ${targetName} = ${target};`);
+        lines.push(
+          `  cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setText}(${targetName}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})));`,
+        );
+      } else {
+        lines.push(
+          `  ${runtimeNames.setText}(${target}, ${runtimeValueExpression(binding.expression, reactive, sourceName)});`,
+        );
+      }
     } else if (binding.kind === "class") {
-      const statement = `${runtimeNames.setClassPresence}(${elementExpression(binding.path)}, ${JSON.stringify(binding.className)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
-      lines.push(reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`);
+      const target = elementExpression(binding.path);
+      if (reactive) {
+        const targetName = `__tachyonTarget${targetIndex++}`;
+        lines.push(`  const ${targetName} = ${target};`);
+        lines.push(
+          `  cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setClassPresence}(${targetName}, ${JSON.stringify(binding.className)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})));`,
+        );
+      } else {
+        lines.push(
+          `  ${runtimeNames.setClassPresence}(${target}, ${JSON.stringify(binding.className)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)});`,
+        );
+      }
     } else if (binding.kind === "event") {
       const statement = `${runtimeNames.delegate}(root, ${JSON.stringify(binding.eventName)}, ${JSON.stringify(binding.path)}, ${expressionToScopeAccess(binding.handler, new Set(), scopeName(needsStore))})`;
       lines.push(`  cleanups.push(${statement});`);
     } else if (binding.kind === "attr") {
-      const statement = `${runtimeNames.setAttributeValue}(${elementExpression(binding.path)}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
-      lines.push(reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`);
+      const target = elementExpression(binding.path);
+      if (reactive) {
+        const targetName = `__tachyonTarget${targetIndex++}`;
+        lines.push(`  const ${targetName} = ${target};`);
+        lines.push(
+          `  cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setAttributeValue}(${targetName}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})));`,
+        );
+      } else {
+        lines.push(
+          `  ${runtimeNames.setAttributeValue}(${target}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)});`,
+        );
+      }
     } else if (binding.kind === "style") {
-      const statement = `${runtimeNames.setStyleValue}(${elementExpression(binding.path)}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})`;
-      lines.push(reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`);
+      const target = elementExpression(binding.path);
+      if (reactive) {
+        const targetName = `__tachyonTarget${targetIndex++}`;
+        lines.push(`  const ${targetName} = ${target};`);
+        lines.push(
+          `  cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setStyleValue}(${targetName}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)})));`,
+        );
+      } else {
+        lines.push(
+          `  ${runtimeNames.setStyleValue}(${target}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName)});`,
+        );
+      }
     } else if (binding.kind === "ref") {
       lines.push(
         `  ${runtimeNames.setRef}(${sourceName}, ${JSON.stringify(binding.expression)}, ${elementExpression(binding.path)});`,
@@ -448,12 +489,18 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     } else if (binding.kind === "model") {
       const target = elementExpression(binding.path);
       const value = runtimeValueExpression(binding.expression, false, sourceName);
-      lines.push(
-        `  cleanups.push(${runtimeNames.bindControl}(${target}, ${JSON.stringify(binding.property)}, () => ${value}, (value) => { ${expressionToScopeAccess(binding.expression, new Set(), sourceName)} = value; }));`,
-      );
       if (reactive) {
+        const targetName = `__tachyonTarget${targetIndex++}`;
+        lines.push(`  const ${targetName} = ${target};`);
         lines.push(
-          `  cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setControlValue}(${target}, ${JSON.stringify(binding.property)}, ${runtimeValueExpression(binding.expression, true, sourceName)})));`,
+          `  cleanups.push(${runtimeNames.bindControl}(${targetName}, ${JSON.stringify(binding.property)}, () => ${value}, (value) => { ${expressionToScopeAccess(binding.expression, new Set(), sourceName)} = value; }));`,
+        );
+        lines.push(
+          `  cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setControlValue}(${targetName}, ${JSON.stringify(binding.property)}, ${runtimeValueExpression(binding.expression, true, sourceName)})));`,
+        );
+      } else {
+        lines.push(
+          `  cleanups.push(${runtimeNames.bindControl}(${target}, ${JSON.stringify(binding.property)}, () => ${value}, (value) => { ${expressionToScopeAccess(binding.expression, new Set(), sourceName)} = value; }));`,
         );
       }
     } else if (binding.kind === "list") {
