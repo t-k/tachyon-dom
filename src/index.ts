@@ -6,7 +6,7 @@ export { enhanceForm, validateFormData } from "./runtime/form.js";
 export { cleanupEnhancements, createEnhancementRegistry, enhance, registerEnhancement } from "./runtime/enhancement.js";
 export { createClientRouter } from "./runtime/router.js";
 export { createKeyedRows } from "./runtime/keyed-rows.js";
-export { batch, createMemo, createSignal, effect } from "./runtime/signal.js";
+export { batch, createMemo, createResource, createSignal, effect } from "./runtime/signal.js";
 export { createStore } from "./runtime/store.js";
 export { readTextStreamChunks } from "./runtime/stream-client.js";
 export { attr, booleanAttr, classList, html as serverHtml, join, rawHtml } from "./server/html.js";

@@ -210,3 +210,55 @@ export const catchError = (fn: () => void, onError: (error: unknown) => void): (
       onError(error);
     }
   });
+
+export type Resource<T> = {
+  data: Accessor<T | undefined>;
+  error: Accessor<unknown | undefined>;
+  loading: Accessor<boolean>;
+  refetch: () => Promise<T | undefined>;
+};
+
+export const createResource = <Source, T>(
+  source: Source | Accessor<Source>,
+  fetcher: (source: Source) => Promise<T> | T,
+): Resource<T> => {
+  const data = createSignal<T | undefined>(undefined);
+  const error = createSignal<unknown | undefined>(undefined);
+  const loading = createSignal(true);
+  let current: Promise<T | undefined> | undefined;
+  let version = 0;
+  const sourceValue = (): Source => read(source);
+  const run = (): Promise<T | undefined> => {
+    if (loading() && current) {
+      return current;
+    }
+    const runVersion = ++version;
+    loading.set(true);
+    current = Promise.resolve()
+      .then(() => fetcher(sourceValue()))
+      .then(
+        (value) => {
+          if (runVersion === version) {
+            batch(() => {
+              data.set(value);
+              error.set(undefined);
+              loading.set(false);
+            });
+          }
+          return value;
+        },
+        (reason) => {
+          if (runVersion === version) {
+            batch(() => {
+              error.set(reason);
+              loading.set(false);
+            });
+          }
+          return undefined;
+        },
+      );
+    return current;
+  };
+  void run();
+  return { data, error, loading, refetch: run };
+};

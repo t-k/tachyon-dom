@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batch, catchError, createMemo, createSignal, effect, read } from "../src/runtime/signal";
+import { batch, catchError, createMemo, createResource, createSignal, effect, read } from "../src/runtime/signal";
 
 describe("signal runtime", () => {
   it("re-runs effects only while they are active", () => {
@@ -138,5 +138,26 @@ describe("signal runtime", () => {
     source.set(2);
 
     expect(seen).toEqual(["s=2 m=20"]);
+  });
+
+  it("tracks createResource loading, data, and error states through effects", async () => {
+    const key = createSignal("ok");
+    const resource = createResource(key, async (value) => {
+      await Promise.resolve();
+      if (value === "bad") {
+        throw new Error("broken");
+      }
+      return value.toUpperCase();
+    });
+    const seen: string[] = [];
+
+    effect(() => {
+      seen.push(`${resource.loading()}:${resource.data() ?? "-"}:${resource.error() instanceof Error ? "err" : "-"}`);
+    });
+    await resource.refetch();
+    key.set("bad");
+    await resource.refetch();
+
+    expect(seen).toEqual(["true:-:-", "false:OK:-", "true:OK:-", "false:OK:err"]);
   });
 });
