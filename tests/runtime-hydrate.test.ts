@@ -4,6 +4,7 @@ import {
   diagnoseHydrationBoundaries,
   locateHydrationBoundary,
   readHydrationState,
+  reportHydrationDiagnostics,
   scheduleHydrationBoundaries,
   scheduleHydration,
   serializeHydrationState,
@@ -147,6 +148,25 @@ describe("hydrate boundary runtime", () => {
       { id: "c", type: "missing-start", message: "Missing hydrate boundary start marker for c." },
       { id: "c", type: "missing-end", message: "Missing hydrate boundary end marker for c." },
     ]);
+  });
+
+  it("reports hydration diagnostics to a Vite-style dev overlay", () => {
+    document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--></main>`;
+    const main = document.querySelector("main");
+    if (!main) {
+      throw new Error("Missing main.");
+    }
+    const hot = { send: vi.fn() };
+
+    const diagnostics = reportHydrationDiagnostics(main, ["panel"], { hot });
+
+    expect(diagnostics).toHaveLength(1);
+    expect(hot.send).toHaveBeenCalledWith("vite:error", {
+      err: {
+        message: "Missing hydrate boundary end marker for panel.",
+        stack: "Missing hydrate boundary end marker for panel.",
+      },
+    });
   });
 
   it("schedules multiple compiled hydration boundaries from metadata", () => {

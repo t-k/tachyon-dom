@@ -17,6 +17,10 @@ export type HydrationBoundaryDiagnostic = {
   message: string;
 };
 
+export type HydrationDiagnosticsHot = {
+  send: (event: string, payload: { err: { message: string; stack?: string } }) => void;
+};
+
 export type HydrationBoundaryHandle = {
   hydrate: () => void;
   hydrated: () => boolean;
@@ -121,6 +125,23 @@ export const diagnoseHydrationBoundaries = (
     if (starts.length === 1 && ends.length === 1 && !nextElementBetween(starts[0] as Comment, ends[0] as Comment)) {
       diagnostics.push({ id, type: "missing-element", message: `Missing hydrate boundary element for ${id}.` });
     }
+  }
+  return diagnostics;
+};
+
+export const reportHydrationDiagnostics = (
+  root: ParentNode,
+  expectedIds: readonly string[],
+  options: { hot?: HydrationDiagnosticsHot } = {},
+): HydrationBoundaryDiagnostic[] => {
+  const diagnostics = diagnoseHydrationBoundaries(root, expectedIds);
+  for (const diagnostic of diagnostics) {
+    options.hot?.send("vite:error", {
+      err: {
+        message: diagnostic.message,
+        stack: diagnostic.message,
+      },
+    });
   }
   return diagnostics;
 };
