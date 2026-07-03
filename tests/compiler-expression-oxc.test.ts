@@ -8,6 +8,16 @@ import {
 } from "../src/compiler/expression";
 
 describe("compiler expression OXC backend", () => {
+  it("reuses parsed expression results for repeated source and backend pairs", () => {
+    const first = parseExpression("user.name", { backend: "native" });
+    const second = parseExpression("user.name", { backend: "native" });
+    const oxc = parseExpression("user.name", { backend: "oxc" });
+
+    expect(first.ok).toBe(true);
+    expect(second).toBe(first);
+    expect(oxc).not.toBe(first);
+  });
+
   it("parses optional chaining, nullish coalescing, computed members, and template literals through OXC", () => {
     const parsed = parseExpression("user?.profile?.name ?? `Guest ${fallback}`", { backend: "oxc" });
 

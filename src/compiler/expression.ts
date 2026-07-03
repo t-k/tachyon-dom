@@ -63,6 +63,14 @@ const operators = [
   "{",
   "}",
 ];
+const operatorsByFirstChar = new Map<string, string[]>();
+for (const operator of operators) {
+  const first = operator[0] as string;
+  const entries = operatorsByFirstChar.get(first) ?? [];
+  entries.push(operator);
+  entries.sort((left, right) => right.length - left.length);
+  operatorsByFirstChar.set(first, entries);
+}
 const binaryPrecedence = new Map([
   ["||", 1],
   ["??", 1],
@@ -83,6 +91,28 @@ const binaryPrecedence = new Map([
 ]);
 
 const expressionError = (message: string): Result<never, CompilerError> => err({ message, offset: 0 });
+const expressionCacheLimit = 512;
+const expressionCache = new Map<string, Result<ExpressionNode, CompilerError>>();
+
+const cacheKeyFor = (source: string, backend: ExpressionParserBackend): string => `${backend}\u0000${source}`;
+
+const rememberExpression = (
+  key: string,
+  result: Result<ExpressionNode, CompilerError>,
+): Result<ExpressionNode, CompilerError> => {
+  if (expressionCache.has(key)) {
+    expressionCache.delete(key);
+  }
+  expressionCache.set(key, result);
+  while (expressionCache.size > expressionCacheLimit) {
+    const oldest = expressionCache.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    expressionCache.delete(oldest);
+  }
+  return result;
+};
 
 const tokenize = (source: string): Result<Token[], CompilerError> => {
   const tokens: Token[] = [];
@@ -151,7 +181,7 @@ const tokenize = (source: string): Result<Token[], CompilerError> => {
       tokens.push({ type: "string", value });
       continue;
     }
-    const operator = operators.find((candidate) => source.startsWith(candidate, offset));
+    const operator = operatorsByFirstChar.get(char)?.find((candidate) => source.startsWith(candidate, offset));
     if (!operator) {
       return expressionError(`Unsupported expression token: ${char}.`);
     }
@@ -568,14 +598,21 @@ export const parseExpression = (
   options: ExpressionParseOptions = {},
 ): Result<ExpressionNode, CompilerError> => {
   const backend = options.backend ?? "auto";
+  const key = cacheKeyFor(source, backend);
+  const cached = expressionCache.get(key);
+  if (cached) {
+    expressionCache.delete(key);
+    expressionCache.set(key, cached);
+    return cached;
+  }
   if (backend === "oxc") {
-    return parseOxcExpression(source);
+    return rememberExpression(key, parseOxcExpression(source));
   }
   const native = parseNativeExpression(source);
   if (backend === "native" || native.ok) {
-    return native;
+    return rememberExpression(key, native);
   }
-  return parseOxcExpression(source);
+  return rememberExpression(key, parseOxcExpression(source));
 };
 
 const readPath = (scope: Record<string, unknown>, path: readonly string[]): unknown => {

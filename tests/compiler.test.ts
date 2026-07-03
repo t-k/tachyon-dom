@@ -28,6 +28,15 @@ const mountClientTextBindings = (
 };
 
 describe("HTML-first compiler", () => {
+  it("reuses compiled templates for repeated source strings", () => {
+    const source = `<section><h1>{title}</h1></section>`;
+    const first = compileTemplate(source);
+    const second = compileTemplate(source);
+
+    expect(first.ok).toBe(true);
+    expect(second).toBe(first);
+  });
+
   it("extracts text bindings while keeping a static client template", () => {
     const result = compileTemplate(`<tr><td>{row.id}</td><td><a>{row.label}</a></td></tr>`);
 
