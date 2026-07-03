@@ -24,6 +24,13 @@ const isClientHtml = (value: unknown): value is ClientHtml =>
 
 type ClientRenderValue = string | ClientHtml | Node | readonly Node[] | DocumentFragment;
 
+export type ClientHeadDescriptor = {
+  title?: string;
+  metas?: Array<Record<string, string>>;
+  links?: Array<Record<string, string>>;
+  scripts?: Array<Record<string, string>>;
+};
+
 export type ClientRouteDefinition<Data = unknown> = {
   id?: string;
   path: string;
@@ -32,6 +39,7 @@ export type ClientRouteDefinition<Data = unknown> = {
     | Element
     | ((context: { root: Element; url: URL; params: ClientRouteParams; data: Data }) => Element | undefined | null);
   load?: (context: Omit<ClientRouteContext<Data>, "data">) => Data | Promise<Data>;
+  head?: (context: ClientRouteContext<Data>) => ClientHeadDescriptor | Promise<ClientHeadDescriptor>;
   action?: (context: Omit<ClientRouteContext<Data>, "data"> & { request: Request }) => Response | Promise<Response>;
   revalidateOnAction?:
     | "self"
@@ -231,6 +239,39 @@ const focusRouteContent = (root: Element, selector: string): void => {
   }
 };
 
+const managedHeadSelector = `[data-tachyon-head="route"]`;
+
+const appendManagedHeadElement = (tagName: "meta" | "link" | "script", attributes: Record<string, string>): void => {
+  const element = document.createElement(tagName);
+  element.setAttribute("data-tachyon-head", "route");
+  for (const [name, value] of Object.entries(attributes)) {
+    if (/^on/i.test(name)) {
+      continue;
+    }
+    element.setAttribute(name, value);
+  }
+  document.head.appendChild(element);
+};
+
+const applyHead = (descriptor: ClientHeadDescriptor | undefined): void => {
+  document.head.querySelectorAll(managedHeadSelector).forEach((element) => element.remove());
+  if (!descriptor) {
+    return;
+  }
+  if (descriptor.title !== undefined) {
+    document.title = descriptor.title;
+  }
+  for (const meta of descriptor.metas ?? []) {
+    appendManagedHeadElement("meta", meta);
+  }
+  for (const link of descriptor.links ?? []) {
+    appendManagedHeadElement("link", link);
+  }
+  for (const script of descriptor.scripts ?? []) {
+    appendManagedHeadElement("script", script);
+  }
+};
+
 const routeTargetFor = (root: Element, match: ClientMatch, url: URL, data: unknown): Element => {
   const target = match.route.target;
   if (!target) {
@@ -297,6 +338,17 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     }
     if (options.liveRegion) {
       options.liveRegion.textContent = `Navigated to ${url.pathname}`;
+    }
+  };
+
+  const updateHead = async (url: URL, match: ClientMatch, data: unknown, signal: AbortSignal): Promise<void> => {
+    if (!match.route.head) {
+      applyHead(undefined);
+      return;
+    }
+    const descriptor = await match.route.head({ url, params: match.params, data, signal });
+    if (!signal.aborted) {
+      applyHead(descriptor);
     }
   };
 
@@ -484,6 +536,10 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         writeHistory(url, navigateOptions);
         const target = routeTargetFor(options.root, match, url, data);
         renderInto(target, rendered);
+        await updateHead(url, match, data, nextController.signal);
+        if (nextController.signal.aborted) {
+          return;
+        }
         restoreOrScroll(url, navigateOptions);
         focusRouteContent(target, focusSelector);
         updateA11y(url, data);

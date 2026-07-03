@@ -399,6 +399,53 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("reconciles managed head metadata on client navigation", async () => {
+    document.head.innerHTML = `<meta name="viewport" content="width=device-width">`;
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/");
+    const router = createClientRouter({
+      root,
+      routes: [
+        {
+          path: "/",
+          head: () => ({
+            title: "Home",
+            metas: [{ name: "description", content: "Home page" }],
+            links: [{ rel: "canonical", href: "https://example.test/" }],
+          }),
+          render: () => rawHtml(`<a href="/about">About</a>`),
+        },
+        {
+          path: "/about",
+          head: () => ({
+            title: "About",
+            metas: [{ property: "og:title", content: "About page" }],
+          }),
+          render: () => rawHtml(`<h1>About</h1>`),
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    expect(document.title).toBe("Home");
+    expect(document.head.querySelector(`meta[name="description"]`)?.getAttribute("content")).toBe("Home page");
+    expect(document.head.querySelector(`link[rel="canonical"]`)?.getAttribute("href")).toBe("https://example.test/");
+
+    await router.navigate("/about");
+
+    expect(document.title).toBe("About");
+    expect(document.head.querySelector(`meta[name="viewport"]`)).not.toBeNull();
+    expect(document.head.querySelector(`meta[name="description"]`)).toBeNull();
+    expect(document.head.querySelectorAll(`[data-tachyon-head="route"]`)).toHaveLength(1);
+    expect(document.head.querySelector(`meta[property="og:title"]`)?.getAttribute("content")).toBe("About page");
+    router.dispose();
+  });
+
   it("aborts in-flight prefetches on dispose", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");
