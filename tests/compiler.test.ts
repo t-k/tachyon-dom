@@ -862,7 +862,7 @@ describe("HTML-first compiler", () => {
     expect(chunks.join("")).toBe(`<main><h1>Before</h1><p>Ready</p></main>`);
   });
 
-  it("generates hydration state helpers for server modules", () => {
+  it("generates hydration state helpers for server modules", async () => {
     const result = compileTemplate(`<main><section hydrate:id={islandId}>{label}</section></main>`);
     if (!result.ok) {
       throw new Error(result.error.message);
@@ -872,6 +872,13 @@ describe("HTML-first compiler", () => {
 
     expect(code).toContain(`export const hydrationBoundaries = [{"path":[0],"id":"islandId"}];`);
     expect(code).toContain(`export const renderHydrationState = (id, state) =>`);
+
+    const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
+      renderHydrationState: (id: string, state: unknown) => string;
+    };
+    const stateHtml = module.renderHydrationState("island", { body: `</script><img src=x onerror=alert(1)>` });
+    expect(stateHtml).toContain(String.raw`\u003c/script\u003e\u003cimg`);
+    expect(stateHtml).not.toContain(`</script><img`);
   });
 
   it("records await streaming options and emits fallback and error chunks", async () => {

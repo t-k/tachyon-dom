@@ -95,6 +95,22 @@ describe("hydrate boundary runtime", () => {
     expect(empty.ok && empty.value).toBe(null);
   });
 
+  it("serializes script-close text without allowing script breakout", () => {
+    const serialized = serializeHydrationState("article", { body: `</script><img src=x onerror=alert(1)>` });
+    document.body.innerHTML = `<main>${serialized}</main>`;
+    const main = document.querySelector("main");
+    if (!main) {
+      throw new Error("Missing main.");
+    }
+
+    const article = readHydrationState<{ body: string }>(main, "article");
+
+    expect(serialized).toContain(String.raw`\u003c/script\u003e\u003cimg`);
+    expect(serialized).not.toContain(`</script><img`);
+    expect(main.querySelector("img")).toBeNull();
+    expect(article.ok && article.value).toEqual({ body: `</script><img src=x onerror=alert(1)>` });
+  });
+
   it("schedules idle, media, and interaction hydration strategies", () => {
     document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--><section><button>Open</button></section><!--tachyon-hydrate:panel:end--></main>`;
     const main = document.querySelector("main");

@@ -127,6 +127,37 @@ const isFileSystemNotFound = (error: unknown): boolean => {
   return code === "ENOENT" || code === "ENOTDIR";
 };
 
+const rawPathnameFromRequestUrl = (requestUrl: string | undefined): string => {
+  const raw = requestUrl ?? "/";
+  const queryStart = raw.search(/[?#]/);
+  return queryStart === -1 ? raw : raw.slice(0, queryStart);
+};
+
+const rawPathStartsWithBase = (rawPathname: string, basePath: string): boolean => {
+  if (basePath === "/") {
+    return rawPathname.startsWith("/");
+  }
+  return rawPathname === basePath || rawPathname.startsWith(`${basePath}/`);
+};
+
+const staticAssetTraversalResponse = (
+  requestUrl: string | undefined,
+  options: StaticAssetOptions,
+): Response | undefined => {
+  const basePath = options.basePath ?? "/";
+  const rawPathname = rawPathnameFromRequestUrl(requestUrl);
+  try {
+    const decodedPathname = decodeURIComponent(rawPathname);
+    if (!rawPathStartsWithBase(rawPathname, basePath) && !rawPathStartsWithBase(decodedPathname, basePath)) {
+      return undefined;
+    }
+    const relativePath = decodedPathname.slice(basePath.length).replace(/^\/+/, "");
+    return relativePath.split(/[\\/]/).includes("..") ? new Response("Forbidden", { status: 403 }) : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export const createStaticAssetHandler =
   (options: StaticAssetOptions): ((request: Request) => Promise<Response | undefined>) =>
   async (request) => {
@@ -340,6 +371,11 @@ export const createNodeHandler =
       return;
     }
     if (options.staticAssets) {
+      const traversal = staticAssetTraversalResponse(request.url, options.staticAssets);
+      if (traversal) {
+        await writeNodeResponse(withSecurityHeaders(traversal, options.securityHeaders), response);
+        return;
+      }
       const asset = await createStaticAssetHandler(options.staticAssets)(webRequest);
       if (asset) {
         await writeNodeResponse(withSecurityHeaders(asset, options.securityHeaders), response);
@@ -370,6 +406,13 @@ export const createNodeFetchHandler = (
     if (webRequest instanceof Response) {
       await writeNodeResponse(webRequest, response);
       return;
+    }
+    if (options.staticAssets) {
+      const traversal = staticAssetTraversalResponse(request.url, options.staticAssets);
+      if (traversal) {
+        await writeNodeResponse(withSecurityHeaders(traversal, options.securityHeaders), response);
+        return;
+      }
     }
     const webResponse = await fetchHandler.fetch(webRequest);
     await writeNodeResponse(webResponse, response);

@@ -869,6 +869,100 @@ describe("server adapters", () => {
     }
   });
 
+  it("rejects encoded static asset path traversal before the dynamic fetch handler", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "tachyon-adapter-assets-"));
+    const outside = await mkdtemp(path.join(tmpdir(), "tachyon-adapter-outside-"));
+    try {
+      await writeFile(path.join(root, "app.js"), `console.log("asset");`);
+      await writeFile(path.join(outside, "secret.txt"), "secret");
+      let fetchCalls = 0;
+      const handler = createNodeFetchHandler({
+        staticAssets: { rootDir: root, basePath: "/assets" },
+        fetch: () => {
+          fetchCalls += 1;
+          return new Response("dynamic");
+        },
+      });
+      const makeRequest = (url: string) => {
+        const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+          method: string;
+          url: string;
+          headers: Record<string, string>;
+        };
+        req.method = "GET";
+        req.url = url;
+        req.headers = { host: "example.com" };
+        return req;
+      };
+
+      for (const url of [
+        "/assets/%2e%2e/secret.txt",
+        "/assets/%2e%2e%2fsecret.txt",
+        "/assets%2f%2e%2e%2fsecret.txt",
+      ]) {
+        const chunks: string[] = [];
+        const res = {
+          statusCode: 200,
+          setHeader: vi.fn(),
+          end: vi.fn((chunk?: string) => {
+            if (chunk) {
+              chunks.push(chunk);
+            }
+          }),
+        };
+
+        await handler(makeRequest(url) as never, res as never);
+
+        expect(res.statusCode).toBe(403);
+        expect(chunks.join("")).toBe("Forbidden");
+      }
+      expect(fetchCalls).toBe(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects untrusted Node fetch Host before encoded static asset traversal checks", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-adapter-assets-"));
+    try {
+      let fetchCalls = 0;
+      const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+        method: string;
+        url: string;
+        headers: Record<string, string>;
+      };
+      req.method = "GET";
+      req.url = "/assets/%2e%2e/secret.txt";
+      req.headers = { host: "evil.example" };
+      const chunks: string[] = [];
+      const res = {
+        statusCode: 200,
+        setHeader: vi.fn(),
+        end: vi.fn((chunk?: string) => {
+          if (chunk) {
+            chunks.push(chunk);
+          }
+        }),
+      };
+
+      await createNodeFetchHandler({
+        trustedHosts: ["app.example"],
+        staticAssets: { rootDir: dir, basePath: "/assets" },
+        fetch: () => {
+          fetchCalls += 1;
+          return new Response("dynamic");
+        },
+      })(req as never, res as never);
+
+      expect(res.statusCode).toBe(400);
+      expect(chunks.join("")).toBe("Untrusted Host header");
+      expect(fetchCalls).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("pipes Node streaming responses without buffering through end text", async () => {
     const routes: RouteDefinition[] = [
       { path: "/", fallback: "<p>Loading</p>", loader: async () => "Ready", render: ({ data }) => `<h1>${data}</h1>` },
