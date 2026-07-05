@@ -331,7 +331,17 @@ describe("server adapters", () => {
       end: vi.fn(),
     };
 
-    await writeNodeResponse(new Response(ReadableStream.from([new TextEncoder().encode("hello")])), res as never);
+    await writeNodeResponse(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("hello"));
+            controller.close();
+          },
+        }),
+      ),
+      res as never,
+    );
 
     expect(chunks.join("")).toBe("hello");
     expect(res.end).toHaveBeenCalledOnce();

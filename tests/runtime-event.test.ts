@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { delegate } from "../src/runtime/event";
 
 describe("runtime event delegation", () => {
-  it("attaches delegated listeners to the root and filters by path", () => {
+  it("attaches listeners to the target path so non-bubbling events fire", () => {
     document.body.innerHTML = `<section><button><span>Save</span></button><a href="#">Other</a></section>`;
     const root = document.querySelector("section");
     const button = document.querySelector("button");
@@ -17,17 +17,38 @@ describe("runtime event delegation", () => {
       currentTargets.push(event.currentTarget);
     });
 
-    const cleanup = delegate(root, "click", [0], handler);
+    const cleanup = delegate(root, "focus", [0], handler);
 
-    expect(rootAdd).toHaveBeenCalledTimes(1);
-    expect(buttonAdd).not.toHaveBeenCalled();
+    expect(rootAdd).not.toHaveBeenCalled();
+    expect(buttonAdd).toHaveBeenCalledTimes(1);
 
-    root.querySelector("a")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    root.querySelector("span")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    root.querySelector("a")?.dispatchEvent(new FocusEvent("focus", { bubbles: false }));
+    button.dispatchEvent(new FocusEvent("focus", { bubbles: false }));
     expect(handler).toHaveBeenCalledTimes(1);
     expect(currentTargets).toEqual([button]);
 
     cleanup();
-    expect(rootRemove).toHaveBeenCalledTimes(1);
+    expect(rootRemove).not.toHaveBeenCalled();
+  });
+
+  it("preserves DOM listener order and stopPropagation for nested handlers", () => {
+    document.body.innerHTML = `<section><button><span>Save</span></button></section>`;
+    const root = document.querySelector("section");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing event test root.");
+    }
+    const calls: string[] = [];
+
+    const cleanupParent = delegate(root, "click", [0], () => calls.push("parent"));
+    const cleanupChild = delegate(root, "click", [0, 0], (event) => {
+      calls.push("child");
+      event.stopPropagation();
+    });
+
+    root.querySelector("span")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(calls).toEqual(["child"]);
+    cleanupChild();
+    cleanupParent();
   });
 });

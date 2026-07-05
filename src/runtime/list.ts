@@ -226,47 +226,6 @@ const cleanupListState = (state: ListState): void => {
   state.records.clear();
 };
 
-const rowElementFromEvent = (container: Element, event: Event): Element | undefined => {
-  let current = event.target instanceof Node ? event.target : undefined;
-  while (current && current.parentNode !== container) {
-    current = current.parentNode ?? undefined;
-  }
-  return current instanceof Element ? current : undefined;
-};
-
-const bindListEvents = (container: Element, state: ListState, options: KeyedListOptions): Array<() => void> => {
-  const cleanups: Array<() => void> = [];
-  const delegateKeys = new Set<string>();
-  for (const binding of options.bindings) {
-    if (binding.kind !== "event") {
-      continue;
-    }
-    const delegateKey = `${binding.eventName}:${binding.path.join(".")}:${binding.handler}`;
-    if (delegateKeys.has(delegateKey)) {
-      continue;
-    }
-    delegateKeys.add(delegateKey);
-    const listener: EventListener = (event) => {
-      const row = rowElementFromEvent(container, event);
-      if (!row) {
-        return;
-      }
-      const record = state.recordsByElement.get(row);
-      const target = record ? nodeAtRecord(record, binding.path) : nodeAt(row, binding.path);
-      if (!(event.target instanceof Node) || !(target instanceof Element) || !target.contains(event.target)) {
-        return;
-      }
-      const handler = record ? readHandler(record.scope, binding) : undefined;
-      if (typeof handler === "function") {
-        (handler as EventListener)(event);
-      }
-    };
-    container.addEventListener(binding.eventName, listener);
-    cleanups.push(() => container.removeEventListener(binding.eventName, listener));
-  }
-  return cleanups;
-};
-
 const getListState = (container: Element, options: KeyedListOptions): ListState => {
   const current = listStates.get(container);
   if (current && current.options === options) {
@@ -289,7 +248,6 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
     template: createTemplate(options.templateHtml),
     cleanups: [] as Array<() => void>,
   };
-  next.cleanups = bindListEvents(container, next, options);
   listStates.set(container, next);
   return next;
 };
@@ -395,6 +353,32 @@ const bindRowBindings = (record: RowRecord, options: KeyedListOptions): void => 
   }
 };
 
+const bindRowEvents = (record: RowRecord, options: KeyedListOptions): void => {
+  const delegateKeys = new Set<string>();
+  for (const binding of options.bindings) {
+    if (binding.kind !== "event") {
+      continue;
+    }
+    const delegateKey = `${binding.eventName}:${binding.path.join(".")}:${binding.handler}`;
+    if (delegateKeys.has(delegateKey)) {
+      continue;
+    }
+    delegateKeys.add(delegateKey);
+    const target = nodeAtRecord(record, binding.path);
+    if (!(target instanceof Element)) {
+      continue;
+    }
+    const listener: EventListener = (event) => {
+      const handler = readHandler(record.scope, binding);
+      if (typeof handler === "function") {
+        (handler as EventListener)(event);
+      }
+    };
+    target.addEventListener(binding.eventName, listener);
+    record.cleanups.push(() => target.removeEventListener(binding.eventName, listener));
+  }
+};
+
 const bindRowControls = (record: RowRecord, options: KeyedListOptions): void => {
   for (const binding of options.bindings) {
     if (binding.kind !== "model") {
@@ -473,6 +457,7 @@ const createRecord = (
       state.recordsByElement.set(node, record);
     }
   }
+  bindRowEvents(record, options);
   bindRowBindings(record, options);
   untrack(() => bindRowControls(record, options));
   return record;

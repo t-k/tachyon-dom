@@ -383,6 +383,57 @@ describe("mountKeyedList", () => {
     expect(calls).toEqual(["new"]);
   });
 
+  it("uses the row event target as currentTarget", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const currentTargets: Array<EventTarget | null> = [];
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><button><span> </span></button></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0, 0], expression: "item.label" },
+        { kind: "event" as const, path: [0], eventName: "click", handler: "item.onClick" },
+      ],
+    };
+
+    mountKeyedList(
+      root,
+      [],
+      [{ id: 1, label: "One", onClick: (event: Event) => currentTargets.push(event.currentTarget) }],
+      options,
+    );
+    const button = root.querySelector("button");
+
+    root.querySelector("span")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(currentTargets).toEqual([button]);
+  });
+
+  it("fires non-bubbling row events on nested targets", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const calls: string[] = [];
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><input value="One"></li>`,
+      bindings: [{ kind: "event" as const, path: [0], eventName: "focus", handler: "item.onFocus" }],
+    };
+
+    mountKeyedList(root, [], [{ id: 1, onFocus: () => calls.push("focus") }], options);
+
+    root.querySelector("input")?.dispatchEvent(new FocusEvent("focus", { bubbles: false }));
+
+    expect(calls).toEqual(["focus"]);
+  });
+
   it("skips unchanged row binding writes when keyed rows are reused", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");
@@ -569,7 +620,7 @@ describe("mountKeyedList", () => {
     expect(Array.from(root.children, (child) => child.textContent)).toEqual(["One"]);
   });
 
-  it("delegates row events through the list container", () => {
+  it("binds row events without a container listener", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");
     if (!(root instanceof HTMLElement)) {
@@ -612,7 +663,7 @@ describe("mountKeyedList", () => {
 
     root.querySelector("span")?.click();
 
-    expect(addCount).toBe(1);
+    expect(addCount).toBe(0);
     expect(removeCount).toBe(0);
     expect(calls).toEqual(["updated"]);
   });
