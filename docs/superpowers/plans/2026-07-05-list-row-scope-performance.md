@@ -4,7 +4,7 @@
 
 **Goal:** Reduce unnecessary keyed-list row rebinding CPU work and measure whether `keyed-rows` needs a separate local optimization.
 
-**Architecture:** Keep the compiler and public list API stable. Add a runtime-only row update guard that reuses DOM records but skips binding re-evaluation when a reused row receives the identical item reference and unchanged outer scope reference. Treat `keyed-rows` as a lower-priority manual API surface and patch it only if focused measurement identifies a local bottleneck.
+**Architecture:** Keep the compiler and public list API stable. Add runtime-only row-scoped binding effects, detached from the outer list effect with `untrack()`, so row signal changes update only the owning row. Use a per-record revision signal for item replacement updates. Treat `keyed-rows` as a lower-priority manual API surface and patch it only if focused measurement identifies a local bottleneck.
 
 **Tech Stack:** TypeScript, Tachyon DOM runtime, Vitest, Playwright-backed local benchmark runner, pnpm.
 
@@ -23,7 +23,7 @@ Use single-writer execution because the impact area is narrow after source inspe
 
 - [x] **Step 2: Rank implementation candidates**
 
-Selected candidate: row-level unchanged-item skipping in `mountKeyedList`.
+Selected candidate after RED refinement: row-scoped binding effects in `mountKeyedList`, with unchanged-item skipping as the compatibility guard for item replacement updates.
 
 - [x] **Step 3: Validate artifacts**
 
@@ -107,9 +107,15 @@ Expected: fail with `expected [1,2,3,4,5] to deeply equal [3]`.
 ### Task 3: Runtime List Implementation
 
 **Files:**
+- Modify: `src/runtime/signal.ts`
+- Modify: `src/index.ts`
 - Modify: `src/runtime/list.ts`
 
-- [ ] **Step 1: Store the last row item and outer scope reference**
+- [x] **Step 1: Add `untrack()` to the signal runtime**
+
+`untrack(fn)` temporarily clears the active effect while `fn` runs.
+
+- [x] **Step 2: Store the last row item, outer scope reference, and row revision signal**
 
 Extend `RowRecord`:
 
@@ -123,34 +129,35 @@ type RowRecord = {
   lastValues: unknown[];
   item: unknown;
   outerScope: Record<string, unknown> | undefined;
+  revision: Signal<number>;
 };
 ```
 
-- [ ] **Step 2: Initialize the new fields in `createRecord`**
+- [x] **Step 3: Initialize row-scoped binding effects in `createRecord`**
 
-Set `item` and `outerScope` when creating a record.
+Create one detached effect per non-event binding with `untrack(() => effect(...))`, and store each disposer in `record.cleanups`.
 
-- [ ] **Step 3: Skip update when item and outer scope are unchanged**
+- [x] **Step 4: Invalidate row effects only when the row item changes or outer-dependent bindings need compatibility updates**
 
-In `updateRecord`, return before `Object.assign()` and `applyRowBindings()` when both references are identical:
+In `updateRecord`, refresh the row scope, then return without bumping the revision when the item is unchanged and every binding is item-scoped:
 
 ```ts
-if (record.item === item && record.outerScope === options.scope) {
+if (previousItem === item && hasOnlyItemScopedBindings(options)) {
   return;
 }
 ```
 
-Then update `record.item` and `record.outerScope` before applying bindings.
+Otherwise, bump `record.revision` so only that row's binding effects rerun.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run: `pnpm vitest run tests/runtime-list.test.ts -t "skips binding reads for reused rows whose item and outer scope references are unchanged"`
 Expected: pass.
 
-- [ ] **Step 5: Run focused list tests**
+- [x] **Step 6: Run focused signal/list tests**
 
-Run: `pnpm vitest run tests/runtime-list.test.ts`
-Expected: all runtime list tests pass.
+Run: `pnpm vitest run tests/runtime-signal.test.ts tests/runtime-list.test.ts tests/keyed-rows.test.ts`
+Expected: all focused runtime tests pass.
 
 ### Task 4: Keyed-Rows Measurement and Patch Decision
 
@@ -159,17 +166,19 @@ Expected: all runtime list tests pass.
 - Inspect: `benchmark/js-framework-benchmark/src/main.ts`
 - Modify only if measured bottleneck is local: `src/runtime/keyed-rows.ts`, `tests/keyed-rows.test.ts`
 
-- [ ] **Step 1: Compare benchmark evidence**
+- [x] **Step 1: Compare benchmark evidence**
 
 Use baseline and after-change smoke results for `partial update` and `select row`.
 
-- [ ] **Step 2: Decide whether to patch `keyed-rows`**
+- [x] **Step 2: Decide whether to patch `keyed-rows`**
 
 Patch only if the result points to local `keyed-rows` code. Do not change the manual API just to chase noisy one-iteration smoke numbers.
 
-- [ ] **Step 3: Add RED test first if patching**
+- [x] **Step 3: Add RED test first if patching**
 
 Use Vitest against `createKeyedRows`; no production code change without a failing test.
+
+Decision: no `keyed-rows` patch. The after-change smoke run showed `select row` faster than Solid and `partial update` close to Solid. The remaining `partial update` cost is mainly the benchmark patch body's row DOM traversal, not an isolated `keyed-rows.ts` runtime defect.
 
 ### Task 5: Verification, Logs, and Commit
 
@@ -177,22 +186,22 @@ Use Vitest against `createKeyedRows`; no production code change without a failin
 - Modify: `docs.local/logs/2026-07-05/2026-07-05-004-list-row-scope-and-keyed-rows-investigation.md`
 - Commit tracked source/test/docs plan files only.
 
-- [ ] **Step 1: Run focused tests**
+- [x] **Step 1: Run focused tests**
 
 Run: `pnpm vitest run tests/runtime-list.test.ts tests/keyed-rows.test.ts`
 Expected: all focused tests pass.
 
-- [ ] **Step 2: Run lint**
+- [x] **Step 2: Run lint**
 
 Run: `pnpm lint`
 Expected: no lint errors.
 
-- [ ] **Step 3: Run build**
+- [x] **Step 3: Run build**
 
 Run: `pnpm build`
 Expected: TypeScript and package artifact build complete.
 
-- [ ] **Step 4: Run after-change smoke benchmark**
+- [x] **Step 4: Run after-change smoke benchmark**
 
 Run through port registry:
 

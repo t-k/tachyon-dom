@@ -8,7 +8,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/form`: `bind:value`, `bind:checked`, validation, and progressive form helpers.
 - `runtime/enhancement`: small progressive enhancement registry for SSR markup that opts in with `data-td-enhance`.
 - `runtime/event`: delegated event binding.
-- `runtime/list`: keyed list mounting, reuse, move, and multi-root item support.
+- `runtime/list`: keyed list mounting, reuse, move, multi-root item support, and row-scoped binding effects that avoid re-reading unchanged rows after a single row signal changes.
 - `runtime/keyed-rows`: dependency-free keyed table-row list where the live DOM is the single source of truth (no shadow item/row arrays). Bulk creation binds and clones a reusable multi-row chunk; remove/swap/select are O(1) DOM operations. Suited to large data tables that do not need per-row reactivity.
 - `runtime/virtual-list`: fixed-height virtualized lists with overscan, imperative updates, index scrolling, and ARIA position metadata.
 - `runtime/conditional`: conditional DOM mounting.
@@ -182,7 +182,7 @@ Routes can define `action()` and `revalidateOnAction`. `router.submit(href, init
 
 ## Signals
 
-`runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, `read()`, `createResource()`, and `catchError()`. Effects run once when registered, then subsequent signal notifications are queued. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. `createMemo()` exposes a cached computed accessor that updates before dependent effects observe the next flush. `createResource()` ties an async loader to a source accessor and exposes `data`, `error`, `loading`, and `refetch`. `catchError()` wraps an effect body with an error callback while keeping the effect subscribed for later successful runs.
+`runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, `read()`, `untrack()`, `createResource()`, and `catchError()`. Effects run once when registered, then subsequent signal notifications are queued. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. `untrack(fn)` reads signals without subscribing the active effect, and effects created inside `untrack()` are not attached to the active owner. `createMemo()` exposes a cached computed accessor that updates before dependent effects observe the next flush. `createResource()` ties an async loader to a source accessor and exposes `data`, `error`, `loading`, and `refetch`. `catchError()` wraps an effect body with an error callback while keeping the effect subscribed for later successful runs.
 
 ## Error Boundaries and i18n
 

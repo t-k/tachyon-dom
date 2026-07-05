@@ -3,6 +3,7 @@ import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
 import { setText } from "./text.js";
 import { bindControl, setControlValue } from "./form.js";
 import { mountConditional } from "./conditional.js";
+import { createSignal, effect, untrack, type Signal } from "./signal.js";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void;
@@ -114,6 +115,9 @@ type RowRecord = {
   scope: Record<string, unknown>;
   cleanups: Array<() => void>;
   lastValues: unknown[];
+  item: unknown;
+  outerScope: Record<string, unknown> | undefined;
+  revision: Signal<number>;
 };
 
 type ListState = {
@@ -308,57 +312,88 @@ const shouldApplyValue = (record: RowRecord, index: number, value: unknown): boo
   return true;
 };
 
-const applyRowBindings = (record: RowRecord, scope: Record<string, unknown>, options: KeyedListOptions): void => {
+const applyRowBinding = (
+  record: RowRecord,
+  scope: Record<string, unknown>,
+  options: KeyedListOptions,
+  binding: Binding,
+  index: number,
+): void => {
+  record.revision();
+  if (binding.kind === "text") {
+    const value = readBinding(scope, binding);
+    if (shouldApplyValue(record, index, value)) {
+      setText(nodeAtRecord(record, binding.path) as Text, value);
+    }
+  } else if (binding.kind === "class") {
+    const value = readBinding(scope, binding);
+    if (shouldApplyValue(record, index, value)) {
+      setClassPresence(nodeAtRecord(record, binding.path) as Element, binding.className, value);
+    }
+  } else if (binding.kind === "attr") {
+    const value = readBinding(scope, binding);
+    if (shouldApplyValue(record, index, value)) {
+      setAttributeValue(nodeAtRecord(record, binding.path) as Element, binding.name, value);
+    }
+  } else if (binding.kind === "style") {
+    const value = readBinding(scope, binding);
+    if (shouldApplyValue(record, index, value)) {
+      setStyleValue(nodeAtRecord(record, binding.path) as Element, binding.name, value);
+    }
+  } else if (binding.kind === "ref") {
+    setRef(scope, binding.expression, nodeAtRecord(record, binding.path) as Element);
+  } else if (binding.kind === "model") {
+    const value = readBinding(scope, binding);
+    if (shouldApplyValue(record, index, value)) {
+      setControlValue(
+        nodeAtRecord(record, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+        binding.property,
+        value,
+      );
+    }
+  } else if (binding.kind === "list") {
+    const eachBinding = binding.read ? { expression: binding.each, read: binding.read } : { expression: binding.each };
+    const value = readBinding(scope, eachBinding) as readonly unknown[] | undefined;
+    if (shouldApplyValue(record, index, value)) {
+      mountKeyedList(record.element, binding.path, value, { ...binding, scope });
+    }
+  } else if (binding.kind === "if") {
+    const testBinding = binding.read ? { expression: binding.test, read: binding.read } : { expression: binding.test };
+    const value = readBinding(scope, testBinding);
+    if (shouldApplyValue(record, index, value)) {
+      mountConditional(record.element, binding.path, value, scope, binding);
+    }
+  }
+};
+
+const itemScopedExpression = (expression: string, itemName: string): boolean =>
+  expression === itemName || expression.startsWith(`${itemName}.`) || expression.startsWith(`${itemName}[`);
+
+const itemScopedBinding = (binding: Binding, itemName: string): boolean => {
+  if (binding.kind === "event") {
+    return true;
+  }
+  if (binding.kind === "list") {
+    return itemScopedExpression(binding.each, itemName);
+  }
+  if (binding.kind === "if") {
+    return itemScopedExpression(binding.test, itemName);
+  }
+  return itemScopedExpression(binding.expression, itemName);
+};
+
+const hasOnlyItemScopedBindings = (options: KeyedListOptions): boolean =>
+  options.bindings.every((binding) => itemScopedBinding(binding, options.itemName));
+
+const bindRowBindings = (record: RowRecord, options: KeyedListOptions): void => {
   for (let index = 0; index < options.bindings.length; index++) {
     const binding = options.bindings[index] as Binding;
-    if (binding.kind === "text") {
-      const value = readBinding(scope, binding);
-      if (shouldApplyValue(record, index, value)) {
-        setText(nodeAtRecord(record, binding.path) as Text, value);
-      }
-    } else if (binding.kind === "class") {
-      const value = readBinding(scope, binding);
-      if (shouldApplyValue(record, index, value)) {
-        setClassPresence(nodeAtRecord(record, binding.path) as Element, binding.className, value);
-      }
-    } else if (binding.kind === "attr") {
-      const value = readBinding(scope, binding);
-      if (shouldApplyValue(record, index, value)) {
-        setAttributeValue(nodeAtRecord(record, binding.path) as Element, binding.name, value);
-      }
-    } else if (binding.kind === "style") {
-      const value = readBinding(scope, binding);
-      if (shouldApplyValue(record, index, value)) {
-        setStyleValue(nodeAtRecord(record, binding.path) as Element, binding.name, value);
-      }
-    } else if (binding.kind === "ref") {
-      setRef(scope, binding.expression, nodeAtRecord(record, binding.path) as Element);
-    } else if (binding.kind === "model") {
-      const value = readBinding(scope, binding);
-      if (shouldApplyValue(record, index, value)) {
-        setControlValue(
-          nodeAtRecord(record, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
-          binding.property,
-          value,
-        );
-      }
-    } else if (binding.kind === "list") {
-      const eachBinding = binding.read
-        ? { expression: binding.each, read: binding.read }
-        : { expression: binding.each };
-      const value = readBinding(scope, eachBinding) as readonly unknown[] | undefined;
-      if (shouldApplyValue(record, index, value)) {
-        mountKeyedList(record.element, binding.path, value, { ...binding, scope });
-      }
-    } else if (binding.kind === "if") {
-      const testBinding = binding.read
-        ? { expression: binding.test, read: binding.read }
-        : { expression: binding.test };
-      const value = readBinding(scope, testBinding);
-      if (shouldApplyValue(record, index, value)) {
-        mountConditional(record.element, binding.path, value, scope, binding);
-      }
+    if (binding.kind === "event") {
+      continue;
     }
+    record.cleanups.push(
+      untrack(() => effect(() => applyRowBinding(record, record.scope, options, binding, index))),
+    );
   }
 };
 
@@ -419,23 +454,32 @@ const createRecord = (
     scope,
     cleanups: [],
     lastValues: [],
+    item,
+    outerScope: options.scope,
+    revision: createSignal(0),
   };
   for (const node of nodes) {
     if (node instanceof Element) {
       state.recordsByElement.set(node, record);
     }
   }
-  applyRowBindings(record, record.scope, options);
-  bindRowControls(record, options);
+  bindRowBindings(record, options);
+  untrack(() => bindRowControls(record, options));
   return record;
 };
 
 const updateRecord = (record: RowRecord, item: unknown, options: KeyedListOptions): void => {
+  const previousItem = record.item;
   if (options.scope) {
     Object.assign(record.scope, options.scope);
   }
   record.scope[options.itemName] = item;
-  applyRowBindings(record, record.scope, options);
+  record.item = item;
+  record.outerScope = options.scope;
+  if (previousItem === item && hasOnlyItemScopedBindings(options)) {
+    return;
+  }
+  record.revision.update((value) => value + 1);
 };
 
 const moveBefore = (container: Element, node: Node, before: Node | null): void => {

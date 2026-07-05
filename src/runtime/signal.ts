@@ -105,6 +105,16 @@ export function read<T>(value: T | Accessor<T>): T {
   return isSignal(value) ? (value as Accessor<T>)() : (value as T);
 }
 
+export const untrack = <T>(fn: () => T): T => {
+  const previous = activeEffect;
+  activeEffect = undefined;
+  try {
+    return fn();
+  } finally {
+    activeEffect = previous;
+  }
+};
+
 export const batch = <T>(fn: () => T): T => {
   batchDepth++;
   try {

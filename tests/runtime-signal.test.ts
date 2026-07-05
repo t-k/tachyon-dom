@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { batch, catchError, createMemo, createResource, createSignal, effect, read } from "../src/runtime/signal";
+import { batch, catchError, createMemo, createResource, createSignal, effect, read, untrack } from "../src/runtime/signal";
 
 const arrayFrom = Array.from;
 
@@ -47,6 +47,45 @@ describe("signal runtime", () => {
 
     expect(read("Plain")).toBe("Plain");
     expect(read(title)).toBe("Hello");
+  });
+
+  it("reads signals without subscribing the active effect through untrack", () => {
+    const count = createSignal(1);
+    const seen: number[] = [];
+
+    effect(() => {
+      seen.push(untrack(() => count()));
+    });
+    count.set(2);
+
+    expect(seen).toEqual([1]);
+  });
+
+  it("creates effects inside untrack without attaching them to the active owner", () => {
+    const outer = createSignal(0);
+    const inner = createSignal("a");
+    const seen: string[] = [];
+    let disposeInner: (() => void) | undefined;
+
+    const disposeOuter = effect(() => {
+      outer();
+      if (!disposeInner) {
+        untrack(() => {
+          disposeInner = effect(() => {
+            seen.push(inner());
+          });
+        });
+      }
+    });
+
+    outer.set(1);
+    inner.set("b");
+    disposeOuter();
+    inner.set("c");
+    disposeInner?.();
+    inner.set("d");
+
+    expect(seen).toEqual(["a", "b", "c"]);
   });
 
   it("batches multiple signal writes into one effect run", () => {

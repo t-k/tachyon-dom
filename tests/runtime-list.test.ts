@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createSignal, effect } from "../src/runtime/signal";
 import { mountKeyedList } from "../src/runtime/list";
 
 const stringify = JSON.stringify;
@@ -346,6 +347,95 @@ describe("mountKeyedList", () => {
     mountKeyedList(root, [], [{ id: 1, label: "One" }], options);
 
     expect(writes).toBe(0);
+  });
+
+  it("skips binding reads for reused rows whose item and outer scope references are unchanged", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const readIds: number[] = [];
+    const rows = Array.from({ length: 5 }, (_, index) => ({ id: index + 1, label: `Row ${index + 1}` }));
+    const options = {
+      signature: "row-scope-skip-unchanged-items",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "item.label",
+          read: (scope: Record<string, unknown>) => {
+            readIds.push((scope.item as { id: number }).id);
+            return (scope.item as { label: string }).label;
+          },
+        },
+      ],
+    };
+
+    mountKeyedList(root, [], rows, options);
+    readIds.length = 0;
+    const nextRows = rows.slice();
+    nextRows[2] = { id: 3, label: "Row 3 updated" };
+
+    mountKeyedList(root, [], nextRows, options);
+
+    expect(readIds).toEqual([3]);
+    expect(Array.from(root.children, (child) => child.textContent)).toEqual([
+      "Row 1",
+      "Row 2",
+      "Row 3 updated",
+      "Row 4",
+      "Row 5",
+    ]);
+  });
+
+  it("reruns only the changed row binding when a row signal changes", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const readIds: number[] = [];
+    const rows = Array.from({ length: 5 }, (_, index) => ({
+      id: index + 1,
+      label: createSignal(`Row ${index + 1}`),
+    }));
+    const options = {
+      signature: "row-scope-skip-unchanged-row-signals",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "item.label()",
+          read: (scope: Record<string, unknown>) => {
+            const item = scope.item as { id: number; label: () => string };
+            readIds.push(item.id);
+            return item.label();
+          },
+        },
+      ],
+    };
+
+    const dispose = effect(() => mountKeyedList(root, [], rows, options));
+    readIds.length = 0;
+    rows[2]?.label.set("Row 3 updated");
+
+    expect(readIds).toEqual([3]);
+    expect(Array.from(root.children, (child) => child.textContent)).toEqual([
+      "Row 1",
+      "Row 2",
+      "Row 3 updated",
+      "Row 4",
+      "Row 5",
+    ]);
+
+    dispose();
   });
 
   it("allows row bindings to read handlers and values from the outer scope", () => {
