@@ -1,4 +1,5 @@
 import { Readable } from "node:stream";
+import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -10,7 +11,7 @@ import {
   lambdaResponseFromWebResponse,
   requestFromLambdaEvent,
 } from "../src/adapters/lambda";
-import { createNodeFetchHandler, createNodeHandler } from "../src/adapters/node";
+import { createNodeFetchHandler, createNodeHandler, writeNodeResponse } from "../src/adapters/node";
 import { createWorkersFetchHandler, createWorkersHandler } from "../src/adapters/workers";
 import { createSecurityHeaders, redirect, type RouteDefinition } from "../src/router";
 
@@ -33,6 +34,8 @@ const lambdaEvent = (overrides: Record<string, unknown> = {}) => ({
   isBase64Encoded: false,
   ...overrides,
 });
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 describe("server adapters", () => {
   it("emits structured request lifecycle events for Workers routes", async () => {
@@ -243,6 +246,77 @@ describe("server adapters", () => {
     expect(res.statusCode).toBe(200);
     expect(res.setHeader).toHaveBeenCalledWith("content-type", "text/html; charset=utf-8");
     expect(chunks.join("")).toBe("<h1>Home</h1>");
+  });
+
+  it("aborts the Node fetch request signal when the client connection closes", async () => {
+    const req = new Readable({ read() {} }) as Readable & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/events";
+    req.headers = { host: "example.com" };
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    };
+    let signal: AbortSignal | undefined;
+
+    await createNodeFetchHandler({
+      fetch: async (request) => {
+        signal = request.signal;
+        (req as typeof req & { aborted?: boolean }).aborted = true;
+        req.emit("close");
+        await delay(0);
+        return new Response("ok");
+      },
+    })(req as never, res as never);
+
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("cancels a streamed Node response body when the client connection closes", async () => {
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(nextController) {
+        controller = nextController;
+        nextController.enqueue(new TextEncoder().encode("event: ready\n\n"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const res = new EventEmitter() as EventEmitter & {
+      statusCode: number;
+      setHeader: ReturnType<typeof vi.fn>;
+      write: ReturnType<typeof vi.fn>;
+      end: ReturnType<typeof vi.fn>;
+    };
+    res.statusCode = 200;
+    res.setHeader = vi.fn();
+    res.end = vi.fn();
+    res.write = vi.fn(() => {
+      queueMicrotask(() => res.emit("close"));
+      return true;
+    });
+    const writer = writeNodeResponse(new Response(body), res as never);
+
+    try {
+      const outcome = await Promise.race([writer.then(() => "done"), delay(20).then(() => "timeout")]);
+      expect(outcome).toBe("done");
+      expect(cancelled).toBe(true);
+      expect(res.end).not.toHaveBeenCalled();
+    } finally {
+      try {
+        controller?.close();
+      } catch {
+        // Already cancelled by the implementation under test.
+      }
+      await writer.catch(() => undefined);
+    }
   });
 
   it("preserves multiple Set-Cookie headers in Node fetch responses", async () => {

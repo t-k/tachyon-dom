@@ -1,4 +1,7 @@
+import { readFile } from "node:fs/promises";
 import type { TachyonApp } from "./app.js";
+import { diagnoseTachyonSfc, formatDiagnostic } from "./diagnostics.js";
+import { renderServerTemplate } from "./compiler/index.js";
 import { renderRoute, type RouteDefinition, type RouteRenderOptions, type RouteRenderResult } from "./router.js";
 
 export const renderRouteForTest = async (
@@ -41,4 +44,22 @@ export const assertAppHtml = (app: TachyonApp, path: string, expectedFragments: 
   if (missing.length > 0) {
     throw new Error(`App HTML assertion failed for ${path}: missing ${missing.join(", ")}`);
   }
+};
+
+export type RenderTdForTestOptions = {
+  locale?: string;
+};
+
+export const renderTdForTest = async (
+  templatePath: string,
+  scope: Record<string, unknown> = {},
+  options: RenderTdForTestOptions = {},
+): Promise<string> => {
+  const source = await readFile(templatePath, "utf8");
+  const result = diagnoseTachyonSfc(source);
+  if (!result.ok) {
+    throw new Error(formatDiagnostic(result.error, templatePath));
+  }
+  const defaultScope = options.locale === undefined ? {} : { locale: options.locale };
+  return renderServerTemplate(result.value.template, { ...defaultScope, ...scope });
 };

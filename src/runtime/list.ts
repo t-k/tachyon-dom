@@ -391,9 +391,7 @@ const bindRowBindings = (record: RowRecord, options: KeyedListOptions): void => 
     if (binding.kind === "event") {
       continue;
     }
-    record.cleanups.push(
-      untrack(() => effect(() => applyRowBinding(record, record.scope, options, binding, index))),
-    );
+    record.cleanups.push(untrack(() => effect(() => applyRowBinding(record, record.scope, options, binding, index))));
   }
 };
 
@@ -430,6 +428,18 @@ const keyFor = (item: unknown, options: KeyedListOptions): PropertyKey => {
     return key;
   }
   return String(key);
+};
+
+const isProductionEnvironment = (): boolean => typeof process !== "undefined" && process.env.NODE_ENV === "production";
+
+const warnDuplicateKey = (key: PropertyKey, options: KeyedListOptions): void => {
+  if (isProductionEnvironment() || typeof console.warn !== "function") {
+    return;
+  }
+  const location = options.signature ? ` ${options.signature}` : "";
+  console.warn(
+    `Duplicate key ${JSON.stringify(String(key))} in keyed <for> list${location}. Later items with the same key were skipped.`,
+  );
 };
 
 const createRecord = (
@@ -584,6 +594,7 @@ export const mountKeyedList = (
   for (const item of items) {
     const key = keyFor(item, options);
     if (seenKeys.has(key)) {
+      warnDuplicateKey(key, options);
       continue;
     }
     seenKeys.add(key);

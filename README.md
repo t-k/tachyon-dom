@@ -192,6 +192,25 @@ For Cloudflare Pages, `tachyon-dom/vite` exposes `packageCloudflarePages()` to c
 
 Server-rendered string helpers live under `tachyon-dom/server/html` and `tachyon-dom/server/form-action`. The HTML helper escapes interpolation by default, provides explicit `attr()`, `booleanAttr()`, `classList()`, `join()`, and `rawHtml()` helpers, and does not require DOM globals. The form action helper keeps validation in userland while standardizing `FormData` parsing, safe value preservation, accessible field error attributes, and path-relative redirect responses for classic SSR forms.
 
+## Testing Templates
+
+`tachyon-dom/testing` includes helpers for fast server-side assertions without starting Vite. Use `renderTdForTest(filePath, scope, { locale })` in Vitest when you want to assert the SSR HTML for a `.td` template directly:
+
+```ts
+import { expect, it } from "vitest";
+import { renderTdForTest } from "tachyon-dom/testing";
+
+it("escapes user content in the account view", async () => {
+  await expect(
+    renderTdForTest("src/account-view.td", {
+      userName: `<img src=x onerror=alert(1)>`,
+    }),
+  ).resolves.toContain("&lt;img src=x onerror=alert(1)&gt;");
+});
+```
+
+The helper reads and compiles the template with Tachyon DOM diagnostics, then renders it through the server target. Compiler errors include the template file path, line, column, source line, and pointer so failures are suitable for normal unit-test output.
+
 ## Security Notes
 
 `sanitizeHtml(markup)` has a small built-in allowlist sanitizer for constrained, already-simple backend HTML. Do not rely on the default sanitizer for arbitrary untrusted HTML. For user-generated or third-party markup, pass a vetted adapter through `createHtmlSanitizer()`/`sanitizeHtml(..., { adapter })`, such as a DOMPurify-backed sanitizer in the target runtime.

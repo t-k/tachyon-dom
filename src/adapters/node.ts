@@ -186,13 +186,35 @@ export const writeNodeResponse = async (webResponse: Response, response: ServerR
     return;
   }
   const reader = webResponse.body.getReader();
-  while (true) {
-    const result = await reader.read();
-    if (result.done) {
-      response.end();
+  let responseClosed = false;
+  let finished = false;
+  let cancelPromise: Promise<void> | undefined;
+  const onClose = (): void => {
+    if (finished || response.writableEnded) {
       return;
     }
-    writable.write(Buffer.from(result.value));
+    responseClosed = true;
+    cancelPromise = reader.cancel().catch(() => undefined);
+  };
+  response.once("close", onClose);
+  try {
+    while (!responseClosed) {
+      const result = await reader.read();
+      if (responseClosed) {
+        return;
+      }
+      if (result.done) {
+        finished = true;
+        response.end();
+        return;
+      }
+      writable.write(Buffer.from(result.value));
+    }
+  } finally {
+    if (typeof response.off === "function") {
+      response.off("close", onClose);
+    }
+    await cancelPromise;
   }
 };
 
@@ -243,7 +265,34 @@ const requestUrl = (request: IncomingMessage, options: RequestUrlOptions = {}): 
   return `${origin}${request.url ?? "/"}`;
 };
 
-const webRequestFor = (request: IncomingMessage, options: RequestUrlOptions = {}): Request | Response => {
+const requestAbortSignal = (request: IncomingMessage, response?: ServerResponse): AbortSignal => {
+  const controller = new AbortController();
+  const abort = (): void => {
+    if (!controller.signal.aborted) {
+      controller.abort();
+    }
+  };
+  request.once("aborted", abort);
+  request.once("close", () => {
+    if ((request as IncomingMessage & { aborted?: boolean }).aborted) {
+      abort();
+    }
+  });
+  if (typeof response?.once === "function") {
+    response.once("close", () => {
+      if (!response.writableEnded) {
+        abort();
+      }
+    });
+  }
+  return controller.signal;
+};
+
+const webRequestFor = (
+  request: IncomingMessage,
+  options: RequestUrlOptions = {},
+  response?: ServerResponse,
+): Request | Response => {
   const url = requestUrl(request, options);
   if (url instanceof Response) {
     return url;
@@ -252,6 +301,7 @@ const webRequestFor = (request: IncomingMessage, options: RequestUrlOptions = {}
   const init: RequestInit = {
     method: request.method ?? "GET",
     headers: request.headers as HeadersInit,
+    signal: requestAbortSignal(request, response),
     ...(body ? { body, duplex: "half" } : {}),
   } as RequestInit;
   return new Request(url, init);
@@ -275,7 +325,7 @@ export const createNodeHandler =
       writeNodeStaticRoute(staticRoute, request, response, options.securityHeaders);
       return;
     }
-    const webRequest = webRequestFor(request, options);
+    const webRequest = webRequestFor(request, options, response);
     if (webRequest instanceof Response) {
       await writeNodeResponse(webRequest, response);
       return;
@@ -307,7 +357,7 @@ export const createNodeFetchHandler = (
     },
   });
   return async (request, response) => {
-    const webRequest = webRequestFor(request, options);
+    const webRequest = webRequestFor(request, options, response);
     if (webRequest instanceof Response) {
       await writeNodeResponse(webRequest, response);
       return;

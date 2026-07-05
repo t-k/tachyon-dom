@@ -3,9 +3,13 @@ import { createSignal, effect } from "../src/runtime/signal";
 import { mountKeyedList } from "../src/runtime/list";
 
 const stringify = JSON.stringify;
+const nodeEnv = process.env.NODE_ENV;
+const warn = console.warn;
 
 afterEach(() => {
   JSON.stringify = stringify;
+  process.env.NODE_ENV = nodeEnv;
+  console.warn = warn;
 });
 
 describe("mountKeyedList", () => {
@@ -116,6 +120,70 @@ describe("mountKeyedList", () => {
 
     expect(root.children.length).toBe(2);
     expect(Array.from(root.children, (child) => child.textContent)).toEqual(["One", "Two"]);
+  });
+
+  it("warns in development when keyed list items contain duplicate keys", () => {
+    process.env.NODE_ENV = "development";
+    const warnings: string[] = [];
+    console.warn = (message?: unknown) => {
+      warnings.push(String(message));
+    };
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 1, label: "One A" },
+        { id: 1, label: "One B" },
+      ],
+      {
+        signature: "tests/runtime-list.td:list:0",
+        key: "item.id",
+        itemName: "item",
+        templateHtml: `<li><span> </span></li>`,
+        bindings: [{ kind: "text", path: [0, 0], expression: "item.label" }],
+      },
+    );
+
+    expect(warnings).toEqual([
+      `Duplicate key "1" in keyed <for> list tests/runtime-list.td:list:0. Later items with the same key were skipped.`,
+    ]);
+  });
+
+  it("does not warn for duplicate keyed list items in production", () => {
+    process.env.NODE_ENV = "production";
+    const warnings: string[] = [];
+    console.warn = (message?: unknown) => {
+      warnings.push(String(message));
+    };
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 1, label: "One A" },
+        { id: 1, label: "One B" },
+      ],
+      {
+        signature: "tests/runtime-list.td:list:0",
+        key: "item.id",
+        itemName: "item",
+        templateHtml: `<li><span> </span></li>`,
+        bindings: [{ kind: "text", path: [0, 0], expression: "item.label" }],
+      },
+    );
+
+    expect(warnings).toEqual([]);
   });
 
   it("adopts matching SSR rows on the first mount before applying keyed updates", () => {
