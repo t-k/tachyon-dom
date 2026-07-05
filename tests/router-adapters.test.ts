@@ -319,6 +319,54 @@ describe("server adapters", () => {
     }
   });
 
+  it("flushes Node response headers before waiting for the first streamed body chunk", async () => {
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const events: string[] = [];
+    const body = new ReadableStream<Uint8Array>({
+      start(nextController) {
+        controller = nextController;
+      },
+    });
+    const res = new EventEmitter() as EventEmitter & {
+      statusCode: number;
+      setHeader: ReturnType<typeof vi.fn>;
+      flushHeaders: ReturnType<typeof vi.fn>;
+      write: ReturnType<typeof vi.fn>;
+      end: ReturnType<typeof vi.fn>;
+    };
+    res.statusCode = 200;
+    res.setHeader = vi.fn((name: string) => {
+      events.push(`header:${name}`);
+    });
+    res.flushHeaders = vi.fn(() => {
+      events.push("flush");
+    });
+    res.write = vi.fn((chunk: Buffer) => {
+      events.push(`write:${chunk.toString("utf8")}`);
+      return true;
+    });
+    res.end = vi.fn(() => {
+      events.push("end");
+    });
+    const writer = writeNodeResponse(
+      new Response(body, { headers: { "content-type": "text/event-stream" } }),
+      res as never,
+    );
+
+    await delay(0);
+    const flushCallCountBeforeFirstChunk = res.flushHeaders.mock.calls.length;
+    const writeCallCountBeforeFirstChunk = res.write.mock.calls.length;
+
+    controller?.enqueue(new TextEncoder().encode(":ok\n\n"));
+    controller?.close();
+    await writer;
+
+    expect(flushCallCountBeforeFirstChunk).toBe(1);
+    expect(writeCallCountBeforeFirstChunk).toBe(0);
+
+    expect(events.indexOf("flush")).toBeLessThan(events.findIndex((event) => event.startsWith("write:")));
+  });
+
   it("writes streamed Node responses for minimal ServerResponse-compatible objects", async () => {
     const chunks: string[] = [];
     const res = {

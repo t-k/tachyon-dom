@@ -185,6 +185,9 @@ export const writeNodeResponse = async (webResponse: Response, response: ServerR
     response.end(await webResponse.text());
     return;
   }
+  if (typeof response.flushHeaders === "function") {
+    response.flushHeaders();
+  }
   const reader = webResponse.body.getReader();
   let responseClosed = false;
   let finished = false;
