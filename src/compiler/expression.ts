@@ -650,6 +650,30 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
       : evaluateExpressionNode(node.alternate, scope);
   }
   if (node.type === "call") {
+    if (node.callee.type === "identifier" && node.callee.path.length > 1) {
+      const object = readPath(scope, node.callee.path.slice(0, -1));
+      const property = node.callee.path.at(-1) as string;
+      const callee = (Object(object) as Record<PropertyKey, unknown>)[property];
+      if (typeof callee !== "function") {
+        return undefined;
+      }
+      return callee.apply(object, node.args.map((arg) => evaluateExpressionNode(arg, scope)));
+    }
+    if (node.callee.type === "member") {
+      const object = evaluateExpressionNode(node.callee.object, scope);
+      if (object == null) {
+        if (node.callee.optional) {
+          return undefined;
+        }
+        throw new TypeError(`Cannot read properties of ${object}.`);
+      }
+      const property = evaluateExpressionNode(node.callee.property, scope);
+      const callee = (object as Record<PropertyKey, unknown>)[property as PropertyKey];
+      if (typeof callee !== "function") {
+        return undefined;
+      }
+      return callee.apply(object, node.args.map((arg) => evaluateExpressionNode(arg, scope)));
+    }
     const callee = evaluateExpressionNode(node.callee, scope);
     if (typeof callee !== "function") {
       return undefined;
