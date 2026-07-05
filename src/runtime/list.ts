@@ -330,26 +330,21 @@ const applyRowBindings = (record: RowRecord, scope: Record<string, unknown>, opt
         );
       }
     } else if (binding.kind === "list") {
-      const eachBinding = binding.read ? { expression: binding.each, read: binding.read } : { expression: binding.each };
+      const eachBinding = binding.read
+        ? { expression: binding.each, read: binding.read }
+        : { expression: binding.each };
       const value = readBinding(scope, eachBinding) as readonly unknown[] | undefined;
-      shouldApplyValue(record, index, value);
-      mountKeyedList(
-        record.element,
-        binding.path,
-        value,
-        { ...binding, scope },
-      );
+      if (shouldApplyValue(record, index, value)) {
+        mountKeyedList(record.element, binding.path, value, { ...binding, scope });
+      }
     } else if (binding.kind === "if") {
-      const testBinding = binding.read ? { expression: binding.test, read: binding.read } : { expression: binding.test };
+      const testBinding = binding.read
+        ? { expression: binding.test, read: binding.read }
+        : { expression: binding.test };
       const value = readBinding(scope, testBinding);
-      shouldApplyValue(record, index, value);
-      mountConditional(
-        record.element,
-        binding.path,
-        value,
-        scope,
-        binding,
-      );
+      if (shouldApplyValue(record, index, value)) {
+        mountConditional(record.element, binding.path, value, scope, binding);
+      }
     }
   }
 };

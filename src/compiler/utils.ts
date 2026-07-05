@@ -1,5 +1,7 @@
 import type { Attribute, ElementNode, HydrationBoundary, TemplateNode } from "./types.js";
 import { evaluateExpression, expressionToJs } from "./expression.js";
+import { escapeHtml } from "../html-escape.js";
+export { escapeHtml } from "../html-escape.js";
 
 export const expressionPattern = /\{([^{}]+)\}/g;
 export const identifierNamePattern = /^[A-Za-z_$][\w$]*$/;
@@ -177,14 +179,6 @@ export const itemNameFromKey = (key: string): string => {
 
 export const renderableChildren = (node: ElementNode): TemplateNode[] =>
   node.children.filter((child) => child.type !== "text" || child.value.length > 0);
-
-export const escapeHtml = (value: unknown): string =>
-  String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll(`"`, "&quot;")
-    .replaceAll("'", "&#39;");
 
 export const escapeMarker = (value: unknown): string =>
   String(value ?? "")

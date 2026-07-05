@@ -1,4 +1,5 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
+import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
 import {
   attrExpression,
   attrString,
@@ -235,15 +236,13 @@ export const generateServerStreamModule = (template: CompiledTemplate): string =
     return [line];
   });
   const lines = [
-    `const HTML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };`,
-    `const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => HTML_ESCAPE[char]);`,
+    ...generatedEscapeHtmlHelperLines,
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `export const stream = async function* (scope) {`,
-    `  const __tachyonEncoder = new TextEncoder();`,
     `  const __tachyonFlushBytes = 8192;`,
     `  let __tachyonBuffer = "";`,
     `  let __tachyonBufferBytes = 0;`,
-    `  const __tachyonPush = (chunk) => { const text = String(chunk ?? ""); __tachyonBuffer += text; __tachyonBufferBytes += __tachyonEncoder.encode(text).byteLength; };`,
+    `  const __tachyonPush = (chunk) => { const text = String(chunk ?? ""); __tachyonBuffer += text; __tachyonBufferBytes += text.length; };`,
     ...coalescedStatements,
     `  if (__tachyonBuffer) { yield __tachyonBuffer; }`,
     `};`,

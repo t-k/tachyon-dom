@@ -92,7 +92,11 @@ describe("server stream adapter", () => {
       throw new Error(result.error.message);
     }
     const module = generateServerStreamModule(result.value).replace("export const stream", "const stream");
-    const stream = new Function(`${module}; return stream;`)() as (scope: Record<string, unknown>) => AsyncIterable<string>;
+    expect(module).not.toContain("new TextEncoder");
+    expect(module).toContain("__tachyonBufferBytes += text.length");
+    const stream = new Function(`${module}; return stream;`)() as (
+      scope: Record<string, unknown>,
+    ) => AsyncIterable<string>;
     const chunks: string[] = [];
 
     for await (const chunk of stream({ title: "Hello" })) {
@@ -108,7 +112,9 @@ describe("server stream adapter", () => {
       throw new Error(result.error.message);
     }
     const module = generateServerStreamModule(result.value).replace("export const stream", "const stream");
-    const stream = new Function(`${module}; return stream;`)() as (scope: Record<string, unknown>) => AsyncIterable<string>;
+    const stream = new Function(`${module}; return stream;`)() as (
+      scope: Record<string, unknown>,
+    ) => AsyncIterable<string>;
     const chunks: string[] = [];
 
     for await (const chunk of stream({})) {

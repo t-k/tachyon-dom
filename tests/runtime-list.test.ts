@@ -644,7 +644,7 @@ describe("mountKeyedList", () => {
     if (!(root instanceof HTMLElement)) {
       throw new Error("Missing root.");
     }
-    const items = [{ id: "a1", label: "A1" }];
+    let items = [{ id: "a1", label: "A1" }];
     const json = vi.fn(stringify);
     JSON.stringify = json as typeof JSON.stringify;
     const options = {
@@ -692,12 +692,86 @@ describe("mountKeyedList", () => {
     };
 
     mountKeyedList(root, [0], [{ id: "a", name: "Group A", visible: true, badge: "visible", items }], options);
-    items[0] = { id: "a1", label: "A1 updated" };
+    items = [{ id: "a1", label: "A1 updated" }];
     mountKeyedList(root, [0], [{ id: "a", name: "Group A updated", visible: true, badge: "visible", items }], options);
 
     expect(json).not.toHaveBeenCalled();
     expect(root.innerHTML).toBe(
       `<ul id="groups"><li><span>Group A updated</span><ul><li>A1 updated</li></ul><!----><em>visible</em></li></ul>`,
+    );
+  });
+
+  it("skips nested list and conditional remounts when their values are unchanged", () => {
+    document.body.innerHTML = `<section><ul id="groups"></ul></section>`;
+    const root = document.body.firstElementChild;
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing root.");
+    }
+    const items = [{ id: "a1", label: "A1" }];
+    let nestedListTextReads = 0;
+    let conditionalTextReads = 0;
+    const options = {
+      signature: "groups-with-guarded-nested-bindings",
+      key: "group.id",
+      itemName: "group",
+      templateHtml: `<li><span> </span><ul></ul><!----></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "group.name",
+          read: (scope: Record<string, unknown>) => (scope.group as { name: string }).name,
+        },
+        {
+          kind: "list" as const,
+          signature: "guarded-nested-items",
+          path: [1],
+          each: "group.items",
+          read: (scope: Record<string, unknown>) => (scope.group as { items: typeof items }).items,
+          itemName: "item",
+          key: "item.id",
+          templateHtml: `<li> </li>`,
+          bindings: [
+            {
+              kind: "text" as const,
+              path: [0],
+              expression: "item.label",
+              read: (scope: Record<string, unknown>) => {
+                nestedListTextReads += 1;
+                return (scope.item as { label: string }).label;
+              },
+            },
+          ],
+        },
+        {
+          kind: "if" as const,
+          signature: "guarded-nested-visible",
+          path: [2],
+          test: "group.visible",
+          read: (scope: Record<string, unknown>) => (scope.group as { visible: boolean }).visible,
+          templateHtml: `<em> </em>`,
+          bindings: [
+            {
+              kind: "text" as const,
+              path: [0],
+              expression: "group.badge",
+              read: (scope: Record<string, unknown>) => {
+                conditionalTextReads += 1;
+                return (scope.group as { badge: string }).badge;
+              },
+            },
+          ],
+        },
+      ],
+    };
+
+    mountKeyedList(root, [0], [{ id: "a", name: "Group A", visible: true, badge: "visible", items }], options);
+    mountKeyedList(root, [0], [{ id: "a", name: "Group A updated", visible: true, badge: "visible", items }], options);
+
+    expect(nestedListTextReads).toBe(1);
+    expect(conditionalTextReads).toBe(1);
+    expect(root.innerHTML).toBe(
+      `<ul id="groups"><li><span>Group A updated</span><ul><li>A1</li></ul><!----><em>visible</em></li></ul>`,
     );
   });
 });

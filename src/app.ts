@@ -1,5 +1,6 @@
 import { compileServerTemplate, compileTemplate } from "./compiler/index.js";
 import { compileTachyonSfc, generateSfcScriptDeclarations } from "./compiler/sfc.js";
+import { escapeHtml } from "./html-escape.js";
 import type { ClientBinding, CompiledTemplate } from "./compiler/types.js";
 import { err, ok, type Result } from "./result.js";
 import type { TemplateScope, TypedTemplate } from "./typed.js";
@@ -94,8 +95,6 @@ const ignoredIdentifiers = new Set([
   "true",
   "undefined",
 ]);
-const htmlEscapeMap: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-
 export const normalizeAppPath = (path: string): string => {
   if (path === "" || path === "/" || path === "/index.html") {
     return "/";
@@ -103,8 +102,6 @@ export const normalizeAppPath = (path: string): string => {
   const withoutIndex = path.endsWith("/index.html") ? path.slice(0, -"index.html".length) : path;
   return withoutIndex.endsWith("/") ? withoutIndex : `${withoutIndex}/`;
 };
-
-const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (char) => htmlEscapeMap[char] as string);
 
 export const minifyHtml = (html: string): string => {
   const preserved: string[] = [];

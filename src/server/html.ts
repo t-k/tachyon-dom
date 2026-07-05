@@ -1,3 +1,5 @@
+import { escapeHtml as escapeText } from "../html-escape.js";
+
 const htmlFragmentBrand = Symbol("tachyon.htmlFragment");
 const htmlAttributeBrand = Symbol("tachyon.htmlAttribute");
 
@@ -33,24 +35,24 @@ const isHtmlFragment = (value: unknown): value is HtmlFragment =>
 const isHtmlAttribute = (value: unknown): value is HtmlAttribute =>
   Boolean(value && typeof value === "object" && (value as Record<symbol, unknown>)[htmlAttributeBrand] === true);
 
-const textEscapeMap: Record<string, string> = {
+const attributeEscapeMap: Record<string, string> = {
   "&": "&amp;",
   "<": "&lt;",
   ">": "&gt;",
   '"': "&quot;",
   "'": "&#39;",
-};
-
-const attributeEscapeMap: Record<string, string> = {
-  ...textEscapeMap,
   "`": "&#96;",
 };
 
-const escapeText = (value: unknown): string =>
-  String(value ?? "").replace(/[&<>"']/g, (char) => textEscapeMap[char] ?? char);
+const attributeEscapePattern = /[&<>"'`]/;
+const attributeEscapeGlobalPattern = /[&<>"'`]/g;
 
-const escapeAttribute = (value: unknown): string =>
-  String(value ?? "").replace(/[&<>"'`]/g, (char) => attributeEscapeMap[char] ?? char);
+const escapeAttribute = (value: unknown): string => {
+  const text = String(value ?? "");
+  return attributeEscapePattern.test(text)
+    ? text.replace(attributeEscapeGlobalPattern, (char) => attributeEscapeMap[char] ?? char)
+    : text;
+};
 
 const assertAttributeName = (name: string): void => {
   if (!attributeNamePattern.test(name)) {

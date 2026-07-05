@@ -5,12 +5,11 @@ const shouldReflectProperty = (name: string): boolean => {
   return !normalized.startsWith("on") && !dangerousPropertyNames.has(normalized);
 };
 
-const isDangerousAttributeSink = (name: string): boolean => !shouldReflectProperty(name);
-
 export const setAttributeValue = (element: Element, name: string, value: unknown): void => {
+  const reflectProperty = shouldReflectProperty(name);
   if (value == null || value === false) {
     element.removeAttribute(name);
-    if (shouldReflectProperty(name) && name in element) {
+    if (reflectProperty && name in element) {
       try {
         const properties = element as unknown as Record<string, unknown>;
         const current = properties[name];
@@ -25,7 +24,7 @@ export const setAttributeValue = (element: Element, name: string, value: unknown
     }
     return;
   }
-  if (isDangerousAttributeSink(name)) {
+  if (!reflectProperty) {
     element.removeAttribute(name);
     return;
   }
@@ -34,7 +33,7 @@ export const setAttributeValue = (element: Element, name: string, value: unknown
   } else {
     element.setAttribute(name, String(value));
   }
-  if (shouldReflectProperty(name) && name in element) {
+  if (name in element) {
     try {
       (element as unknown as Record<string, unknown>)[name] = value;
     } catch {

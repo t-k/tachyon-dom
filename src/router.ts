@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "./constant-time.js";
+import { escapeHtml } from "./html-escape.js";
 import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
 
@@ -286,16 +287,6 @@ export const json = (data: unknown, init: ResponseInit = {}): RouteResponse => {
   }
   return routeResponse(JSON.stringify(data), { ...init, headers });
 };
-
-const htmlEscapeMap: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-};
-
-const escapeHtml = (value: unknown): string =>
-  String(value ?? "").replace(/[&<>"]/g, (char) => htmlEscapeMap[char] ?? char);
 
 const trustedHtmlValues = new WeakSet<TrustedHtml>();
 

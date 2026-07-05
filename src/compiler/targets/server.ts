@@ -1,4 +1,5 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
+import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
 import {
   attrExpression,
   attrString,
@@ -194,9 +195,6 @@ const renderNode = (node: TemplateNode, scope: Record<string, unknown>, path: nu
   return renderElement(node, scope, path);
 };
 
-export const renderServerTemplate = (template: CompiledTemplate, scope: Record<string, unknown>): string =>
-  renderElement(template.root, scope);
-
 const renderTextExpression = (node: TextNode, locals: ReadonlySet<string> = new Set()): string => {
   const parts: string[] = [];
   let lastEmittedWasText = false;
@@ -274,7 +272,11 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
     const classExpression = `${jsString(staticClasses.join(" "))}${
       dynamicClasses.length > 0 ? ` + ${dynamicClasses.join(" + ")}` : ""
     }`;
-    parts.push(`(${classExpression} ? ${jsString(` class="`)} + (${classExpression}).trim() + ${jsString(`"`)} : "")`);
+    parts.splice(
+      1,
+      0,
+      `(${classExpression} ? ${jsString(` class="`)} + (${classExpression}).trim() + ${jsString(`"`)} : "")`,
+    );
   }
   if (dynamicStyles.length > 0) {
     const styleExpression = dynamicStyles.join(" + ");
@@ -414,8 +416,7 @@ export const generateServerModule = (template: CompiledTemplate): string => {
     return cached;
   }
   const lines = [
-    `const HTML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };`,
-    `const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => HTML_ESCAPE[char]);`,
+    ...generatedEscapeHtmlHelperLines,
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll(">", "\\\\u003e");`,
     `const ATTRIBUTE_ESCAPE = { "&": "&amp;", '"': "&quot;", "<": "&lt;" };`,
@@ -439,8 +440,7 @@ export const compileServerTemplate = (template: CompiledTemplate): ServerRendere
     return cached;
   }
   const body = [
-    `const HTML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };`,
-    `const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => HTML_ESCAPE[char]);`,
+    ...generatedEscapeHtmlHelperLines,
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `return ${renderElementExpression(template.root)};`,
   ].join("\n");
@@ -448,3 +448,6 @@ export const compileServerTemplate = (template: CompiledTemplate): ServerRendere
   serverRendererCache.set(template, renderer);
   return renderer;
 };
+
+export const renderServerTemplate = (template: CompiledTemplate, scope: Record<string, unknown>): string =>
+  compileServerTemplate(template)(scope);

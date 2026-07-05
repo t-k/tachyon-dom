@@ -48,6 +48,7 @@ describe("HTML-first compiler", () => {
     const firstServerCode = generateServerModule(result.value);
     const firstStreamCode = generateServerStreamModule(result.value);
     const firstRenderer = compileServerTemplate(result.value);
+    const firstRenderedHtml = renderServerTemplate(result.value, { title: "Hello" });
 
     result.value.root.tagName = "article";
     result.value.client.templateHtml = "<article></article>";
@@ -56,6 +57,7 @@ describe("HTML-first compiler", () => {
     expect(generateServerModule(result.value)).toBe(firstServerCode);
     expect(generateServerStreamModule(result.value)).toBe(firstStreamCode);
     expect(compileServerTemplate(result.value)).toBe(firstRenderer);
+    expect(renderServerTemplate(result.value, { title: "Hello" })).toBe(firstRenderedHtml);
   });
 
   it("extracts text bindings while keeping a static client template", () => {
@@ -415,6 +417,8 @@ describe("HTML-first compiler", () => {
     const serverCode = generateServerModule(result.value);
     const streamCode = generateServerStreamModule(result.value);
 
+    expect(serverCode).toContain(`HTML_ESCAPE_PATTERN.test(text)`);
+    expect(streamCode).toContain(`HTML_ESCAPE_PATTERN.test(text)`);
     expect(serverCode).toContain(`replace(/[&<>"']/g`);
     expect(streamCode).toContain(`replace(/[&<>"']/g`);
     expect(serverCode).not.toContain(`replaceAll("&", "&amp;").replaceAll("<", "&lt;")`);
