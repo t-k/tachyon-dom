@@ -307,6 +307,7 @@ const runtimeNames = {
   elementAt: "__tachyonElementAt",
   mountConditional: "__tachyonMountConditional",
   mountKeyedList: "__tachyonMountKeyedList",
+  nodeAt: "__tachyonNodeAt",
   read: "__tachyonRead",
   setAttributeValue: "__tachyonSetAttributeValue",
   setClassPresence: "__tachyonSetClassPresence",
@@ -319,6 +320,16 @@ const runtimeNames = {
 
 const elementExpression = (path: readonly number[]): string =>
   path.length === 0 ? "root" : `${runtimeNames.elementAt}(root, ${JSON.stringify(path)})`;
+
+const nodeExpression = (path: readonly number[]): string =>
+  path.length === 0 ? "root" : `${runtimeNames.nodeAt}(root, ${JSON.stringify(path)})`;
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const simpleItemKeyExpression = (expression: string, itemName: string): string | undefined => {
+  const itemPattern = new RegExp(`^${escapeRegExp(itemName)}(?:\\.[A-Za-z_$][\\w$]*)*$`);
+  return itemPattern.test(expression) ? expressionToScopeAccess(expression, new Set([itemName])) : undefined;
+};
 
 const runtimeValueExpression = (expression: string, reactive: boolean, sourceName: string): string => {
   const value = expressionToScopeAccess(expression, new Set(), sourceName);
@@ -352,13 +363,15 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsList = bindings.some((binding) => binding.kind === "list");
   const needsConditional = bindings.some((binding) => binding.kind === "if");
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
+  const needsElementAt = needsClass || needsAttr || needsModel || (reactive && needsList);
+  const needsNodeAt = reactive && needsConditional;
   const lines: string[] = [];
   if (needsText) {
     lines.push(
       `import { setText as ${runtimeNames.setText}, textAt as ${runtimeNames.textAt} } from "tachyon-dom/runtime/text";`,
     );
   }
-  if (needsClass || needsAttr || needsModel) {
+  if (needsElementAt) {
     lines.push(
       needsClass
         ? `import { elementAt as ${runtimeNames.elementAt}, setClassPresence as ${runtimeNames.setClassPresence} } from "tachyon-dom/runtime/class";`
@@ -383,7 +396,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (needsConditional) {
     lines.push(
-      `import { mountConditional as ${runtimeNames.mountConditional} } from "tachyon-dom/runtime/conditional";`,
+      needsNodeAt
+        ? `import { mountConditional as ${runtimeNames.mountConditional}, nodeAt as ${runtimeNames.nodeAt} } from "tachyon-dom/runtime/conditional";`
+        : `import { mountConditional as ${runtimeNames.mountConditional} } from "tachyon-dom/runtime/conditional";`,
     );
   }
   if (needsSignal) {
@@ -503,9 +518,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         );
       }
     } else if (binding.kind === "list") {
-      lines.push(emitListBinding(binding, reactive, sourceName, listIndex++));
+      const targetName = reactive ? `__tachyonTarget${targetIndex++}` : undefined;
+      lines.push(emitListBinding(binding, reactive, sourceName, listIndex++, targetName));
     } else {
-      lines.push(emitConditionalBinding(binding, reactive, sourceName, conditionalIndex++));
+      const targetName = reactive ? `__tachyonTarget${targetIndex++}` : undefined;
+      lines.push(emitConditionalBinding(binding, reactive, sourceName, conditionalIndex++, targetName));
     }
   }
   if (reactive || needsEvent || needsModel) {
@@ -575,12 +592,17 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression)}`);
     fields.push(`write: (scope, value) => { ${bindingReadExpression(binding.expression)} = value; }`);
   } else if (binding.kind === "list") {
+    const itemKeyExpression = simpleItemKeyExpression(binding.key, binding.itemName);
     fields.push(`signature: ${JSON.stringify(listSignature(binding))}`);
     fields.push(`each: ${JSON.stringify(binding.each)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.each)}`);
     fields.push(`itemName: ${JSON.stringify(binding.itemName)}`);
     fields.push(`key: ${JSON.stringify(binding.key)}`);
-    fields.push(`keyRead: (scope) => ${bindingReadExpression(binding.key)}`);
+    fields.push(
+      itemKeyExpression
+        ? `keyReadItem: (${binding.itemName}) => ${itemKeyExpression}`
+        : `keyRead: (scope) => ${bindingReadExpression(binding.key)}`,
+    );
     fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
     fields.push(`bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}]`);
   } else if (binding.kind === "if") {
@@ -593,22 +615,33 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
   return `{ ${fields.join(", ")} }`;
 };
 
-const emitListBinding = (binding: ListBinding, reactive: boolean, sourceName: string, index: number): string => {
+const emitListBinding = (
+  binding: ListBinding,
+  reactive: boolean,
+  sourceName: string,
+  index: number,
+  targetName?: string,
+): string => {
   const optionsName = `listOptions${index}`;
+  const itemKeyExpression = simpleItemKeyExpression(binding.key, binding.itemName);
   const listOptions = [
     `  const ${optionsName} = {`,
     `    signature: ${JSON.stringify(listSignature(binding))},`,
     `    key: ${JSON.stringify(binding.key)},`,
-    `    keyRead: (scope) => ${bindingReadExpression(binding.key)},`,
+    itemKeyExpression
+      ? `    keyReadItem: (${binding.itemName}) => ${itemKeyExpression},`
+      : `    keyRead: (scope) => ${bindingReadExpression(binding.key)},`,
     `    itemName: ${JSON.stringify(binding.itemName)},`,
     `    scope: ${sourceName},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
     `  };`,
   ].join("\n");
-  const statement = `${runtimeNames.mountKeyedList}(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.each, reactive, sourceName)}, ${optionsName})`;
+  const target = targetName ?? "root";
+  const path = targetName ? [] : binding.path;
+  const statement = `${runtimeNames.mountKeyedList}(${target}, ${JSON.stringify(path)}, ${runtimeValueExpression(binding.each, reactive, sourceName)}, ${optionsName})`;
   return reactive
-    ? `${listOptions}\n  cleanups.push(${runtimeNames.effect}(() => ${statement}));`
+    ? `  const ${targetName} = ${elementExpression(binding.path)};\n${listOptions}\n  cleanups.push(${runtimeNames.effect}(() => ${statement}));`
     : `${listOptions}\n  ${statement};`;
 };
 
@@ -617,6 +650,7 @@ const emitConditionalBinding = (
   reactive: boolean,
   sourceName: string,
   index: number,
+  targetName?: string,
 ): string => {
   const optionsName = `conditionalOptions${index}`;
   const conditionalOptions = [
@@ -626,8 +660,10 @@ const emitConditionalBinding = (
     `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
     `  };`,
   ].join("\n");
-  const statement = `${runtimeNames.mountConditional}(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.test, reactive, sourceName)}, ${sourceName}, ${optionsName})`;
+  const target = targetName ?? "root";
+  const path = targetName ? [] : binding.path;
+  const statement = `${runtimeNames.mountConditional}(${target}, ${JSON.stringify(path)}, ${runtimeValueExpression(binding.test, reactive, sourceName)}, ${sourceName}, ${optionsName})`;
   return reactive
-    ? `${conditionalOptions}\n  cleanups.push(${runtimeNames.effect}(() => ${statement}));`
+    ? `  const ${targetName} = ${nodeExpression(binding.path)};\n${conditionalOptions}\n  cleanups.push(${runtimeNames.effect}(() => ${statement}));`
     : `${conditionalOptions}\n  ${statement};`;
 };

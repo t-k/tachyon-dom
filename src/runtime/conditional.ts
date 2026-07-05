@@ -66,6 +66,7 @@ type NestedListBinding = {
   each: string;
   key: string;
   keyRead?: (scope: Record<string, unknown>) => unknown;
+  keyReadItem?: (item: unknown) => unknown;
   itemName: string;
   templateHtml: string;
   bindings: ConditionalBinding[];
@@ -107,7 +108,7 @@ type ConditionalState = {
 
 const states = new WeakMap<Comment, ConditionalState>();
 
-const nodeAt = (root: Node, path: readonly number[]): Node => {
+export const nodeAt = (root: Node, path: readonly number[]): Node => {
   let current = root;
   for (const index of path) {
     current = current.childNodes[index] as Node;
@@ -247,7 +248,7 @@ const bindNodes = (
 };
 
 export const mountConditional = (
-  root: Element,
+  root: Node,
   path: readonly number[],
   visible: unknown,
   scope: Record<string, unknown>,

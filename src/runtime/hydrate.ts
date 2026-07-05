@@ -55,12 +55,15 @@ export type ScheduleHydrationBoundariesOptions = {
 
 type HydrationCleanup = void | (() => void);
 
+type HydrationCommentIndex = {
+  starts: Map<string, Comment[]>;
+  ends: Map<string, Comment[]>;
+};
+
 const escapeScriptJson = (value: string): string => value.replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
 
 const escapeAttribute = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll(`"`, "&quot;").replaceAll("<", "&lt;");
-
-const markerText = (id: string, edge: "start" | "end"): string => `tachyon-hydrate:${id}:${edge}`;
 
 const commentsIn = (root: ParentNode): Comment[] => {
   const ownerDocument = root instanceof Document ? root : (root.ownerDocument ?? document);
@@ -74,6 +77,24 @@ const commentsIn = (root: ParentNode): Comment[] => {
     current = walker.nextNode();
   }
   return comments;
+};
+
+const hydrationCommentIndex = (root: ParentNode): HydrationCommentIndex => {
+  const starts = new Map<string, Comment[]>();
+  const ends = new Map<string, Comment[]>();
+  for (const comment of commentsIn(root)) {
+    if (!comment.data.startsWith("tachyon-hydrate:")) {
+      continue;
+    }
+    if (comment.data.endsWith(":start")) {
+      const id = comment.data.slice("tachyon-hydrate:".length, -":start".length);
+      starts.set(id, [...(starts.get(id) ?? []), comment]);
+    } else if (comment.data.endsWith(":end")) {
+      const id = comment.data.slice("tachyon-hydrate:".length, -":end".length);
+      ends.set(id, [...(ends.get(id) ?? []), comment]);
+    }
+  }
+  return { starts, ends };
 };
 
 const nextElementBetween = (start: Comment, end: Comment): Element | undefined => {
@@ -90,10 +111,10 @@ const nextElementBetween = (start: Comment, end: Comment): Element | undefined =
 export const locateHydrationBoundary = (
   root: ParentNode,
   id: string,
+  index: HydrationCommentIndex = hydrationCommentIndex(root),
 ): Result<LocatedHydrationBoundary, HydrationBoundaryError> => {
-  const comments = commentsIn(root);
-  const start = comments.find((comment) => comment.data === markerText(id, "start"));
-  const end = comments.find((comment) => comment.data === markerText(id, "end"));
+  const start = index.starts.get(id)?.[0];
+  const end = index.ends.get(id)?.[0];
   if (!start || !end) {
     return err({ message: `Missing hydrate boundary markers for ${id}.` });
   }
@@ -108,11 +129,11 @@ export const diagnoseHydrationBoundaries = (
   root: ParentNode,
   expectedIds: readonly string[],
 ): HydrationBoundaryDiagnostic[] => {
-  const comments = commentsIn(root);
+  const index = hydrationCommentIndex(root);
   const diagnostics: HydrationBoundaryDiagnostic[] = [];
   for (const id of expectedIds) {
-    const starts = comments.filter((comment) => comment.data === markerText(id, "start"));
-    const ends = comments.filter((comment) => comment.data === markerText(id, "end"));
+    const starts = index.starts.get(id) ?? [];
+    const ends = index.ends.get(id) ?? [];
     if (starts.length === 0) {
       diagnostics.push({ id, type: "missing-start", message: `Missing hydrate boundary start marker for ${id}.` });
     }
@@ -150,8 +171,9 @@ export const createHydrationBoundary = (
   root: ParentNode,
   id: string,
   bind: (element: Element) => HydrationCleanup,
+  index?: HydrationCommentIndex,
 ): Result<HydrationBoundaryHandle, HydrationBoundaryError> => {
-  const located = locateHydrationBoundary(root, id);
+  const located = locateHydrationBoundary(root, id, index);
   if (!located.ok) {
     return err(located.error);
   }
@@ -257,12 +279,13 @@ export const scheduleHydrationBoundaries = (
   options: ScheduleHydrationBoundariesOptions = {},
 ): (() => void) => {
   const cleanups: Array<() => void> = [];
+  const index = hydrationCommentIndex(root);
   for (const boundary of boundaries) {
     const id = boundary.idKind === "expression" ? options.resolveId?.(boundary) : boundary.id;
     if (!id) {
       continue;
     }
-    const handle = createHydrationBoundary(root, id, (element) => bind(element, boundary));
+    const handle = createHydrationBoundary(root, id, (element) => bind(element, boundary), index);
     if (!handle.ok) {
       options.onError?.(handle.error, boundary);
       continue;

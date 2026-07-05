@@ -69,6 +69,7 @@ type NestedListBinding = {
   read?: ExpressionReader;
   key: string;
   keyRead?: ExpressionReader;
+  keyReadItem?: (item: unknown) => unknown;
   itemName: string;
   templateHtml: string;
   bindings: Binding[];
@@ -99,6 +100,7 @@ type KeyedListOptions = {
   signature?: string;
   key: string;
   keyRead?: ExpressionReader;
+  keyReadItem?: (item: unknown) => unknown;
   itemName: string;
   scope?: Record<string, unknown>;
   templateHtml: string;
@@ -140,6 +142,17 @@ const readPath = (scope: Record<string, unknown>, expression: string): unknown =
     current = (current as Record<string, unknown>)[part];
   }
   return current;
+};
+
+const readItemPath = (item: unknown, expression: string, itemName: string): unknown => {
+  if (expression === itemName) {
+    return item;
+  }
+  const prefix = `${itemName}.`;
+  if (!expression.startsWith(prefix)) {
+    return undefined;
+  }
+  return readPath(item as Record<string, unknown>, expression.slice(prefix.length));
 };
 
 const writePath = (scope: Record<string, unknown>, expression: string, value: unknown): void => {
@@ -373,8 +386,11 @@ const bindRowControls = (record: RowRecord, options: KeyedListOptions): void => 
 };
 
 const keyFor = (item: unknown, options: KeyedListOptions): PropertyKey => {
-  const scope = scopedItem(options.itemName, item, options.scope);
-  const key = options.keyRead ? options.keyRead(scope) : readPath(scope, options.key);
+  const key = options.keyReadItem
+    ? options.keyReadItem(item)
+    : options.keyRead
+      ? options.keyRead(scopedItem(options.itemName, item, options.scope))
+      : readItemPath(item, options.key, options.itemName);
   if (typeof key === "string" || typeof key === "number" || typeof key === "symbol") {
     return key;
   }

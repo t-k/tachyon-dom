@@ -219,6 +219,27 @@ const renderTextExpression = (node: TextNode, locals: ReadonlySet<string> = new 
   return parts.length > 0 ? parts.join(" + ") : `""`;
 };
 
+const foldStaticExpressionParts = (parts: string[]): string[] => {
+  const folded: string[] = [];
+  let pending = "";
+  const flush = (): void => {
+    if (pending) {
+      folded.push(jsString(pending));
+      pending = "";
+    }
+  };
+  for (const part of parts) {
+    if (part.startsWith(`"`) && part.endsWith(`"`)) {
+      pending += JSON.parse(part) as string;
+      continue;
+    }
+    flush();
+    folded.push(part);
+  }
+  flush();
+  return folded;
+};
+
 export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<string>): string => {
   const parts: string[] = [jsString(`<${node.tagName}`)];
   const staticClasses: string[] = [];
@@ -275,7 +296,9 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
     parts.splice(
       1,
       0,
-      `(${classExpression} ? ${jsString(` class="`)} + (${classExpression}).trim() + ${jsString(`"`)} : "")`,
+      dynamicClasses.length === 0
+        ? jsString(` class="${staticClasses.join(" ")}"`)
+        : `(${classExpression} ? ${jsString(` class="`)} + (${classExpression}).trim() + ${jsString(`"`)} : "")`,
     );
   }
   if (dynamicStyles.length > 0) {
@@ -286,7 +309,7 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
   }
 
   parts.push(jsString(">"));
-  return parts.join(" + ");
+  return foldStaticExpressionParts(parts).join(" + ");
 };
 
 export const renderNodeExpression = (

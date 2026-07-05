@@ -823,7 +823,7 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(code).toContain(
       `import { effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
     );
-    expect(code).toContain(`__tachyonMountKeyedList(root, [], __tachyonRead(scope.rows)`);
+    expect(code).toContain(`__tachyonMountKeyedList(__tachyonTarget0, [], __tachyonRead(scope.rows)`);
   });
 
   it("transforms target-specific .td query modules", async () => {

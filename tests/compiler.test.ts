@@ -301,7 +301,7 @@ describe("HTML-first compiler", () => {
       `cleanups.push(__tachyonEffect(() => __tachyonSetText(__tachyonTarget0, __tachyonRead(scope.title))));`,
     );
     expect(code).toContain(
-      `cleanups.push(__tachyonEffect(() => __tachyonMountKeyedList(root, [1], __tachyonRead(scope.rows)`,
+      `cleanups.push(__tachyonEffect(() => __tachyonMountKeyedList(__tachyonTarget1, [], __tachyonRead(scope.rows)`,
     );
     expect(code).toContain(`return () => {`);
   });
@@ -388,9 +388,9 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`signature: "if:`);
     expect(code).toContain(`read: (scope) => scope.label`);
     expect(code).toContain(
-      `cleanups.push(__tachyonEffect(() => __tachyonMountConditional(root, [0], __tachyonRead(scope.active), scope, conditionalOptions0)));`,
+      `cleanups.push(__tachyonEffect(() => __tachyonMountConditional(__tachyonTarget0, [], __tachyonRead(scope.active), scope, conditionalOptions0)));`,
     );
-    expect(code).not.toContain(`__tachyonMountConditional(root, [0], __tachyonRead(scope.active), scope, {`);
+    expect(code).not.toContain(`__tachyonMountConditional(__tachyonTarget0, [], __tachyonRead(scope.active), scope, {`);
   });
 
   it("generates a separate server target without client runtime imports", () => {
@@ -406,6 +406,19 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`scope.selected ? " danger" : ""`);
     expect(code).toContain(`" class=`);
     expect(code).not.toContain(`tachyon-dom/runtime`);
+  });
+
+  it("folds fully static SSR classes into the open tag literal", () => {
+    const result = compileTemplate(`<section class="card primary">Ready</section>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateServerModule(result.value);
+
+    expect(code).toContain(`"<section class=\\"card primary\\">"`);
+    expect(code).not.toContain(`.trim()`);
+    expect(code).not.toContain(`? " class=`);
   });
 
   it("generates single-pass HTML escaping helpers for server targets", () => {
@@ -645,6 +658,18 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`itemName: "row"`);
   });
 
+  it("generates item-direct key readers for simple list keys", () => {
+    const result = compileTemplate(`<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td></tr></for></tbody>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateClientModule(result.value);
+
+    expect(code).toContain(`keyReadItem: (row) => row.id`);
+    expect(code).not.toContain(`keyRead: (scope) => scope.row.id`);
+  });
+
   it("generates compiled list binding readers instead of runtime dot parsing", () => {
     const result = compileTemplate(
       `<ul><for each={rows} key={row.ids[0]}><li>{row.profile?.name ?? row.name}</li></for></ul>`,
@@ -659,6 +684,25 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`keyRead: (scope) => scope.row.ids[0]`);
     expect(code).toContain(`read: (scope) => (scope.row.profile?.name ?? scope.row.name)`);
     expect(code).toContain(`__tachyonMountKeyedList(root, [], scope.rows, listOptions0)`);
+  });
+
+  it("caches reactive list containers and conditional anchors before effects", () => {
+    const result = compileTemplate(
+      `<main><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul><if test={active}><p>{label}</p></if></main>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateClientModule(result.value, { reactive: true });
+
+    expect(code).toContain(`nodeAt as __tachyonNodeAt`);
+    expect(code).toContain(`const __tachyonTarget`);
+    expect(code).toContain(`__tachyonMountKeyedList(__tachyonTarget`);
+    expect(code).toContain(`__tachyonMountConditional(__tachyonTarget`);
+    expect(code).toContain(`, [], __tachyonRead(scope.active), scope, conditionalOptions`);
+    expect(code).not.toContain(`__tachyonMountKeyedList(root, [0]`);
+    expect(code).not.toContain(`__tachyonMountConditional(root, [1]`);
   });
 
   it("fixes the HTML-first syntax surface in an explicit IR", () => {
@@ -709,7 +753,7 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`from "tachyon-dom/runtime/conditional"`);
     expect(code).toContain(`const conditionalOptions0 = {`);
     expect(code).toContain(
-      `__tachyonMountConditional(root, [0,0], __tachyonRead(scope.active), scope, conditionalOptions0)`,
+      `__tachyonMountConditional(__tachyonTarget0, [], __tachyonRead(scope.active), scope, conditionalOptions0)`,
     );
   });
 

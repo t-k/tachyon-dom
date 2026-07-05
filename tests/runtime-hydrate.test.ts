@@ -194,4 +194,27 @@ describe("hydrate boundary runtime", () => {
     });
     cleanup();
   });
+
+  it("indexes comments once when scheduling many hydration boundaries", () => {
+    document.body.innerHTML = `<main>${Array.from(
+      { length: 5 },
+      (_, index) =>
+        `<!--tachyon-hydrate:td-h-${index}:start--><section>${index}</section><!--tachyon-hydrate:td-h-${index}:end-->`,
+    ).join("")}</main>`;
+    const main = document.querySelector("main");
+    if (!main) {
+      throw new Error("Missing main.");
+    }
+    const createTreeWalker = vi.spyOn(document, "createTreeWalker");
+
+    const cleanup = scheduleHydrationBoundaries(
+      main,
+      Array.from({ length: 5 }, (_, index) => ({ id: `td-h-${index}`, idKind: "static" as const })),
+      vi.fn(),
+    );
+
+    expect(createTreeWalker).toHaveBeenCalledTimes(1);
+    cleanup();
+    createTreeWalker.mockRestore();
+  });
 });
