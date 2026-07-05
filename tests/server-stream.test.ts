@@ -92,8 +92,8 @@ describe("server stream adapter", () => {
       throw new Error(result.error.message);
     }
     const module = generateServerStreamModule(result.value).replace("export const stream", "const stream");
-    expect(module).not.toContain("new TextEncoder");
-    expect(module).toContain("__tachyonBufferBytes += text.length");
+    expect(module).toContain("new TextEncoder");
+    expect(module).toContain("__tachyonBufferBytes += __tachyonTextEncoder.encode(text).byteLength");
     const stream = new Function(`${module}; return stream;`)() as (
       scope: Record<string, unknown>,
     ) => AsyncIterable<string>;
@@ -123,5 +123,25 @@ describe("server stream adapter", () => {
 
     expect(chunks.length).toBeGreaterThan(1);
     expect(chunks.join("")).toBe(`<main>${"<p>Ready</p>".repeat(900)}</main>`);
+  });
+
+  it("flushes generated stream chunks by UTF-8 byte length for CJK text", async () => {
+    const text = "漢".repeat(3000);
+    const result = compileTemplate(`<main>${text}</main>`);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+    const module = generateServerStreamModule(result.value).replace("export const stream", "const stream");
+    const stream = new Function(`${module}; return stream;`)() as (
+      scope: Record<string, unknown>,
+    ) => AsyncIterable<string>;
+    const chunks: string[] = [];
+
+    for await (const chunk of stream({})) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(chunks.join("")).toBe(`<main>${text}</main>`);
   });
 });

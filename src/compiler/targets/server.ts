@@ -462,12 +462,8 @@ export const compileServerTemplate = (template: CompiledTemplate): ServerRendere
   if (cached) {
     return cached;
   }
-  const body = [
-    ...generatedEscapeHtmlHelperLines,
-    `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
-    `return ${renderElementExpression(template.root)};`,
-  ].join("\n");
-  const renderer = new Function("scope", body) as ServerRenderer;
+  const root = structuredClone(template.root);
+  const renderer: ServerRenderer = (scope) => renderNode(root, scope);
   serverRendererCache.set(template, renderer);
   return renderer;
 };

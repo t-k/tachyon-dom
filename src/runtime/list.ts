@@ -335,13 +335,23 @@ const applyRowBinding = (
 };
 
 const bindRowBindings = (record: RowRecord, options: KeyedListOptions): void => {
-  for (let index = 0; index < options.bindings.length; index++) {
-    const binding = options.bindings[index] as Binding;
-    if (binding.kind === "event") {
-      continue;
-    }
-    record.cleanups.push(untrack(() => effect(() => applyRowBinding(record, record.scope, options, binding, index))));
+  const rowBindings = options.bindings
+    .map((binding, index) => ({ binding, index }))
+    .filter(
+      (entry): entry is { binding: Exclude<Binding, EventBinding>; index: number } => entry.binding.kind !== "event",
+    );
+  if (rowBindings.length === 0) {
+    return;
   }
+  record.cleanups.push(
+    untrack(() =>
+      effect(() => {
+        for (const { binding, index } of rowBindings) {
+          applyRowBinding(record, record.scope, options, binding, index);
+        }
+      }),
+    ),
+  );
 };
 
 const bindRowEvents = (record: RowRecord, options: KeyedListOptions): void => {

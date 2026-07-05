@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import {
   compileTemplate,
@@ -58,6 +59,12 @@ describe("HTML-first compiler", () => {
     expect(generateServerStreamModule(result.value)).toBe(firstStreamCode);
     expect(compileServerTemplate(result.value)).toBe(firstRenderer);
     expect(renderServerTemplate(result.value, { title: "Hello" })).toBe(firstRenderedHtml);
+  });
+
+  it("keeps the direct server renderer eval-free", async () => {
+    const source = await readFile("src/compiler/targets/server.ts", "utf8");
+
+    expect(source).not.toContain("new Function");
   });
 
   it("extracts text bindings while keeping a static client template", () => {

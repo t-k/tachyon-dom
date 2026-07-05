@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSignal, effect } from "../src/runtime/signal";
 import { mountKeyedList } from "../src/runtime/list";
@@ -823,6 +824,12 @@ describe("mountKeyedList", () => {
 
     expect(json).not.toHaveBeenCalled();
     expect(root.innerHTML).toBe(`<li><span>One updated</span></li>`);
+  });
+
+  it("keeps keyed row bindings in a single row effect", async () => {
+    const source = await readFile("src/runtime/list.ts", "utf8");
+
+    expect(source).not.toContain("effect(() => applyRowBinding");
   });
 
   it("mounts nested lists and conditionals inside keyed rows", () => {
