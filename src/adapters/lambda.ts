@@ -104,7 +104,7 @@ const hostName = (host: string): string => host.toLowerCase().replace(/:\d+$/, "
 
 const isTrustedHost = (host: string, trustedHosts: readonly string[] | undefined): boolean => {
   if (!trustedHosts || trustedHosts.length === 0) {
-    return true;
+    return false;
   }
   const normalized = host.toLowerCase();
   const normalizedName = hostName(normalized);
@@ -129,10 +129,11 @@ const originForEvent = (
     return normalizeOrigin(domainName);
   }
   const host = headerValue(event.headers, "host") ?? "localhost";
-  if (!isTrustedHost(host, options?.trustedHosts)) {
+  const hasTrustedHosts = options?.trustedHosts !== undefined && options.trustedHosts.length > 0;
+  if (hasTrustedHosts && !isTrustedHost(host, options.trustedHosts)) {
     throw new Error("Untrusted Host header");
   }
-  return normalizeOrigin(host);
+  return normalizeOrigin(isTrustedHost(host, options?.trustedHosts) ? host : "localhost");
 };
 
 const methodForEvent = (event: LambdaHttpEventV2): string => event.requestContext?.http?.method ?? "GET";

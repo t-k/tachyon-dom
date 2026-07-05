@@ -132,6 +132,13 @@ const sanitizeAttributes = (
     })
     .join("");
 
+/**
+ * Best-effort allowlist sanitizer for constrained backend HTML.
+ *
+ * This fallback is intentionally small and regex-based; it is not a browser-grade sanitizer for arbitrary
+ * attacker-controlled HTML. Pass a vetted adapter such as DOMPurify through `options.adapter` for user-generated,
+ * CMS, imported, or otherwise untrusted markup.
+ */
 export const sanitizeHtml = (markup: string, options: SanitizeHtmlOptions = {}): TrustedHtml => {
   if (options.adapter) {
     return options.adapter(markup);

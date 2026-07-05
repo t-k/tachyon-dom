@@ -688,7 +688,8 @@ describe("HTML-first compiler", () => {
     const code = generateClientModule(result.value);
 
     expect(code).toContain(`const listOptions0 = {`);
-    expect(code).toContain(`keyRead: (scope) => scope.row.ids[0]`);
+    expect(code).toContain(`keyRead: (scope) => ((__tachyonObject, __tachyonProperty) =>`);
+    expect(code).toContain(`__tachyonObject[__tachyonProperty])(scope.row.ids, 0)`);
     expect(code).toContain(`read: (scope) => (scope.row.profile?.name ?? scope.row.name)`);
     expect(code).toContain(`__tachyonMountKeyedList(root, [], scope.rows, listOptions0)`);
   });

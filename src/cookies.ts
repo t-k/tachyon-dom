@@ -112,13 +112,17 @@ export const parseCookies = (header: string | null | undefined): Record<string, 
   }
   const cookies: Record<string, string> = {};
   for (const part of header.split(";")) {
-    const [rawName, ...rawValue] = part.trim().split("=");
+    const trimmed = part.trim();
+    if (hasControlCharacter(trimmed)) {
+      continue;
+    }
+    const [rawName, ...rawValue] = trimmed.split("=");
     if (!rawName) {
       continue;
     }
     const name = tryDecodeCookiePart(rawName);
     const value = tryDecodeCookiePart(rawValue.join("="));
-    if (name === undefined || value === undefined) {
+    if (name === undefined || value === undefined || hasControlCharacter(name) || hasControlCharacter(value)) {
       continue;
     }
     cookies[name] = value;
@@ -156,7 +160,7 @@ export const createMemorySessionStorage = <Data extends Record<string, unknown> 
   options: MemorySessionStorageOptions = {},
 ) => {
   const cookieName = options.cookieName ?? "tachyon_session";
-  const cookieOptions = options.cookie ?? { httpOnly: true, path: "/", sameSite: "Lax" as const };
+  const cookieOptions = options.cookie ?? defaultSessionCookie();
   const sessions = new Map<string, Data>();
   const createId = options.id ?? sessionId;
 

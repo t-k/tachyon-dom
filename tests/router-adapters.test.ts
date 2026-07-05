@@ -519,6 +519,33 @@ describe("server adapters", () => {
     expect(seenUrls.at(-1)).toBe("https://app.example/account");
   });
 
+  it("does not derive Node request origins from Host unless trust is explicit", async () => {
+    const seenUrls: string[] = [];
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/account";
+    req.headers = { host: "evil.example", "x-forwarded-proto": "https" };
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    };
+
+    await createNodeFetchHandler({
+      fetch: (request) => {
+        seenUrls.push(request.url);
+        return new Response("ok");
+      },
+    })(req as never, res as never);
+
+    expect(res.statusCode).toBe(200);
+    expect(seenUrls).toEqual(["http://localhost/account"]);
+  });
+
   it("rejects untrusted Lambda fallback Host headers", () => {
     expect(() =>
       requestFromLambdaEvent(
@@ -538,6 +565,18 @@ describe("server adapters", () => {
       { trustedHosts: ["app.example"] },
     );
     expect(request.url).toBe("https://app.example/");
+  });
+
+  it("does not derive Lambda fallback origins from Host unless trust is explicit", () => {
+    const request = requestFromLambdaEvent(
+      lambdaEvent({
+        rawPath: "/account",
+        headers: { host: "evil.example" },
+        requestContext: { http: { method: "GET", path: "/account" } },
+      }),
+    );
+
+    expect(request.url).toBe("https://localhost/account");
   });
 
   it("preserves Set-Cookie arrays for Node static routes and assets", async () => {

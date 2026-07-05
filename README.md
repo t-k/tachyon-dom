@@ -219,7 +219,7 @@ The helper reads and compiles the template with Tachyon DOM diagnostics, then re
 
 The built-in sanitizer rejects protocol-relative URLs and removes absolute `http:`/`https:` URLs unless their origin is explicitly listed in `allowedUrlOrigins`. `redirect()` similarly accepts path-relative targets by default; external redirects require `allowExternal: true` plus an `allowedOrigins` entry for the target origin.
 
-The Node adapter derives request URLs from `Host` and `X-Forwarded-Proto`. Only use those headers behind a trusted proxy or edge that normalizes them; otherwise validate the host/proto boundary before routing.
+The Node adapter derives request URLs from `Host` only when you pass `trustedHosts`, or from a fixed `origin` when configured. Without either option it falls back to `localhost` instead of trusting the incoming `Host` header. Only enable `trustProxy` behind a trusted proxy or edge that normalizes forwarded headers.
 
 The Lambda adapter derives request URLs from `event.requestContext.domainName` by default and falls back to the `Host` header for minimal local events. Pass `origin` when the public origin differs from the Lambda event domain, for example behind CloudFront or a custom domain.
 

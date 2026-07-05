@@ -246,7 +246,7 @@ const hostName = (host: string): string => host.toLowerCase().replace(/:\d+$/, "
 
 const isTrustedHost = (host: string, trustedHosts: readonly string[] | undefined): boolean => {
   if (!trustedHosts || trustedHosts.length === 0) {
-    return true;
+    return false;
   }
   const normalized = host.toLowerCase();
   const normalizedName = hostName(normalized);
@@ -260,7 +260,9 @@ const badRequestResponse = (message: string): Response => new Response(message, 
 
 const requestUrl = (request: IncomingMessage, options: RequestUrlOptions = {}): string | Response => {
   const host = firstHeaderValue(request.headers.host) ?? "localhost";
-  if (!isTrustedHost(host, options.trustedHosts)) {
+  const hasTrustedHosts = options.trustedHosts !== undefined && options.trustedHosts.length > 0;
+  const trustedHost = isTrustedHost(host, options.trustedHosts) ? host : "localhost";
+  if (hasTrustedHosts && trustedHost === "localhost") {
     return badRequestResponse("Untrusted Host header");
   }
   const protocol = options.trustProxy
@@ -268,7 +270,7 @@ const requestUrl = (request: IncomingMessage, options: RequestUrlOptions = {}): 
     : "http";
   const origin = options.origin
     ? normalizeOrigin(typeof options.origin === "function" ? options.origin(request) : options.origin)
-    : `${protocol}://${host}`;
+    : `${protocol}://${trustedHost}`;
   return `${origin}${request.url ?? "/"}`;
 };
 

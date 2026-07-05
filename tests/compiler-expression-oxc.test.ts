@@ -28,7 +28,16 @@ describe("compiler expression OXC backend", () => {
     expect(
       evaluateExpression("items[index].label", { items: [{ label: "first" }, { label: "second" }], index: 1 }),
     ).toBe("second");
-    expect(expressionToJs("items[index].label", new Set(), "scope")).toBe("scope.items[scope.index].label");
+    const computedJs = expressionToJs("items[index].label", new Set(), "scope");
+    expect(
+      Function(
+        "scope",
+        `return ${computedJs}`,
+      )({
+        items: [{ label: "first" }, { label: "second" }],
+        index: 1,
+      }),
+    ).toBe("second");
     expect(isAssignableExpression("user[addressKey]", { backend: "oxc" })).toBe(true);
   });
 
@@ -77,5 +86,61 @@ describe("compiler expression OXC backend", () => {
     const memberJs = expressionToJs("user.name", new Set(), "scope");
     expect(() => evaluateExpression("user.name", {})).toThrow(TypeError);
     expect(() => Function("scope", `return ${memberJs}`)({})).toThrow(TypeError);
+  });
+
+  it("keeps eval-free method calls bound to their receiver", () => {
+    const scope = {
+      counter: {
+        value: 1,
+        add(amount: number) {
+          this.value += amount;
+          return this.value;
+        },
+      },
+      method: "add",
+    };
+
+    expect(evaluateExpression("counter.add(2)", scope)).toBe(3);
+    expect(evaluateExpression("counter[method](4)", scope)).toBe(7);
+
+    const directJs = expressionToJs("counter.add(2)", new Set(), "scope");
+    const computedJs = expressionToJs("counter[method](4)", new Set(), "scope");
+    expect(Function("scope", `return ${directJs}`)(scope)).toBe(9);
+    expect(Function("scope", `return ${computedJs}`)(scope)).toBe(13);
+  });
+
+  it("rejects prototype escape property names before evaluation or JS emission", () => {
+    for (const source of [
+      "user.constructor",
+      "user.__proto__",
+      "user.prototype",
+      "user['constructor']",
+      "user['__proto__']",
+      "user['prototype']",
+    ]) {
+      expect(parseExpression(source).ok, source).toBe(false);
+      expect(parseExpression(source, { backend: "oxc" }).ok, source).toBe(false);
+      expect(expressionToJs(source, new Set(), "scope"), source).toBe("undefined");
+      expect(evaluateExpression(source, { user: {} }), source).toBeUndefined();
+    }
+  });
+
+  it("blocks computed prototype escape property names at evaluation and JS emission time", () => {
+    for (const key of ["constructor", "__proto__", "prototype"]) {
+      const source = "user[key]";
+      const scope = { user: {}, key };
+      const js = expressionToJs(source, new Set(), "scope");
+
+      expect(parseExpression(source).ok, key).toBe(true);
+      expect(evaluateExpression(source, scope), key).toBeUndefined();
+      expect(Function("scope", `return ${js}`)(scope), key).toBeUndefined();
+    }
+
+    const attack = "value['con' + 'structor']['con' + 'structor']('return 7')()";
+    const attackJs = expressionToJs(attack, new Set(), "scope");
+
+    expect(parseExpression(attack).ok).toBe(true);
+    expect(evaluateExpression(attack, { value: {} })).toBeUndefined();
+    expect(Function("scope", `return ${attackJs}`)({ value: {} })).toBeUndefined();
   });
 });

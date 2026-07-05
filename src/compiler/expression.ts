@@ -93,6 +93,8 @@ const binaryPrecedence = new Map([
 const expressionError = (message: string): Result<never, CompilerError> => err({ message, offset: 0 });
 const expressionCacheLimit = 512;
 const expressionCache = new Map<string, Result<ExpressionNode, CompilerError>>();
+const deniedPropertyNames = new Set(["constructor", "__proto__", "prototype"]);
+const deniedPropertyNameList = [...deniedPropertyNames];
 
 const cacheKeyFor = (source: string, backend: ExpressionParserBackend): string => `${backend}\u0000${source}`;
 
@@ -378,6 +380,110 @@ const parseNativeExpression = (source: string): Result<ExpressionNode, CompilerE
 const literalPropertyName = (node: ExpressionNode): string | undefined =>
   node.type === "literal" && typeof node.value === "string" ? node.value : undefined;
 
+const denyForbiddenPropertyName = (name: string): Result<void, CompilerError> =>
+  deniedPropertyNames.has(name) ? expressionError(`Disallowed expression property: ${name}.`) : ok(undefined);
+
+const isDeniedPropertyKey = (key: unknown): boolean => deniedPropertyNames.has(String(key));
+
+const validateExpressionNode = (node: ExpressionNode): Result<ExpressionNode, CompilerError> => {
+  if (node.type === "identifier") {
+    for (const part of node.path) {
+      const denied = denyForbiddenPropertyName(part);
+      if (!denied.ok) {
+        return denied;
+      }
+    }
+    return ok(node);
+  }
+  if (node.type === "literal") {
+    return ok(node);
+  }
+  if (node.type === "array") {
+    for (const item of node.items) {
+      const valid = validateExpressionNode(item);
+      if (!valid.ok) {
+        return valid;
+      }
+    }
+    return ok(node);
+  }
+  if (node.type === "object") {
+    for (const entry of node.entries) {
+      const denied = denyForbiddenPropertyName(entry.key);
+      if (!denied.ok) {
+        return denied;
+      }
+      const valid = validateExpressionNode(entry.value);
+      if (!valid.ok) {
+        return valid;
+      }
+    }
+    return ok(node);
+  }
+  if (node.type === "unary") {
+    const valid = validateExpressionNode(node.argument);
+    return valid.ok ? ok(node) : valid;
+  }
+  if (node.type === "conditional") {
+    const test = validateExpressionNode(node.test);
+    if (!test.ok) return test;
+    const consequent = validateExpressionNode(node.consequent);
+    if (!consequent.ok) return consequent;
+    const alternate = validateExpressionNode(node.alternate);
+    return alternate.ok ? ok(node) : alternate;
+  }
+  if (node.type === "call") {
+    const callee = validateExpressionNode(node.callee);
+    if (!callee.ok) {
+      return callee;
+    }
+    for (const arg of node.args) {
+      const valid = validateExpressionNode(arg);
+      if (!valid.ok) {
+        return valid;
+      }
+    }
+    return ok(node);
+  }
+  if (node.type === "member") {
+    const propertyName = literalPropertyName(node.property);
+    if (propertyName) {
+      const denied = denyForbiddenPropertyName(propertyName);
+      if (!denied.ok) {
+        return denied;
+      }
+    }
+    const object = validateExpressionNode(node.object);
+    if (!object.ok) {
+      return object;
+    }
+    const property = validateExpressionNode(node.property);
+    return property.ok ? ok(node) : property;
+  }
+  if (node.type === "template") {
+    for (const part of node.parts) {
+      if (typeof part === "string") {
+        continue;
+      }
+      const valid = validateExpressionNode(part);
+      if (!valid.ok) {
+        return valid;
+      }
+    }
+    return ok(node);
+  }
+  const left = validateExpressionNode(node.left);
+  if (!left.ok) {
+    return left;
+  }
+  const right = validateExpressionNode(node.right);
+  return right.ok ? ok(node) : right;
+};
+
+const validateParsedExpression = (
+  result: Result<ExpressionNode, CompilerError>,
+): Result<ExpressionNode, CompilerError> => (result.ok ? validateExpressionNode(result.value) : result);
+
 const maybeIdentifierPath = (
   object: ExpressionNode,
   property: ExpressionNode,
@@ -606,19 +712,22 @@ export const parseExpression = (
     return cached;
   }
   if (backend === "oxc") {
-    return rememberExpression(key, parseOxcExpression(source));
+    return rememberExpression(key, validateParsedExpression(parseOxcExpression(source)));
   }
   const native = parseNativeExpression(source);
   if (backend === "native" || native.ok) {
-    return rememberExpression(key, native);
+    return rememberExpression(key, validateParsedExpression(native));
   }
-  return rememberExpression(key, parseOxcExpression(source));
+  return rememberExpression(key, validateParsedExpression(parseOxcExpression(source)));
 };
 
 const readPath = (scope: Record<string, unknown>, path: readonly string[]): unknown => {
   let current: unknown = scope;
   for (let index = 0; index < path.length; index++) {
     const part = path[index] as string;
+    if (isDeniedPropertyKey(part)) {
+      return undefined;
+    }
     if (current == null || typeof current !== "object") {
       throw new TypeError(`Cannot read properties of ${current}.`);
     }
@@ -653,26 +762,38 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
     if (node.callee.type === "identifier" && node.callee.path.length > 1) {
       const object = readPath(scope, node.callee.path.slice(0, -1));
       const property = node.callee.path.at(-1) as string;
+      if (isDeniedPropertyKey(property)) {
+        return undefined;
+      }
       const callee = (Object(object) as Record<PropertyKey, unknown>)[property];
       if (typeof callee !== "function") {
         return undefined;
       }
-      return callee.apply(object, node.args.map((arg) => evaluateExpressionNode(arg, scope)));
+      return callee.apply(
+        object,
+        node.args.map((arg) => evaluateExpressionNode(arg, scope)),
+      );
     }
     if (node.callee.type === "member") {
       const object = evaluateExpressionNode(node.callee.object, scope);
+      const property = evaluateExpressionNode(node.callee.property, scope);
+      if (isDeniedPropertyKey(property)) {
+        return undefined;
+      }
       if (object == null) {
         if (node.callee.optional) {
           return undefined;
         }
         throw new TypeError(`Cannot read properties of ${object}.`);
       }
-      const property = evaluateExpressionNode(node.callee.property, scope);
       const callee = (object as Record<PropertyKey, unknown>)[property as PropertyKey];
       if (typeof callee !== "function") {
         return undefined;
       }
-      return callee.apply(object, node.args.map((arg) => evaluateExpressionNode(arg, scope)));
+      return callee.apply(
+        object,
+        node.args.map((arg) => evaluateExpressionNode(arg, scope)),
+      );
     }
     const callee = evaluateExpressionNode(node.callee, scope);
     if (typeof callee !== "function") {
@@ -682,13 +803,16 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
   }
   if (node.type === "member") {
     const object = evaluateExpressionNode(node.object, scope);
+    const property = evaluateExpressionNode(node.property, scope);
+    if (isDeniedPropertyKey(property)) {
+      return undefined;
+    }
     if (object == null) {
       if (node.optional) {
         return undefined;
       }
       throw new TypeError(`Cannot read properties of ${object}.`);
     }
-    const property = evaluateExpressionNode(node.property, scope);
     return (object as Record<PropertyKey, unknown>)[property as PropertyKey];
   }
   if (node.type === "template") {
@@ -745,6 +869,33 @@ const memberObjectToJs = (node: ExpressionNode, locals: ReadonlySet<string>, sco
 
 const isIdentifierName = (value: string): boolean => /^[A-Za-z_$][\w$]*$/.test(value);
 
+const deniedPropertyCheckToJs = (propertyName: string): string =>
+  deniedPropertyNameList.map((name) => `String(${propertyName}) === ${JSON.stringify(name)}`).join(" || ");
+
+const guardedMemberAccessToJs = (object: string, property: string, optional: boolean): string =>
+  `((__tachyonObject, __tachyonProperty) => ${optional ? "__tachyonObject == null ? undefined : " : ""}${deniedPropertyCheckToJs(
+    "__tachyonProperty",
+  )} ? undefined : __tachyonObject[__tachyonProperty])(${object}, ${property})`;
+
+const guardedMemberCallToJs = (
+  object: string,
+  property: string,
+  args: readonly string[],
+  optional: boolean,
+): string => {
+  const argsArray = `[${args.join(", ")}]`;
+  return `((__tachyonObject, __tachyonProperty) => { if (${
+    optional ? "__tachyonObject == null || " : ""
+  }${deniedPropertyCheckToJs(
+    "__tachyonProperty",
+  )}) return undefined; const __tachyonCallee = __tachyonObject[__tachyonProperty]; return typeof __tachyonCallee === "function" ? __tachyonCallee.apply(__tachyonObject, ${argsArray}) : undefined; })(${object}, ${property})`;
+};
+
+const genericCallToJs = (callee: string, args: readonly string[]): string =>
+  `((__tachyonCallee) => typeof __tachyonCallee === "function" ? __tachyonCallee(${args.join(
+    ", ",
+  )}) : undefined)(${callee})`;
+
 export const expressionNodeToJs = (
   node: ExpressionNode,
   locals: ReadonlySet<string> = new Set(),
@@ -777,9 +928,20 @@ export const expressionNodeToJs = (
     )} : ${expressionNodeToJs(node.alternate, locals, scopeName)})`;
   }
   if (node.type === "call") {
-    return `${expressionNodeToJs(node.callee, locals, scopeName)}(${node.args
-      .map((arg) => expressionNodeToJs(arg, locals, scopeName))
-      .join(", ")})`;
+    const args = node.args.map((arg) => expressionNodeToJs(arg, locals, scopeName));
+    if (node.callee.type === "member") {
+      const object = memberObjectToJs(node.callee.object, locals, scopeName);
+      const propertyName = literalPropertyName(node.callee.property);
+      if (!node.callee.computed && propertyName && isIdentifierName(propertyName)) {
+        return `${object}${node.callee.optional ? "?." : "."}${propertyName}(${args.join(", ")})`;
+      }
+      const property = expressionNodeToJs(node.callee.property, locals, scopeName);
+      return guardedMemberCallToJs(object, property, args, node.callee.optional);
+    }
+    if (node.callee.type === "identifier") {
+      return `${expressionNodeToJs(node.callee, locals, scopeName)}(${args.join(", ")})`;
+    }
+    return genericCallToJs(expressionNodeToJs(node.callee, locals, scopeName), args);
   }
   if (node.type === "member") {
     const object = memberObjectToJs(node.object, locals, scopeName);
@@ -788,7 +950,7 @@ export const expressionNodeToJs = (
       return `${object}${node.optional ? "?." : "."}${propertyName}`;
     }
     const property = expressionNodeToJs(node.property, locals, scopeName);
-    return `${object}${node.optional ? "?." : ""}[${property}]`;
+    return guardedMemberAccessToJs(object, property, node.optional);
   }
   if (node.type === "template") {
     return node.parts

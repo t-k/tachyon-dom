@@ -125,7 +125,7 @@ await renderRoute(routes, request, { cspNonce: nonce });
 - `csrfInput(token)`
 - `verifyCsrfRequest(request, { token })`
 
-`tachyon-dom/cookies` exports `parseCookies()`, `serializeCookie()`, and `createMemorySessionStorage()` for small server adapters and examples. `serializeCookie()` validates `Path` and `Domain` attributes and throws on semicolons, control characters, CRLF, whitespace in domains, or other values that would inject extra cookie attributes or invalid header bytes.
+`tachyon-dom/cookies` exports `parseCookies()`, `serializeCookie()`, and `createMemorySessionStorage()` for small server adapters and examples. `parseCookies()` ignores malformed cookie pairs and decoded NUL/control-character names or values. `serializeCookie()` validates `Path` and `Domain` attributes and throws on semicolons, control characters, CRLF, whitespace in domains, or other values that would inject extra cookie attributes or invalid header bytes. Memory and cookie session storage default to Secure, HTTP-only, SameSite=Lax cookies.
 
 For server sessions, `createCookieSessionStorage({ secret })` stores signed session payloads in secure, HTTP-only, SameSite=Lax cookies. `signCookieValue()` and `verifySignedCookieValue()` are also exported for custom adapters.
 
@@ -140,6 +140,8 @@ For server sessions, `createCookieSessionStorage({ secret })` stores signed sess
 - `createWorkersFetchHandler({ fetch })`
 - `createLambdaFetchHandler({ fetch })`
 - `createStaticAssetHandler({ rootDir, basePath })`
+
+When a Node adapter must derive absolute request URLs from the request host, pass `trustedHosts` or a fixed `origin`. Without either option, the Node adapter falls back to `localhost` instead of trusting the incoming `Host` header.
 
 Use the runtime-specific entries for deployable server bundles:
 
@@ -180,7 +182,7 @@ The entry module should export `renderRequest(request, env, ctx, runtimeEnv)` or
 {
   "name": "tachyon-app",
   "pages_build_output_dir": ".tachyon/pages",
-  "compatibility_date": "2026-06-29"
+  "compatibility_date": "2026-06-29",
 }
 ```
 
@@ -212,9 +214,12 @@ export default defineConfig({
         new URL(request.url).searchParams.has("preview") ? "/client/main.js" : "/src/client/main.ts",
       fetch: async (request, { clientScript }) => {
         const locale = request.headers.get("accept-language")?.split(",", 1)[0] ?? "en";
-        return new Response(`<main data-locale="${locale}"></main><script type="module" src="${clientScript ?? ""}"></script>`, {
-          headers: { "content-type": "text/html; charset=utf-8" },
-        });
+        return new Response(
+          `<main data-locale="${locale}"></main><script type="module" src="${clientScript ?? ""}"></script>`,
+          {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          },
+        );
       },
     }),
   ],

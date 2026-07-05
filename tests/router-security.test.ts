@@ -157,6 +157,9 @@ describe("router security helpers", () => {
   it("parses cookies and commits in-memory sessions", async () => {
     expect(parseCookies("theme=dark; sid=abc")).toEqual({ theme: "dark", sid: "abc" });
     expect(parseCookies("theme=dark; bad=%E0%A4%A; sid=abc")).toEqual({ theme: "dark", sid: "abc" });
+    expect(parseCookies("sid=abc%00def; theme=dark")).toEqual({ theme: "dark" });
+    expect(parseCookies("si%1Fd=abc; theme=dark")).toEqual({ theme: "dark" });
+    expect(parseCookies("sid=abc\u0000def; theme=dark")).toEqual({ theme: "dark" });
     expect(serializeCookie("sid", "abc", { httpOnly: true, sameSite: "Lax", path: "/" })).toBe(
       "sid=abc; Path=/; HttpOnly; SameSite=Lax",
     );
@@ -167,6 +170,7 @@ describe("router security helpers", () => {
     const restored = await storage.getSession(cookie);
 
     expect(restored.data).toEqual({ userId: "u1" });
+    expect(cookie).toContain("Secure");
   });
 
   it("rejects cookie path and domain values that can inject attributes or headers", async () => {

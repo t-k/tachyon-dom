@@ -8,6 +8,8 @@ The default expression parser is `auto`: it first uses the small native parser f
 
 Supported expression forms include identifiers, dotted paths, literals, arrays, objects, unary `!` and `-`, binary arithmetic/comparison/logical operators, ternaries, calls, optional chaining, nullish coalescing, computed member access, and template literals. Assignable expressions for `bind:*` accept identifier paths and non-optional member expressions.
 
+Expressions are a compiler/runtime convenience for developer-authored templates, not a sandbox for untrusted input. The parser rejects `constructor`, `__proto__`, and `prototype` anywhere they would name an identifier path, object key, or member property, but callers must not expose expression strings as user-controlled policy or scripting input.
+
 ## Text Bindings
 
 `{value}` creates a dynamic text slot. The client target leaves a placeholder text node in the static template and updates it through `runtime/text`. The server targets emit an HTML-escaped value.
