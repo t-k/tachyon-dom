@@ -104,6 +104,7 @@ type ConditionalState = {
   signature: string;
   nodes: Node[];
   cleanups: Array<() => void>;
+  scope: Record<string, unknown>;
 };
 
 const states = new WeakMap<Comment, ConditionalState>();
@@ -187,6 +188,7 @@ const bindNodes = (
   scope: Record<string, unknown>,
   options: ConditionalOptions,
 ): void => {
+  state.scope = scope;
   const firstElement = state.nodes.find((node): node is Element => node instanceof Element);
   if (!firstElement) {
     return;
@@ -222,10 +224,13 @@ const bindNodes = (
   if (state.cleanups.length === 0) {
     for (const binding of options.bindings) {
       if (binding.kind === "event") {
-        const handler = readEvent(scope, binding);
-        if (typeof handler === "function") {
-          state.cleanups.push(delegate(firstElement, binding.eventName, binding.path, handler as EventListener));
-        }
+        const listener: EventListener = (event) => {
+          const handler = readEvent(state.scope, binding);
+          if (typeof handler === "function") {
+            (handler as EventListener)(event);
+          }
+        };
+        state.cleanups.push(delegate(firstElement, binding.eventName, binding.path, listener));
       } else if (binding.kind === "model") {
         const element = elementAt(firstElement, binding.path) as
           | HTMLInputElement
@@ -274,6 +279,7 @@ export const mountConditional = (
           signature,
           nodes: createNodes(options.templateHtml),
           cleanups: [],
+          scope,
         };
   states.set(anchor, state);
   bindNodes(anchor, state, scope, options);

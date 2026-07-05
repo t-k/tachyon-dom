@@ -192,7 +192,7 @@ export const writeNodeResponse = async (webResponse: Response, response: ServerR
   let responseClosed = false;
   let finished = false;
   let cancelPromise: Promise<void> | undefined;
-  const onClose = (): void => {
+  const onCloseOrError = (): void => {
     if (finished || response.writableEnded) {
       return;
     }
@@ -200,7 +200,8 @@ export const writeNodeResponse = async (webResponse: Response, response: ServerR
     cancelPromise = reader.cancel().catch(() => undefined);
   };
   if (typeof response.once === "function") {
-    response.once("close", onClose);
+    response.once("close", onCloseOrError);
+    response.once("error", onCloseOrError);
   }
   try {
     while (!responseClosed) {
@@ -217,7 +218,8 @@ export const writeNodeResponse = async (webResponse: Response, response: ServerR
     }
   } finally {
     if (typeof response.off === "function") {
-      response.off("close", onClose);
+      response.off("close", onCloseOrError);
+      response.off("error", onCloseOrError);
     }
     await cancelPromise;
   }

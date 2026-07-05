@@ -93,4 +93,33 @@ describe("mountConditional", () => {
     expect(stringify).not.toHaveBeenCalled();
     stringify.mockRestore();
   });
+
+  it("keeps event handlers current when a visible conditional is reused", () => {
+    document.body.innerHTML = `<section><!----></section>`;
+    const root = document.querySelector("section");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing root.");
+    }
+    const calls: string[] = [];
+    const options = {
+      signature: "conditional-with-event",
+      templateHtml: `<button>Save</button>`,
+      bindings: [
+        {
+          kind: "event" as const,
+          path: [],
+          eventName: "click",
+          handler: "onSave",
+          read: (localScope: Record<string, unknown>) => localScope.onSave,
+        },
+      ],
+    };
+
+    mountConditional(root, [0], true, { onSave: () => calls.push("old") }, options);
+    mountConditional(root, [0], true, { onSave: () => calls.push("new") }, options);
+
+    root.querySelector("button")?.click();
+
+    expect(calls).toEqual(["new"]);
+  });
 });

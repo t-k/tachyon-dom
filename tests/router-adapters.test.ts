@@ -319,6 +319,48 @@ describe("server adapters", () => {
     }
   });
 
+  it("cancels a streamed Node response body when the response emits an error", async () => {
+    let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(nextController) {
+        controller = nextController;
+        nextController.enqueue(new TextEncoder().encode("event: ready\n\n"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const res = new EventEmitter() as EventEmitter & {
+      statusCode: number;
+      setHeader: ReturnType<typeof vi.fn>;
+      write: ReturnType<typeof vi.fn>;
+      end: ReturnType<typeof vi.fn>;
+    };
+    res.statusCode = 200;
+    res.setHeader = vi.fn();
+    res.end = vi.fn();
+    res.write = vi.fn(() => {
+      queueMicrotask(() => res.emit("error", new Error("connection reset")));
+      return true;
+    });
+    const writer = writeNodeResponse(new Response(body), res as never);
+
+    try {
+      const outcome = await Promise.race([writer.then(() => "done"), delay(20).then(() => "timeout")]);
+      expect(outcome).toBe("done");
+      expect(cancelled).toBe(true);
+      expect(res.end).not.toHaveBeenCalled();
+    } finally {
+      try {
+        controller?.close();
+      } catch {
+        // Already cancelled by the implementation under test.
+      }
+      await writer.catch(() => undefined);
+    }
+  });
+
   it("flushes Node response headers before waiting for the first streamed body chunk", async () => {
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
     const events: string[] = [];
