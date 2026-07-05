@@ -319,6 +319,24 @@ describe("server adapters", () => {
     }
   });
 
+  it("writes streamed Node responses for minimal ServerResponse-compatible objects", async () => {
+    const chunks: string[] = [];
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      write: vi.fn((chunk: Buffer) => {
+        chunks.push(chunk.toString("utf8"));
+        return true;
+      }),
+      end: vi.fn(),
+    };
+
+    await writeNodeResponse(new Response(ReadableStream.from([new TextEncoder().encode("hello")])), res as never);
+
+    expect(chunks.join("")).toBe("hello");
+    expect(res.end).toHaveBeenCalledOnce();
+  });
+
   it("preserves multiple Set-Cookie headers in Node fetch responses", async () => {
     const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
       method: string;

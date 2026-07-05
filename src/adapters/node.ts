@@ -196,7 +196,9 @@ export const writeNodeResponse = async (webResponse: Response, response: ServerR
     responseClosed = true;
     cancelPromise = reader.cancel().catch(() => undefined);
   };
-  response.once("close", onClose);
+  if (typeof response.once === "function") {
+    response.once("close", onClose);
+  }
   try {
     while (!responseClosed) {
       const result = await reader.read();
