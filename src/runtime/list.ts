@@ -116,7 +116,6 @@ type RowRecord = {
   cleanups: Array<() => void>;
   lastValues: unknown[];
   item: unknown;
-  outerScope: Record<string, unknown> | undefined;
   revision: Signal<number>;
 };
 
@@ -226,6 +225,20 @@ const cleanupListState = (state: ListState): void => {
   state.records.clear();
 };
 
+const cleanupNestedListStates = (node: Node): void => {
+  if (!(node instanceof Element)) {
+    return;
+  }
+  const state = listStates.get(node);
+  if (state) {
+    cleanupListState(state);
+    listStates.delete(node);
+  }
+  for (const child of Array.from(node.childNodes)) {
+    cleanupNestedListStates(child);
+  }
+};
+
 const getListState = (container: Element, options: KeyedListOptions): ListState => {
   const current = listStates.get(container);
   if (current && current.options === options) {
@@ -258,6 +271,7 @@ const cleanupRecord = (record: RowRecord): void => {
   }
   record.cleanups.length = 0;
   for (const node of record.nodes) {
+    cleanupNestedListStates(node);
     node.parentNode?.removeChild(node);
   }
 };
@@ -312,36 +326,13 @@ const applyRowBinding = (
   } else if (binding.kind === "list") {
     const eachBinding = binding.read ? { expression: binding.each, read: binding.read } : { expression: binding.each };
     const value = readBinding(scope, eachBinding) as readonly unknown[] | undefined;
-    if (shouldApplyValue(record, index, value)) {
-      mountKeyedList(record.element, binding.path, value, { ...binding, scope });
-    }
+    mountKeyedList(record.element, binding.path, value, { ...binding, scope });
   } else if (binding.kind === "if") {
     const testBinding = binding.read ? { expression: binding.test, read: binding.read } : { expression: binding.test };
     const value = readBinding(scope, testBinding);
-    if (shouldApplyValue(record, index, value)) {
-      mountConditional(record.element, binding.path, value, scope, binding);
-    }
+    mountConditional(record.element, binding.path, value, scope, binding);
   }
 };
-
-const itemScopedExpression = (expression: string, itemName: string): boolean =>
-  expression === itemName || expression.startsWith(`${itemName}.`) || expression.startsWith(`${itemName}[`);
-
-const itemScopedBinding = (binding: Binding, itemName: string): boolean => {
-  if (binding.kind === "event") {
-    return true;
-  }
-  if (binding.kind === "list") {
-    return itemScopedExpression(binding.each, itemName);
-  }
-  if (binding.kind === "if") {
-    return itemScopedExpression(binding.test, itemName);
-  }
-  return itemScopedExpression(binding.expression, itemName);
-};
-
-const hasOnlyItemScopedBindings = (options: KeyedListOptions): boolean =>
-  options.bindings.every((binding) => itemScopedBinding(binding, options.itemName));
 
 const bindRowBindings = (record: RowRecord, options: KeyedListOptions): void => {
   for (let index = 0; index < options.bindings.length; index++) {
@@ -449,7 +440,6 @@ const createRecord = (
     cleanups: [],
     lastValues: [],
     item,
-    outerScope: options.scope,
     revision: createSignal(0),
   };
   for (const node of nodes) {
@@ -464,16 +454,11 @@ const createRecord = (
 };
 
 const updateRecord = (record: RowRecord, item: unknown, options: KeyedListOptions): void => {
-  const previousItem = record.item;
   if (options.scope) {
     Object.assign(record.scope, options.scope);
   }
   record.scope[options.itemName] = item;
   record.item = item;
-  record.outerScope = options.scope;
-  if (previousItem === item && hasOnlyItemScopedBindings(options)) {
-    return;
-  }
   record.revision.update((value) => value + 1);
 };
 

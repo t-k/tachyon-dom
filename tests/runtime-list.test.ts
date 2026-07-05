@@ -468,13 +468,12 @@ describe("mountKeyedList", () => {
     expect(writes).toBe(0);
   });
 
-  it("skips binding reads for reused rows whose item and outer scope references are unchanged", () => {
+  it("updates reused row objects when their properties change in place", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");
     if (!(root instanceof HTMLElement)) {
       throw new Error("Missing test root.");
     }
-    const readIds: number[] = [];
     const rows = Array.from({ length: 5 }, (_, index) => ({ id: index + 1, label: `Row ${index + 1}` }));
     const options = {
       signature: "row-scope-skip-unchanged-items",
@@ -486,22 +485,17 @@ describe("mountKeyedList", () => {
           kind: "text" as const,
           path: [0, 0],
           expression: "item.label",
-          read: (scope: Record<string, unknown>) => {
-            readIds.push((scope.item as { id: number }).id);
-            return (scope.item as { label: string }).label;
-          },
+          read: (scope: Record<string, unknown>) => (scope.item as { label: string }).label,
         },
       ],
     };
 
     mountKeyedList(root, [], rows, options);
-    readIds.length = 0;
     const nextRows = rows.slice();
-    nextRows[2] = { id: 3, label: "Row 3 updated" };
+    (nextRows[2] as { label: string }).label = "Row 3 updated";
 
     mountKeyedList(root, [], nextRows, options);
 
-    expect(readIds).toEqual([3]);
     expect(Array.from(root.children, (child) => child.textContent)).toEqual([
       "Row 1",
       "Row 2",
@@ -600,6 +594,43 @@ describe("mountKeyedList", () => {
     expect(button?.getAttribute("title")).toBe("Row");
     button?.click();
     expect(removed).toEqual([7]);
+  });
+
+  it("updates compound row expressions when outer scope values change", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing test root.");
+    }
+    const rows = [
+      { id: 1, label: "One" },
+      { id: 2, label: "Two" },
+    ];
+    const outerScope = { activeId: 1 };
+    const options = {
+      signature: "row-compound-outer-scope",
+      key: "item.id",
+      itemName: "item",
+      scope: outerScope,
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "item.label" },
+        {
+          kind: "class" as const,
+          path: [],
+          className: "selected",
+          expression: "item.id === activeId",
+          read: (scope: Record<string, unknown>) =>
+            (scope.item as { id: number }).id === (scope as { activeId: number }).activeId,
+        },
+      ],
+    };
+
+    mountKeyedList(root, [], rows, options);
+    outerScope.activeId = 2;
+    mountKeyedList(root, [], rows, options);
+
+    expect(Array.from(root.children, (child) => child.className)).toEqual(["", "selected"]);
   });
 
   it("removes surplus SSR rows when the first client mount has fewer items", () => {
@@ -910,15 +941,14 @@ describe("mountKeyedList", () => {
     );
   });
 
-  it("skips nested list and conditional remounts when their values are unchanged", () => {
+  it("updates nested list and conditional children when references stay unchanged", () => {
     document.body.innerHTML = `<section><ul id="groups"></ul></section>`;
     const root = document.body.firstElementChild;
     if (!(root instanceof HTMLElement)) {
       throw new Error("Missing root.");
     }
-    const items = [{ id: "a1", label: "A1" }];
-    let nestedListTextReads = 0;
-    let conditionalTextReads = 0;
+    const item = { id: "a1", label: "A1" };
+    const group = { id: "a", name: "Group A", visible: true, badge: "visible", items: [item] };
     const options = {
       signature: "groups-with-guarded-nested-bindings",
       key: "group.id",
@@ -936,7 +966,7 @@ describe("mountKeyedList", () => {
           signature: "guarded-nested-items",
           path: [1],
           each: "group.items",
-          read: (scope: Record<string, unknown>) => (scope.group as { items: typeof items }).items,
+          read: (scope: Record<string, unknown>) => (scope.group as { items: typeof group.items }).items,
           itemName: "item",
           key: "item.id",
           templateHtml: `<li> </li>`,
@@ -945,10 +975,7 @@ describe("mountKeyedList", () => {
               kind: "text" as const,
               path: [0],
               expression: "item.label",
-              read: (scope: Record<string, unknown>) => {
-                nestedListTextReads += 1;
-                return (scope.item as { label: string }).label;
-              },
+              read: (scope: Record<string, unknown>) => (scope.item as { label: string }).label,
             },
           ],
         },
@@ -964,9 +991,55 @@ describe("mountKeyedList", () => {
               kind: "text" as const,
               path: [0],
               expression: "group.badge",
+              read: (scope: Record<string, unknown>) => (scope.group as { badge: string }).badge,
+            },
+          ],
+        },
+      ],
+    };
+
+    mountKeyedList(root, [0], [group], options);
+    item.label = "A1 updated";
+    group.badge = "still visible";
+    mountKeyedList(root, [0], [group], options);
+
+    expect(root.innerHTML).toBe(
+      `<ul id="groups"><li><span>Group A</span><ul><li>A1 updated</li></ul><!----><em>still visible</em></li></ul>`,
+    );
+  });
+
+  it("cleans up nested row effects when a parent row is removed", () => {
+    document.body.innerHTML = `<section><ul id="groups"></ul></section>`;
+    const root = document.body.firstElementChild;
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing root.");
+    }
+    const label = createSignal("A1");
+    let nestedReads = 0;
+    const options = {
+      signature: "groups-with-cleaned-nested-effects",
+      key: "group.id",
+      itemName: "group",
+      templateHtml: `<li><ul></ul></li>`,
+      bindings: [
+        {
+          kind: "list" as const,
+          signature: "nested-items-cleanup",
+          path: [0],
+          each: "group.items",
+          read: (scope: Record<string, unknown>) =>
+            (scope.group as { items: Array<{ id: string; label: () => string }> }).items,
+          itemName: "item",
+          key: "item.id",
+          templateHtml: `<li> </li>`,
+          bindings: [
+            {
+              kind: "text" as const,
+              path: [0],
+              expression: "item.label()",
               read: (scope: Record<string, unknown>) => {
-                conditionalTextReads += 1;
-                return (scope.group as { badge: string }).badge;
+                nestedReads += 1;
+                return (scope.item as { label: () => string }).label();
               },
             },
           ],
@@ -974,13 +1047,12 @@ describe("mountKeyedList", () => {
       ],
     };
 
-    mountKeyedList(root, [0], [{ id: "a", name: "Group A", visible: true, badge: "visible", items }], options);
-    mountKeyedList(root, [0], [{ id: "a", name: "Group A updated", visible: true, badge: "visible", items }], options);
+    mountKeyedList(root, [0], [{ id: "a", items: [{ id: "a1", label }] }], options);
+    mountKeyedList(root, [0], [], options);
+    nestedReads = 0;
+    label.set("A1 updated");
 
-    expect(nestedListTextReads).toBe(1);
-    expect(conditionalTextReads).toBe(1);
-    expect(root.innerHTML).toBe(
-      `<ul id="groups"><li><span>Group A updated</span><ul><li>A1</li></ul><!----><em>visible</em></li></ul>`,
-    );
+    expect(nestedReads).toBe(0);
+    expect(root.innerHTML).toBe(`<ul id="groups"></ul>`);
   });
 });
