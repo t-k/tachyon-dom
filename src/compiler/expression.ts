@@ -344,7 +344,13 @@ const parseExpressionInternal = (parser: Parser, minPrecedence: number): Result<
       if (!alternate.ok) {
         return alternate;
       }
-      left = ok({ type: "conditional", test: left.value, consequent: consequent.value, alternate: alternate.value });
+      const conditional: ExpressionNode = {
+        type: "conditional",
+        test: left.value,
+        consequent: consequent.value,
+        alternate: alternate.value,
+      };
+      left = ok(conditional);
       continue;
     }
     const operator = peek(parser).value;

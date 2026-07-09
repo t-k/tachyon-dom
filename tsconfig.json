@@ -8,7 +8,7 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
-    "baseUrl": "."
+    "types": ["node"]
   },
   "include": [
     "src",
