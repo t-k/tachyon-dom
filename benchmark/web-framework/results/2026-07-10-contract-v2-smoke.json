@@ -1,0 +1,155 @@
+{
+  "contractVersion": 2,
+  "generatedAt": "2026-07-10T09:09:27.937Z",
+  "smoke": true,
+  "legacyDynamicAndStreamRankings": "non-authoritative",
+  "metrics": [
+    {
+      "framework": "tachyon-dom",
+      "staticRequestsPerSecond": 93152,
+      "staticLatencyP95Ms": 0.01,
+      "dynamicRequestsPerSecond": 18632,
+      "dynamicLatencyP95Ms": 0.01,
+      "streamTtfbMs": 2.045904000000064,
+      "streamCompleteMs": 21.70657600000004,
+      "clientNavigationMs": 36.13259599999947,
+      "clientBundleBytes": 355
+    },
+    {
+      "framework": "marko-run",
+      "staticRequestsPerSecond": 18888,
+      "staticLatencyP95Ms": 0.01,
+      "dynamicRequestsPerSecond": 31544,
+      "dynamicLatencyP95Ms": 0.01,
+      "streamTtfbMs": 0.8102770000004966,
+      "streamCompleteMs": 21.333794000000125,
+      "clientNavigationMs": 28.262267000000065,
+      "clientBundleBytes": 2456
+    },
+    {
+      "framework": "solid-start",
+      "staticRequestsPerSecond": 2565,
+      "staticLatencyP95Ms": 6,
+      "dynamicRequestsPerSecond": 2943,
+      "dynamicLatencyP95Ms": 5,
+      "streamTtfbMs": 2.9373239999986254,
+      "streamCompleteMs": 22.276890999999523,
+      "clientNavigationMs": 55.63840599999821,
+      "clientBundleBytes": 54498
+    },
+    {
+      "framework": "tanstack-start",
+      "staticRequestsPerSecond": 2859,
+      "staticLatencyP95Ms": 4,
+      "dynamicRequestsPerSecond": 3201,
+      "dynamicLatencyP95Ms": 4,
+      "streamTtfbMs": 2.335970999996789,
+      "streamCompleteMs": 22.299222999998165,
+      "clientNavigationMs": 46.59140000000116,
+      "clientBundleBytes": 318095
+    },
+    {
+      "framework": "next-app-router",
+      "staticRequestsPerSecond": 5206,
+      "staticLatencyP95Ms": 2,
+      "dynamicRequestsPerSecond": 797,
+      "dynamicLatencyP95Ms": 9,
+      "streamTtfbMs": 3.485818000001018,
+      "streamCompleteMs": 23.212283000000753,
+      "clientNavigationMs": 57.57292000000234,
+      "clientBundleBytes": 267206
+    },
+    {
+      "framework": "mreact-app-router",
+      "staticRequestsPerSecond": 16292,
+      "staticLatencyP95Ms": 0.01,
+      "dynamicRequestsPerSecond": 11772,
+      "dynamicLatencyP95Ms": 0.01,
+      "streamTtfbMs": 1.2689009999994596,
+      "streamCompleteMs": 21.79186699999991,
+      "clientNavigationMs": 37.886310000001686,
+      "clientBundleBytes": 41093
+    }
+  ],
+  "ranking": [
+    {
+      "framework": "tachyon-dom",
+      "staticRequestsPerSecond": 93152,
+      "staticLatencyP95Ms": 0.01,
+      "dynamicRequestsPerSecond": 18632,
+      "dynamicLatencyP95Ms": 0.01,
+      "streamTtfbMs": 2.045904000000064,
+      "streamCompleteMs": 21.70657600000004,
+      "clientNavigationMs": 36.13259599999947,
+      "clientBundleBytes": 355,
+      "score": 1.2391975699006577,
+      "rank": 1
+    },
+    {
+      "framework": "marko-run",
+      "staticRequestsPerSecond": 18888,
+      "staticLatencyP95Ms": 0.01,
+      "dynamicRequestsPerSecond": 31544,
+      "dynamicLatencyP95Ms": 0.01,
+      "streamTtfbMs": 0.8102770000004966,
+      "streamCompleteMs": 21.333794000000125,
+      "clientNavigationMs": 28.262267000000065,
+      "clientBundleBytes": 2456,
+      "score": 1.5546254655398082,
+      "rank": 2
+    },
+    {
+      "framework": "mreact-app-router",
+      "staticRequestsPerSecond": 16292,
+      "staticLatencyP95Ms": 0.01,
+      "dynamicRequestsPerSecond": 11772,
+      "dynamicLatencyP95Ms": 0.01,
+      "streamTtfbMs": 1.2689009999994596,
+      "streamCompleteMs": 21.79186699999991,
+      "clientNavigationMs": 37.886310000001686,
+      "clientBundleBytes": 41093,
+      "score": 2.8023021437262603,
+      "rank": 3
+    },
+    {
+      "framework": "solid-start",
+      "staticRequestsPerSecond": 2565,
+      "staticLatencyP95Ms": 6,
+      "dynamicRequestsPerSecond": 2943,
+      "dynamicLatencyP95Ms": 5,
+      "streamTtfbMs": 2.9373239999986254,
+      "streamCompleteMs": 22.276890999999523,
+      "clientNavigationMs": 55.63840599999821,
+      "clientBundleBytes": 54498,
+      "score": 24.587940951161997,
+      "rank": 4
+    },
+    {
+      "framework": "tanstack-start",
+      "staticRequestsPerSecond": 2859,
+      "staticLatencyP95Ms": 4,
+      "dynamicRequestsPerSecond": 3201,
+      "dynamicLatencyP95Ms": 4,
+      "streamTtfbMs": 2.335970999996789,
+      "streamCompleteMs": 22.299222999998165,
+      "clientNavigationMs": 46.59140000000116,
+      "clientBundleBytes": 318095,
+      "score": 26.296714458310714,
+      "rank": 5
+    },
+    {
+      "framework": "next-app-router",
+      "staticRequestsPerSecond": 5206,
+      "staticLatencyP95Ms": 2,
+      "dynamicRequestsPerSecond": 797,
+      "dynamicLatencyP95Ms": 9,
+      "streamTtfbMs": 3.485818000001018,
+      "streamCompleteMs": 23.212283000000753,
+      "clientNavigationMs": 57.57292000000234,
+      "clientBundleBytes": 267206,
+      "score": 31.2731141314674,
+      "rank": 6
+    }
+  ],
+  "table": "| Rank | Framework | Score | Static req/s | Static p95 | Dynamic req/s | Dynamic p95 | Stream TTFB | Stream done | Client nav | Client bundle |\n|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n| 1 | tachyon-dom | 1.239x | 93152 | 0.01ms | 18632 | 0.01ms | 2.0ms | 21.7ms | 36.1ms | 355B |\n| 2 | marko-run | 1.555x | 18888 | 0.01ms | 31544 | 0.01ms | 0.81ms | 21.3ms | 28.3ms | 2.4KiB |\n| 3 | mreact-app-router | 2.802x | 16292 | 0.01ms | 11772 | 0.01ms | 1.3ms | 21.8ms | 37.9ms | 40.1KiB |\n| 4 | solid-start | 24.588x | 2565 | 6.0ms | 2943 | 5.0ms | 2.9ms | 22.3ms | 55.6ms | 53.2KiB |\n| 5 | tanstack-start | 26.297x | 2859 | 4.0ms | 3201 | 4.0ms | 2.3ms | 22.3ms | 46.6ms | 311KiB |\n| 6 | next-app-router | 31.273x | 5206 | 2.0ms | 797 | 9.0ms | 3.5ms | 23.2ms | 57.6ms | 261KiB |"
+}

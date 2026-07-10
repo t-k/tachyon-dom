@@ -7,6 +7,11 @@ import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
 import { chromium, type Browser, type Page } from "playwright";
 import { formatWebFrameworkRanking, scoreWebFrameworkMetrics, type WebFrameworkMetric } from "./report";
+import {
+  measureStreamSemantics,
+  validateDynamicRouteSemantics,
+  WEB_FRAMEWORK_CONTRACT_VERSION,
+} from "./contract";
 
 type CliOptions = {
   smoke: boolean;
@@ -35,6 +40,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../..");
 const fixtureRoot = path.join(__dirname, "fixtures");
 const mreactAppRouterRoot = path.join(projectRoot, "benchmark/web-framework/fixtures/mreact-app-router");
+const workspaceBin = (name: string): string => path.join(projectRoot, "node_modules", ".bin", name);
 
 const frameworks: readonly FrameworkConfig[] = [
   {
@@ -53,20 +59,20 @@ const frameworks: readonly FrameworkConfig[] = [
   {
     name: "marko-run",
     cwd: path.join(fixtureRoot, "marko-run"),
-    build: ["pnpm", "exec", "marko-run", "build"],
-    start: (port) => ["pnpm", "exec", "marko-run", "preview", "--host", "127.0.0.1", "--port", String(port)],
+    build: [workspaceBin("marko-run"), "build"],
+    start: (port) => [workspaceBin("marko-run"), "preview", "--host", "127.0.0.1", "--port", String(port)],
   },
   {
     name: "solid-start",
     cwd: path.join(fixtureRoot, "solid-start"),
-    build: ["pnpm", "exec", "vinxi", "build"],
-    start: (port) => ["pnpm", "exec", "vinxi", "start", "--host", "127.0.0.1", "--port", String(port)],
+    build: [workspaceBin("vinxi"), "build"],
+    start: (port) => [workspaceBin("vinxi"), "start", "--host", "127.0.0.1", "--port", String(port)],
   },
   {
     name: "tanstack-start",
     cwd: path.join(fixtureRoot, "tanstack-start"),
-    build: ["pnpm", "exec", "vite", "build"],
-    start: (port) => ["pnpm", "exec", "vite", "preview", "--host", "127.0.0.1", "--port", String(port)],
+    build: [workspaceBin("vite"), "build"],
+    start: (port) => [workspaceBin("vite"), "preview", "--host", "127.0.0.1", "--port", String(port)],
   },
   {
     name: "next-app-router",
@@ -285,32 +291,14 @@ const validateFrameworkFixture = async (baseUrl: string): Promise<void> => {
   await validateTextRoute(baseUrl, "/dashboard/orders", ["data-route", "orders", "Orders"]);
   await validateTextRoute(baseUrl, "/interactive", ["data-route", "interactive", "Counter"]);
   await validateTextRoute(baseUrl, "/stream", ["data-route", "stream", "data-stream", "done"]);
+  await validateDynamicRouteSemantics(baseUrl);
 };
-
-const measureStreamOnce = async (url: string, agent: http.Agent): Promise<{ ttfb: number; complete: number }> =>
-  await new Promise((resolve, reject) => {
-    const start = performance.now();
-    let ttfb = 0;
-    const request = http.get(url, { agent }, (response) => {
-      response.once("data", () => {
-        ttfb = performance.now() - start;
-      });
-      response.on("data", () => undefined);
-      response.on("end", () =>
-        resolve({ ttfb: ttfb || performance.now() - start, complete: performance.now() - start }),
-      );
-    });
-    request.on("error", reject);
-    request.setTimeout(10_000, () => {
-      request.destroy(new Error(`Timed out while measuring ${url}`));
-    });
-  });
 
 const measureStream = async (url: string): Promise<{ ttfb: number; complete: number }> => {
   const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
   try {
-    await measureStreamOnce(url, agent);
-    return await measureStreamOnce(url, agent);
+    await measureStreamSemantics(url, agent);
+    return await measureStreamSemantics(url, agent);
   } finally {
     agent.destroy();
   }
@@ -432,7 +420,8 @@ const measureFramework = async (
     await runCommand(framework.build, framework.cwd);
   }
 
-  const port = await freePort();
+  const claimedPort = Number.parseInt(process.env.PORT ?? "", 10);
+  const port = Number.isInteger(claimedPort) && claimedPort > 0 ? claimedPort : await freePort();
   console.log(`Measuring ${framework.name} on ${port}...`);
   const child = await startServer(framework, port);
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -486,7 +475,15 @@ const run = async (): Promise<void> => {
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(
     outputPath,
-    `${JSON.stringify({ generatedAt: new Date().toISOString(), smoke: options.smoke, metrics, ranking, table }, null, 2)}\n`,
+    `${JSON.stringify({
+      contractVersion: WEB_FRAMEWORK_CONTRACT_VERSION,
+      generatedAt: new Date().toISOString(),
+      smoke: options.smoke,
+      legacyDynamicAndStreamRankings: "non-authoritative",
+      metrics,
+      ranking,
+      table,
+    }, null, 2)}\n`,
   );
   console.log("");
   console.log(table);

@@ -19,6 +19,41 @@ describe("web framework benchmark fixtures", () => {
     expect(source).toContain("streaming: true");
   });
 
+  it("uses delayed production streaming primitives in every framework fixture", () => {
+    const sources = [
+      readFileSync(fixture("tachyon/server.ts"), "utf8"),
+      readFileSync(fixture("next/app/stream/page.tsx"), "utf8"),
+      readFileSync(fixture("solid-start/src/routes/stream/index.tsx"), "utf8"),
+      readFileSync(fixture("tanstack-start/src/routes/stream.tsx"), "utf8"),
+      readFileSync(fixture("marko-run/src/routes/stream/+page.marko"), "utf8"),
+      readFileSync(fixture("mreact-app-router/app/stream/page.tsx"), "utf8"),
+    ];
+
+    for (const source of sources) {
+      expect(source).toMatch(/(?:delay|setTimeout)/);
+      expect(source).toContain("20");
+      expect(source).toContain('data-stream="shell"');
+      expect(source).toContain('data-stream="done"');
+    }
+    expect(sources[1]).toContain("<Suspense");
+    expect(sources[2]).toContain("createAsync");
+    expect(sources[3]).toContain("<Await");
+    expect(sources[4]).toContain("<await|resolvedItems|");
+    expect(readFileSync(fixture("marko-run/src/routes/stream/+handler.ts"), "utf8")).toContain(
+      "new ReadableStream",
+    );
+    expect(sources[5]).toContain("defer(");
+  });
+
+  it("versions corrected benchmark results and rejects buffered stream fixtures", () => {
+    const source = readFileSync(path.join(root, "benchmark/web-framework/run-web-framework-benchmark.ts"), "utf8");
+
+    expect(source).toContain("WEB_FRAMEWORK_CONTRACT_VERSION");
+    expect(source).toContain("validateDynamicRouteSemantics");
+    expect(source).toContain("measureStreamSemantics");
+    expect(source).toContain('legacyDynamicAndStreamRankings: "non-authoritative"');
+  });
+
   it("uses request-time Tachyon routing for the dynamic benchmark scenario", () => {
     const source = readFileSync(fixture("tachyon/server.ts"), "utf8");
 
