@@ -188,6 +188,19 @@ describe("router security helpers", () => {
     await expect(storage.getSession(cookie)).resolves.toEqual({ id: "rotated-id", data: { userId: "victim" } });
   });
 
+  it("rotates a reconstructed unknown session before committing it", async () => {
+    const storage = createMemorySessionStorage<{ userId?: string }>({
+      cookieName: "sid",
+      id: () => "rotated-id",
+    });
+    const unknown = await storage.getSession("sid=attacker-id");
+
+    const cookie = await storage.commitSession({ id: unknown.id, data: { userId: "victim" } });
+
+    expect(cookie).toContain("sid=rotated-id");
+    await expect(storage.getSession("sid=attacker-id")).resolves.toEqual({ id: "attacker-id", data: {} });
+  });
+
   it("regenerates a known memory session ID for a privilege change", async () => {
     const ids = ["before-login", "after-login"];
     const storage = createMemorySessionStorage<{ userId?: string }>({ cookieName: "sid", id: () => ids.shift() ?? "extra" });
