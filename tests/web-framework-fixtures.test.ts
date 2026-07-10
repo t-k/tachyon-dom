@@ -11,11 +11,12 @@ describe("web framework benchmark fixtures", () => {
     expect(existsSync(fixture("marko-run/src/routes/products/[id]/+page.marko"))).toBe(false);
   });
 
-  it("does not give Tachyon a fixture-only stream delay", () => {
+  it("uses an explicit deferred stream payload in the Tachyon fixture", () => {
     const source = readFileSync(fixture("tachyon/server.ts"), "utf8");
 
-    expect(source).not.toContain("await delay(");
-    expect(source).not.toContain("fallback: documentShell");
+    expect(source).toContain("fallback:");
+    expect(source).toContain("await delay(");
+    expect(source).toContain("streaming: true");
   });
 
   it("uses request-time Tachyon routing for the dynamic benchmark scenario", () => {
@@ -28,10 +29,9 @@ describe("web framework benchmark fixtures", () => {
     expect(source).toContain("createClientRouter");
     expect(source).toContain('target: "#app"');
     expect(source).toContain("staticAssets");
-    expect(source).toContain("streamHtml");
+    expect(source).toContain("streamShell");
     expect(source).toContain("interactiveHtml");
     expect(source).toContain('route("/interactive", interactiveHtml)');
-    expect(source).toContain('route("/stream", streamHtml)');
   });
 
   it("provides full interactive routes for client bundle measurement", () => {

@@ -29,8 +29,9 @@ const ordersBody = () => `<h1>Dashboard</h1><h2 data-route="orders">Orders</h2><
 
 const ordersNavBody = () => `<h1>Dashboard</h1><h2 data-route="orders">Orders</h2>`;
 
-const streamBody = () =>
-  `<h1>Stream</h1><p data-stream="shell">Shell</p><section data-stream="done"><h2>Deferred payload</h2><ul>${items("stream")}</ul></section>`;
+const streamShell = `<main id="app" data-route="stream"><h1>Stream</h1><p data-stream="shell">Shell</p>`;
+const streamBody = () => `<section data-stream="done"><h2>Deferred payload</h2><ul>${items("stream")}</ul></section></main>`;
+const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const interactiveBody = () => `<h1>Interactive</h1><h2>Counter</h2>
 <button data-action="increment" type="button">Increment</button>
@@ -122,18 +123,26 @@ const ordersHtml = documentShell(ordersBody(), "orders");
 const interactiveHtml = documentShell(interactiveBody(), "interactive");
 const usersPartialHtml = usersBody();
 const ordersPartialHtml = ordersNavBody();
-const streamPartialHtml = partial("stream", streamBody());
-const streamHtml = partial("stream", streamBody());
 const route = (path: string, body: string): StaticRouteDefinition => defineStaticRoute({ path, body });
 const routes: RouteDefinition[] = [
   {
     path: "/products/:id",
     render: ({ params }) => documentShell(productBody(params.id), "product"),
   },
+  {
+    path: "/stream",
+    fallback: streamShell,
+    loader: async () => {
+      await delay(20);
+      return streamBody();
+    },
+    render: ({ data }) => data as string,
+  },
 ];
 const server = createServer(
   createNodeHandler({
     routes,
+    streaming: true,
     staticAssets: { rootDir: distRoot, basePath: "/tachyon-dom/" },
     staticRoutes: [
       route("/", homeHtml),
@@ -142,8 +151,6 @@ const server = createServer(
       route("/dashboard/orders", ordersHtml),
       route("/dashboard/orders?partial=1", ordersPartialHtml),
       route("/interactive", interactiveHtml),
-      route("/stream", streamHtml),
-      route("/stream?partial=1", streamPartialHtml),
     ],
     notFound: () => "Not Found",
   }),
