@@ -369,13 +369,19 @@ const responseFor = async <Env>(
         await emitResponse(options.observability, state, response, true);
         return response;
       }
+      const iterator = result.value.chunks[Symbol.asyncIterator]();
+      const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({
-        async start(controller) {
-          const encoder = new TextEncoder();
-          for await (const chunk of result.value.chunks) {
-            controller.enqueue(encoder.encode(chunk));
+        async pull(controller) {
+          const next = await iterator.next();
+          if (next.done) {
+            controller.close();
+            return;
           }
-          controller.close();
+          controller.enqueue(encoder.encode(next.value));
+        },
+        async cancel() {
+          await iterator.return?.();
         },
       });
       const response = new Response(stream, {
