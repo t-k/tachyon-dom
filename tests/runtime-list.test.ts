@@ -743,6 +743,26 @@ describe("mountKeyedList", () => {
     expect(root.innerHTML).toBe(`<h2>Two updated</h2><p>Second updated</p><h2>One updated</h2><p>First updated</p>`);
   });
 
+  it("adopts a server row when formatting whitespace precedes its primary element", () => {
+    document.body.innerHTML = `<ul id="items"> <li><span>A</span></li> </ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: ` <li><span> </span></li> `,
+      bindings: [{ kind: "text" as const, path: [1, 0, 0], expression: "item.label" }],
+    };
+
+    const existing = root.querySelector("li");
+    mountKeyedList(root, [], [{ id: 1, label: "A" }], options);
+    mountKeyedList(root, [], [{ id: 1, label: "Updated" }], options);
+
+    expect(root.querySelector("li")).toBe(existing);
+    expect(root.querySelector("span")?.textContent).toBe("Updated");
+    expect(root.textContent).toBe(" Updated ");
+  });
+
   it("uses compiled binding readers for expressions beyond dot paths", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

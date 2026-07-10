@@ -2,7 +2,6 @@ import type { ElementNode, TemplateNode, TemplateWhitespacePolicy, TextNode } fr
 import { textExpressionSegments } from "./utils.js";
 
 const protectedTextElements = new Set(["pre", "script", "style", "textarea"]);
-const fragmentElements = new Set(["await", "component", "for", "if"]);
 const asciiWhitespaceOnly = /^[\t\n\f\r ]+$/;
 const internalFormattingLine = /[\t\f\r ]*(?:\r\n?|\n)[\t\n\f\r ]*/g;
 
@@ -19,15 +18,6 @@ const condenseTextValue = (value: string): string =>
       : value.slice(segment.start, segment.end))
     .join("");
 
-const isFormattingWhitespace = (node: TemplateNode): boolean =>
-  node.type === "text" && (node.value.includes("\n") || node.value.includes("\r")) && asciiWhitespaceOnly.test(node.value);
-
-const fragmentChildren = (node: ElementNode, protectedContext: boolean): TemplateNode[] => {
-  if (protectedContext || !fragmentElements.has(node.tagName.toLowerCase())) return node.children;
-  return node.children.filter((child, index, children) =>
-    (index !== 0 && index !== children.length - 1) || !isFormattingWhitespace(child));
-};
-
 const transformNode = (node: TemplateNode, protectedContext: boolean): TemplateNode => {
   if (node.type === "text") {
     const text: TextNode = { ...node };
@@ -38,7 +28,7 @@ const transformNode = (node: TemplateNode, protectedContext: boolean): TemplateN
   return {
     ...node,
     attrs: node.attrs.map((attribute) => ({ ...attribute })),
-    children: fragmentChildren(node, nextProtectedContext).map((child) => transformNode(child, nextProtectedContext)),
+    children: node.children.map((child) => transformNode(child, nextProtectedContext)),
   } satisfies ElementNode;
 };
 

@@ -117,6 +117,7 @@ type RowRecord = {
   lastValues: unknown[];
   item: unknown;
   revision: Signal<number>;
+  adoptedRootIndex?: number;
 };
 
 type ListState = {
@@ -126,6 +127,7 @@ type ListState = {
   records: Map<PropertyKey, RowRecord>;
   recordsByElement: WeakMap<Element, RowRecord>;
   template: HTMLTemplateElement;
+  primaryElementIndex: number;
   cleanups: Array<() => void>;
 };
 
@@ -193,6 +195,12 @@ const nodeAt = (root: Node, path: readonly number[]): Node => {
 };
 
 const nodeAtRecord = (record: RowRecord, path: readonly number[]): Node => {
+  if (record.adoptedRootIndex !== undefined) {
+    const [rootIndex, ...rest] = path;
+    if (rootIndex === record.adoptedRootIndex) {
+      return nodeAt(record.element, rest);
+    }
+  }
   if (record.nodes.length <= 1) {
     return nodeAt(record.element, path);
   }
@@ -252,13 +260,16 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
   if (current) {
     cleanupListState(current);
   }
+  const template = createTemplate(options.templateHtml);
+  const primaryElementIndex = Array.from(template.content.childNodes).findIndex((node) => node instanceof Element);
   const next = {
     signature,
     options,
     templateHtml: options.templateHtml,
     records: new Map<PropertyKey, RowRecord>(),
     recordsByElement: new WeakMap<Element, RowRecord>(),
-    template: createTemplate(options.templateHtml),
+    template,
+    primaryElementIndex,
     cleanups: [] as Array<() => void>,
   };
   listStates.set(container, next);
@@ -451,6 +462,9 @@ const createRecord = (
     lastValues: [],
     item,
     revision: createSignal(0),
+    ...(existingElement && state.template.content.childNodes.length > 1
+      ? { adoptedRootIndex: state.primaryElementIndex }
+      : {}),
   };
   for (const node of nodes) {
     if (node instanceof Element) {
@@ -605,6 +619,8 @@ export const mountKeyedList = (
       element.parentNode?.removeChild(element);
     }
   }
-  positionRecords(container, orderedRecords, state.records);
+  if (!canAdoptServerRows) {
+    positionRecords(container, orderedRecords, state.records);
+  }
   state.records = nextRecords;
 };

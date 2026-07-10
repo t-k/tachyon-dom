@@ -98,7 +98,7 @@ describe("HTML-first compiler", () => {
     expect(html).toContain(`<style>line one\n    line two</style>`);
   });
 
-  it("removes only newline-derived whitespace at fragment boundaries", () => {
+  it("condenses newline-derived whitespace at fragment boundaries without deleting separators", () => {
     const source = `<main><ul><for each={rows} key={row}>
       <li>{row}</li>
     </for></ul><if test={visible}> <span>kept</span> </if></main>`;
@@ -107,8 +107,8 @@ describe("HTML-first compiler", () => {
 
     const list = result.value.client.bindings.find((binding) => binding.kind === "list");
     const conditional = result.value.client.bindings.find((binding) => binding.kind === "if");
-    expect(list).toMatchObject({ templateHtml: `<li> </li>` });
-    expect(list?.bindings).toContainEqual(expect.objectContaining({ kind: "text", path: [0] }));
+    expect(list).toMatchObject({ templateHtml: ` <li> </li> ` });
+    expect(list?.bindings).toContainEqual(expect.objectContaining({ kind: "text", path: [1, 0] }));
     expect(conditional).toMatchObject({ templateHtml: ` <span>kept</span> ` });
   });
 
@@ -129,13 +129,20 @@ describe("HTML-first compiler", () => {
       whitespace: "condense",
     });
     const raw = compileTemplate(`<pre><if test={show}>\n  <span>x</span>\n</if></pre>`, { whitespace: "condense" });
+    const fragment = compileTemplate(`<p>Hello<if test={show}>\n  <strong>world</strong>\n</if>!</p>`, {
+      whitespace: "condense",
+    });
     if (!inline.ok) throw new Error(inline.error.message);
     if (!raw.ok) throw new Error(raw.error.message);
+    if (!fragment.ok) throw new Error(fragment.error.message);
 
     expect(renderServerTemplate(inline.value, {})).toBe(
       `<p><span>Hello</span> world and <strong>friends</strong></p>`,
     );
     expect(renderServerTemplate(raw.value, { show: true })).toBe(`<pre>\n  <span>x</span>\n</pre>`);
+    expect(renderServerTemplate(fragment.value, { show: true })).toBe(
+      `<p>Hello <strong>world</strong> !</p>`,
+    );
   });
 
   it("caches generated target modules for repeated compiled template objects", () => {
