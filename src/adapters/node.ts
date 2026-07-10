@@ -216,7 +216,7 @@ export const createStaticAssetHandler =
 export const writeNodeResponse = async (webResponse: Response, response: ServerResponse): Promise<void> => {
   response.statusCode = webResponse.status;
   setNodeHeaders(response, webResponse.headers);
-  const writable = response as ServerResponse & { write?: (chunk: Buffer) => void };
+  const writable = response as ServerResponse & { write?: (chunk: Buffer) => boolean | void };
   if (!webResponse.body || typeof writable.write !== "function") {
     response.end(await webResponse.text());
     return;
@@ -250,7 +250,19 @@ export const writeNodeResponse = async (webResponse: Response, response: ServerR
         response.end();
         return;
       }
-      writable.write(Buffer.from(result.value));
+      if (writable.write(Buffer.from(result.value)) === false && typeof response.once === "function") {
+        await new Promise<void>((resolve) => {
+          const resume = (): void => {
+            response.off?.("drain", resume);
+            response.off?.("close", resume);
+            response.off?.("error", resume);
+            resolve();
+          };
+          response.once("drain", resume);
+          response.once("close", resume);
+          response.once("error", resume);
+        });
+      }
     }
   } finally {
     if (typeof response.off === "function") {

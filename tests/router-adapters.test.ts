@@ -288,7 +288,7 @@ describe("server adapters", () => {
       cancel() {
         cancelled = true;
       },
-    });
+    }, { highWaterMark: 0 });
     const res = new EventEmitter() as EventEmitter & {
       statusCode: number;
       setHeader: ReturnType<typeof vi.fn>;
@@ -435,6 +435,33 @@ describe("server adapters", () => {
 
     expect(chunks.join("")).toBe("hello");
     expect(res.end).toHaveBeenCalledOnce();
+  });
+
+  it("waits for drain before reading the next Node stream chunk", async () => {
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) controller.enqueue(new TextEncoder().encode("first"));
+        else if (pulls === 2) controller.enqueue(new TextEncoder().encode("second"));
+        else controller.close();
+      },
+    });
+    const res = Object.assign(new EventEmitter(), {
+      statusCode: 200,
+      writableEnded: false,
+      setHeader: vi.fn(),
+      write: vi.fn(() => false),
+      end: vi.fn(),
+    });
+    const writing = writeNodeResponse(new Response(body), res as never);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(res.write).toHaveBeenCalledTimes(1);
+    res.emit("drain");
+    res.write.mockReturnValueOnce(true);
+    await writing;
   });
 
   it("preserves multiple Set-Cookie headers in Node fetch responses", async () => {
