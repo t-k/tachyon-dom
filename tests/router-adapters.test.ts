@@ -1634,6 +1634,56 @@ describe("server adapters", () => {
     expect(end).toHaveBeenCalledOnce();
   });
 
+  it("commits private cache and delayed CSRF status in Lambda streaming metadata", async () => {
+    const from = vi.fn((stream: Writable) => stream);
+    const runtime = {
+      streamifyResponse: vi.fn((handler) => handler),
+      HttpResponseStream: { from },
+    };
+    const chunks: string[] = [];
+    const responseStream = () => new Writable({
+      write(chunk, _encoding, callback) {
+        chunks.push(Buffer.from(chunk).toString("utf8"));
+        callback();
+      },
+    });
+    const action = vi.fn(() => "saved");
+    const handler = createLambdaStreamingHandler({
+      routes: [{
+        path: "/account",
+        fallback: "secret fallback",
+        loader: async () => { await delay(10); return "private account"; },
+        action,
+        cache: { maxAge: 60 },
+        render: ({ data }) => `<h1>${data}</h1>`,
+      }],
+      streaming: true,
+      csrf: { verify: async () => { await delay(10); return false; } },
+    }, runtime) as (
+      event: ReturnType<typeof lambdaEvent>,
+      responseStream: Writable,
+      context: unknown,
+    ) => Promise<void>;
+
+    await handler(lambdaEvent({
+      rawPath: "/account",
+      requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/account" } },
+    }), responseStream(), {});
+    expect(from).toHaveBeenLastCalledWith(expect.any(Writable), expect.objectContaining({
+      statusCode: 200,
+      headers: expect.objectContaining({ "cache-control": "private" }),
+    }));
+
+    chunks.length = 0;
+    await handler(lambdaEvent({
+      rawPath: "/account",
+      requestContext: { domainName: "lambda.example", http: { method: "POST", path: "/account" } },
+    }), responseStream(), {});
+    expect(from).toHaveBeenLastCalledWith(expect.any(Writable), expect.objectContaining({ statusCode: 403 }));
+    expect(chunks.join("")).toBe("<h1>Forbidden</h1>");
+    expect(action).not.toHaveBeenCalled();
+  });
+
   it("uses standard Writable backpressure for Lambda response streams", async () => {
     let sourcePulls = 0;
     let releaseFirstWrite: (() => void) | undefined;
