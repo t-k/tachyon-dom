@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { generateTachyonModuleTypes, generateTemplateTypes } from "./app.js";
@@ -359,8 +359,14 @@ export const addPageFiles = async (options: Omit<CliAddPageOptions, "command">):
   }
   const targetDir = join(options.routesDir, normalized);
   const title = titleCase(normalized);
-  await mkdir(targetDir, { recursive: true });
   const pageFile = join(targetDir, "page.td");
+  try {
+    await access(pageFile);
+    return err(`Refusing to overwrite existing page file: ${pageFile}`);
+  } catch {
+    // The target does not exist yet.
+  }
+  await mkdir(targetDir, { recursive: true });
   await writeFile(
     pageFile,
     `<script>

@@ -567,6 +567,23 @@ export default { selected: false };
     }
   });
 
+  it("preserves an existing route-local page file on generator conflict", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-add-page-conflict-"));
+    try {
+      const routesDir = path.join(dir, "src", "routes");
+      const page = path.join(routesDir, "settings", "page.td");
+      await mkdir(path.dirname(page), { recursive: true });
+      await writeFile(page, "user-authored\n");
+
+      const result = await addPageFiles({ name: "settings", routesDir });
+
+      expect(result).toEqual({ ok: false, error: expect.stringContaining("Refusing to overwrite") });
+      await expect(readFile(page, "utf8")).resolves.toBe("user-authored\n");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("creates route-local starter files for new apps", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-starter-"));
     try {
