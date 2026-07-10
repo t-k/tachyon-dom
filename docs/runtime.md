@@ -180,6 +180,8 @@ In-flight prefetches are aborted when their cache entry is invalidated or when t
 
 Routes can define `action()` and `revalidateOnAction`. `router.submit(href, init)` calls the matched action, invalidates cache entries according to the policy, and re-renders the current route.
 
+Client action concurrency is latest-operation-wins. A newer submission or navigation aborts the active action, and a stale response cannot revalidate or redirect. Disposing the router also aborts its active action. When `init.signal` is supplied to `router.submit()`, caller cancellation is composed with the router-owned signal rather than replacing it. An action should still observe its signal and stop expensive work promptly.
+
 ## Signals
 
 `runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, `read()`, `untrack()`, `createResource()`, and `catchError()`. Effects run once when registered, then subsequent signal notifications are queued. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. `untrack(fn)` reads signals without subscribing the active effect, and effects created inside `untrack()` are not attached to the active owner. `createMemo()` exposes a cached computed accessor that updates before dependent effects observe the next flush. `createResource()` ties an async loader to a source accessor and exposes `data`, `error`, `loading`, and `refetch`. `catchError()` wraps an effect body with an error callback while keeping the effect subscribed for later successful runs.

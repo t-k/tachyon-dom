@@ -644,6 +644,114 @@ describe("client router", () => {
     expect(signal?.aborted).toBe(true);
   });
 
+  it("composes caller cancellation with the router-owned action signal", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    const caller = new AbortController();
+    let actionSignal: AbortSignal | undefined;
+    let requestSignal: AbortSignal | undefined;
+    let resolveAction: ((response: Response) => void) | undefined;
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => "home" },
+        {
+          path: "/action",
+          action: ({ signal, request }) => {
+            actionSignal = signal;
+            requestSignal = request.signal;
+            return new Promise<Response>((resolve) => {
+              resolveAction = resolve;
+            });
+          },
+          render: () => "action",
+        },
+      ],
+    });
+
+    await router.start();
+    const submission = router.submit("/action", { signal: caller.signal });
+    await Promise.resolve();
+    caller.abort();
+
+    expect(actionSignal?.aborted).toBe(true);
+    expect(requestSignal?.aborted).toBe(true);
+    resolveAction?.(new Response("cancelled"));
+    await submission;
+    router.dispose();
+  });
+
+  it("prevents stale action redirects after a newer submission or navigation", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    const pending: Array<(response: Response) => void> = [];
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => "home" },
+        { path: "/new", render: () => "new" },
+        { path: "/stale", render: () => "stale" },
+        {
+          path: "/action",
+          action: () => new Promise<Response>((resolve) => pending.push(resolve)),
+          render: () => "action",
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    const first = router.submit("/action");
+    await Promise.resolve();
+    const second = router.submit("/action");
+    await Promise.resolve();
+    pending[0]?.(new Response(null, { status: 302, headers: { location: "/stale" } }));
+    pending[1]?.(new Response("ok"));
+    await Promise.all([first, second]);
+    expect(location.pathname).toBe("/");
+
+    const third = router.submit("/action");
+    await Promise.resolve();
+    await router.navigate("/new");
+    pending[2]?.(new Response(null, { status: 302, headers: { location: "/stale" } }));
+    await third;
+    expect(location.pathname).toBe("/new");
+    expect(root.textContent).toBe("new");
+    router.dispose();
+  });
+
+  it("propagates action errors without preventing a later submission", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    let attempts = 0;
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => "home" },
+        {
+          path: "/action",
+          action: () => {
+            attempts += 1;
+            if (attempts === 1) throw new Error("action failed");
+            return new Response("ok");
+          },
+          render: () => "action",
+        },
+      ],
+    });
+
+    await router.start();
+    await expect(router.submit("/action")).rejects.toThrow("action failed");
+    await expect(router.submit("/action")).resolves.toBeInstanceOf(Response);
+    router.dispose();
+  });
+
   it("submits actions and revalidates loader cache by route policy", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");

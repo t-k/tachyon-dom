@@ -617,18 +617,37 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     const nextActionController = new AbortController();
     actionController = nextActionController;
     const version = ++actionVersion;
+    const callerSignal = init.signal;
+    const abortFromCaller = (): void => nextActionController.abort(callerSignal?.reason);
+    if (callerSignal?.aborted) {
+      abortFromCaller();
+    } else {
+      callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+    }
     const request = new Request(url, { method: init.method ?? "POST", ...init, signal: nextActionController.signal });
-    const response = await match.route.action({ url, params: match.params, signal: nextActionController.signal, request });
-    if (nextActionController.signal.aborted || version !== actionVersion) {
+    try {
+      const response = await match.route.action({
+        url,
+        params: match.params,
+        signal: nextActionController.signal,
+        request,
+      });
+      if (nextActionController.signal.aborted || version !== actionVersion) {
+        return response;
+      }
+      const locationHeader = response.headers.get("location");
+      if (response.status >= 300 && response.status < 400 && locationHeader) {
+        await navigate(locationHeader, { replace: true });
+        return response;
+      }
+      await revalidate(hrefsForAction(url, match, response));
       return response;
+    } finally {
+      callerSignal?.removeEventListener("abort", abortFromCaller);
+      if (actionController === nextActionController) {
+        actionController = undefined;
+      }
     }
-    const locationHeader = response.headers.get("location");
-    if (response.status >= 300 && response.status < 400 && locationHeader) {
-      await navigate(locationHeader, { replace: true });
-      return response;
-    }
-    await revalidate(hrefsForAction(url, match, response));
-    return response;
   };
 
   const navigate = async (href: string, navigateOptions: NavigateOptions = {}): Promise<void> => {
