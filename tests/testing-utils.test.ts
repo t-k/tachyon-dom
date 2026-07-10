@@ -71,6 +71,6 @@ describe("testing utilities", () => {
     const file = path.join(dir, "broken.td");
     await writeFile(file, `<ul><for key={row.id}><li>{row.label}</li></for></ul>`);
 
-    await expect(renderTdForTest(file, {})).rejects.toThrow(`${file}:1:1: <for> requires each={items}.`);
+    await expect(renderTdForTest(file, {})).rejects.toThrow(`${file}:1:5: <for> requires each={items}.`);
   });
 });
