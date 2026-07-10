@@ -134,12 +134,19 @@ export type WorkersRouteMiddleware<Env> = (context: {
   bindings: Env;
 }) => ReturnType<NonNullable<RouteRenderOptions["middleware"]>[number]>;
 
+export type WorkersCsrfOptions<Env> = {
+  verify: (context: { request: Request; url: URL; env: RouteEnvironment; bindings: Env }) =>
+    | boolean
+    | Promise<boolean>;
+};
+
 export type WorkersHandlerOptions<Env = Record<string, unknown>> = Omit<
   RouteRenderOptions,
-  "bindings" | "middleware"
+  "bindings" | "csrf" | "middleware"
 > & {
   routes: readonly WorkersRouteDefinition<Env, any, any>[];
   middleware?: readonly WorkersRouteMiddleware<Env>[];
+  csrf?: WorkersCsrfOptions<Env>;
   securityHeaders?: Headers;
   streaming?: boolean;
   staticRoutes?: readonly StaticRouteDefinition[];

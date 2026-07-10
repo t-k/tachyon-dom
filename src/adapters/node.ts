@@ -195,6 +195,10 @@ export const createStaticAssetHandler =
       if (!canonicalFile.startsWith(`${canonicalRoot}${path.sep}`)) {
         return new Response("Forbidden", { status: 403 });
       }
+      const canonicalRelativePath = path.relative(canonicalRoot, canonicalFile);
+      if (canonicalRelativePath.split(path.sep).some((segment) => segment.startsWith("."))) {
+        return new Response("Forbidden", { status: 403 });
+      }
       const info = await stat(canonicalFile);
       if (!info.isFile()) {
         return options.fallthroughOnNotFound ? undefined : new Response("Not Found", { status: 404 });

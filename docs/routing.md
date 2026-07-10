@@ -145,6 +145,8 @@ For server sessions, `createCookieSessionStorage({ secret, maxAgeMs, verificatio
 
 Route cache policies are private unless `mode: "public"` is specified explicitly. Use public caching only for responses that are independent of identity, or provide an intentional cache key and `Vary` policy.
 
+Asynchronous GET and HEAD streams commit a conservative `Cache-Control: private` policy before their first fallback chunk. Loader-dependent cache callbacks cannot retroactively promote an already committed response to public caching. Unsafe methods wait for their authoritative route result before status, headers, or fallback content are committed.
+
 ## Server Adapters
 
 `tachyon-dom/adapters` provides compatibility exports for:
@@ -179,7 +181,7 @@ export default createWorkersHandler<{ ASSETS: { fetch: (request: Request) => Pro
 });
 ```
 
-The `Env` type parameter is also the request-scoped `bindings` type for route middleware, loaders, actions, renderers, head/resource functions, header functions, and cache functions. Invocation bindings are kept separate from `RouteEnvironment`: `context.env` contains only the configured string values from handler options, while `context.bindings` is exactly the environment object passed to that Workers `fetch()` invocation. Invocation bindings do not merge into or override configured string environment values. Node and Lambda route handlers continue to use their platform-specific options and do not expose a Workers binding map.
+The `Env` type parameter is also the request-scoped `bindings` type for route middleware, loaders, actions, renderers, head/resource functions, header functions, cache functions, and CSRF verification. Invocation bindings are kept separate from `RouteEnvironment`: `context.env` contains only the configured string values from handler options, while `context.bindings` is exactly the environment object passed to that Workers `fetch()` invocation. Invocation bindings do not merge into or override configured string environment values. Node and Lambda route handlers continue to use their platform-specific options and do not expose a Workers binding map.
 
 Bindings are server-only capability objects and can contain Secrets, KV, D1, R2, services, and `ASSETS`. Tachyon DOM does not serialize the binding object itself, but loader return values are hydration data. Do not return secrets or capability objects from loaders or interpolate them into HTML, head descriptors, resource URLs, or response headers. An asset request handled by the configured binding bypasses route callbacks; on a dynamic route, `context.bindings` still contains the complete invocation object, including `ASSETS`.
 
@@ -222,7 +224,7 @@ export const handler = createNodeFetchHandler({
 
 When Node static assets are mounted at the application root, pass `staticAssets: { fallthroughOnNotFound: true }` so missing files, root requests, and non-GET/HEAD application routes such as `POST /login` continue to your app handler instead of being handled by the static asset layer.
 
-Node static assets deny dotfile and dot-directory segments, including `.well-known`, by default. Symlinks are followed only when their canonical target remains beneath the canonical `rootDir`; sensitive-path denials return 403 and never fall through to the dynamic handler.
+Node static assets deny dotfile and dot-directory segments, including `.well-known`, by default. This policy is applied to both the requested path and the canonical target, so a public-name symlink cannot alias `.env`, `.git`, or another hidden path. Symlinks are followed only when their non-hidden canonical target remains beneath the canonical `rootDir`; sensitive-path denials return 403 and never fall through to the dynamic handler. The static tree is expected to be immutable while a request is resolved; deployments with attacker-writable asset roots need stronger file-descriptor-level isolation.
 
 For Vite dev servers with request-scoped SSR, `tachyon-dom/vite` exports `tachyonSsr()`. It mounts the same fetch-style handler shape as `createNodeFetchHandler()`, lets Vite handle internal module URLs by default, and serves configured static assets before the dynamic handler:
 

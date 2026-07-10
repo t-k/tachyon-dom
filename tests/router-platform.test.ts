@@ -83,6 +83,31 @@ describe("router platform features", () => {
     }
   });
 
+  it("rejects public-name symlinks whose canonical targets contain hidden segments", async () => {
+    const root = path.join(tmpdir(), `tachyon-assets-${Date.now()}-hidden-target`);
+    await mkdir(path.join(root, ".git"), { recursive: true });
+    try {
+      await writeFile(path.join(root, ".env"), "environment-secret");
+      await writeFile(path.join(root, ".git", "config"), "git-secret");
+      await writeFile(path.join(root, "public.txt"), "public");
+      await symlink(path.join(root, ".env"), path.join(root, "settings.txt"));
+      await symlink(path.join(root, ".git"), path.join(root, "metadata"));
+      await symlink(path.join(root, "public.txt"), path.join(root, "alias.txt"));
+      const handler = createStaticAssetHandler({ rootDir: root, basePath: "/assets", fallthroughOnNotFound: true });
+
+      for (const pathname of ["settings.txt", "metadata/config"]) {
+        const response = await handler(new Request(`https://x.test/assets/${pathname}`));
+        expect(response?.status).toBe(403);
+        await expect(response?.text()).resolves.toBe("Forbidden");
+      }
+      const allowed = await handler(new Request("https://x.test/assets/alias.txt"));
+      expect(allowed?.status).toBe(200);
+      await expect(allowed?.text()).resolves.toBe("public");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("creates a route build manifest with route assets and types", async () => {
     const routes: RouteDefinition[] = [
       { id: "home", path: "/", resources: [{ rel: "stylesheet", href: "/app.css" }], render: () => "home" },

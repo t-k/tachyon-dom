@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -809,6 +809,67 @@ describe("server adapters", () => {
     expect(await response.text()).toBe("");
   });
 
+  it("commits a private cache policy before an asynchronous personalized stream", async () => {
+    const handler = createWorkersHandler({
+      routes: [{
+        path: "/account",
+        fallback: "<p>Loading account</p>",
+        loader: async ({ request }) => {
+          await delay(10);
+          return request.headers.get("cookie") ?? "anonymous";
+        },
+        cache: { maxAge: 60 },
+        render: ({ data }) => `<h1>${data}</h1>`,
+      }],
+      streaming: true,
+    });
+
+    const response = await handler.fetch(new Request("https://example.com/account", { headers: { cookie: "sid=a" } }));
+
+    expect(response.headers.get("cache-control")).toBe("private");
+    expect(await response.text()).toBe("<p>Loading account</p><h1>sid=a</h1>");
+  });
+
+  it("commits delayed streaming CSRF rejection before status and fallback", async () => {
+    type Bindings = { sessions: { verify: (request: Request) => Promise<boolean> } };
+    const action = vi.fn(() => "saved");
+    const bindings: Bindings = {
+      sessions: { verify: async () => { await delay(10); return false; } },
+    };
+    const handler = createWorkersHandler<Bindings>({
+      routes: [{ path: "/action", fallback: "secret fallback", action, render: () => "ok" }],
+      csrf: { verify: ({ request }) => bindings.sessions.verify(request) },
+      streaming: true,
+    });
+
+    const response = await handler.fetch(
+      new Request("https://example.com/action", { method: "POST" }),
+      bindings,
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.text()).toBe("<h1>Forbidden</h1>");
+    expect(action).not.toHaveBeenCalled();
+  });
+
+  it("passes typed Workers invocation bindings to CSRF verification", async () => {
+    type Bindings = { sessions: { verify: (request: Request) => Promise<boolean> } };
+    const bindings: Bindings = { sessions: { verify: async () => false } };
+    let verifierBindings: Bindings | undefined;
+    const handler = createWorkersHandler<Bindings>({
+      routes: [{ path: "/action", action: () => "saved", render: () => "ok" }],
+      csrf: { verify: ({ request, bindings: seen }) => {
+        verifierBindings = seen;
+        return seen.sessions.verify(request);
+      } },
+    });
+
+    const response = await handler.fetch(new Request("https://example.com/action", { method: "POST" }), bindings);
+
+    expect(response.status).toBe(403);
+    expect(verifierBindings).toBe(bindings);
+  });
+
   it("serves Cloudflare assets from env binding with security headers", async () => {
     const assetFetch = vi.fn((request: Request) => {
       expect(new URL(request.url).pathname).toBe("/assets/app.js");
@@ -1058,8 +1119,12 @@ describe("server adapters", () => {
     try {
       await writeFile(path.join(root, "app.js"), `console.log("asset");`);
       await writeFile(path.join(root, ".env"), "secret");
+      await mkdir(path.join(root, ".git"), { recursive: true });
+      await writeFile(path.join(root, ".git", "config"), "git-secret");
       await writeFile(path.join(outside, "secret.txt"), "secret");
       await symlink(path.join(outside, "secret.txt"), path.join(root, "linked.txt"));
+      await symlink(path.join(root, ".env"), path.join(root, "settings.txt"));
+      await symlink(path.join(root, ".git"), path.join(root, "metadata"));
       let fetchCalls = 0;
       const handler = createNodeFetchHandler({
         staticAssets: { rootDir: root, basePath: "/assets" },
@@ -1087,6 +1152,8 @@ describe("server adapters", () => {
         "/assets/.env",
         "/assets/.well-known/security.txt",
         "/assets/linked.txt",
+        "/assets/settings.txt",
+        "/assets/metadata/config",
       ]) {
         const chunks: string[] = [];
         const res = {

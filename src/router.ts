@@ -120,7 +120,9 @@ export type RouteRenderOptions = {
   maxActionBodyBytes?: number;
   cspNonce?: string;
   csrf?: {
-    verify: (context: { request: Request; url: URL; env: RouteEnvironment }) => boolean | Promise<boolean>;
+    verify: (context: { request: Request; url: URL; env: RouteEnvironment; bindings?: unknown }) =>
+      | boolean
+      | Promise<boolean>;
   };
   middleware?: readonly RouteMiddleware[];
   hooks?: RouteHooks;
@@ -404,8 +406,9 @@ const verifyCsrf = async (
   request: Request,
   url: URL,
   env: RouteEnvironment,
+  bindings: unknown,
   options: NonNullable<RouteRenderOptions["csrf"]>,
-): Promise<boolean> => options.verify({ request, url, env });
+): Promise<boolean> => options.verify({ request, url, env, bindings });
 
 const payloadTooLargeResult = (match: MatchedRoute): RouteRenderResult => ({
   status: 413,
@@ -1167,7 +1170,7 @@ export const renderRoute = async (
     let actionResult: unknown;
     const loaderData: Record<string, unknown> = {};
     if (request.method !== "GET" && request.method !== "HEAD" && match.value.route.action) {
-      if (options.csrf && !(await verifyCsrf(request, url, env, options.csrf))) {
+      if (options.csrf && !(await verifyCsrf(request, url, env, bindings, options.csrf))) {
         return ok({
           status: 403,
           html: "<h1>Forbidden</h1>",
@@ -1351,13 +1354,16 @@ export const renderRouteStream = async (
     });
   }
   const renderedPromise = renderRoute(routes, request, options);
+  const requiresAuthoritativeCommit = request.method !== "GET" && request.method !== "HEAD";
   type SettledRender =
     | { settled: true; rendered: Awaited<typeof renderedPromise> }
     | { settled: false; rendered?: undefined };
   const pending = (): Promise<SettledRender> =>
     new Promise((resolve) => setTimeout(() => resolve({ settled: false }), 0));
   const settle = (rendered: Awaited<typeof renderedPromise>): SettledRender => ({ settled: true, rendered });
-  const immediate = await Promise.race([renderedPromise.then(settle), pending()]);
+  const immediate = requiresAuthoritativeCommit
+    ? settle(await renderedPromise)
+    : await Promise.race([renderedPromise.then(settle), pending()]);
   if (immediate.settled) {
     const rendered = immediate.rendered;
     if (!rendered.ok) {
@@ -1379,7 +1385,7 @@ export const renderRouteStream = async (
         }),
       });
     }
-    if (rendered.value.status !== 200 || rendered.value.responseBody !== undefined) {
+    if (requiresAuthoritativeCommit || rendered.value.status !== 200 || rendered.value.responseBody !== undefined) {
       return ok({
         status: rendered.value.status,
         chunks: (async function* () {
@@ -1447,7 +1453,10 @@ export const renderRouteStream = async (
     headHtml: "",
     resourceHints: renderResourceHints(collectRouteResources(match.value.branch)),
     stateScript: "",
-    headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+    headers: new Headers({
+      "cache-control": "private",
+      "content-type": "text/html; charset=utf-8",
+    }),
     final,
   });
 };
