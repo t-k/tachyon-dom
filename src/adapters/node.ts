@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import {
@@ -181,7 +181,7 @@ export const createStaticAssetHandler =
     if (!relativePath) {
       return options.fallthroughOnNotFound ? undefined : new Response("Forbidden", { status: 403 });
     }
-    if (relativePath.split("/").includes("..")) {
+    if (relativePath.split(/[\\/]/).some((segment) => segment === ".." || segment.startsWith("."))) {
       return new Response("Forbidden", { status: 403 });
     }
     const root = path.resolve(options.rootDir);
@@ -190,16 +190,21 @@ export const createStaticAssetHandler =
       return new Response("Forbidden", { status: 403 });
     }
     try {
-      const info = await stat(file);
+      const canonicalRoot = await realpath(root);
+      const canonicalFile = await realpath(file);
+      if (!canonicalFile.startsWith(`${canonicalRoot}${path.sep}`)) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const info = await stat(canonicalFile);
       if (!info.isFile()) {
         return options.fallthroughOnNotFound ? undefined : new Response("Not Found", { status: 404 });
       }
       const headers = new Headers(options.headers);
       if (!headers.has("content-type")) {
-        headers.set("content-type", contentTypeFor(file));
+        headers.set("content-type", contentTypeFor(canonicalFile));
       }
       headers.set("content-length", String(info.size));
-      return new Response(request.method === "HEAD" ? null : await readFile(file), { status: 200, headers });
+      return new Response(request.method === "HEAD" ? null : await readFile(canonicalFile), { status: 200, headers });
     } catch (error) {
       if (options.fallthroughOnNotFound && isFileSystemNotFound(error)) {
         return undefined;

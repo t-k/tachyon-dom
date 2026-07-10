@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -58,6 +58,25 @@ describe("router platform features", () => {
       await expect(handler(new Request("https://x.test/folder"))).resolves.toBeUndefined();
     } finally {
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects dotfiles and symlinks that escape the canonical asset root", async () => {
+    const root = path.join(tmpdir(), `tachyon-assets-${Date.now()}-canonical`);
+    const outside = path.join(tmpdir(), `tachyon-assets-${Date.now()}-outside`);
+    await mkdir(root, { recursive: true });
+    await mkdir(outside, { recursive: true });
+    try {
+      await writeFile(path.join(root, ".env"), "secret");
+      await writeFile(path.join(outside, "secret.txt"), "secret");
+      await symlink(path.join(outside, "secret.txt"), path.join(root, "linked.txt"));
+      const handler = createStaticAssetHandler({ rootDir: root, basePath: "/assets", fallthroughOnNotFound: true });
+
+      expect((await handler(new Request("https://x.test/assets/.env")))?.status).toBe(403);
+      expect((await handler(new Request("https://x.test/assets/linked.txt")))?.status).toBe(403);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
     }
   });
 
