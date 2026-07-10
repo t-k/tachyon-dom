@@ -129,6 +129,8 @@ await renderRoute(routes, request, { cspNonce: nonce });
 
 For server sessions, `createCookieSessionStorage({ secret })` stores signed session payloads in secure, HTTP-only, SameSite=Lax cookies. `signCookieValue()` and `verifySignedCookieValue()` are also exported for custom adapters.
 
+Route cache policies are private unless `mode: "public"` is specified explicitly. Use public caching only for responses that are independent of identity, or provide an intentional cache key and `Vary` policy.
+
 ## Server Adapters
 
 `tachyon-dom/adapters` provides compatibility exports for:

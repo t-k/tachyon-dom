@@ -325,7 +325,7 @@ export const cacheControl = (policy: RouteCachePolicy): Headers => {
   if (policy.mode === "no-store") {
     directives.push("no-store");
   } else {
-    directives.push(policy.mode ?? "public");
+    directives.push(policy.mode ?? "private");
     const maxAge = cacheSeconds(policy.maxAge);
     const sharedMaxAge = cacheSeconds(policy.sharedMaxAge);
     const staleWhileRevalidate = cacheSeconds(policy.staleWhileRevalidate);

@@ -155,6 +155,10 @@ describe("router platform features", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("defaults an unspecified route cache policy to private", () => {
+    expect(cacheControl({ maxAge: 60 }).get("cache-control")).toBe("private, max-age=60");
+  });
+
   it("resolves deferred loader data independently from route rendering", async () => {
     const deferred = defer({ title: "Now", comments: Promise.resolve(["A", "B"]) });
 
