@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -674,6 +674,31 @@ export default { selected: false };
     }
   });
 
+  it("preserves an orphan route declaration unless force is explicit", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-add-page-orphan-declaration-"));
+    try {
+      const routesDir = path.join(dir, "src", "routes");
+      const page = path.join(routesDir, "settings", "page.td");
+      const declarations = `${page}.d.ts`;
+      const registry = path.join(dir, "src", "routes.generated.ts");
+      await mkdir(path.dirname(page), { recursive: true });
+      await writeFile(declarations, "user-authored declarations\n");
+
+      const result = await addPageFiles({ name: "settings", routesDir });
+
+      expect(result).toEqual({ ok: false, error: expect.stringContaining(declarations) });
+      await expect(readFile(declarations, "utf8")).resolves.toBe("user-authored declarations\n");
+      await expect(access(page)).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(access(registry)).rejects.toMatchObject({ code: "ENOENT" });
+
+      const forced = await addPageFiles({ name: "settings", routesDir, force: true });
+      expect(forced.ok && forced.value).toContain(`Overwrote ${declarations}`);
+      await expect(readFile(page, "utf8")).resolves.toContain("<h1>{title}</h1>");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("creates route-local starter files for new apps", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-starter-"));
     try {
@@ -1114,6 +1139,28 @@ export const bindRows = (root, rows, options) => effect(() => {
       await expect(readFile(`${id}.d.ts`, "utf8")).resolves.toContain("title: unknown;");
       await plugin.transform.call(context, `<main>{title}<small>{subtitle}</small></main>`, `${id}?raw`);
       await expect(readFile(`${id}.d.ts`, "utf8")).resolves.toContain("subtitle: unknown;");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps Vite declaration diagnostics aligned with SFC source locations", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-vite-diagnostic-location-"));
+    try {
+      const id = path.join(dir, "page.td");
+      const source = `<script>\nexport const scope = () => ({});\n</script>\n<main>\n  <if></if>\n</main>`;
+      const plugin = tachyonDom();
+      if (typeof plugin.transform !== "function" || typeof plugin.configResolved !== "function") {
+        throw new Error("Missing Vite hooks.");
+      }
+      await plugin.configResolved.call({} as never, { command: "serve", mode: "development", root: dir } as never);
+
+      await expect(plugin.transform.call({
+        error(error: string): never {
+          throw new Error(error);
+        },
+      } as never, source, `${id}?raw`)).rejects.toThrow(`${id}:5:3: <if> requires test={condition}.`);
+      await expect(access(`${id}.d.ts`)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

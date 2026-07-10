@@ -327,7 +327,12 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
                 ? `${cleanId(id)}.d.ts`
                 : undefined;
         if (declarationOutput) {
-          const declarations = generateTachyonModuleTypes(declarationSourceFor(source, id));
+          const declarationSource = declarationSourceFor(source, id);
+          const diagnostic = diagnoseTachyonSfc(declarationSource);
+          if (!diagnostic.ok) {
+            this.error(formatDiagnostic(diagnostic.error, cleanId(id)));
+          }
+          const declarations = generateTachyonModuleTypes(declarationSource);
           if (!declarations.ok) {
             this.error(declarations.error);
           }

@@ -403,9 +403,6 @@ export const addPageFiles = async (options: Omit<CliAddPageOptions, "command">):
   let overwritingRegistry = false;
   try {
     await access(pageFile);
-    if (!options.force) {
-      return err(`Refusing to overwrite existing page file: ${pageFile}`);
-    }
     overwriting = true;
   } catch {
     // The target does not exist yet.
@@ -415,6 +412,11 @@ export const addPageFiles = async (options: Omit<CliAddPageOptions, "command">):
     overwritingDeclarations = true;
   } catch {
     // The declaration does not exist yet.
+  }
+  if (!options.force && (overwriting || overwritingDeclarations)) {
+    const conflicts = [overwriting ? pageFile : undefined, overwritingDeclarations ? declarationFile : undefined]
+      .filter((file): file is string => file !== undefined);
+    return err(`Refusing to overwrite existing page files:\n${conflicts.join("\n")}`);
   }
   try {
     const registry = await readFile(registryFile, "utf8");
