@@ -10,6 +10,7 @@ import {
   createLambdaStreamingHandler,
   lambdaResponseFromWebResponse,
   requestFromLambdaEvent,
+  writeWebResponseToLambdaStream,
 } from "../src/adapters/lambda";
 import { createNodeFetchHandler, createNodeHandler, writeNodeResponse } from "../src/adapters/node";
 import { createWorkersFetchHandler, createWorkersHandler } from "../src/adapters/workers";
@@ -1340,6 +1341,24 @@ describe("server adapters", () => {
     );
     expect(chunks.join("")).toBe("<p>Loading</p><h1>Ready</h1>");
     expect(stream.end).toHaveBeenCalledOnce();
+  });
+
+  it("waits for an explicit Lambda drain capability after a saturated write", async () => {
+    let drainCalls = 0;
+    const stream = {
+      write: vi.fn(() => false),
+      drain: vi.fn(async () => {
+        drainCalls += 1;
+      }),
+      end: vi.fn(),
+    };
+    await writeWebResponseToLambdaStream(
+      new Response(new ReadableStream<Uint8Array>({ start: (controller) => { controller.enqueue(new TextEncoder().encode("one")); controller.close(); } })),
+      stream,
+      { HttpResponseStream: { from: (value) => value } },
+    );
+
+    expect(drainCalls).toBe(1);
   });
 
   it("keeps the Workers entry and router runtime free of top-level Node imports", async () => {

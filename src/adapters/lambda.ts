@@ -50,6 +50,7 @@ export type LambdaFetchHandlerOptions = Omit<WorkersFetchHandlerOptions, "fetch"
 
 export type LambdaResponseStream = {
   write: (chunk: string | Uint8Array) => boolean | void;
+  drain?: () => Promise<void>;
   end: () => void;
   finished?: () => Promise<void>;
 };
@@ -300,12 +301,16 @@ export const writeWebResponseToLambdaStream = async (
       if (result.done) {
         break;
       }
-      stream.write(result.value);
+      if (stream.write(result.value) === false) {
+        await stream.drain?.();
+      }
     }
   } else {
     const body = await response.text();
     if (body) {
-      stream.write(textEncoder.encode(body));
+      if (stream.write(textEncoder.encode(body)) === false) {
+        await stream.drain?.();
+      }
     }
   }
   stream.end();
