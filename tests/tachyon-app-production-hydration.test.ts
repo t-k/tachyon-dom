@@ -23,10 +23,11 @@ describe("tachyonApp production hydration", () => {
       `
       import { defineApp } from ${JSON.stringify(path.join(sourceRoot, "app.ts"))};
       export const app = defineApp({
+        templateWhitespace: "condense",
         pages: [{
           path: "/",
           fileName: "index.html",
-          template: '<section hydrate:id={id}><button id="increment">Increment</button><span id="count">Count {count}</span><button id="add">Add</button><ul id="rows"><li>A</li></ul></section>',
+          template: '<section hydrate:id={id}>\\n        <button id="increment">Increment</button>\\n        <span id="count">Count {count}</span>\\n        <button id="add">Add</button>\\n        <ul id="rows"><li>A</li></ul>\\n      </section>',
           scope: { id: "counter", count: 0 },
         }],
       });
@@ -107,6 +108,7 @@ describe("tachyonApp production hydration", () => {
     const html = await response.text();
     expect(html).toContain("<!--tachyon-hydrate:counter:start-->");
     expect(html).toContain("<!---->");
+    expect(html).toContain('<button id="increment">Increment</button> <span id="count">');
 
     const page = await browser?.newPage();
     if (!page) throw new Error("Missing browser page.");

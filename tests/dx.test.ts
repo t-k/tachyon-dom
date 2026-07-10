@@ -181,6 +181,31 @@ describe("DX helpers", () => {
     expect(app.renderRoute("/")).toBe(`<main><h1>HOME</h1><p>2</p></main>`);
   });
 
+  it("applies template whitespace policy to defineApp and loadRouteApp route compilation", async () => {
+    const source = `<section>\n  <p>Hello</p>\n</section>`;
+    const condensed = defineApp({
+      templateWhitespace: "condense",
+      pages: [{ path: "/", fileName: "index.html", template: source }],
+    });
+    const preserved = defineApp({
+      pages: [{ path: "/", fileName: "index.html", template: source }],
+    });
+
+    expect(condensed.renderRoute("/")).toBe(`<section> <p>Hello</p> </section>`);
+    expect(preserved.renderRoute("/")).toBe(source);
+
+    const directory = await mkdtemp(path.join(tmpdir(), "tachyon-template-whitespace-"));
+    try {
+      const routeDirectory = path.join(directory, "index");
+      await mkdir(routeDirectory, { recursive: true });
+      await writeFile(path.join(routeDirectory, "page.td"), source);
+      const loaded = await loadRouteApp({ routesDir: directory, templateWhitespace: "condense" });
+      expect(loaded.renderRoute("/")).toBe(condensed.renderRoute("/"));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("marks the package as tree-shakable for bundlers", async () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
       sideEffects?: boolean;
@@ -749,13 +774,15 @@ export default { selected: false };
       expect(page).toContain("<h1>{title}</h1>");
       expect(page).toContain("Welcome");
       expect(app).toContain(`import { pages } from "./routes.generated";`);
+      expect(app).toContain('templateWhitespace: "condense"');
       expect(app).toContain("pages,");
       expect(registry).toContain(`import routeSource0 from "./routes/index/page.td?raw";`);
       expect(registry).toContain('path: "/"');
       expect(declarations).toContain("ReturnType<typeof scope>");
       expect(client).toContain("Client entry for Tachyon DOM runtime code.");
-      expect(viteConfig).toContain('loadRouteApp({ lang: "en", routesDir: "src/routes", title: "Tachyon App" })');
-      expect(viteConfig).toContain("tachyonDom({ reactive: true })");
+      expect(viteConfig).toContain('const templateWhitespace = "condense" as const;');
+      expect(viteConfig).toContain("templateWhitespace,");
+      expect(viteConfig).toContain("tachyonDom({ reactive: true, templateWhitespace })");
       expect(viteConfig).toContain('tachyonApp(app, { appScript: "/src/client/main.ts" })');
       expect(viteConfig).toContain(`input: "src/client/main.ts"`);
       expect(gitignore).toContain("node_modules/");

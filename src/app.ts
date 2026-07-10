@@ -1,7 +1,7 @@
 import { compileServerTemplate } from "./compiler/index.js";
 import { compileTachyonSfc, extractStaticSfcScope, generateSfcScriptDeclarations } from "./compiler/sfc.js";
 import { escapeHtml } from "./html-escape.js";
-import type { ClientBinding, CompiledTemplate } from "./compiler/types.js";
+import type { ClientBinding, CompiledTemplate, TemplateWhitespacePolicy } from "./compiler/types.js";
 import { err, ok, type Result } from "./result.js";
 import type { TemplateScope, TypedTemplate } from "./typed.js";
 import { applyHtmlWhitespace, normalizeHtmlTagWhitespace, type HtmlWhitespacePolicy } from "./html-whitespace.js";
@@ -14,6 +14,7 @@ type TachyonAppPageBase = {
   fileName: string;
   title?: string;
   assetPrefix?: string;
+  templateWhitespace?: TemplateWhitespacePolicy;
 };
 
 export type TachyonAppPage<Scope extends TemplateScope = TemplateScope> = TachyonAppPageBase &
@@ -33,6 +34,7 @@ export type TachyonAppPageFile = {
   fileName: string;
   file: string;
   assetPrefix?: string;
+  templateWhitespace?: TemplateWhitespacePolicy;
 };
 
 export type TachyonAppDefinition<Pages extends readonly TachyonAppPage<any>[] = readonly TachyonAppPage[]> = {
@@ -42,6 +44,7 @@ export type TachyonAppDefinition<Pages extends readonly TachyonAppPage<any>[] = 
   shell?: (context: TachyonAppShellContext) => string;
   assets?: TachyonAppAssets | ((page: TachyonAppPage) => TachyonAppAssets);
   notFound?: TachyonAppNotFoundPage;
+  templateWhitespace?: TemplateWhitespacePolicy;
 };
 
 export type TachyonAppNotFoundPage = {
@@ -141,16 +144,18 @@ export const minifyHtml = normalizeHtmlTagWhitespace;
 const templateSource = (template: string | TypedTemplate<TemplateScope>): string =>
   typeof template === "string" ? template : template.source;
 
-const compilePage = (page: TachyonAppPage): CompiledTemplate => {
-  const result = compileTachyonSfc(templateSource(page.template));
+const compilePage = (page: TachyonAppPage, templateWhitespace: TemplateWhitespacePolicy): CompiledTemplate => {
+  const result = compileTachyonSfc(templateSource(page.template), { whitespace: templateWhitespace });
   if (!result.ok) {
     throw new Error(result.error.message);
   }
   return result.value.template;
 };
 
-const compilePageRenderer = (page: TachyonAppPage): ((scope: Record<string, unknown>) => string) =>
-  compileServerTemplate(compilePage(page));
+const compilePageRenderer = (
+  page: TachyonAppPage,
+  templateWhitespace: TemplateWhitespacePolicy,
+): ((scope: Record<string, unknown>) => string) => compileServerTemplate(compilePage(page, templateWhitespace));
 
 const scopeForPage = (page: TachyonAppPage): Record<string, unknown> => {
   if (page.scope) return page.scope;
@@ -226,7 +231,8 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     if (!page) {
       return "";
     }
-    const render = renderers.get(page.path) ?? compilePageRenderer(page);
+    const render =
+      renderers.get(page.path) ?? compilePageRenderer(page, page.templateWhitespace ?? definition.templateWhitespace ?? "preserve");
     renderers.set(page.path, render);
     return render(scopeForPage(page));
   };
@@ -331,7 +337,10 @@ const segmentToFileName = (segment: string): string => segment;
 const assetPrefixForDepth = (depth: number): string =>
   depth <= 0 ? "." : Array.from({ length: depth }, () => "..").join("/");
 
-export const pagesFromRouteFiles = (files: readonly string[], options: { rootDir: string }): TachyonAppPageFile[] =>
+export const pagesFromRouteFiles = (
+  files: readonly string[],
+  options: { rootDir: string; templateWhitespace?: TemplateWhitespacePolicy },
+): TachyonAppPageFile[] =>
   files
     .filter((file) => templateExtensions.test(file))
     .map((file) => {
@@ -343,6 +352,7 @@ export const pagesFromRouteFiles = (files: readonly string[], options: { rootDir
         file,
         fileName,
         path,
+        ...(options.templateWhitespace ? { templateWhitespace: options.templateWhitespace } : {}),
       };
     });
 

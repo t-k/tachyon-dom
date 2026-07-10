@@ -70,7 +70,10 @@ export const loadRouteApp = async ({ routesDir, ...definition }: TachyonRouteApp
   const manifest = await scanFileRoutes(absoluteRoutesDir);
   const pageFiles = manifest.filter((route) => route.kind === "template").map((route) => route.file);
   const pages = await Promise.all(
-    pagesFromRouteFiles(pageFiles, { rootDir: absoluteRoutesDir }).map(async (page) => ({
+    pagesFromRouteFiles(pageFiles, {
+      rootDir: absoluteRoutesDir,
+      ...(definition.templateWhitespace ? { templateWhitespace: definition.templateWhitespace } : {}),
+    }).map(async (page) => ({
       ...page,
       template: await readFile(page.file, "utf8"),
     })),

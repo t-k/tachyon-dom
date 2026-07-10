@@ -489,6 +489,7 @@ import { pages } from "./routes.generated";
 export const app = defineApp({
   lang: "en",
   title: "Tachyon App",
+  templateWhitespace: "condense",
   pages,
 });
 `;
@@ -516,7 +517,13 @@ describe("starter app", () => {
 const starterViteConfigSource = (): string => `import { defineConfig } from "vite";
 import { loadRouteApp, tachyonApp, tachyonDom } from "tachyon-dom/vite";
 
-const app = await loadRouteApp({ lang: "en", routesDir: "src/routes", title: "Tachyon App" });
+const templateWhitespace = "condense" as const;
+const app = await loadRouteApp({
+  lang: "en",
+  routesDir: "src/routes",
+  title: "Tachyon App",
+  templateWhitespace,
+});
 
 export default defineConfig({
   build: {
@@ -524,7 +531,7 @@ export default defineConfig({
       input: "src/client/main.ts",
     },
   },
-  plugins: [tachyonDom({ reactive: true }), tachyonApp(app, { appScript: "/src/client/main.ts" })],
+  plugins: [tachyonDom({ reactive: true, templateWhitespace }), tachyonApp(app, { appScript: "/src/client/main.ts" })],
 });
 `;
 
