@@ -870,6 +870,69 @@ describe("server adapters", () => {
     expect(verifierBindings).toBe(bindings);
   });
 
+  it("preserves streaming cache and delayed CSRF commit policies through Node and Lambda", async () => {
+    const action = vi.fn(() => "saved");
+    const routes: RouteDefinition[] = [{
+      path: "/account",
+      fallback: "secret fallback",
+      loader: async () => { await delay(10); return "private account"; },
+      action,
+      cache: { maxAge: 60 },
+      render: ({ data }) => `<h1>${data}</h1>`,
+    }];
+    const nodeRequest = (method: string) => Object.assign(Readable.from([]), {
+      method,
+      url: "/account",
+      headers: { host: "example.com", cookie: "sid=a" },
+    });
+    const nodeResponse = () => {
+      const headers = new Map<string, string | number | readonly string[]>();
+      const chunks: string[] = [];
+      const response = Object.assign(new EventEmitter(), {
+        statusCode: 200,
+        writableEnded: false,
+        setHeader: (name: string, value: string | number | readonly string[]) => headers.set(name, value),
+        flushHeaders: () => undefined,
+        write: (chunk: Uint8Array) => { chunks.push(Buffer.from(chunk).toString("utf8")); return true; },
+        end: (chunk?: string) => {
+          if (chunk) chunks.push(chunk);
+          response.writableEnded = true;
+        },
+      });
+      return { response, headers, chunks };
+    };
+
+    const nodeGet = nodeResponse();
+    await createNodeHandler({ routes, streaming: true })(nodeRequest("GET") as never, nodeGet.response as never);
+    expect(nodeGet.headers.get("cache-control")).toBe("private");
+
+    const nodePost = nodeResponse();
+    await createNodeHandler({ routes, streaming: true, csrf: { verify: async () => { await delay(10); return false; } } })(
+      nodeRequest("POST") as never,
+      nodePost.response as never,
+    );
+    expect(nodePost.response.statusCode).toBe(403);
+    expect(nodePost.chunks.join("")).toBe("<h1>Forbidden</h1>");
+
+    const lambdaGet = await createLambdaHandler({ routes, streaming: true })(lambdaEvent({
+      rawPath: "/account",
+      requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/account" } },
+    }));
+    expect(lambdaGet.headers["cache-control"]).toBe("private");
+
+    const lambdaPost = await createLambdaHandler({
+      routes,
+      streaming: true,
+      csrf: { verify: async () => { await delay(10); return false; } },
+    })(lambdaEvent({
+      rawPath: "/account",
+      requestContext: { domainName: "lambda.example", http: { method: "POST", path: "/account" } },
+    }));
+    expect(lambdaPost.statusCode).toBe(403);
+    expect(lambdaPost.body).toBe("<h1>Forbidden</h1>");
+    expect(action).not.toHaveBeenCalled();
+  });
+
   it("serves Cloudflare assets from env binding with security headers", async () => {
     const assetFetch = vi.fn((request: Request) => {
       expect(new URL(request.url).pathname).toBe("/assets/app.js");
