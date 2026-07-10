@@ -894,6 +894,21 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(typeof client === "object" && client?.code).toContain(`export const bind = (root, scope) =>`);
   });
 
+  it("writes synchronized module declarations during Vite transforms", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-vite-types-"));
+    try {
+      const output = path.join(dir, "page.td.d.ts");
+      const plugin = tachyonDom({ declarationOutput: () => output });
+      if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+
+      await plugin.transform.call({ error: (error: string): never => { throw new Error(error); } } as never, `<main>{title}</main>`, "/src/page.td");
+
+      await expect(readFile(output, "utf8")).resolves.toContain("title: unknown;");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("exports ambient types for .td modules through a package subpath", async () => {
     const packageJson = JSON.parse(await readFile(path.join(process.cwd(), "package.json"), "utf8")) as {
       exports?: Record<string, { types?: string; import?: string }>;

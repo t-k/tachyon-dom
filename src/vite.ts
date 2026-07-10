@@ -2,10 +2,10 @@ import type { Plugin } from "vite";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createNodeFetchHandler, type NodeFetchHandlerOptions, type StaticAssetOptions } from "./adapters/node.js";
-import type { TachyonApp, TachyonAppAssets } from "./app.js";
+import { generateTachyonModuleTypes, type TachyonApp, type TachyonAppAssets } from "./app.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import { diagnoseTachyonSfc, formatDiagnostic, locateOffset } from "./diagnostics.js";
@@ -20,6 +20,7 @@ export type TachyonDomViteOptions = {
   sourcemap?: boolean;
   productionSourceMap?: boolean;
   requestLog?: boolean | TachyonDomRequestLogOptions;
+  declarationOutput?: (id: string) => string | undefined;
   onSourceMap?: (artifact: { id: string; code: string; map: SourceMap; source: string }) => void | Promise<void>;
 };
 
@@ -290,6 +291,15 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         return null;
       }
       const resolvedTarget = targetForId(id, target);
+      const declarationOutput = options.declarationOutput?.(cleanId(id));
+      if (declarationOutput) {
+        const declarations = generateTachyonModuleTypes(source);
+        if (!declarations.ok) {
+          this.error(declarations.error);
+        }
+        await mkdir(dirname(declarationOutput), { recursive: true });
+        await writeFile(declarationOutput, declarations.value);
+      }
       const result = diagnoseTachyonSfc(source);
       if (!result.ok) {
         this.error(formatDiagnostic(result.error, id));
