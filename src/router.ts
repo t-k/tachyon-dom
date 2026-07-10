@@ -41,6 +41,7 @@ export type RouteContext<Data = unknown, ActionResult = unknown> = {
   params: RouteParams;
   route: RouteDefinition;
   env: RouteEnvironment;
+  bindings?: unknown;
   data: Data;
   loaderData: Record<string, unknown>;
   actionResult: ActionResult;
@@ -124,6 +125,7 @@ export type RouteRenderOptions = {
   middleware?: readonly RouteMiddleware[];
   hooks?: RouteHooks;
   env?: RouteEnvironment;
+  bindings?: unknown;
 };
 
 export type RouteError = {
@@ -1051,6 +1053,7 @@ export const renderRoute = async (
   let request = requestFor(input);
   let url = new URL(request.url);
   const env = options.env ?? {};
+  const bindings = options.bindings;
   const emptyMatch = (pathname = url.pathname): MatchedRoute => ({
     route: { path: "*", render: () => "" },
     branch: [],
@@ -1168,6 +1171,7 @@ export const renderRoute = async (
         params: match.value.params,
         route: match.value.route,
         env,
+        bindings,
         loaderData,
         actionResult: undefined,
       });
@@ -1185,6 +1189,7 @@ export const renderRoute = async (
           params: match.value.params,
           route: entry.route,
           env,
+          bindings,
           loaderData,
           actionResult,
         });
@@ -1206,6 +1211,7 @@ export const renderRoute = async (
         params: match.value.params,
         route: entry.route,
         env,
+        bindings,
         data,
         loaderData,
         actionResult,
@@ -1229,6 +1235,7 @@ export const renderRoute = async (
       params: match.value.params,
       route: match.value.route,
       env,
+      bindings,
       data: loaderData[routeId(match.value.route, match.value.pathname)],
       loaderData,
       actionResult,
@@ -1258,6 +1265,7 @@ export const renderRoute = async (
           url,
           params: match.value.params,
           env,
+          bindings,
           loaderData,
           actionResult,
         }),

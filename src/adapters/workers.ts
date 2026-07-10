@@ -360,6 +360,7 @@ const responseFor = async <Env>(
     const hooks = routeObservabilityHooks(options.hooks, options.observability, state);
     const renderOptions = {
       ...options,
+      bindings: env,
       ...(hooks ? { hooks } : {}),
     };
     if (options.streaming) {

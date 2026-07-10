@@ -757,6 +757,20 @@ describe("server adapters", () => {
     expect(await response.text()).toBe(`console.log("asset");`);
   });
 
+  it("passes Workers invocation bindings to route callbacks", async () => {
+    const handler = createWorkersHandler<{ RUNTIME_NAME: string }>({
+      routes: [{
+        path: "/",
+        loader: ({ bindings }) => (bindings as { RUNTIME_NAME: string }).RUNTIME_NAME,
+        render: ({ data }) => `<h1>${data}</h1>`,
+      }],
+    });
+
+    const response = await handler.fetch(new Request("https://example.com/"), { RUNTIME_NAME: "edge" });
+
+    expect(await response.text()).toBe("<h1>edge</h1>");
+  });
+
   it("falls through to dynamic routes when Cloudflare asset basePath does not match", async () => {
     const assetFetch = vi.fn(() => new Response("asset"));
     const handler = createWorkersHandler<{ ASSETS: { fetch: typeof assetFetch } }>({
