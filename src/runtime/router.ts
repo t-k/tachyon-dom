@@ -335,6 +335,8 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     });
   const focusSelector = options.focusSelector ?? "[autofocus],h1,[data-route-focus],main";
   let controller: AbortController | undefined;
+  let actionController: AbortController | undefined;
+  let actionVersion = 0;
   let currentNavigation: Promise<void> = Promise.resolve();
   const cache = new Map<string, unknown>();
   const layoutRoots = new WeakMap<ClientRouteDefinition, Element>();
@@ -611,9 +613,15 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     if (!match?.route.action) {
       throw new Error(`No action route matched ${url.pathname}.`);
     }
-    const actionController = new AbortController();
-    const request = new Request(url, { method: init.method ?? "POST", ...init, signal: actionController.signal });
-    const response = await match.route.action({ url, params: match.params, signal: actionController.signal, request });
+    actionController?.abort();
+    const nextActionController = new AbortController();
+    actionController = nextActionController;
+    const version = ++actionVersion;
+    const request = new Request(url, { method: init.method ?? "POST", ...init, signal: nextActionController.signal });
+    const response = await match.route.action({ url, params: match.params, signal: nextActionController.signal, request });
+    if (nextActionController.signal.aborted || version !== actionVersion) {
+      return response;
+    }
     const locationHeader = response.headers.get("location");
     if (response.status >= 300 && response.status < 400 && locationHeader) {
       await navigate(locationHeader, { replace: true });
@@ -625,6 +633,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
 
   const navigate = async (href: string, navigateOptions: NavigateOptions = {}): Promise<void> => {
     controller?.abort();
+    actionController?.abort();
     const nextController = new AbortController();
     controller = nextController;
     const url = toUrl(href, location.href || baseUrl);
@@ -759,6 +768,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     settled: () => currentNavigation,
     dispose: () => {
       controller?.abort();
+      actionController?.abort();
       prefetchControllers.forEach((prefetchController) => prefetchController.abort());
       prefetchControllers.clear();
       options.root.removeEventListener("click", onClick);

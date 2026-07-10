@@ -619,6 +619,31 @@ describe("client router", () => {
     expect(prefetchSignal?.aborted).toBe(true);
   });
 
+  it("aborts an in-flight action when the router is disposed", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    let signal: AbortSignal | undefined;
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => "home" },
+        { path: "/action", action: ({ signal: actionSignal }) => {
+          signal = actionSignal;
+          return new Promise<Response>(() => undefined);
+        }, render: () => "action" },
+      ],
+    });
+
+    await router.start();
+    void router.submit("/action");
+    await Promise.resolve();
+    router.dispose();
+
+    expect(signal?.aborted).toBe(true);
+  });
+
   it("submits actions and revalidates loader cache by route policy", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");
