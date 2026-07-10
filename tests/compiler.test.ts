@@ -112,6 +112,32 @@ describe("HTML-first compiler", () => {
     expect(conditional).toMatchObject({ templateHtml: ` <span>kept</span> ` });
   });
 
+  it("never rewrites whitespace inside text expressions", () => {
+    const expression = "`a\n  b`";
+    const source = `<p>\n      Before {${expression}} after\n      text\n    </p>`;
+    const result = compileTemplate(source, { whitespace: "condense" });
+    if (!result.ok) throw new Error(result.error.message);
+
+    expect(renderServerTemplate(result.value, {})).toBe(`<p> Before <!---->a\n  b<!----> after text </p>`);
+    const binding = result.value.client.bindings.find((candidate) => candidate.kind === "text");
+    expect(binding).toMatchObject({ expression });
+    expect(generateServerStreamModule(result.value)).toContain(`escapeHtml("a\\n  b")`);
+  });
+
+  it("keeps one separator at inline newline boundaries and protects nested directives in raw text", () => {
+    const inline = compileTemplate(`<p><span>Hello</span>\n  world and\n  <strong>friends</strong></p>`, {
+      whitespace: "condense",
+    });
+    const raw = compileTemplate(`<pre><if test={show}>\n  <span>x</span>\n</if></pre>`, { whitespace: "condense" });
+    if (!inline.ok) throw new Error(inline.error.message);
+    if (!raw.ok) throw new Error(raw.error.message);
+
+    expect(renderServerTemplate(inline.value, {})).toBe(
+      `<p><span>Hello</span> world and <strong>friends</strong></p>`,
+    );
+    expect(renderServerTemplate(raw.value, { show: true })).toBe(`<pre>\n  <span>x</span>\n</pre>`);
+  });
+
   it("caches generated target modules for repeated compiled template objects", () => {
     const result = compileTemplate(`<section><h1>{title}</h1></section>`);
     if (!result.ok) {
