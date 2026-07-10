@@ -480,16 +480,15 @@ const increment = (): void => {
     expect(app.entries({ minify: true })[1]?.source).not.toContain("\n  <");
   });
 
-  it("keeps first-match semantics for duplicate app page paths", () => {
-    const app = defineApp({
-      pages: [
-        { path: "/", fileName: "index.html", template: `<h1>{title}</h1>`, scope: { title: "First" } },
-        { path: "/index.html", fileName: "duplicate.html", template: `<h1>{title}</h1>`, scope: { title: "Second" } },
-      ],
-    });
-
-    expect(app.pageForPath("/")).toBe(app.pages[0]);
-    expect(app.renderRoute("/")).toBe("<h1>First</h1>");
+  it("rejects duplicate normalized app paths and output names", () => {
+    expect(() =>
+      defineApp({
+        pages: [
+          { path: "/", fileName: "index.html", template: `<h1>First</h1>` },
+          { path: "/index.html", fileName: "index.html", template: `<h1>Second</h1>` },
+        ],
+      }),
+    ).toThrow("Duplicate app pages");
   });
 
   it("creates page definitions from route-local template files", () => {

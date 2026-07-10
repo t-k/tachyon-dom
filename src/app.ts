@@ -164,6 +164,18 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     ...page,
     path: normalizeAppPath(page.path),
   }));
+  const conflicts = new Map<string, TachyonAppPage[]>();
+  for (const page of pages) {
+    for (const key of [`path ${page.path}`, `file ${page.fileName}`]) {
+      const group = conflicts.get(key) ?? [];
+      group.push(page);
+      conflicts.set(key, group);
+    }
+  }
+  const duplicates = [...conflicts.entries()].filter(([, group]) => group.length > 1);
+  if (duplicates.length > 0) {
+    throw new Error(`Duplicate app pages:\n${duplicates.map(([key, group]) => `${key}: ${group.map((page) => page.fileName).join(", ")}`).join("\n")}`);
+  }
   const pagesByPath = new Map<string, TachyonAppPage>();
   for (const page of pages) {
     if (!pagesByPath.has(page.path)) {
