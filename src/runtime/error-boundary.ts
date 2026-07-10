@@ -1,6 +1,7 @@
 import { catchError } from "./signal.js";
+import { isClientHtml, type ClientHtml } from "./html.js";
 
-type ErrorBoundaryRenderValue = string | Node | readonly Node[] | DocumentFragment;
+type ErrorBoundaryRenderValue = string | ClientHtml | Node | readonly Node[] | DocumentFragment;
 
 export type ErrorBoundaryOptions = {
   render: (root: Element) => void;
@@ -10,7 +11,11 @@ export type ErrorBoundaryOptions = {
 const renderValue = (root: Element, value: ErrorBoundaryRenderValue): void => {
   root.replaceChildren();
   if (typeof value === "string") {
-    root.innerHTML = value;
+    root.textContent = value;
+    return;
+  }
+  if (isClientHtml(value)) {
+    root.innerHTML = value.toString();
     return;
   }
   if (value instanceof DocumentFragment) {

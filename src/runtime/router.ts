@@ -1,3 +1,7 @@
+import { isClientHtml, rawHtml, type ClientHtml } from "./html.js";
+
+export { rawHtml, type ClientHtml } from "./html.js";
+
 export type ClientRouteParams = Record<string, string>;
 
 export type ClientRouteContext<Data = unknown> = {
@@ -6,21 +10,6 @@ export type ClientRouteContext<Data = unknown> = {
   data: Data;
   signal: AbortSignal;
 };
-
-const clientHtmlBrand = Symbol("tachyon.clientHtml");
-
-export type ClientHtml = {
-  readonly [clientHtmlBrand]: true;
-  toString(): string;
-};
-
-export const rawHtml = (value: string): ClientHtml => ({
-  [clientHtmlBrand]: true,
-  toString: () => value,
-});
-
-const isClientHtml = (value: unknown): value is ClientHtml =>
-  Boolean(value && typeof value === "object" && (value as Record<symbol, unknown>)[clientHtmlBrand] === true);
 
 type ClientRenderValue = string | ClientHtml | Node | readonly Node[] | DocumentFragment;
 
