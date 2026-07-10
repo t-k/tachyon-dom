@@ -17,7 +17,7 @@ import {
   runCli,
   serverCommandMessage,
 } from "../src/cli";
-import { defineApp, generateTemplateTypes, pagesFromRouteFiles, renderAppDocument } from "../src/app";
+import { defineApp, generateTemplateTypes, pagesFromRouteFiles, renderAppDocument, renderAppResponse } from "../src/app";
 import { diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
@@ -500,11 +500,39 @@ const increment = (): void => {
     expect(() =>
       defineApp({
         pages: [
-          { path: "/", fileName: "index.html", template: `<h1>First</h1>` },
-          { path: "/index.html", fileName: "index.html", template: `<h1>Second</h1>` },
+          { path: "/", fileName: "root.html", template: `<h1>Root</h1>` },
+          { path: "/index.html", fileName: "alias.html", template: `<h1>Alias</h1>` },
+          { path: "/guide", fileName: "guide.html", template: `<h1>Guide</h1>` },
+          { path: "/guide/", fileName: "guide-copy.html", template: `<h1>Guide copy</h1>` },
+          { path: "/other", fileName: "guide.html", template: `<h1>Other</h1>` },
         ],
       }),
-    ).toThrow("Duplicate app pages");
+    ).toThrow(
+      expect.objectContaining({
+        message: expect.stringMatching(
+          /path \/: root\.html, alias\.html[\s\S]*path \/guide\/: guide\.html, guide-copy\.html[\s\S]*file guide\.html: guide\.html, guide\.html/,
+        ),
+      }),
+    );
+  });
+
+  it("returns an explicit SSR status and configured page for unknown app paths", () => {
+    const app = defineApp({
+      title: "Docs",
+      pages: [{ path: "/", fileName: "index.html", template: `<h1>Home</h1>` }],
+      notFound: {
+        title: "Missing",
+        render: ({ path }) => `<h1>Missing ${path}</h1>`,
+      },
+    });
+
+    expect(renderAppResponse(app, "/")).toMatchObject({ status: 200, html: expect.stringContaining("<h1>Home</h1>") });
+    expect(renderAppResponse(app, "/missing")).toMatchObject({
+      status: 404,
+      html: expect.stringContaining("<title>Missing</title>"),
+    });
+    expect(renderAppResponse(app, "/missing").html).toContain("<h1>Missing /missing</h1>");
+    expect(() => renderAppDocument(app, "/missing")).toThrow("No page found");
   });
 
   it("creates page definitions from route-local template files", () => {

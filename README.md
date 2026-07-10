@@ -77,6 +77,8 @@ export default {
 
 Route-local template conventions are available through `pagesFromRouteFiles()`: `src/routes/index/page.td` maps to `/`, `src/routes/counter/page.td` maps to `/counter/`, `[id]` maps to `:id`, and `[...slug]` maps to a named wildcard. `generateTemplateTypes()` can emit a first-pass scope type from a template's text, class, event, conditional, and list bindings.
 
+`defineApp()` rejects every duplicate normalized route and output filename before compilation or serving. Path aliases such as `/`, `/index.html`, `/guide`, and `/guide/` share their normalized route keys. `renderAppDocument()` throws for an unknown path instead of falling back to home. SSR adapters should use `renderAppResponse()`, which returns `{ status, html }`; missing routes retain status 404 and render either the configured `notFound` page or the built-in not-found document.
+
 `examples/full-app` is a multi-page browser example with SSR initial HTML for every page, a persistent layout, client-side routing, counters, keyed lists, forms, settings, and compiler/stream diagnostics. Run it with `pnpm example:full-app`, then open the Vite dev server root. Source pages are route-local `.td` templates, and the example Vite config generates dev/build HTML entries instead of keeping `index.html` files in source. Production output is available with `pnpm example:full-app:build`; the example config builds every generated page entry and minifies HTML during build.
 
 ## Recommended App Shape

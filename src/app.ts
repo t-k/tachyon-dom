@@ -37,6 +37,13 @@ export type TachyonAppDefinition<Pages extends readonly TachyonAppPage<any>[] = 
   pages: Pages;
   shell?: (context: TachyonAppShellContext) => string;
   assets?: TachyonAppAssets | ((page: TachyonAppPage) => TachyonAppAssets);
+  notFound?: TachyonAppNotFoundPage;
+};
+
+export type TachyonAppNotFoundPage = {
+  title?: string;
+  assets?: TachyonAppAssets;
+  render: (context: { path: string }) => string;
 };
 
 export type TachyonAppAssets = {
@@ -60,12 +67,18 @@ export type TachyonAppHtmlEntry = {
   path: string;
 };
 
+export type TachyonAppRenderResult = {
+  status: 200 | 404;
+  html: string;
+};
+
 export type TachyonApp = {
   pages: readonly TachyonAppPage[];
   pageForPath: (path: string) => TachyonAppPage | undefined;
   renderRoute: (path: string) => string;
   renderShell: (path: string) => string;
   renderDocument: (path: string, options?: TachyonAppDocumentOptions) => string;
+  renderResponse: (path: string, options?: TachyonAppDocumentOptions) => TachyonAppRenderResult;
   entries: (options?: TachyonAppDocumentOptions) => TachyonAppHtmlEntry[];
 };
 
@@ -157,6 +170,12 @@ const titleForPage = (app: TachyonAppDefinition, page: TachyonAppPage): string =
 export const renderAppDocument = (app: TachyonApp, path: string, options: TachyonAppDocumentOptions = {}): string =>
   app.renderDocument(path, options);
 
+export const renderAppResponse = (
+  app: TachyonApp,
+  path: string,
+  options: TachyonAppDocumentOptions = {},
+): TachyonAppRenderResult => app.renderResponse(path, options);
+
 export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
   definition: Omit<TachyonAppDefinition<Pages>, "pages"> & { pages: ValidateTypedPageScopes<Pages> },
 ): TachyonApp => {
@@ -204,12 +223,14 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     return (definition.shell ?? defaultShell)({ page, routeHtml });
   };
 
-  const renderDocument = (path: string, options: TachyonAppDocumentOptions = {}): string => {
-    const page = pageForPath(path);
-    if (!page) {
-      throw new Error(`No page found for ${path}.`);
-    }
-    const assets = assetsForPage(definition, page, options.assets);
+  const documentFor = (
+    page: TachyonAppPage,
+    routeHtml: string,
+    options: TachyonAppDocumentOptions,
+    assetsOverride?: TachyonAppAssets,
+  ): string => {
+    const assets = assetsForPage(definition, page, options.assets ?? assetsOverride);
+    const shell = (definition.shell ?? defaultShell)({ page, routeHtml });
     const html = `<!doctype html>
 <html lang="${escapeHtml(definition.lang ?? "en")}">
   <head>
@@ -220,17 +241,42 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     ${(assets.scripts ?? []).map((src) => `<script type="module" src="${escapeHtml(src)}"></script>`).join("\n    ")}
   </head>
   <body>
-    ${renderShell(page.path)}
+    ${shell}
   </body>
 </html>
 `;
     return options.minify ? minifyHtml(html) : html;
   };
 
+  const renderDocument = (path: string, options: TachyonAppDocumentOptions = {}): string => {
+    const page = pageForPath(path);
+    if (!page) {
+      throw new Error(`No page found for ${path}.`);
+    }
+    return documentFor(page, renderRoute(page.path), options);
+  };
+
+  const renderResponse = (path: string, options: TachyonAppDocumentOptions = {}): TachyonAppRenderResult => {
+    const page = pageForPath(path);
+    if (page) {
+      return { status: 200, html: renderDocument(page.path, options) };
+    }
+    const fallback = definition.notFound;
+    const fallbackPage: TachyonAppPage = {
+      path: normalizeAppPath(path),
+      fileName: "404.html",
+      title: fallback?.title ?? "Not Found",
+      template: "",
+    };
+    const routeHtml = fallback?.render({ path }) ?? "<h1>Not Found</h1>";
+    return { status: 404, html: documentFor(fallbackPage, routeHtml, options, fallback?.assets) };
+  };
+
   return {
     pages,
     pageForPath,
     renderDocument,
+    renderResponse,
     renderRoute,
     renderShell,
     entries: (options = {}) =>
