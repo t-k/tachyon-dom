@@ -1,4 +1,4 @@
-import { compileServerTemplate, compileTemplate } from "./compiler/index.js";
+import { compileServerTemplate } from "./compiler/index.js";
 import { compileTachyonSfc, generateSfcScriptDeclarations } from "./compiler/sfc.js";
 import { escapeHtml } from "./html-escape.js";
 import type { ClientBinding, CompiledTemplate } from "./compiler/types.js";
@@ -124,11 +124,11 @@ const templateSource = (template: string | TypedTemplate<TemplateScope>): string
   typeof template === "string" ? template : template.source;
 
 const compilePage = (page: TachyonAppPage): CompiledTemplate => {
-  const result = compileTemplate(templateSource(page.template));
+  const result = compileTachyonSfc(templateSource(page.template));
   if (!result.ok) {
     throw new Error(result.error.message);
   }
-  return result.value;
+  return result.value.template;
 };
 
 const compilePageRenderer = (page: TachyonAppPage): ((scope: Record<string, unknown>) => string) =>

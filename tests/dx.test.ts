@@ -483,6 +483,19 @@ const increment = (): void => {
     expect(() => renderAppDocument(app, "/missing/")).toThrow("No page found");
   });
 
+  it("renders an SFC page source through defineApp", () => {
+    const app = defineApp({
+      pages: [{
+        path: "/",
+        fileName: "index.html",
+        template: `<script>export const scope = () => ({ title: "Welcome" });</script><section><h1>{title}</h1></section>`,
+        scope: { title: "Welcome" },
+      }],
+    });
+
+    expect(app.renderRoute("/")).toBe("<section><h1>Welcome</h1></section>");
+  });
+
   it("rejects duplicate normalized app paths and output names", () => {
     expect(() =>
       defineApp({
