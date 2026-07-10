@@ -277,6 +277,13 @@ export const createResource = <Source, T>(
       );
     return current;
   };
-  void run();
+  if (isSignal(source)) {
+    effect(() => {
+      source();
+      void untrack(run);
+    });
+  } else {
+    void run();
+  }
   return { data, error, loading, refetch: run };
 };

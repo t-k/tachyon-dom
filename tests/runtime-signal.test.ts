@@ -233,4 +233,22 @@ describe("signal runtime", () => {
 
     expect(seen).toEqual(["true:-:-", "false:OK:-", "true:OK:-", "false:OK:err"]);
   });
+
+  it("refetches when an accessor source changes", async () => {
+    const key = createSignal("first");
+    const calls: string[] = [];
+    const resource = createResource(key, async (value) => {
+      calls.push(value);
+      return value.toUpperCase();
+    });
+
+    await resource.refetch();
+    key.set("second");
+    await Promise.resolve();
+    await Promise.resolve();
+    await resource.refetch();
+
+    expect(calls).toEqual(["first", "second"]);
+    expect(resource.data()).toBe("SECOND");
+  });
 });
