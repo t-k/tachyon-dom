@@ -1,7 +1,14 @@
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createNodeHandler, defineStaticRoute, type RouteDefinition, type StaticRouteDefinition } from "../../../../src/adapters";
+import {
+  createNodeHandler,
+  defineStaticRoute,
+  writeNodeResponse,
+  type RouteDefinition,
+  type StaticRouteDefinition,
+} from "../../../../src/adapters";
+import { renderToResponse } from "../../../../src/server/stream";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distRoot = path.resolve(__dirname, "../../../../dist");
@@ -30,8 +37,14 @@ const ordersBody = () => `<h1>Dashboard</h1><h2 data-route="orders">Orders</h2><
 const ordersNavBody = () => `<h1>Dashboard</h1><h2 data-route="orders">Orders</h2>`;
 
 const streamShell = `<main id="app" data-route="stream"><h1>Stream</h1><p data-stream="shell">Shell</p>`;
-const streamBody = () => `<section data-stream="done"><h2>Deferred payload</h2><ul>${items("stream")}</ul></section></main>`;
+const streamBody = () =>
+  `<section data-stream="done"><h2>Deferred payload</h2><ul>${items("stream")}</ul></section></main>`;
 const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const streamChunks = async function* () {
+  yield streamShell;
+  await delay(20);
+  yield streamBody();
+};
 
 const interactiveBody = () => `<h1>Interactive</h1><h2>Counter</h2>
 <button data-action="increment" type="button">Increment</button>
@@ -127,32 +140,28 @@ const routes: RouteDefinition[] = [
     path: "/products/:id",
     render: ({ params }) => documentShell(productBody(params.id), "product"),
   },
-  {
-    path: "/stream",
-    fallback: streamShell,
-    loader: async () => {
-      await delay(20);
-      return streamBody();
-    },
-    render: ({ data }) => data as string,
-  },
 ];
-const server = createServer(
-  createNodeHandler({
-    routes,
-    streaming: true,
-    staticAssets: { rootDir: distRoot, basePath: "/tachyon-dom/" },
-    staticRoutes: [
-      route("/", homeHtml),
-      route("/dashboard/users", usersHtml),
-      route("/dashboard/users?partial=1", usersPartialHtml),
-      route("/dashboard/orders", ordersHtml),
-      route("/dashboard/orders?partial=1", ordersPartialHtml),
-      route("/interactive", interactiveHtml),
-    ],
-    notFound: () => "Not Found",
-  }),
-);
+const routeHandler = createNodeHandler({
+  routes,
+  streaming: true,
+  staticAssets: { rootDir: distRoot, basePath: "/tachyon-dom/" },
+  staticRoutes: [
+    route("/", homeHtml),
+    route("/dashboard/users", usersHtml),
+    route("/dashboard/users?partial=1", usersPartialHtml),
+    route("/dashboard/orders", ordersHtml),
+    route("/dashboard/orders?partial=1", ordersPartialHtml),
+    route("/interactive", interactiveHtml),
+  ],
+  notFound: () => "Not Found",
+});
+const server = createServer(async (request, response) => {
+  if (new URL(request.url ?? "/", "http://benchmark.local").pathname === "/stream") {
+    await writeNodeResponse(renderToResponse(streamChunks()), response);
+    return;
+  }
+  await routeHandler(request, response);
+});
 
 server.listen(port, "127.0.0.1", () => {
   const address = server.address();
