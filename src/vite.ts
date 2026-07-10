@@ -12,7 +12,7 @@ import {
   type TachyonApp,
   type TachyonAppAssets,
   type TachyonAppDefinition,
-  type HtmlWhitespacePolicy,
+  type HtmlWhitespacePolicyInput,
 } from "./app.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
@@ -56,7 +56,7 @@ export type TachyonDomRoutesViteOptions = {
 
 export type TachyonAppViteOptions = {
   appScript?: string;
-  htmlWhitespace?: HtmlWhitespacePolicy;
+  htmlWhitespace?: HtmlWhitespacePolicyInput;
   /** @deprecated Use `htmlWhitespace` instead. */
   minifyHtml?: boolean;
 };

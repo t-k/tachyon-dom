@@ -4,9 +4,9 @@ import { escapeHtml } from "./html-escape.js";
 import type { ClientBinding, CompiledTemplate, TemplateWhitespacePolicy } from "./compiler/types.js";
 import { err, ok, type Result } from "./result.js";
 import type { TemplateScope, TypedTemplate } from "./typed.js";
-import { applyHtmlWhitespace, normalizeHtmlTagWhitespace, type HtmlWhitespacePolicy } from "./html-whitespace.js";
+import { applyHtmlWhitespace, normalizeHtmlTagWhitespace, type HtmlWhitespacePolicyInput } from "./html-whitespace.js";
 
-export type { HtmlWhitespacePolicy } from "./html-whitespace.js";
+export type { HtmlWhitespacePolicy, HtmlWhitespacePolicyInput, LegacyHtmlWhitespacePolicy } from "./html-whitespace.js";
 export { condenseHtmlWhitespace, normalizeHtmlTagWhitespace } from "./html-whitespace.js";
 
 type TachyonAppPageBase = {
@@ -65,7 +65,7 @@ export type TachyonAppShellContext = {
 
 export type TachyonAppDocumentOptions = {
   assets?: TachyonAppAssets;
-  whitespace?: HtmlWhitespacePolicy;
+  whitespace?: HtmlWhitespacePolicyInput;
   /** @deprecated Use `whitespace: "normalize-tags"` instead. */
   minify?: boolean;
 };

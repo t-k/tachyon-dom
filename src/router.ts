@@ -1,7 +1,7 @@
 import { escapeHtml } from "./html-escape.js";
 import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
-import { applyHtmlWhitespace, type HtmlWhitespacePolicy } from "./html-whitespace.js";
+import { applyHtmlWhitespace, type HtmlWhitespacePolicyInput } from "./html-whitespace.js";
 
 export type RouteParams = Record<string, string>;
 
@@ -126,7 +126,7 @@ export type RouteRenderOptions = {
   hooks?: RouteHooks;
   env?: RouteEnvironment;
   /** Applied only after buffered rendering. Streaming chunks are always preserved. */
-  htmlWhitespace?: HtmlWhitespacePolicy;
+  htmlWhitespace?: HtmlWhitespacePolicyInput;
 };
 
 export type RouteError = {
