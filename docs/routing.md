@@ -38,6 +38,8 @@ export default defineRouteModule({
 
 `routeFromModule(id, module)` adapts this convention into a `RouteDefinition`.
 
+`NotFound` is a route-branch boundary for unmatched descendants. When no route matches the complete URL, the router compares pathname segments against each route's full nested path and calls the deepest matching boundary. Dynamic segments match one segment, static prefixes match only at segment boundaries, and a boundary on `/` is the top-level fallback. A wildcard route that matches the complete URL renders normally instead of invoking `NotFound`. If no route boundary owns the pathname, `renderRoute()` uses its global `notFound` option and then the built-in 404 body.
+
 ## Server Rendering
 
 `renderRoute(routes, requestOrUrl, options)` returns:

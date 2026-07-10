@@ -249,6 +249,41 @@ describe("server adapters", () => {
     expect(chunks.join("")).toBe("<h1>Home</h1>");
   });
 
+  it("preserves route-boundary 404 status and body across server adapters", async () => {
+    const routes: RouteDefinition[] = [
+      { path: "/", render: () => "home", notFound: ({ url }) => `<h1>Missing ${url.pathname}</h1>` },
+    ];
+    const workersResponse = await createWorkersHandler({ routes }).fetch(
+      new Request("https://example.com/missing"),
+    );
+    expect(workersResponse.status).toBe(404);
+    expect(await workersResponse.text()).toBe("<h1>Missing /missing</h1>");
+
+    const lambdaResponse = await createLambdaHandler({ routes })(lambdaEvent({ rawPath: "/missing" }));
+    expect(lambdaResponse.statusCode).toBe(404);
+    expect(lambdaResponse.body).toBe("<h1>Missing /missing</h1>");
+
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/missing";
+    req.headers = { host: "example.com" };
+    const chunks: string[] = [];
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn((chunk?: string) => {
+        if (chunk) chunks.push(chunk);
+      }),
+    };
+    await createNodeHandler({ routes })(req as never, res as never);
+    expect(res.statusCode).toBe(404);
+    expect(chunks.join("")).toBe("<h1>Missing /missing</h1>");
+  });
+
   it("aborts the Node fetch request signal when the client connection closes", async () => {
     const req = new Readable({ read() {} }) as Readable & {
       method: string;

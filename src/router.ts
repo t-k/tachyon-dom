@@ -1031,17 +1031,27 @@ const nearestNotFoundBoundary = (
   routes: readonly RouteDefinition[],
   pathname: string,
 ): RouteDefinition["notFound"] | undefined => {
-  let selected: { length: number; handler: NonNullable<RouteDefinition["notFound"]> } | undefined;
-  const visit = (entries: readonly RouteDefinition[]): void => {
-    for (const route of entries) {
-      const prefix = route.path.replace(/[:*][^/]+/g, "").replace(/\/$/, "");
-      if (route.notFound && prefix && (pathname === prefix || pathname.startsWith(`${prefix}/`))) {
-        if (!selected || prefix.length > selected.length) selected = { length: prefix.length, handler: route.notFound };
-      }
-      if (route.children) visit(route.children);
+  const pathnameSegments = trimSlashes(pathname).split("/").filter(Boolean);
+  let selected: { depth: number; handler: NonNullable<RouteDefinition["notFound"]> } | undefined;
+  for (const candidate of flattenRoutes(routes)) {
+    if (!candidate.route.notFound) {
+      continue;
     }
-  };
-  visit(routes);
+    const patternSegments = trimSlashes(candidate.path).split("/").filter(Boolean);
+    let matches = patternSegments.length <= pathnameSegments.length;
+    for (let index = 0; matches && index < patternSegments.length; index += 1) {
+      const pattern = patternSegments[index] as string;
+      if (pattern === "*" || pattern.startsWith("*")) {
+        break;
+      }
+      if (!pattern.startsWith(":") && pattern !== pathnameSegments[index]) {
+        matches = false;
+      }
+    }
+    if (matches && (!selected || patternSegments.length > selected.depth)) {
+      selected = { depth: patternSegments.length, handler: candidate.route.notFound };
+    }
+  }
   return selected?.handler;
 };
 

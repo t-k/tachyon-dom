@@ -91,6 +91,46 @@ describe("advanced router features", () => {
     expect(result.ok && result.value).toMatchObject({ status: 404, html: "<h1>Missing /users/missing</h1>" });
   });
 
+  it("selects the deepest dynamic not-found boundary for an unmatched nested descendant", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        path: "/app",
+        render: ({ outlet }) => `<main>${outlet}</main>`,
+        notFound: () => "app missing",
+        children: [
+          {
+            path: "users/:id",
+            render: () => "user",
+            notFound: ({ url }) => `user missing ${url.pathname}`,
+          },
+        ],
+      },
+    ];
+
+    const nested = await renderRoute(routes, "https://example.com/app/users/42/settings/profile");
+    const parent = await renderRoute(routes, "https://example.com/app/other/missing");
+
+    expect(nested.ok && nested.value).toMatchObject({
+      status: 404,
+      html: "user missing /app/users/42/settings/profile",
+    });
+    expect(parent.ok && parent.value).toMatchObject({ status: 404, html: "app missing" });
+  });
+
+  it("uses a root boundary without confusing segment prefixes and lets wildcard routes match normally", async () => {
+    const routes: RouteDefinition[] = [
+      { path: "/", render: () => "home", notFound: () => "root missing" },
+      { path: "/user", render: () => "user", notFound: () => "user missing" },
+      { path: "/docs/*slug", render: ({ params }) => `docs:${params.slug}`, notFound: () => "docs missing" },
+    ];
+
+    const unrelated = await renderRoute(routes, "https://example.com/users/missing");
+    const wildcard = await renderRoute(routes, "https://example.com/docs/guides/start");
+
+    expect(unrelated.ok && unrelated.value).toMatchObject({ status: 404, html: "root missing" });
+    expect(wildcard.ok && wildcard.value).toMatchObject({ status: 200, html: "docs:guides/start" });
+  });
+
   it("collects preload resources from matched route branches", async () => {
     const routes: RouteDefinition[] = [
       {
