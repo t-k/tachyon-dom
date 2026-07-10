@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createNodeHandler, defineStaticRoute, type StaticRouteDefinition } from "../../../../src/adapters";
+import { createNodeHandler, defineStaticRoute, type RouteDefinition, type StaticRouteDefinition } from "../../../../src/adapters";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distRoot = path.resolve(__dirname, "../../../../dist");
@@ -117,7 +117,6 @@ const documentShell = (body, route) => `<!doctype html>
 const portArg = process.argv.indexOf("--port");
 const port = portArg >= 0 ? Number(process.argv[portArg + 1]) : Number(process.env.PORT ?? 0);
 const homeHtml = documentShell(homeBody(), "home");
-const product42Html = documentShell(productBody("42"), "product");
 const usersHtml = documentShell(usersBody(), "users");
 const ordersHtml = documentShell(ordersBody(), "orders");
 const interactiveHtml = documentShell(interactiveBody(), "interactive");
@@ -126,13 +125,18 @@ const ordersPartialHtml = ordersNavBody();
 const streamPartialHtml = partial("stream", streamBody());
 const streamHtml = partial("stream", streamBody());
 const route = (path: string, body: string): StaticRouteDefinition => defineStaticRoute({ path, body });
+const routes: RouteDefinition[] = [
+  {
+    path: "/products/:id",
+    render: ({ params }) => documentShell(productBody(params.id), "product"),
+  },
+];
 const server = createServer(
   createNodeHandler({
-    routes: [],
+    routes,
     staticAssets: { rootDir: distRoot, basePath: "/tachyon-dom/" },
     staticRoutes: [
       route("/", homeHtml),
-      route("/products/42", product42Html),
       route("/dashboard/users", usersHtml),
       route("/dashboard/users?partial=1", usersPartialHtml),
       route("/dashboard/orders", ordersHtml),

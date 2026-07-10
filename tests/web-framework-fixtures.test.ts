@@ -18,19 +18,18 @@ describe("web framework benchmark fixtures", () => {
     expect(source).not.toContain("fallback: documentShell");
   });
 
-  it("keeps Tachyon benchmark hot paths lean", () => {
+  it("uses request-time Tachyon routing for the dynamic benchmark scenario", () => {
     const source = readFileSync(fixture("tachyon/server.ts"), "utf8");
 
-    expect(source).not.toContain("loader: ({ params })");
+    expect(source).toContain('path: "/products/:id"');
+    expect(source).toContain("render: ({ params }) => documentShell(productBody(params.id)");
     expect(source).toContain("defineStaticRoute");
     expect(source).toContain("staticRoutes");
     expect(source).toContain("createClientRouter");
     expect(source).toContain('target: "#app"');
     expect(source).toContain("staticAssets");
     expect(source).toContain("streamHtml");
-    expect(source).toContain("product42Html");
     expect(source).toContain("interactiveHtml");
-    expect(source).toContain('route("/products/42", product42Html)');
     expect(source).toContain('route("/interactive", interactiveHtml)');
     expect(source).toContain('route("/stream", streamHtml)');
   });
