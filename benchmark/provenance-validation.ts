@@ -2,15 +2,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 export const valueAtBenchmarkPath = (value: unknown, fieldPath: string): unknown =>
-  fieldPath
-    .split(".")
-    .reduce<unknown>((current, field) => (isRecord(current) ? current[field] : undefined), value);
+  fieldPath.split(".").reduce<unknown>((current, field) => (isRecord(current) ? current[field] : undefined), value);
 
 const nonEmptyString = (value: unknown): boolean => typeof value === "string" && value.length > 0;
 const nullableString = (value: unknown): boolean => value === null || nonEmptyString(value);
 const nullableBoolean = (value: unknown): boolean => value === null || typeof value === "boolean";
 const positiveInteger = (value: unknown): boolean => Number.isInteger(value) && Number(value) > 0;
-const stringArray = (value: unknown): boolean => Array.isArray(value) && value.every((item) => typeof item === "string");
+const stringArray = (value: unknown): boolean =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
 
 const validDependencies = (value: unknown): boolean =>
   isRecord(value) &&
@@ -26,7 +25,9 @@ const validGitMetadata = (value: unknown): boolean => {
   if (value.available) {
     return nonEmptyString(value.commit) && typeof value.dirty === "boolean" && nonEmptyString(value.workingTreeSha256);
   }
-  return value.commit === null && value.dirty === null && value.workingTreeSha256 === null && nonEmptyString(value.reason);
+  return (
+    value.commit === null && value.dirty === null && value.workingTreeSha256 === null && nonEmptyString(value.reason)
+  );
 };
 
 const baseFieldValidators: ReadonlyArray<readonly [string, (value: unknown) => boolean]> = [

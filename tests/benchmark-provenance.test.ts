@@ -139,10 +139,7 @@ describe("benchmark provenance", () => {
     const missingWorkload = compareBenchmarkEnvelopes(missingWorkloadBaseline, missingWorkloadCandidate, {
       requiredEqualPaths: ["workload.connections"],
     });
-    expect(missingWorkload.invalidFields).toEqual([
-      "baseline.workload.connections",
-      "candidate.workload.connections",
-    ]);
+    expect(missingWorkload.invalidFields).toEqual(["baseline.workload.connections", "candidate.workload.connections"]);
 
     const wrongTypeBaseline = structuredClone(envelope()) as any;
     wrongTypeBaseline.provenance.host.logicalCpuCount = "8";
@@ -153,7 +150,11 @@ describe("benchmark provenance", () => {
   });
 
   it("records resolved and unavailable dependency versions from the requested project", async () => {
-    const dependencies = await collectDependencyVersions(process.cwd(), ["vite", "@marko/run", "missing-benchmark-package"]);
+    const dependencies = await collectDependencyVersions(process.cwd(), [
+      "vite",
+      "@marko/run",
+      "missing-benchmark-package",
+    ]);
 
     expect(dependencies.vite?.version).toMatch(/^8\./);
     expect(dependencies["@marko/run"]?.version).toMatch(/^0\.10\./);
@@ -165,15 +166,27 @@ describe("benchmark provenance", () => {
     const directory = await mkdtemp(path.join(tmpdir(), "tachyon-backpressure-envelope-"));
     const output = path.join(directory, "result.json");
     try {
-      await execFileAsync("pnpm", [
-        "exec", "tsx", "benchmark/streaming-backpressure.ts",
-        "--connections", "1",
-        "--chunks", "8",
-        "--chunk-bytes", "4096",
-        "--drain-delay-ms", "1",
-        "--label", "test",
-        "--output", output,
-      ], { cwd: process.cwd(), maxBuffer: 16 * 1024 * 1024 });
+      await execFileAsync(
+        "pnpm",
+        [
+          "exec",
+          "tsx",
+          "benchmark/streaming-backpressure.ts",
+          "--connections",
+          "1",
+          "--chunks",
+          "8",
+          "--chunk-bytes",
+          "4096",
+          "--drain-delay-ms",
+          "1",
+          "--label",
+          "test",
+          "--output",
+          output,
+        ],
+        { cwd: process.cwd(), maxBuffer: 16 * 1024 * 1024 },
+      );
       const result = JSON.parse(await readFile(output, "utf8")) as BenchmarkEnvelope<
         { transport?: string; connections?: number },
         { completionTimeMs?: number; sourcePullCount?: number }

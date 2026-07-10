@@ -232,7 +232,8 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
       return "";
     }
     const render =
-      renderers.get(page.path) ?? compilePageRenderer(page, page.templateWhitespace ?? definition.templateWhitespace ?? "preserve");
+      renderers.get(page.path) ??
+      compilePageRenderer(page, page.templateWhitespace ?? definition.templateWhitespace ?? "preserve");
     renderers.set(page.path, render);
     return render(scopeForPage(page));
   };

@@ -24,9 +24,9 @@ const condenseStaticTextValue = (value: string): string => {
 
 const condenseTextValue = (value: string): string =>
   textExpressionSegments(value)
-    .map((segment) => segment.kind === "text"
-      ? condenseStaticTextValue(segment.value)
-      : value.slice(segment.start, segment.end))
+    .map((segment) =>
+      segment.kind === "text" ? condenseStaticTextValue(segment.value) : value.slice(segment.start, segment.end),
+    )
     .join("");
 
 const transformNode = (node: TemplateNode, protectedContext: boolean): TemplateNode => {
@@ -43,7 +43,5 @@ const transformNode = (node: TemplateNode, protectedContext: boolean): TemplateN
   } satisfies ElementNode;
 };
 
-export const applyTemplateWhitespace = (
-  root: ElementNode,
-  policy: TemplateWhitespacePolicy,
-): ElementNode => policy === "condense" ? transformNode(root, false) as ElementNode : root;
+export const applyTemplateWhitespace = (root: ElementNode, policy: TemplateWhitespacePolicy): ElementNode =>
+  policy === "condense" ? (transformNode(root, false) as ElementNode) : root;

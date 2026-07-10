@@ -84,11 +84,14 @@ describe("advanced router features", () => {
   });
 
   it("uses a route module not-found boundary for an unmatched descendant", async () => {
-    const route = routeFromModule("users", defineRouteModule({
-      path: "/users",
-      NotFound: ({ url }) => `<h1>Missing ${url.pathname}</h1>`,
-      render: () => "users",
-    }));
+    const route = routeFromModule(
+      "users",
+      defineRouteModule({
+        path: "/users",
+        NotFound: ({ url }) => `<h1>Missing ${url.pathname}</h1>`,
+        render: () => "users",
+      }),
+    );
 
     const result = await renderRoute([route], "https://example.com/users/missing");
 
@@ -193,9 +196,7 @@ describe("advanced router features", () => {
 
     expect(result.ok && result.value.resourceHints).toContain(`<link rel="modulepreload" href="/app-shell.js">`);
     expect(result.ok && result.value.resourceHints).toContain(`<link rel="modulepreload" href="/users/42.js">`);
-    expect(result.ok && result.value.resourceHints).toContain(
-      `<link rel="preload" href="/app-shell.js" as="script">`,
-    );
+    expect(result.ok && result.value.resourceHints).toContain(`<link rel="preload" href="/app-shell.js" as="script">`);
   });
 
   it("matches named wildcard route params from file-route catchalls", async () => {
@@ -428,10 +429,7 @@ describe("advanced router features", () => {
     expect(result.value.status).toBe(200);
     expect(result.value.headers.get("cache-control")).toBe("no-store");
     expect(result.value.headers.get("content-security-policy")).toBe("default-src 'self'");
-    expect(result.value.headers.getSetCookie()).toEqual([
-      "sid=updated; Path=/; HttpOnly",
-      "theme=dark; Path=/",
-    ]);
+    expect(result.value.headers.getSetCookie()).toEqual(["sid=updated; Path=/; HttpOnly", "theme=dark; Path=/"]);
     expect(result.value.headers.get("vary")).toBe("Cookie, Accept-Encoding");
     const chunks: string[] = [];
     for await (const chunk of result.value.chunks) chunks.push(chunk);

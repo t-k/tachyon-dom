@@ -52,7 +52,11 @@ const workingTreeHash = async (cwd: string, commit: string): Promise<string> => 
   ]);
   const hash = createHash("sha256").update(commit).update("\0").update(status).update("\0").update(diff);
   for (const relativeFile of untracked.split("\0").filter(Boolean).sort()) {
-    hash.update("\0").update(relativeFile).update("\0").update(await readFile(path.join(cwd, relativeFile)));
+    hash
+      .update("\0")
+      .update(relativeFile)
+      .update("\0")
+      .update(await readFile(path.join(cwd, relativeFile)));
   }
   return hash.digest("hex");
 };
@@ -114,39 +118,44 @@ export const collectDependencyVersions = async (
   packageNames: readonly string[],
 ): Promise<Record<string, BenchmarkDependency>> => {
   const requireFromProject = createRequire(path.join(path.resolve(cwd), "package.json"));
-  const entries = await Promise.all(packageNames.map(async (packageName) => {
-    try {
-      let packageFile: string;
+  const entries = await Promise.all(
+    packageNames.map(async (packageName) => {
       try {
-        packageFile = requireFromProject.resolve(`${packageName}/package.json`);
-      } catch {
-        let directory = path.dirname(requireFromProject.resolve(packageName));
-        while (true) {
-          const candidate = path.join(directory, "package.json");
-          try {
-            const manifest = JSON.parse(await readFile(candidate, "utf8")) as { name?: unknown };
-            if (manifest.name === packageName) {
-              packageFile = candidate;
-              break;
+        let packageFile: string;
+        try {
+          packageFile = requireFromProject.resolve(`${packageName}/package.json`);
+        } catch {
+          let directory = path.dirname(requireFromProject.resolve(packageName));
+          while (true) {
+            const candidate = path.join(directory, "package.json");
+            try {
+              const manifest = JSON.parse(await readFile(candidate, "utf8")) as { name?: unknown };
+              if (manifest.name === packageName) {
+                packageFile = candidate;
+                break;
+              }
+            } catch {
+              // Continue toward the filesystem root.
             }
-          } catch {
-            // Continue toward the filesystem root.
+            const parent = path.dirname(directory);
+            if (parent === directory) throw new Error(`Could not locate package.json for ${packageName}.`);
+            directory = parent;
           }
-          const parent = path.dirname(directory);
-          if (parent === directory) throw new Error(`Could not locate package.json for ${packageName}.`);
-          directory = parent;
         }
+        const manifest = JSON.parse(await readFile(packageFile, "utf8")) as { version?: unknown };
+        if (typeof manifest.version !== "string") throw new Error(`${packageFile} has no string version.`);
+        return [packageName, { version: manifest.version }] as const;
+      } catch (error) {
+        return [
+          packageName,
+          {
+            version: null,
+            reason: error instanceof Error ? error.message : String(error),
+          },
+        ] as const;
       }
-      const manifest = JSON.parse(await readFile(packageFile, "utf8")) as { version?: unknown };
-      if (typeof manifest.version !== "string") throw new Error(`${packageFile} has no string version.`);
-      return [packageName, { version: manifest.version }] as const;
-    } catch (error) {
-      return [packageName, {
-        version: null,
-        reason: error instanceof Error ? error.message : String(error),
-      }] as const;
-    }
-  }));
+    }),
+  );
   return Object.fromEntries(entries);
 };
 
@@ -165,7 +174,8 @@ export type BenchmarkComparison = {
 };
 
 const isEnvelope = (value: unknown): value is BenchmarkEnvelope<unknown, unknown> =>
-  typeof value === "object" && value !== null &&
+  typeof value === "object" &&
+  value !== null &&
   (value as { schemaVersion?: unknown }).schemaVersion === 2 &&
   typeof (value as { provenance?: unknown }).provenance === "object";
 

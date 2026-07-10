@@ -843,10 +843,7 @@ describe("server adapters", () => {
 
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("content-security-policy")).toBe("default-src 'self'");
-    expect(response.headers.getSetCookie()).toEqual([
-      "sid=updated; Path=/; HttpOnly",
-      "theme=dark; Path=/",
-    ]);
+    expect(response.headers.getSetCookie()).toEqual(["sid=updated; Path=/; HttpOnly", "theme=dark; Path=/"]);
     expect(response.headers.get("vary")).toBe("Cookie, Accept-Encoding");
     expect(await response.text()).toBe("<h1>sid=a</h1>");
   });
@@ -949,10 +946,7 @@ describe("server adapters", () => {
     await createNodeHandler({ routes, streaming: true })(nodeRequest("GET") as never, nodeGet.response as never);
     expect(nodeGet.headers.get("cache-control")).toBe("no-store");
     expect(nodeGet.headers.get("content-security-policy")).toBe("default-src 'self'");
-    expect(nodeGet.headers.get("set-cookie")).toEqual([
-      "sid=updated; Path=/; HttpOnly",
-      "theme=dark; Path=/",
-    ]);
+    expect(nodeGet.headers.get("set-cookie")).toEqual(["sid=updated; Path=/; HttpOnly", "theme=dark; Path=/"]);
     expect(nodeGet.headers.get("vary")).toBe("Cookie, Accept-Encoding");
     expect(nodeGet.chunks.join("")).toBe("<h1>private account</h1>");
 
@@ -1155,7 +1149,11 @@ describe("server adapters", () => {
       streamifyResponse: vi.fn((handler) => handler),
       HttpResponseStream: { from: metadata },
     };
-    const responseStream = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+    const responseStream = new Writable({
+      write(_chunk, _encoding, callback) {
+        callback();
+      },
+    });
     const streamingHandler = createLambdaStreamingHandler({ routes, streaming: true }, runtime) as (
       event: ReturnType<typeof lambdaEvent>,
       responseStream: Writable,

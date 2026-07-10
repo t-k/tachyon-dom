@@ -38,7 +38,14 @@ describe("HTML-first compiler", () => {
     if (!input || input.type !== "element") throw new Error("Missing input node.");
 
     expect(input).toMatchObject({ start: 9, openEnd: 34, end: 34 });
-    expect(input.attrs[0]).toMatchObject({ start: 16, end: 33, nameStart: 16, nameEnd: 26, valueStart: 27, valueEnd: 33 });
+    expect(input.attrs[0]).toMatchObject({
+      start: 16,
+      end: 33,
+      nameStart: 16,
+      nameEnd: 26,
+      valueStart: 27,
+      valueEnd: 33,
+    });
     const text = result.value.children.find((node) => node.type === "text" && node.value.includes("text"));
     expect(text).toMatchObject({ start: 34, end: 39 });
   });
@@ -149,13 +156,9 @@ describe("HTML-first compiler", () => {
     if (!raw.ok) throw new Error(raw.error.message);
     if (!fragment.ok) throw new Error(fragment.error.message);
 
-    expect(renderServerTemplate(inline.value, {})).toBe(
-      `<p><span>Hello</span> world and <strong>friends</strong></p>`,
-    );
+    expect(renderServerTemplate(inline.value, {})).toBe(`<p><span>Hello</span> world and <strong>friends</strong></p>`);
     expect(renderServerTemplate(raw.value, { show: true })).toBe(`<pre>\n  <span>x</span>\n</pre>`);
-    expect(renderServerTemplate(fragment.value, { show: true })).toBe(
-      `<p>Hello <strong>world</strong> !</p>`,
-    );
+    expect(renderServerTemplate(fragment.value, { show: true })).toBe(`<p>Hello <strong>world</strong> !</p>`);
   });
 
   it("caches generated target modules for repeated compiled template objects", () => {

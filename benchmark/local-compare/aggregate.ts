@@ -57,7 +57,9 @@ const median = (values: readonly number[]): number => {
   const sorted = [...values].filter(Number.isFinite).sort((left, right) => left - right);
   if (sorted.length === 0) return Number.NaN;
   const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? (sorted[middle] as number) : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
+  return sorted.length % 2
+    ? (sorted[middle] as number)
+    : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
 };
 
 type Measurement = { key: string; implementation: string; value: number };
@@ -96,17 +98,18 @@ const report = (title: string, measurements: Map<string, Map<string, number[]>>,
   let wins = 0;
   let total = 0;
   for (const [key, byImplementation] of measurements) {
-    const medians = implementations.map((implementation) => [
-      implementation,
-      median(byImplementation.get(implementation) ?? []),
-    ] as const);
+    const medians = implementations.map(
+      (implementation) => [implementation, median(byImplementation.get(implementation) ?? [])] as const,
+    );
     const finite = medians.filter((entry) => Number.isFinite(entry[1]));
     const best = lowerIsBetter
       ? Math.min(...finite.map((entry) => entry[1]))
       : Math.max(...finite.map((entry) => entry[1]));
     const candidateValue = medians.find((entry) => entry[0] === candidate)?.[1] ?? Number.NaN;
     const ratio = candidateValue / best;
-    const better = finite.filter((entry) => lowerIsBetter ? entry[1] < candidateValue - 1e-9 : entry[1] > candidateValue + 1e-9).length;
+    const better = finite.filter((entry) =>
+      lowerIsBetter ? entry[1] < candidateValue - 1e-9 : entry[1] > candidateValue + 1e-9,
+    ).length;
     const rank = better + 1;
     total += 1;
     const isWin = rank === 1 || Math.abs(ratio - 1) < 0.005;
