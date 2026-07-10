@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -916,7 +916,9 @@ describe("server adapters", () => {
     const outside = await mkdtemp(path.join(tmpdir(), "tachyon-adapter-outside-"));
     try {
       await writeFile(path.join(root, "app.js"), `console.log("asset");`);
+      await writeFile(path.join(root, ".env"), "secret");
       await writeFile(path.join(outside, "secret.txt"), "secret");
+      await symlink(path.join(outside, "secret.txt"), path.join(root, "linked.txt"));
       let fetchCalls = 0;
       const handler = createNodeFetchHandler({
         staticAssets: { rootDir: root, basePath: "/assets" },
@@ -941,6 +943,9 @@ describe("server adapters", () => {
         "/assets/%2e%2e/secret.txt",
         "/assets/%2e%2e%2fsecret.txt",
         "/assets%2f%2e%2e%2fsecret.txt",
+        "/assets/.env",
+        "/assets/.well-known/security.txt",
+        "/assets/linked.txt",
       ]) {
         const chunks: string[] = [];
         const res = {

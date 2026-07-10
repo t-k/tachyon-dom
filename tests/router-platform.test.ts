@@ -65,15 +65,18 @@ describe("router platform features", () => {
     const root = path.join(tmpdir(), `tachyon-assets-${Date.now()}-canonical`);
     const outside = path.join(tmpdir(), `tachyon-assets-${Date.now()}-outside`);
     await mkdir(root, { recursive: true });
+    await mkdir(path.join(root, "nested"), { recursive: true });
     await mkdir(outside, { recursive: true });
     try {
       await writeFile(path.join(root, ".env"), "secret");
       await writeFile(path.join(outside, "secret.txt"), "secret");
       await symlink(path.join(outside, "secret.txt"), path.join(root, "linked.txt"));
+      await symlink(path.join(outside, "secret.txt"), path.join(root, "nested", "linked.txt"));
       const handler = createStaticAssetHandler({ rootDir: root, basePath: "/assets", fallthroughOnNotFound: true });
 
       expect((await handler(new Request("https://x.test/assets/.env")))?.status).toBe(403);
       expect((await handler(new Request("https://x.test/assets/linked.txt")))?.status).toBe(403);
+      expect((await handler(new Request("https://x.test/assets/nested/linked.txt")))?.status).toBe(403);
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });

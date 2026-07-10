@@ -139,7 +139,7 @@ const csrf = {
 
 `tachyon-dom/cookies` exports `parseCookies()`, `serializeCookie()`, and `createMemorySessionStorage()` for small server adapters and examples. `parseCookies()` ignores malformed cookie pairs and decoded NUL/control-character names or values. `serializeCookie()` validates `Path` and `Domain` attributes and throws on semicolons, control characters, CRLF, whitespace in domains, or other values that would inject extra cookie attributes or invalid header bytes. Memory and cookie session storage default to Secure, HTTP-only, SameSite=Lax cookies. Memory storage treats an unknown cookie ID as untrusted and assigns a fresh ID when it is committed; call `regenerateSession()` at login or privilege changes to rotate an existing session deliberately.
 
-For server sessions, `createCookieSessionStorage({ secret, maxAgeMs, verificationSecrets })` stores signed session payloads in secure, HTTP-only, SameSite=Lax cookies. Signing and verification secrets must be at least 32 bytes. `maxAgeMs` adds an authenticated absolute expiry, and `verificationSecrets` permits bounded key rotation while new cookies use `secret`. Stateless signed cookies cannot revoke a copied, still-valid cookie after logout; use memory or external server-side storage, or a server-checked session version, when logout must revoke every replayed copy. `signCookieValue()` and `verifySignedCookieValue()` are also exported for custom adapters.
+For server sessions, `createCookieSessionStorage({ secret, maxAgeMs, verificationSecrets })` stores signed session payloads in secure, HTTP-only, SameSite=Lax cookies. Its signing and verification secrets must be at least 32 bytes. `maxAgeMs` adds an authenticated absolute expiry, and `verificationSecrets` permits bounded key rotation while new cookies use `secret`. Stateless signed cookies cannot revoke a copied, still-valid cookie after logout; use memory or external server-side storage, or a server-checked session version, when logout must revoke every replayed copy. The lower-level `signCookieValue()` and `verifySignedCookieValue()` helpers are also exported for custom adapters and leave secret policy to their caller.
 
 Route cache policies are private unless `mode: "public"` is specified explicitly. Use public caching only for responses that are independent of identity, or provide an intentional cache key and `Vary` policy.
 
@@ -213,6 +213,8 @@ export const handler = createNodeFetchHandler({
 ```
 
 When Node static assets are mounted at the application root, pass `staticAssets: { fallthroughOnNotFound: true }` so missing files, root requests, and non-GET/HEAD application routes such as `POST /login` continue to your app handler instead of being handled by the static asset layer.
+
+Node static assets deny dotfile and dot-directory segments, including `.well-known`, by default. Symlinks are followed only when their canonical target remains beneath the canonical `rootDir`; sensitive-path denials return 403 and never fall through to the dynamic handler.
 
 For Vite dev servers with request-scoped SSR, `tachyon-dom/vite` exports `tachyonSsr()`. It mounts the same fetch-style handler shape as `createNodeFetchHandler()`, lets Vite handle internal module URLs by default, and serves configured static assets before the dynamic handler:
 
