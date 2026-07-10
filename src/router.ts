@@ -41,7 +41,6 @@ export type RouteContext<Data = unknown, ActionResult = unknown> = {
   params: RouteParams;
   route: RouteDefinition;
   env: RouteEnvironment;
-  bindings?: unknown;
   data: Data;
   loaderData: Record<string, unknown>;
   actionResult: ActionResult;
@@ -120,14 +119,11 @@ export type RouteRenderOptions = {
   maxActionBodyBytes?: number;
   cspNonce?: string;
   csrf?: {
-    verify: (context: { request: Request; url: URL; env: RouteEnvironment; bindings?: unknown }) =>
-      | boolean
-      | Promise<boolean>;
+    verify: (context: { request: Request; url: URL; env: RouteEnvironment }) => boolean | Promise<boolean>;
   };
   middleware?: readonly RouteMiddleware[];
   hooks?: RouteHooks;
   env?: RouteEnvironment;
-  bindings?: unknown;
 };
 
 export type RouteError = {
@@ -164,8 +160,24 @@ export type RouteMiddleware = (context: {
   request: Request;
   url: URL;
   env: RouteEnvironment;
-  bindings?: unknown;
 }) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>;
+
+type RouteExecutionContext = RouteContext & { bindings?: unknown };
+
+type RouteExecutionOptions = Omit<RouteRenderOptions, "csrf" | "middleware"> & {
+  bindings?: unknown;
+  csrf?: {
+    verify: (context: { request: Request; url: URL; env: RouteEnvironment; bindings?: unknown }) =>
+      | boolean
+      | Promise<boolean>;
+  };
+  middleware?: readonly ((context: {
+    request: Request;
+    url: URL;
+    env: RouteEnvironment;
+    bindings?: unknown;
+  }) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>)[];
+};
 
 export type RouteHooks = {
   onRequest?: (context: { request: Request; url: URL }) => void | Promise<void>;
@@ -407,7 +419,7 @@ const verifyCsrf = async (
   url: URL,
   env: RouteEnvironment,
   bindings: unknown,
-  options: NonNullable<RouteRenderOptions["csrf"]>,
+  options: NonNullable<RouteExecutionOptions["csrf"]>,
 ): Promise<boolean> => options.verify({ request, url, env, bindings });
 
 const payloadTooLargeResult = (match: MatchedRoute): RouteRenderResult => ({
@@ -992,6 +1004,11 @@ export const renderResourceHints = (resources: readonly RouteResource[]): string
 export const collectRouteResources = (
   branch: readonly { route: RouteDefinition; path: string; params: RouteParams }[],
   context?: Partial<RouteContext>,
+): RouteResource[] => collectRouteResourcesInternal(branch, context);
+
+const collectRouteResourcesInternal = (
+  branch: readonly { route: RouteDefinition; path: string; params: RouteParams }[],
+  context?: Partial<RouteExecutionContext>,
 ): RouteResource[] => {
   const resources: RouteResource[] = [];
   for (const entry of branch) {
@@ -1014,7 +1031,7 @@ export const collectRouteResources = (
             loaderData: context?.loaderData ?? {},
             actionResult: context?.actionResult,
             outlet: context?.outlet ?? "",
-          })
+          } as RouteExecutionContext)
         : entry.route.resources;
     resources.push(...value);
   }
@@ -1063,10 +1080,10 @@ const nearestNotFoundBoundary = (
   return selected?.handler;
 };
 
-export const renderRoute = async (
+const renderRouteInternal = async (
   routes: readonly RouteDefinition[],
   input: Request | URL | string,
-  options: RouteRenderOptions = {},
+  options: RouteExecutionOptions = {},
 ): Promise<Result<RouteRenderResult, RouteError>> => {
   let request = requestFor(input);
   let url = new URL(request.url);
@@ -1192,7 +1209,7 @@ export const renderRoute = async (
         bindings,
         loaderData,
         actionResult: undefined,
-      });
+      } as Omit<RouteExecutionContext, "data" | "outlet">);
       await options.hooks?.onAction?.({ request, url, route: match.value.route, result: actionResult });
       if (isRouteResponse(actionResult)) {
         return ok({ ...routeResponseResult(actionResult, match.value), loaderData, actionResult });
@@ -1210,7 +1227,7 @@ export const renderRoute = async (
           bindings,
           loaderData,
           actionResult,
-        });
+        } as Omit<RouteExecutionContext, "data" | "outlet">);
         if (isRouteResponse(data)) {
           return ok({ ...routeResponseResult(data, match.value), loaderData, actionResult });
         }
@@ -1278,7 +1295,7 @@ export const renderRoute = async (
       html: outlet,
       headHtml: renderHead(mergeHead(heads), options.cspNonce === undefined ? {} : { nonce: options.cspNonce }),
       resourceHints: renderResourceHints(
-        collectRouteResources(match.value.branch, {
+        collectRouteResourcesInternal(match.value.branch, {
           request,
           url,
           params: match.value.params,
@@ -1312,6 +1329,15 @@ export const renderRoute = async (
   }
 };
 
+export const renderRoute = async (
+  routes: readonly RouteDefinition[],
+  input: Request | URL | string,
+  options: RouteRenderOptions = {},
+): Promise<Result<RouteRenderResult, RouteError>> => renderRouteInternal(routes, input, options);
+
+/** @internal */
+export const renderRouteWithBindings = renderRouteInternal;
+
 export type RouteStreamResult = {
   status: number;
   chunks: AsyncIterable<string>;
@@ -1322,16 +1348,16 @@ export type RouteStreamResult = {
   final: Promise<Pick<RouteRenderResult, "headHtml" | "resourceHints" | "stateScript" | "headers" | "status">>;
 };
 
-export const renderRouteStream = async (
+const renderRouteStreamInternal = async (
   routes: readonly RouteDefinition[],
   input: Request | URL | string,
-  options: RouteRenderOptions = {},
+  options: RouteExecutionOptions = {},
 ): Promise<Result<RouteStreamResult, RouteError>> => {
   const request = requestFor(input);
   const url = new URL(request.url);
   const match = matchRoute(routes, url);
   if (!match.ok) {
-    const rendered = await renderRoute(routes, request, options);
+    const rendered = await renderRouteInternal(routes, request, options);
     if (!rendered.ok) {
       return err(rendered.error);
     }
@@ -1353,7 +1379,7 @@ export const renderRouteStream = async (
       }),
     });
   }
-  const renderedPromise = renderRoute(routes, request, options);
+  const renderedPromise = renderRouteInternal(routes, request, options);
   const requiresAuthoritativeCommit = request.method !== "GET" && request.method !== "HEAD";
   type SettledRender =
     | { settled: true; rendered: Awaited<typeof renderedPromise> }
@@ -1373,7 +1399,7 @@ export const renderRouteStream = async (
           yield rendered.error.message;
         })(),
         headHtml: "",
-        resourceHints: renderResourceHints(collectRouteResources(match.value.branch)),
+        resourceHints: renderResourceHints(collectRouteResourcesInternal(match.value.branch)),
         stateScript: "",
         headers: new Headers(),
         final: Promise.resolve({
@@ -1451,7 +1477,7 @@ export const renderRouteStream = async (
     status: 200,
     chunks: chunks(),
     headHtml: "",
-    resourceHints: renderResourceHints(collectRouteResources(match.value.branch)),
+    resourceHints: renderResourceHints(collectRouteResourcesInternal(match.value.branch)),
     stateScript: "",
     headers: new Headers({
       "cache-control": "private",
@@ -1460,3 +1486,12 @@ export const renderRouteStream = async (
     final,
   });
 };
+
+export const renderRouteStream = async (
+  routes: readonly RouteDefinition[],
+  input: Request | URL | string,
+  options: RouteRenderOptions = {},
+): Promise<Result<RouteStreamResult, RouteError>> => renderRouteStreamInternal(routes, input, options);
+
+/** @internal */
+export const renderRouteStreamWithBindings = renderRouteStreamInternal;

@@ -191,7 +191,7 @@ describe("Hacker News example Worker", () => {
       loadStories: async () => ({ ok: true, value: [story(1, "Worker SSR")] }),
     });
 
-    const response = await worker.fetch(new Request("https://example.com/"));
+    const response = await worker.fetch(new Request("https://example.com/"), {});
 
     expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(response.headers.get("content-security-policy")).toContain("'report-sample'");
@@ -226,7 +226,7 @@ describe("Hacker News example Worker", () => {
       loadStories: async () => ({ ok: true, value: [story(1)] }),
     });
 
-    const response = await worker.fetch(new Request("https://example.com/", { method: "POST" }));
+    const response = await worker.fetch(new Request("https://example.com/", { method: "POST" }), {});
 
     expect(response.status).toBe(405);
     expect(response.headers.get("allow")).toBe("GET, HEAD");
@@ -239,7 +239,7 @@ describe("Hacker News example Worker", () => {
       loadStories: async () => ({ ok: false, error: { message: "upstream unavailable" } }),
     });
 
-    const response = await worker.fetch(new Request("https://example.com/"));
+    const response = await worker.fetch(new Request("https://example.com/"), {});
 
     expect(response.status).toBe(200);
     expect(await response.text()).toContain("upstream unavailable");

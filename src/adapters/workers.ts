@@ -1,6 +1,6 @@
 import {
-  renderRoute,
-  renderRouteStream,
+  renderRouteWithBindings,
+  renderRouteStreamWithBindings,
   type MatchedRoute,
   type RouteDefinition,
   type RouteContext,
@@ -97,7 +97,7 @@ export type WorkersAssetOptions<Env> = {
 
 export type WorkersRouteContext<Env, Data = unknown, ActionResult = unknown> = Omit<
   RouteContext<Data, ActionResult>,
-  "bindings" | "route"
+  "route"
 > & {
   bindings: Env;
   route: WorkersRouteDefinition<Env, Data, ActionResult>;
@@ -142,7 +142,7 @@ export type WorkersCsrfOptions<Env> = {
 
 export type WorkersHandlerOptions<Env = Record<string, unknown>> = Omit<
   RouteRenderOptions,
-  "bindings" | "csrf" | "middleware"
+  "csrf" | "middleware"
 > & {
   routes: readonly WorkersRouteDefinition<Env, any, any>[];
   middleware?: readonly WorkersRouteMiddleware<Env>[];
@@ -440,14 +440,14 @@ const responseFor = async <Env>(
       return response;
     }
     const hooks = routeObservabilityHooks(options.hooks, options.observability, state);
-    const renderOptions: RouteRenderOptions = {
+    const renderOptions = {
       ...options,
       bindings: env,
       middleware: options.middleware,
       ...(hooks ? { hooks } : {}),
-    } as RouteRenderOptions;
+    } as unknown as Parameters<typeof renderRouteWithBindings>[2];
     if (options.streaming) {
-      const result = await renderRouteStream(options.routes as readonly RouteDefinition[], request, renderOptions);
+      const result = await renderRouteStreamWithBindings(options.routes as unknown as readonly RouteDefinition[], request, renderOptions);
       if (!result.ok) {
         const response = new Response(result.error.message, { status: result.error.status });
         await emitResponse(options.observability, state, response, true);
@@ -461,7 +461,7 @@ const responseFor = async <Env>(
       await emitResponse(options.observability, state, response, state.routeId === undefined);
       return response;
     }
-    const result = await renderRoute(options.routes as readonly RouteDefinition[], request, renderOptions);
+    const result = await renderRouteWithBindings(options.routes as unknown as readonly RouteDefinition[], request, renderOptions);
     if (!result.ok) {
       const response = new Response(result.error.message, { status: result.error.status });
       await emitResponse(options.observability, state, response, true);
@@ -509,9 +509,16 @@ const responseForFetch = async <Env>(
   }
 };
 
-export function createWorkersHandler<Env = Record<string, unknown>>(
+type WorkersHandler<Env> = {
+  fetch: (
+    request: Request,
+    ...args: [Env] extends [never] ? [env?: undefined] : [env: Env]
+  ) => Promise<Response>;
+};
+
+export function createWorkersHandler<Env = never>(
   options: WorkersHandlerOptions<Env>,
-): { fetch: (request: Request, env?: Env) => Promise<Response> };
+): WorkersHandler<Env>;
 export function createWorkersHandler(
   options: RouteAdapterHandlerOptions,
 ): { fetch: (request: Request, env?: unknown) => Promise<Response> };

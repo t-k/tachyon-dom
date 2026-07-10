@@ -58,7 +58,7 @@ const assetsHandler = createWorkersHandler<HackerNewsEnv>({
 export const createHackerNewsWorker = (options: HackerNewsWorkerOptions = {}) => {
   const loadStories = options.loadStories ?? (() => loadTopStories());
   return {
-    fetch: async (request: Request, env?: HackerNewsEnv): Promise<Response> => {
+    fetch: async (request: Request, env: HackerNewsEnv): Promise<Response> => {
       const url = new URL(request.url);
       if (url.pathname.startsWith("/assets/")) {
         return assetsHandler.fetch(request, env);
