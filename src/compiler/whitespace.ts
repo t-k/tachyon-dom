@@ -1,6 +1,7 @@
 import type { ElementNode, TemplateNode, TemplateWhitespacePolicy, TextNode } from "./types.js";
 
 const protectedTextElements = new Set(["pre", "script", "style", "textarea"]);
+const fragmentElements = new Set(["await", "component", "for", "if"]);
 const asciiWhitespaceOnly = /^[\t\n\f\r ]+$/;
 const startsWithFormattingLine = /^[\t\f\r ]*(?:\r\n?|\n)[\t\n\f\r ]*/;
 const endsWithFormattingLine = /[\t\n\f\r ]*(?:\r\n?|\n)[\t\f\r ]*$/;
@@ -15,6 +16,15 @@ const condenseTextValue = (value: string): string => {
     .replace(internalFormattingLine, " ");
 };
 
+const isFormattingWhitespace = (node: TemplateNode): boolean =>
+  node.type === "text" && (node.value.includes("\n") || node.value.includes("\r")) && asciiWhitespaceOnly.test(node.value);
+
+const fragmentChildren = (node: ElementNode): TemplateNode[] => {
+  if (!fragmentElements.has(node.tagName.toLowerCase())) return node.children;
+  return node.children.filter((child, index, children) =>
+    (index !== 0 && index !== children.length - 1) || !isFormattingWhitespace(child));
+};
+
 const transformNode = (node: TemplateNode, protectedContext: boolean): TemplateNode => {
   if (node.type === "text") {
     const text: TextNode = { ...node };
@@ -25,7 +35,7 @@ const transformNode = (node: TemplateNode, protectedContext: boolean): TemplateN
   return {
     ...node,
     attrs: node.attrs.map((attribute) => ({ ...attribute })),
-    children: node.children.map((child) => transformNode(child, nextProtectedContext)),
+    children: fragmentChildren(node).map((child) => transformNode(child, nextProtectedContext)),
   } satisfies ElementNode;
 };
 

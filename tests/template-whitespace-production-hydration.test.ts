@@ -34,35 +34,32 @@ describe("condensed template production hydration", () => {
         <span id="count">Count {count}</span>
         <button id="add" on:click={add}>Add</button>
         <ul id="rows">
-          <li>A</li>
+          <for each={rows} key={row}>
+            <li>{row}</li>
+          </for>
         </ul>
       </section>`,
     );
     await writeFile(
       path.join(directory, "server.ts"),
       `import { render } from "./page.td?server";
-export const html = render({ id: "counter", count: 0 });`,
+export const html = render({ id: "counter", count: 0, rows: ["A"] });`,
     );
     await writeFile(
       path.join(directory, "client.ts"),
       `import { bind } from "./page.td?client";
+import { createSignal } from ${JSON.stringify(path.join(sourceRoot, "runtime/signal.ts"))};
 const element = document.querySelector("section");
 if (!(element instanceof HTMLElement)) throw new Error("Missing SSR root.");
 const before = element;
-let count = 0;
+const count = createSignal(0);
+const rows = createSignal(["A"]);
 const cleanup = bind(element, {
   id: "counter",
   count,
-  increment: () => {
-    count += 1;
-    const output = element.querySelector("#count");
-    if (output) output.textContent = "Count " + String(count);
-  },
-  add: () => {
-    const row = document.createElement("li");
-    row.textContent = "B";
-    element.querySelector("#rows")?.append(row);
-  },
+  rows,
+  increment: () => count.update((value) => value + 1),
+  add: () => rows.update((values) => [...values, "B"]),
 });
 Object.assign(window, {
   __tachyonCleanup: cleanup,

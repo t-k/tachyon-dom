@@ -98,6 +98,20 @@ describe("HTML-first compiler", () => {
     expect(html).toContain(`<style>line one\n    line two</style>`);
   });
 
+  it("removes only newline-derived whitespace at fragment boundaries", () => {
+    const source = `<main><ul><for each={rows} key={row}>
+      <li>{row}</li>
+    </for></ul><if test={visible}> <span>kept</span> </if></main>`;
+    const result = compileTemplate(source, { whitespace: "condense" });
+    if (!result.ok) throw new Error(result.error.message);
+
+    const list = result.value.client.bindings.find((binding) => binding.kind === "list");
+    const conditional = result.value.client.bindings.find((binding) => binding.kind === "if");
+    expect(list).toMatchObject({ templateHtml: `<li> </li>` });
+    expect(list?.bindings).toContainEqual(expect.objectContaining({ kind: "text", path: [0] }));
+    expect(conditional).toMatchObject({ templateHtml: ` <span>kept</span> ` });
+  });
+
   it("caches generated target modules for repeated compiled template objects", () => {
     const result = compileTemplate(`<section><h1>{title}</h1></section>`);
     if (!result.ok) {
