@@ -1,0 +1,364 @@
+{
+  "schemaVersion": 2,
+  "benchmark": {
+    "name": "web-framework",
+    "contractVersion": 3
+  },
+  "provenance": {
+    "capturedAt": "2026-07-10T11:26:30.141Z",
+    "command": {
+      "argv": [
+        "/home/tk/.volta/tools/image/node/24.13.0/bin/node",
+        "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/web-framework/run-web-framework-benchmark.ts",
+        "--smoke",
+        "--output",
+        "benchmark/web-framework/results/2026-07-10-contract-v3-smoke.json"
+      ],
+      "display": "/home/tk/.volta/tools/image/node/24.13.0/bin/node /home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/web-framework/run-web-framework-benchmark.ts --smoke --output benchmark/web-framework/results/2026-07-10-contract-v3-smoke.json",
+      "cwd": "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues"
+    },
+    "git": {
+      "available": true,
+      "commit": "375dc9522cac735670a5ff4f8dacec1becb23540",
+      "dirty": false,
+      "workingTreeSha256": "87b5cb9e07f9fe54aaa5ea26a05342f70eb4bfcc8beb7599890d45beab7d6e09"
+    },
+    "runtime": {
+      "node": "v24.13.0",
+      "platform": "linux",
+      "arch": "x64",
+      "osRelease": "6.8.0-134-generic"
+    },
+    "host": {
+      "hostname": "ubuntu",
+      "cpuModel": "AMD Ryzen 9 9950X 16-Core Processor",
+      "logicalCpuCount": 32
+    },
+    "dependencies": {
+      "autocannon": {
+        "version": "8.0.0"
+      },
+      "playwright": {
+        "version": "1.61.0"
+      }
+    },
+    "browser": {
+      "name": "chromium",
+      "version": "149.0.7827.55"
+    }
+  },
+  "workload": {
+    "smoke": true,
+    "buildMode": "production",
+    "durationSeconds": 1,
+    "connections": 5,
+    "dynamicChallengeIds": [
+      "a3a5c1cc72b8464d839d71952f463182",
+      "b7f498c00f1d49cc9689cd5bfb0f97f2",
+      "83b1174077ea488a8d04859d3499c847",
+      "7f36c442990e4b099803bc9da3a8e4d0",
+      "121f91a167cf45a79011b4bee437e5ac",
+      "f0d8058256024a1bba5cb7688d72ee36",
+      "f7d5e23fe2464a4fae2035f35bdbe7dd",
+      "ae88b636764745aab5e21c7ddc0b7010"
+    ],
+    "streamMinimumChunkGapMs": 10,
+    "frameworks": [
+      {
+        "name": "tachyon-dom",
+        "cwd": "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues",
+        "build": [
+          "pnpm",
+          "build"
+        ],
+        "start": [
+          "pnpm",
+          "exec",
+          "tsx",
+          "benchmark/web-framework/fixtures/tachyon/server.ts",
+          "--port",
+          "0"
+        ],
+        "dependencies": {
+          "vite": {
+            "version": "8.0.16"
+          }
+        }
+      },
+      {
+        "name": "marko-run",
+        "cwd": "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/web-framework/fixtures/marko-run",
+        "build": [
+          "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/node_modules/.bin/marko-run",
+          "build"
+        ],
+        "start": [
+          "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/node_modules/.bin/marko-run",
+          "preview",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0"
+        ],
+        "dependencies": {
+          "@marko/run": {
+            "version": "0.10.0"
+          },
+          "marko": {
+            "version": "5.39.7"
+          }
+        }
+      },
+      {
+        "name": "solid-start",
+        "cwd": "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/web-framework/fixtures/solid-start",
+        "build": [
+          "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/node_modules/.bin/vinxi",
+          "build"
+        ],
+        "start": [
+          "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/node_modules/.bin/vinxi",
+          "start",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0"
+        ],
+        "dependencies": {
+          "@solidjs/start": {
+            "version": "1.3.2"
+          },
+          "solid-js": {
+            "version": "1.9.13"
+          }
+        }
+      },
+      {
+        "name": "tanstack-start",
+        "cwd": "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/web-framework/fixtures/tanstack-start",
+        "build": [
+          "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/node_modules/.bin/vite",
+          "build"
+        ],
+        "start": [
+          "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/node_modules/.bin/vite",
+          "preview",
+          "--host",
+          "127.0.0.1",
+          "--port",
+          "0"
+        ],
+        "dependencies": {
+          "@tanstack/react-start": {
+            "version": "1.168.26"
+          },
+          "@tanstack/react-router": {
+            "version": "1.170.16"
+          }
+        }
+      },
+      {
+        "name": "next-app-router",
+        "cwd": "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues",
+        "build": [
+          "pnpm",
+          "exec",
+          "next",
+          "build",
+          "benchmark/web-framework/fixtures/next"
+        ],
+        "start": [
+          "pnpm",
+          "exec",
+          "next",
+          "start",
+          "benchmark/web-framework/fixtures/next",
+          "-H",
+          "127.0.0.1",
+          "-p",
+          "0"
+        ],
+        "dependencies": {
+          "next": {
+            "version": "16.2.9"
+          },
+          "react": {
+            "version": "19.2.7"
+          }
+        }
+      },
+      {
+        "name": "mreact-app-router",
+        "cwd": "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/web-framework/fixtures/mreact-app-router",
+        "build": [
+          "pnpm",
+          "build"
+        ],
+        "start": [
+          "pnpm",
+          "start"
+        ],
+        "dependencies": {
+          "@reckona/mreact": {
+            "version": "0.0.181"
+          },
+          "@reckona/mreact-router": {
+            "version": "0.0.181"
+          }
+        }
+      }
+    ]
+  },
+  "measurements": {
+    "legacyDynamicAndStreamRankings": "non-authoritative",
+    "metrics": [
+      {
+        "framework": "tachyon-dom",
+        "staticRequestsPerSecond": 97568,
+        "staticLatencyP95Ms": 0.01,
+        "dynamicRequestsPerSecond": 18312,
+        "dynamicLatencyP95Ms": 0.01,
+        "streamTtfbMs": 1.835997000000134,
+        "streamCompleteMs": 21.072944000000007,
+        "clientNavigationMs": 36.47707399999945,
+        "clientBundleBytes": 355
+      },
+      {
+        "framework": "marko-run",
+        "staticRequestsPerSecond": 18552,
+        "staticLatencyP95Ms": 0.01,
+        "dynamicRequestsPerSecond": 28424,
+        "dynamicLatencyP95Ms": 0.01,
+        "streamTtfbMs": 0.5707740000007107,
+        "streamCompleteMs": 20.877837,
+        "clientNavigationMs": 40.00492699999995,
+        "clientBundleBytes": 2457
+      },
+      {
+        "framework": "solid-start",
+        "staticRequestsPerSecond": 2677,
+        "staticLatencyP95Ms": 6,
+        "dynamicRequestsPerSecond": 2715,
+        "dynamicLatencyP95Ms": 6,
+        "streamTtfbMs": 1.989806999999928,
+        "streamCompleteMs": 21.82430999999997,
+        "clientNavigationMs": 46.923657000003004,
+        "clientBundleBytes": 54522
+      },
+      {
+        "framework": "tanstack-start",
+        "staticRequestsPerSecond": 2865,
+        "staticLatencyP95Ms": 4,
+        "dynamicRequestsPerSecond": 2973,
+        "dynamicLatencyP95Ms": 4,
+        "streamTtfbMs": 1.1061230000013893,
+        "streamCompleteMs": 21.646123999998963,
+        "clientNavigationMs": 43.563930000000255,
+        "clientBundleBytes": 318095
+      },
+      {
+        "framework": "next-app-router",
+        "staticRequestsPerSecond": 4994,
+        "staticLatencyP95Ms": 2,
+        "dynamicRequestsPerSecond": 755,
+        "dynamicLatencyP95Ms": 9,
+        "streamTtfbMs": 2.8597760000011476,
+        "streamCompleteMs": 22.04006600000139,
+        "clientNavigationMs": 41.74515500000052,
+        "clientBundleBytes": 267194
+      },
+      {
+        "framework": "mreact-app-router",
+        "staticRequestsPerSecond": 17624,
+        "staticLatencyP95Ms": 0.01,
+        "dynamicRequestsPerSecond": 11684,
+        "dynamicLatencyP95Ms": 0.01,
+        "streamTtfbMs": 0.6505450000004203,
+        "streamCompleteMs": 20.890220000001136,
+        "clientNavigationMs": 26.07130799999868,
+        "clientBundleBytes": 41094
+      }
+    ],
+    "ranking": [
+      {
+        "framework": "tachyon-dom",
+        "staticRequestsPerSecond": 97568,
+        "staticLatencyP95Ms": 0.01,
+        "dynamicRequestsPerSecond": 18312,
+        "dynamicLatencyP95Ms": 0.01,
+        "streamTtfbMs": 1.835997000000134,
+        "streamCompleteMs": 21.072944000000007,
+        "clientNavigationMs": 36.47707399999945,
+        "clientBundleBytes": 355,
+        "score": 1.276532160011465,
+        "rank": 1
+      },
+      {
+        "framework": "marko-run",
+        "staticRequestsPerSecond": 18552,
+        "staticLatencyP95Ms": 0.01,
+        "dynamicRequestsPerSecond": 28424,
+        "dynamicLatencyP95Ms": 0.01,
+        "streamTtfbMs": 0.5707740000007107,
+        "streamCompleteMs": 20.877837,
+        "clientNavigationMs": 40.00492699999995,
+        "clientBundleBytes": 2457,
+        "score": 1.6534098347493247,
+        "rank": 2
+      },
+      {
+        "framework": "mreact-app-router",
+        "staticRequestsPerSecond": 17624,
+        "staticLatencyP95Ms": 0.01,
+        "dynamicRequestsPerSecond": 11684,
+        "dynamicLatencyP95Ms": 0.01,
+        "streamTtfbMs": 0.6505450000004203,
+        "streamCompleteMs": 20.890220000001136,
+        "clientNavigationMs": 26.07130799999868,
+        "clientBundleBytes": 41094,
+        "score": 2.5482360922458605,
+        "rank": 3
+      },
+      {
+        "framework": "solid-start",
+        "staticRequestsPerSecond": 2677,
+        "staticLatencyP95Ms": 6,
+        "dynamicRequestsPerSecond": 2715,
+        "dynamicLatencyP95Ms": 6,
+        "streamTtfbMs": 1.989806999999928,
+        "streamCompleteMs": 21.82430999999997,
+        "clientNavigationMs": 46.923657000003004,
+        "clientBundleBytes": 54522,
+        "score": 24.69627159744467,
+        "rank": 4
+      },
+      {
+        "framework": "tanstack-start",
+        "staticRequestsPerSecond": 2865,
+        "staticLatencyP95Ms": 4,
+        "dynamicRequestsPerSecond": 2973,
+        "dynamicLatencyP95Ms": 4,
+        "streamTtfbMs": 1.1061230000013893,
+        "streamCompleteMs": 21.646123999998963,
+        "clientNavigationMs": 43.563930000000255,
+        "clientBundleBytes": 318095,
+        "score": 25.083605145577106,
+        "rank": 5
+      },
+      {
+        "framework": "next-app-router",
+        "staticRequestsPerSecond": 4994,
+        "staticLatencyP95Ms": 2,
+        "dynamicRequestsPerSecond": 755,
+        "dynamicLatencyP95Ms": 9,
+        "streamTtfbMs": 2.8597760000011476,
+        "streamCompleteMs": 22.04006600000139,
+        "clientNavigationMs": 41.74515500000052,
+        "clientBundleBytes": 267194,
+        "score": 30.959098451872904,
+        "rank": 6
+      }
+    ],
+    "table": "| Rank | Framework | Score | Static req/s | Static p95 | Dynamic req/s | Dynamic p95 | Stream TTFB | Stream done | Client nav | Client bundle |\n|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n| 1 | tachyon-dom | 1.277x | 97568 | 0.01ms | 18312 | 0.01ms | 1.8ms | 21.1ms | 36.5ms | 355B |\n| 2 | marko-run | 1.653x | 18552 | 0.01ms | 28424 | 0.01ms | 0.57ms | 20.9ms | 40.0ms | 2.4KiB |\n| 3 | mreact-app-router | 2.548x | 17624 | 0.01ms | 11684 | 0.01ms | 0.65ms | 20.9ms | 26.1ms | 40.1KiB |\n| 4 | solid-start | 24.696x | 2677 | 6.0ms | 2715 | 6.0ms | 2.0ms | 21.8ms | 46.9ms | 53.2KiB |\n| 5 | tanstack-start | 25.084x | 2865 | 4.0ms | 2973 | 4.0ms | 1.1ms | 21.6ms | 43.6ms | 311KiB |\n| 6 | next-app-router | 30.959x | 4994 | 2.0ms | 755 | 9.0ms | 2.9ms | 22.0ms | 41.7ms | 261KiB |"
+  }
+}
