@@ -743,8 +743,8 @@ describe("mountKeyedList", () => {
     expect(root.innerHTML).toBe(`<h2>Two updated</h2><p>Second updated</p><h2>One updated</h2><p>First updated</p>`);
   });
 
-  it("adopts a server row when formatting whitespace precedes its primary element", () => {
-    document.body.innerHTML = `<ul id="items"> <li><span>A</span></li> </ul>`;
+  it("owns formatted separators while adopting, reordering, and removing server rows", () => {
+    document.body.innerHTML = `<ul id="items"> <li><span>A</span></li>  <li><span>B</span></li> </ul>`;
     const root = document.querySelector("#items");
     if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
     const options = {
@@ -754,13 +754,43 @@ describe("mountKeyedList", () => {
       bindings: [{ kind: "text" as const, path: [1, 0, 0], expression: "item.label" }],
     };
 
-    const existing = root.querySelector("li");
-    mountKeyedList(root, [], [{ id: 1, label: "A" }], options);
-    mountKeyedList(root, [], [{ id: 1, label: "Updated" }], options);
+    const existing = Array.from(root.querySelectorAll("li"));
+    mountKeyedList(root, [], [{ id: 1, label: "A" }, { id: 2, label: "B" }], options);
+    mountKeyedList(root, [], [{ id: 2, label: "B updated" }, { id: 1, label: "A updated" }], options);
 
-    expect(root.querySelector("li")).toBe(existing);
-    expect(root.querySelector("span")?.textContent).toBe("Updated");
-    expect(root.textContent).toBe(" Updated ");
+    expect(root.querySelectorAll("li")[0]).toBe(existing[1]);
+    expect(root.querySelectorAll("li")[1]).toBe(existing[0]);
+    expect(root.textContent).toBe(" B updated  A updated ");
+    mountKeyedList(root, [], [], options);
+    expect(root.innerHTML).toBe("");
+  });
+
+  it("adopts every element in a formatted multi-root server row", () => {
+    document.body.innerHTML = `<section id="items"> <h2>A</h2><p>A body</p>  <h2>B</h2><p>B body</p> </section>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: ` <h2> </h2><p> </p> `,
+      bindings: [
+        { kind: "text" as const, path: [1, 0], expression: "item.title" },
+        { kind: "text" as const, path: [2, 0], expression: "item.body" },
+      ],
+    };
+    const existing = Array.from(root.children);
+
+    mountKeyedList(root, [], [
+      { id: 1, title: "A", body: "A body" },
+      { id: 2, title: "B", body: "B body" },
+    ], options);
+    mountKeyedList(root, [], [
+      { id: 2, title: "B updated", body: "B body updated" },
+      { id: 1, title: "A updated", body: "A body updated" },
+    ], options);
+
+    expect(Array.from(root.children)).toEqual([existing[2], existing[3], existing[0], existing[1]]);
+    expect(root.textContent).toBe(" B updatedB body updated  A updatedA body updated ");
   });
 
   it("uses compiled binding readers for expressions beyond dot paths", () => {

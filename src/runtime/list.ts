@@ -117,7 +117,6 @@ type RowRecord = {
   lastValues: unknown[];
   item: unknown;
   revision: Signal<number>;
-  adoptedRootIndex?: number;
 };
 
 type ListState = {
@@ -127,7 +126,7 @@ type ListState = {
   records: Map<PropertyKey, RowRecord>;
   recordsByElement: WeakMap<Element, RowRecord>;
   template: HTMLTemplateElement;
-  primaryElementIndex: number;
+  elementIndices: number[];
   cleanups: Array<() => void>;
 };
 
@@ -195,12 +194,6 @@ const nodeAt = (root: Node, path: readonly number[]): Node => {
 };
 
 const nodeAtRecord = (record: RowRecord, path: readonly number[]): Node => {
-  if (record.adoptedRootIndex !== undefined) {
-    const [rootIndex, ...rest] = path;
-    if (rootIndex === record.adoptedRootIndex) {
-      return nodeAt(record.element, rest);
-    }
-  }
   if (record.nodes.length <= 1) {
     return nodeAt(record.element, path);
   }
@@ -261,7 +254,8 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
     cleanupListState(current);
   }
   const template = createTemplate(options.templateHtml);
-  const primaryElementIndex = Array.from(template.content.childNodes).findIndex((node) => node instanceof Element);
+  const elementIndices = Array.from(template.content.childNodes).flatMap((node, index) =>
+    node instanceof Element ? [index] : []);
   const next = {
     signature,
     options,
@@ -269,7 +263,7 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
     records: new Map<PropertyKey, RowRecord>(),
     recordsByElement: new WeakMap<Element, RowRecord>(),
     template,
-    primaryElementIndex,
+    elementIndices,
     cleanups: [] as Array<() => void>,
   };
   listStates.set(container, next);
@@ -443,11 +437,15 @@ const createRecord = (
   key: PropertyKey,
   item: unknown,
   options: KeyedListOptions,
-  existingElement?: Element,
+  existingElements?: readonly Element[],
 ): RowRecord | undefined => {
-  const nodes = existingElement
-    ? [existingElement]
-    : Array.from(state.template.content.childNodes).map((node) => node.cloneNode(true));
+  const nodes = Array.from(state.template.content.childNodes).map((node) => node.cloneNode(true));
+  if (existingElements) {
+    state.elementIndices.forEach((nodeIndex, elementIndex) => {
+      const existing = existingElements[elementIndex];
+      if (existing) nodes[nodeIndex] = existing;
+    });
+  }
   const element = nodes.find((node): node is Element => node instanceof Element);
   if (!element) {
     return undefined;
@@ -462,9 +460,6 @@ const createRecord = (
     lastValues: [],
     item,
     revision: createSignal(0),
-    ...(existingElement && state.template.content.childNodes.length > 1
-      ? { adoptedRootIndex: state.primaryElementIndex }
-      : {}),
   };
   for (const node of nodes) {
     if (node instanceof Element) {
@@ -583,7 +578,10 @@ export const mountKeyedList = (
   }
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];
-  const canAdoptServerRows = state.records.size === 0 && container.children.length > 0;
+  const serverElements = Array.from(container.children);
+  const canAdoptServerRows = state.records.size === 0
+    && state.elementIndices.length > 0
+    && serverElements.length >= items.length * state.elementIndices.length;
   const seenKeys = new Set<PropertyKey>();
   for (const item of items) {
     const key = keyFor(item, options);
@@ -593,7 +591,12 @@ export const mountKeyedList = (
     }
     seenKeys.add(key);
     const existing = state.records.get(key);
-    const adoptable = canAdoptServerRows ? container.children[orderedRecords.length] : undefined;
+    const adoptable = canAdoptServerRows
+      ? serverElements.slice(
+          orderedRecords.length * state.elementIndices.length,
+          (orderedRecords.length + 1) * state.elementIndices.length,
+        )
+      : undefined;
     const record = existing ?? createRecord(state, key, item, options, adoptable);
     if (!record) {
       continue;
@@ -615,11 +618,8 @@ export const mountKeyedList = (
     }
   });
   if (canAdoptServerRows) {
-    for (const element of Array.from(container.children).slice(orderedRecords.length)) {
-      element.parentNode?.removeChild(element);
-    }
-  }
-  if (!canAdoptServerRows) {
+    container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
+  } else {
     positionRecords(container, orderedRecords, state.records);
   }
   state.records = nextRecords;
