@@ -580,6 +580,31 @@ const starterPackageJsonSource = (): string =>
   )}\n`;
 
 export const createStarterFiles = async (options: Omit<CliInitOptions, "command">): Promise<Result<string, string>> => {
+  const managedFiles = [
+    "src/routes/index/page.td",
+    "src/app.ts",
+    "src/client/main.ts",
+    "src/app.test.ts",
+    ...(options.template === "ssr" ? ["src/server.ts"] : []),
+    "vite.config.ts",
+    "tsconfig.json",
+    ".gitignore",
+    ".github/workflows/ci.yml",
+    "README.md",
+    "package.json",
+  ].map((file) => join(options.outDir, file));
+  const conflicts: string[] = [];
+  for (const file of managedFiles) {
+    try {
+      await access(file);
+      conflicts.push(file);
+    } catch {
+      // Missing targets are safe to create after the full preflight.
+    }
+  }
+  if (conflicts.length > 0) {
+    return err(`Refusing to overwrite existing starter files:\n${conflicts.join("\n")}`);
+  }
   await mkdir(join(options.outDir, "src", "routes", "index"), { recursive: true });
   await mkdir(join(options.outDir, "src", "client"), { recursive: true });
   await mkdir(join(options.outDir, ".github", "workflows"), { recursive: true });

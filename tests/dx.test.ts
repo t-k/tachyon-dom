@@ -647,6 +647,21 @@ export default { selected: false };
     }
   });
 
+  it("does not partially create a starter when a managed file conflicts", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-starter-conflict-"));
+    try {
+      await writeFile(path.join(dir, "package.json"), "user-authored\n");
+
+      const result = await createStarterFiles({ outDir: dir, template: "basic" });
+
+      expect(result).toEqual({ ok: false, error: expect.stringContaining("Refusing to overwrite") });
+      await expect(readFile(path.join(dir, "package.json"), "utf8")).resolves.toBe("user-authored\n");
+      await expect(readFile(path.join(dir, "src", "routes", "index", "page.td"), "utf8")).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("creates an SSR starter with an explicit server entry", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-ssr-starter-"));
     try {
