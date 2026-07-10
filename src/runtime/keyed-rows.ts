@@ -143,14 +143,20 @@ export const createKeyedRows = <T>(options: KeyedRowsOptions<T>): KeyedRows<T> =
 
   const replace = (items: readonly T[]): void => rebuild(items.length, (index) => items[index] as T);
 
-  const replaceEach = (count: number, make: (index: number) => T): void => rebuild(count, make);
+  const replaceEach = (count: number, make: (index: number) => T): void => {
+    positiveInteger("count", count);
+    rebuild(count, make);
+  };
 
   const append = (items: readonly T[]): void => {
     const start = tbody.childElementCount;
     build(items.length, (index) => items[index - start] as T, start);
   };
 
-  const appendEach = (count: number, make: (index: number) => T): void => build(count, make, tbody.childElementCount);
+  const appendEach = (count: number, make: (index: number) => T): void => {
+    positiveInteger("count", count);
+    build(count, make, tbody.childElementCount);
+  };
 
   const update = (stride: number, patch: (row: HTMLTableRowElement, index: number) => void): void => {
     positiveInteger("stride", stride);

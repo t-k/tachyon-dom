@@ -39,14 +39,51 @@ describe("createKeyedRows", () => {
     expect(() => createKeyedRows<Item>({ tbody, row: "<div></div>", bind: () => {} })).toThrow();
   });
 
-  it("rejects invalid chunk counts and update strides before DOM mutation", () => {
-    expect(() => setup(0)).toThrow("chunks");
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
+    "rejects invalid chunk count %s before construction can mutate the DOM",
+    (chunks) => {
+      document.body.innerHTML = `<table><tbody id="tbody"><tr><td>existing</td></tr></tbody></table>`;
+      const tbody = document.querySelector("#tbody") as HTMLTableSectionElement;
+      const before = tbody.innerHTML;
+
+      expect(() =>
+        createKeyedRows<Item>({ tbody, row: "<tr><td></td></tr>", bind: () => undefined, chunks }),
+      ).toThrow(new TypeError("keyed-rows: `chunks` must be a positive finite integer."));
+      expect(tbody.innerHTML).toBe(before);
+    },
+  );
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
+    "rejects invalid generated-row count %s before replaceEach or appendEach mutates the DOM",
+    (count) => {
+      const { tbody, list } = setup();
+      list.replace(items(2));
+      const before = tbody.innerHTML;
+      const make = () => ({ id: 3, label: "new" });
+
+      expect(() => list.replaceEach(count, make)).toThrow(
+        new TypeError("keyed-rows: `count` must be a positive finite integer."),
+      );
+      expect(tbody.innerHTML).toBe(before);
+      expect(() => list.appendEach(count, make)).toThrow(
+        new TypeError("keyed-rows: `count` must be a positive finite integer."),
+      );
+      expect(tbody.innerHTML).toBe(before);
+    },
+  );
+
+  it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
+    "rejects invalid update stride %s before DOM mutation",
+    (stride) => {
     const { tbody, list } = setup();
     list.replace(items(2));
     const before = tbody.innerHTML;
-    expect(() => list.update(0, () => {})).toThrow("stride");
+      expect(() => list.update(stride, () => tbody.replaceChildren())).toThrow(
+        new TypeError("keyed-rows: `stride` must be a positive finite integer."),
+      );
     expect(tbody.innerHTML).toBe(before);
-  });
+    },
+  );
 
   it("replaces and appends rows from arrays", () => {
     const { tbody, list } = setup();
