@@ -48,8 +48,6 @@ const interactiveBody = () => `<h1>Interactive</h1><h2>Counter</h2>
   }
 </script>`;
 
-const partial = (route, body) => `<main id="app" data-route="${route}">${body}</main>`;
-
 const seededPartialsFor = (route) => (route === "users" ? [[`${"/dashboard/orders?partial=1"}`, ordersNavBody()]] : []);
 
 const initialCacheFor = (route) => (route === "users" ? [{ href: "/dashboard/orders", data: ordersNavBody() }] : []);
