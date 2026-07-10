@@ -178,6 +178,25 @@ describe("router platform features", () => {
     expect(cacheControl({ maxAge: 60 }).get("cache-control")).toBe("private, max-age=60");
   });
 
+  it("keeps identity-dependent route responses private by default", async () => {
+    const routes: RouteDefinition[] = [{
+      path: "/account",
+      cache: { maxAge: 60 },
+      loader: ({ request }) => request.headers.get("cookie"),
+      render: ({ data }) => `<p>${data}</p>`,
+    }];
+
+    const [alice, bob] = await Promise.all([
+      renderRoute(routes, new Request("https://x.test/account", { headers: { cookie: "sid=alice" } })),
+      renderRoute(routes, new Request("https://x.test/account", { headers: { cookie: "sid=bob" } })),
+    ]);
+
+    expect(alice.ok && alice.value.html).toBe("<p>sid=alice</p>");
+    expect(bob.ok && bob.value.html).toBe("<p>sid=bob</p>");
+    expect(alice.ok && alice.value.headers.get("cache-control")).toBe("private, max-age=60");
+    expect(bob.ok && bob.value.headers.get("cache-control")).toBe("private, max-age=60");
+  });
+
   it("resolves deferred loader data independently from route rendering", async () => {
     const deferred = defer({ title: "Now", comments: Promise.resolve(["A", "B"]) });
 
