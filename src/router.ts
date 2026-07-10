@@ -1055,7 +1055,13 @@ const mergeHead = (heads: readonly RouteHeadDescriptor[]): RouteHeadDescriptor =
 };
 
 const applyHeaders = (headers: Headers, extra: HeadersInit): void => {
-  new Headers(extra).forEach((value, key) => headers.set(key, value));
+  new Headers(extra).forEach((value, key) => {
+    if (key === "set-cookie") {
+      headers.append(key, value);
+      return;
+    }
+    headers.set(key, value);
+  });
 };
 
 const nearestNotFoundBoundary = (
@@ -1365,137 +1371,23 @@ const renderRouteStreamInternal = async (
   options: RouteExecutionOptions = {},
 ): Promise<Result<RouteStreamResult, RouteError>> => {
   const request = requestFor(input);
-  const url = new URL(request.url);
-  const match = matchRoute(routes, url);
   const streamingOptions = { ...options, htmlWhitespace: "preserve" as const };
-  if (!match.ok) {
-    const rendered = await renderRouteInternal(routes, request, streamingOptions);
-    if (!rendered.ok) {
-      return err(rendered.error);
-    }
-    return ok({
-      status: rendered.value.status,
-      chunks: (async function* () {
-        yield rendered.value.html;
-      })(),
-      headHtml: rendered.value.headHtml,
-      resourceHints: rendered.value.resourceHints,
-      stateScript: rendered.value.stateScript,
-      headers: rendered.value.headers,
-      final: Promise.resolve({
-        status: rendered.value.status,
-        headHtml: rendered.value.headHtml,
-        resourceHints: rendered.value.resourceHints,
-        stateScript: rendered.value.stateScript,
-        headers: rendered.value.headers,
-      }),
-    });
-  }
-  const renderedPromise = renderRouteInternal(routes, request, streamingOptions);
-  const requiresAuthoritativeCommit = request.method !== "GET" && request.method !== "HEAD";
-  type SettledRender =
-    | { settled: true; rendered: Awaited<typeof renderedPromise> }
-    | { settled: false; rendered?: undefined };
-  const pending = (): Promise<SettledRender> =>
-    new Promise((resolve) => setTimeout(() => resolve({ settled: false }), 0));
-  const settle = (rendered: Awaited<typeof renderedPromise>): SettledRender => ({ settled: true, rendered });
-  const immediate = requiresAuthoritativeCommit
-    ? settle(await renderedPromise)
-    : await Promise.race([renderedPromise.then(settle), pending()]);
-  if (immediate.settled) {
-    const rendered = immediate.rendered;
-    if (!rendered.ok) {
-      return ok({
-        status: rendered.error.status,
-        chunks: (async function* () {
-          yield rendered.error.message;
-        })(),
-        headHtml: "",
-        resourceHints: renderResourceHints(collectRouteResourcesInternal(match.value.branch)),
-        stateScript: "",
-        headers: new Headers(),
-        final: Promise.resolve({
-          status: rendered.error.status,
-          headHtml: "",
-          resourceHints: "",
-          stateScript: "",
-          headers: new Headers(),
-        }),
-      });
-    }
-    if (requiresAuthoritativeCommit || rendered.value.status !== 200 || rendered.value.responseBody !== undefined) {
-      return ok({
-        status: rendered.value.status,
-        chunks: (async function* () {
-          const body = rendered.value.responseBody ?? rendered.value.html;
-          if (body) {
-            yield body;
-          }
-        })(),
-        headHtml: rendered.value.headHtml,
-        resourceHints: rendered.value.resourceHints,
-        stateScript: rendered.value.stateScript,
-        headers: rendered.value.headers,
-        final: Promise.resolve({
-          status: rendered.value.status,
-          headHtml: rendered.value.headHtml,
-          resourceHints: rendered.value.resourceHints,
-          stateScript: rendered.value.stateScript,
-          headers: rendered.value.headers,
-        }),
-      });
-    }
-  }
-  const chunks = async function* (): AsyncIterable<string> {
-    for (const entry of match.value.branch) {
-      if (entry.route.fallback) {
-        yield entry.route.fallback;
-      }
-    }
-    const rendered = await renderedPromise;
-    if (!rendered.ok) {
-      yield rendered.error.message;
-      return;
-    }
-    if (rendered.value.status !== 200 || rendered.value.responseBody !== undefined) {
-      const body = rendered.value.responseBody ?? rendered.value.html;
-      if (body) {
-        yield body;
-      }
-      return;
-    }
-    if (rendered.value.html) {
-      yield rendered.value.html;
-    }
+  const rendered = await renderRouteInternal(routes, request, streamingOptions);
+  if (!rendered.ok) return err(rendered.error);
+  const body = rendered.value.responseBody ?? rendered.value.html;
+  const final = {
+    status: rendered.value.status,
+    headHtml: rendered.value.headHtml,
+    resourceHints: rendered.value.resourceHints,
+    stateScript: rendered.value.stateScript,
+    headers: rendered.value.headers,
   };
-  const final = renderedPromise.then((rendered) =>
-    rendered.ok
-      ? {
-          status: rendered.value.status,
-          headHtml: rendered.value.headHtml,
-          resourceHints: rendered.value.resourceHints,
-          stateScript: rendered.value.stateScript,
-          headers: rendered.value.headers,
-        }
-      : {
-          status: rendered.error.status,
-          headHtml: "",
-          resourceHints: "",
-          stateScript: "",
-          headers: new Headers(),
-        },
-  );
   return ok({
-    status: 200,
-    chunks: chunks(),
-    headHtml: "",
-    resourceHints: renderResourceHints(collectRouteResourcesInternal(match.value.branch)),
-    stateScript: "",
-    headers: new Headers({
-      "cache-control": "private",
-      "content-type": "text/html; charset=utf-8",
-    }),
-    final,
+    ...final,
+    chunks: (async function* () {
+      if (request.method !== "HEAD" && body) yield body;
+    })(),
+    final: Promise.resolve(final),
   });
 };
 

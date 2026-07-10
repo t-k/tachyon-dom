@@ -55,7 +55,7 @@ export default defineRouteModule({
 
 Actions run for non-GET/HEAD requests before loaders. Loaders run from parent to child. Rendering runs from child to parent with `outlet`.
 
-`renderRouteStream()` yields route `fallback` chunks before the final rendered route HTML.
+`renderRouteStream()` resolves commit-critical route metadata before it returns. A route `fallback` is never sent while a loader can still change the status, redirect location, cache policy, cookies, or security headers. Use compiler-generated async stream fragments when progressive body chunks are required after the HTTP metadata has been committed.
 
 `middleware` runs before route matching and can rewrite the incoming `Request` or return a short-circuit `Response`. `hooks` expose request, match, loader, action, render, and error observations for tracing and metrics.
 
@@ -97,7 +97,7 @@ const sanitizer = createHtmlSanitizer({
 const trusted = sanitizeHtml(markup, { adapter: sanitizer });
 ```
 
-`defer(record)` separates immediate values from promised values, and `resolveDeferredData()` resolves the full object. `renderRoute()` resolves deferred loader data before rendering; `renderRouteStream()` can still flush route fallbacks before the final route HTML.
+`defer(record)` separates immediate values from promised values, and `resolveDeferredData()` resolves the full object. Both `renderRoute()` and `renderRouteStream()` resolve deferred loader data before final route rendering. Compiler-generated stream fragments remain available for progressive body content whose response metadata is already authoritative.
 
 `renderDeferredDataScript(id, deferred, { nonce })` serializes resolved deferred data for client-side stream handoff.
 
@@ -145,7 +145,7 @@ For server sessions, `createCookieSessionStorage({ secret, maxAgeMs, verificatio
 
 Route cache policies are private unless `mode: "public"` is specified explicitly. Use public caching only for responses that are independent of identity, or provide an intentional cache key and `Vary` policy.
 
-Asynchronous GET and HEAD streams commit a conservative `Cache-Control: private` policy before their first fallback chunk. Loader-dependent cache callbacks cannot retroactively promote an already committed response to public caching. Unsafe methods wait for their authoritative route result before status, headers, or fallback content are committed.
+GET, HEAD, and unsafe-method streams wait for the authoritative route result before status, headers, or body content are committed. Delayed redirects, `Cache-Control`, CSP, `Set-Cookie`, and `Vary` therefore reach the actual response consistently across Workers, Node, Lambda proxy, and Lambda response streaming adapters. HEAD responses preserve the same metadata as GET responses without emitting body chunks.
 
 ## Server Adapters
 
@@ -297,7 +297,7 @@ The adapter uses `rawPath` and `rawQueryString` as delivered by the Lambda event
 
 ## Streaming Finalization
 
-`renderRouteStream()` returns fallback chunks immediately and exposes a `final` promise for finalized `headHtml`, `resourceHints`, `stateScript`, headers, and status. Use this when an outer server shell needs to flush route fallback early but still collect final metadata.
+`renderRouteStream()` returns only after `headHtml`, `resourceHints`, `stateScript`, headers, and status are authoritative. Its `final` promise remains available for compatibility and resolves to the same metadata. Route fallbacks are not emitted speculatively because HTTP status and headers cannot be changed after the first body byte.
 
 ## Type Generation
 

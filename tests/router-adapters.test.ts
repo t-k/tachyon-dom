@@ -813,7 +813,7 @@ describe("server adapters", () => {
     expect(await response.text()).toBe("");
   });
 
-  it("commits a private cache policy before an asynchronous personalized stream", async () => {
+  it("commits authoritative route metadata before an asynchronous personalized stream", async () => {
     const handler = createWorkersHandler({
       routes: [
         {
@@ -823,7 +823,16 @@ describe("server adapters", () => {
             await delay(10);
             return request.headers.get("cookie") ?? "anonymous";
           },
-          cache: { maxAge: 60 },
+          cache: { mode: "no-store" },
+          headers: () => {
+            const headers = new Headers({
+              "content-security-policy": "default-src 'self'",
+              vary: "Cookie, Accept-Encoding",
+            });
+            headers.append("set-cookie", "sid=updated; Path=/; HttpOnly");
+            headers.append("set-cookie", "theme=dark; Path=/");
+            return headers;
+          },
           render: ({ data }) => `<h1>${data}</h1>`,
         },
       ],
@@ -832,8 +841,14 @@ describe("server adapters", () => {
 
     const response = await handler.fetch(new Request("https://example.com/account", { headers: { cookie: "sid=a" } }));
 
-    expect(response.headers.get("cache-control")).toBe("private");
-    expect(await response.text()).toBe("<p>Loading account</p><h1>sid=a</h1>");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-security-policy")).toBe("default-src 'self'");
+    expect(response.headers.getSetCookie()).toEqual([
+      "sid=updated; Path=/; HttpOnly",
+      "theme=dark; Path=/",
+    ]);
+    expect(response.headers.get("vary")).toBe("Cookie, Accept-Encoding");
+    expect(await response.text()).toBe("<h1>sid=a</h1>");
   });
 
   it("commits delayed streaming CSRF rejection before status and fallback", async () => {
@@ -880,7 +895,7 @@ describe("server adapters", () => {
     expect(verifierBindings).toBe(bindings);
   });
 
-  it("preserves streaming cache and delayed CSRF commit policies through Node and Lambda", async () => {
+  it("preserves authoritative streaming metadata and delayed CSRF commit policies through Node and Lambda", async () => {
     const action = vi.fn(() => "saved");
     const routes: RouteDefinition[] = [
       {
@@ -891,7 +906,16 @@ describe("server adapters", () => {
           return "private account";
         },
         action,
-        cache: { maxAge: 60 },
+        cache: { mode: "no-store" },
+        headers: () => {
+          const headers = new Headers({
+            "content-security-policy": "default-src 'self'",
+            vary: "Cookie, Accept-Encoding",
+          });
+          headers.append("set-cookie", "sid=updated; Path=/; HttpOnly");
+          headers.append("set-cookie", "theme=dark; Path=/");
+          return headers;
+        },
         render: ({ data }) => `<h1>${data}</h1>`,
       },
     ];
@@ -923,7 +947,14 @@ describe("server adapters", () => {
 
     const nodeGet = nodeResponse();
     await createNodeHandler({ routes, streaming: true })(nodeRequest("GET") as never, nodeGet.response as never);
-    expect(nodeGet.headers.get("cache-control")).toBe("private");
+    expect(nodeGet.headers.get("cache-control")).toBe("no-store");
+    expect(nodeGet.headers.get("content-security-policy")).toBe("default-src 'self'");
+    expect(nodeGet.headers.get("set-cookie")).toEqual([
+      "sid=updated; Path=/; HttpOnly",
+      "theme=dark; Path=/",
+    ]);
+    expect(nodeGet.headers.get("vary")).toBe("Cookie, Accept-Encoding");
+    expect(nodeGet.chunks.join("")).toBe("<h1>private account</h1>");
 
     const nodePost = nodeResponse();
     await createNodeHandler({
@@ -945,7 +976,11 @@ describe("server adapters", () => {
         requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/account" } },
       }),
     );
-    expect(lambdaGet.headers["cache-control"]).toBe("private");
+    expect(lambdaGet.headers["cache-control"]).toBe("no-store");
+    expect(lambdaGet.headers["content-security-policy"]).toBe("default-src 'self'");
+    expect(lambdaGet.headers.vary).toBe("Cookie, Accept-Encoding");
+    expect(lambdaGet.cookies).toEqual(["sid=updated; Path=/; HttpOnly", "theme=dark; Path=/"]);
+    expect(lambdaGet.body).toBe("<h1>private account</h1>");
 
     const lambdaPost = await createLambdaHandler({
       routes,
@@ -965,6 +1000,183 @@ describe("server adapters", () => {
     expect(lambdaPost.statusCode).toBe(403);
     expect(lambdaPost.body).toBe("<h1>Forbidden</h1>");
     expect(action).not.toHaveBeenCalled();
+  });
+
+  it("preserves delayed HEAD metadata without emitting bodies across streaming adapters", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        path: "/head",
+        loader: async () => {
+          await delay(10);
+          return "ready";
+        },
+        cache: { mode: "no-store" },
+        headers: { vary: "Cookie" },
+        render: ({ data }) => `<h1>${data}</h1>`,
+      },
+    ];
+
+    const workers = await createWorkersHandler({ routes, streaming: true }).fetch(
+      new Request("https://example.com/head", { method: "HEAD" }),
+    );
+    expect(workers.headers.get("cache-control")).toBe("no-store");
+    expect(workers.headers.get("vary")).toBe("Cookie");
+    expect(await workers.text()).toBe("");
+
+    const nodeChunks: string[] = [];
+    const nodeRequest = Object.assign(Readable.from([]), {
+      method: "HEAD",
+      url: "/head",
+      headers: { host: "example.com" },
+    });
+    const nodeHeaders = new Map<string, string | number | readonly string[]>();
+    const nodeResponse = Object.assign(new EventEmitter(), {
+      statusCode: 200,
+      writableEnded: false,
+      setHeader: (name: string, value: string | number | readonly string[]) => nodeHeaders.set(name, value),
+      flushHeaders: () => undefined,
+      write: (chunk: Uint8Array) => {
+        nodeChunks.push(Buffer.from(chunk).toString("utf8"));
+        return true;
+      },
+      end: (chunk?: string) => {
+        if (chunk) nodeChunks.push(chunk);
+        nodeResponse.writableEnded = true;
+      },
+    });
+    await createNodeHandler({ routes, streaming: true })(nodeRequest as never, nodeResponse as never);
+    expect(nodeHeaders.get("cache-control")).toBe("no-store");
+    expect(nodeHeaders.get("vary")).toBe("Cookie");
+    expect(nodeChunks).toEqual([]);
+
+    const lambda = await createLambdaHandler({ routes, streaming: true })(
+      lambdaEvent({
+        rawPath: "/head",
+        requestContext: { domainName: "lambda.example", http: { method: "HEAD", path: "/head" } },
+      }),
+    );
+    expect(lambda.headers["cache-control"]).toBe("no-store");
+    expect(lambda.headers.vary).toBe("Cookie");
+    expect(lambda.body).toBe("");
+
+    const metadata = vi.fn((stream: Writable) => stream);
+    const runtime = {
+      streamifyResponse: vi.fn((handler) => handler),
+      HttpResponseStream: { from: metadata },
+    };
+    const lambdaChunks: string[] = [];
+    const responseStream = new Writable({
+      write(chunk, _encoding, callback) {
+        lambdaChunks.push(Buffer.from(chunk).toString("utf8"));
+        callback();
+      },
+    });
+    const streamingHandler = createLambdaStreamingHandler({ routes, streaming: true }, runtime) as (
+      event: ReturnType<typeof lambdaEvent>,
+      responseStream: Writable,
+      context: unknown,
+    ) => Promise<void>;
+    await streamingHandler(
+      lambdaEvent({
+        rawPath: "/head",
+        requestContext: { domainName: "lambda.example", http: { method: "HEAD", path: "/head" } },
+      }),
+      responseStream,
+      {},
+    );
+    expect(metadata).toHaveBeenCalledWith(
+      responseStream,
+      expect.objectContaining({ headers: expect.objectContaining({ "cache-control": "no-store", vary: "Cookie" }) }),
+    );
+    expect(lambdaChunks).toEqual([]);
+  });
+
+  it("preserves delayed redirects and cookies across streaming adapters", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        path: "/private",
+        fallback: "secret fallback",
+        loader: async () => {
+          await delay(10);
+          return redirect("/login", { headers: { "set-cookie": "return-to=/private; Path=/" } });
+        },
+        render: () => "<h1>Private</h1>",
+      },
+    ];
+
+    const workers = await createWorkersHandler({ routes, streaming: true }).fetch(
+      new Request("https://example.com/private"),
+    );
+    expect(workers.status).toBe(302);
+    expect(workers.headers.get("location")).toBe("/login");
+    expect(workers.headers.get("set-cookie")).toBe("return-to=/private; Path=/");
+    expect(await workers.text()).toBe("");
+
+    const nodeHeaders = new Map<string, string | number | readonly string[]>();
+    const nodeChunks: string[] = [];
+    const nodeRequest = Object.assign(Readable.from([]), {
+      method: "GET",
+      url: "/private",
+      headers: { host: "example.com" },
+    });
+    const nodeResponse = Object.assign(new EventEmitter(), {
+      statusCode: 200,
+      writableEnded: false,
+      setHeader: (name: string, value: string | number | readonly string[]) => nodeHeaders.set(name, value),
+      flushHeaders: () => undefined,
+      write: (chunk: Uint8Array) => {
+        nodeChunks.push(Buffer.from(chunk).toString("utf8"));
+        return true;
+      },
+      end: (chunk?: string) => {
+        if (chunk) nodeChunks.push(chunk);
+        nodeResponse.writableEnded = true;
+      },
+    });
+    await createNodeHandler({ routes, streaming: true })(nodeRequest as never, nodeResponse as never);
+    expect(nodeResponse.statusCode).toBe(302);
+    expect(nodeHeaders.get("location")).toBe("/login");
+    expect(nodeHeaders.get("set-cookie")).toBe("return-to=/private; Path=/");
+    expect(nodeChunks).toEqual([]);
+
+    const lambda = await createLambdaHandler({ routes, streaming: true })(
+      lambdaEvent({
+        rawPath: "/private",
+        requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/private" } },
+      }),
+    );
+    expect(lambda.statusCode).toBe(302);
+    expect(lambda.headers.location).toBe("/login");
+    expect(lambda.cookies).toEqual(["return-to=/private; Path=/"]);
+    expect(lambda.body).toBe("");
+
+    const metadata = vi.fn((stream: Writable) => stream);
+    const runtime = {
+      streamifyResponse: vi.fn((handler) => handler),
+      HttpResponseStream: { from: metadata },
+    };
+    const responseStream = new Writable({ write(_chunk, _encoding, callback) { callback(); } });
+    const streamingHandler = createLambdaStreamingHandler({ routes, streaming: true }, runtime) as (
+      event: ReturnType<typeof lambdaEvent>,
+      responseStream: Writable,
+      context: unknown,
+    ) => Promise<void>;
+    await streamingHandler(
+      lambdaEvent({
+        rawPath: "/private",
+        requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/private" } },
+      }),
+      responseStream,
+      {},
+    );
+    expect(metadata).toHaveBeenCalledWith(
+      responseStream,
+      expect.objectContaining({
+        statusCode: 302,
+        headers: expect.objectContaining({ location: "/login" }),
+        multiValueHeaders: { "Set-Cookie": ["return-to=/private; Path=/"] },
+      }),
+    );
   });
 
   it("shares safe buffered HTML condensation across Workers, Node, and Lambda", async () => {
@@ -1396,7 +1608,7 @@ describe("server adapters", () => {
 
     expect(res.write).toHaveBeenCalled();
     expect(res.end).toHaveBeenCalledWith();
-    expect(chunks.join("")).toBe("<p>Loading</p><h1>Ready</h1>");
+    expect(chunks.join("")).toBe("<h1>Ready</h1>");
   });
 
   it("creates a Node fetch handler that serves static assets before a standards fetch handler", async () => {
@@ -1670,7 +1882,7 @@ describe("server adapters", () => {
     expect(response.body).toBe(Buffer.from(bytes).toString("base64"));
   });
 
-  it("streams Lambda responses through awslambda metadata and chunk writes", async () => {
+  it("streams Lambda responses through authoritative awslambda metadata and chunk writes", async () => {
     const chunks: string[] = [];
     const from = vi.fn((stream: Writable) => stream);
     const runtime = {
@@ -1713,11 +1925,11 @@ describe("server adapters", () => {
         }),
       }),
     );
-    expect(chunks.join("")).toBe("<p>Loading</p><h1>Ready</h1>");
+    expect(chunks.join("")).toBe("<h1>Ready</h1>");
     expect(end).toHaveBeenCalledOnce();
   });
 
-  it("commits private cache and delayed CSRF status in Lambda streaming metadata", async () => {
+  it("commits authoritative headers and delayed CSRF status in Lambda streaming metadata", async () => {
     const from = vi.fn((stream: Writable) => stream);
     const runtime = {
       streamifyResponse: vi.fn((handler) => handler),
@@ -1743,7 +1955,16 @@ describe("server adapters", () => {
               return "private account";
             },
             action,
-            cache: { maxAge: 60 },
+            cache: { mode: "no-store" },
+            headers: () => {
+              const headers = new Headers({
+                "content-security-policy": "default-src 'self'",
+                vary: "Cookie, Accept-Encoding",
+              });
+              headers.append("set-cookie", "sid=updated; Path=/; HttpOnly");
+              headers.append("set-cookie", "theme=dark; Path=/");
+              return headers;
+            },
             render: ({ data }) => `<h1>${data}</h1>`,
           },
         ],
@@ -1770,9 +1991,15 @@ describe("server adapters", () => {
       expect.any(Writable),
       expect.objectContaining({
         statusCode: 200,
-        headers: expect.objectContaining({ "cache-control": "private" }),
+        headers: expect.objectContaining({
+          "cache-control": "no-store",
+          "content-security-policy": "default-src 'self'",
+          vary: "Cookie, Accept-Encoding",
+        }),
+        multiValueHeaders: { "Set-Cookie": ["sid=updated; Path=/; HttpOnly", "theme=dark; Path=/"] },
       }),
     );
+    expect(chunks.join("")).toBe("<h1>private account</h1>");
 
     chunks.length = 0;
     await handler(

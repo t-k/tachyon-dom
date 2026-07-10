@@ -283,7 +283,7 @@ describe("advanced router features", () => {
     ).toContain(`"user": { path: "/users/:id"; params: ParamsForPath<"/users/:id"> }`);
   });
 
-  it("renders streaming route fallbacks before loader content", async () => {
+  it("does not commit streaming fallbacks before loader metadata is authoritative", async () => {
     const routes: RouteDefinition[] = [
       {
         id: "stream",
@@ -303,14 +303,14 @@ describe("advanced router features", () => {
     for await (const chunk of result.value.chunks) {
       chunks.push(chunk);
     }
-    expect(chunks).toEqual(["<p>Loading</p>", "<h1>Ready</h1>"]);
+    expect(chunks).toEqual(["<h1>Ready</h1>"]);
     await expect(result.value.final).resolves.toMatchObject({
       headHtml: "",
       stateScript: expect.stringContaining(`data-tachyon-state="route:stream"`),
     });
   });
 
-  it("emits streaming route fallback before loader data resolves", async () => {
+  it("waits for loader data before exposing streaming response metadata", async () => {
     let resolveLoader: ((value: string) => void) | undefined;
     const loaderStarted: string[] = [];
     const routes: RouteDefinition[] = [
@@ -333,25 +333,37 @@ describe("advanced router features", () => {
       pendingResult,
       new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 25)),
     ]);
-    expect(result).not.toBeUndefined();
-    if (!result) {
-      resolveLoader?.("Ready");
-      await pendingResult;
-      throw new Error("renderRouteStream waited for loader data before returning.");
-    }
+    expect(result).toBeUndefined();
+    resolveLoader?.("Ready");
+    const settled = await pendingResult;
+    expect(settled.ok).toBe(true);
+    if (!settled.ok) throw new Error(settled.error.message);
+    const iterator = settled.value.chunks[Symbol.asyncIterator]();
+    expect(loaderStarted).toEqual(["loader"]);
+    await expect(iterator.next()).resolves.toEqual({ done: false, value: "<h1>Ready</h1>" });
+    await expect(settled.value.final).resolves.toMatchObject({
+      status: 200,
+      stateScript: expect.stringContaining(`data-tachyon-state="route:stream"`),
+    });
+  });
+
+  it("does not emit a fallback after authoritative streaming metadata resolves", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        id: "stream",
+        path: "/stream",
+        fallback: "<p>Loading</p>",
+        loader: async () => "Ready",
+        render: ({ data }) => `<h1>${data}</h1>`,
+      },
+    ];
+
+    const result = await renderRouteStream(routes, "https://example.com/stream");
     expect(result.ok).toBe(true);
     if (!result.ok) {
       throw new Error(result.error.message);
     }
     const iterator = result.value.chunks[Symbol.asyncIterator]();
-    const firstChunk = await Promise.race([
-      iterator.next(),
-      Promise.resolve().then(() => ({ done: false as const, value: "loader still pending" })),
-    ]);
-
-    expect(loaderStarted).toEqual(["loader"]);
-    expect(firstChunk).toEqual({ done: false, value: "<p>Loading</p>" });
-    resolveLoader?.("Ready");
     await expect(iterator.next()).resolves.toEqual({ done: false, value: "<h1>Ready</h1>" });
     await expect(result.value.final).resolves.toMatchObject({
       status: 200,
@@ -384,6 +396,91 @@ describe("advanced router features", () => {
     expect(result.value.headers.get("location")).toBe("/login");
     expect(chunks).toEqual([]);
     await expect(result.value.final).resolves.toMatchObject({ status: 302 });
+  });
+
+  it("commits delayed streaming status and headers before exposing body chunks", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        id: "account",
+        path: "/account",
+        fallback: "<p>Loading</p>",
+        loader: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return "Ada";
+        },
+        cache: { mode: "no-store" },
+        headers: () => {
+          const headers = new Headers({
+            "content-security-policy": "default-src 'self'",
+            vary: "Cookie, Accept-Encoding",
+          });
+          headers.append("set-cookie", "sid=updated; Path=/; HttpOnly");
+          headers.append("set-cookie", "theme=dark; Path=/");
+          return headers;
+        },
+        render: ({ data }) => `<h1>${data}</h1>`,
+      },
+    ];
+
+    const result = await renderRouteStream(routes, new Request("https://example.com/account"));
+    if (!result.ok) throw new Error(result.error.message);
+
+    expect(result.value.status).toBe(200);
+    expect(result.value.headers.get("cache-control")).toBe("no-store");
+    expect(result.value.headers.get("content-security-policy")).toBe("default-src 'self'");
+    expect(result.value.headers.getSetCookie()).toEqual([
+      "sid=updated; Path=/; HttpOnly",
+      "theme=dark; Path=/",
+    ]);
+    expect(result.value.headers.get("vary")).toBe("Cookie, Accept-Encoding");
+    const chunks: string[] = [];
+    for await (const chunk of result.value.chunks) chunks.push(chunk);
+    expect(chunks).toEqual(["<h1>Ada</h1>"]);
+  });
+
+  it("commits delayed streaming redirects before exposing a fallback", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        path: "/private",
+        fallback: "<p>Loading</p>",
+        loader: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          return redirect("/login", { headers: { "set-cookie": "return-to=/private; Path=/" } });
+        },
+        render: () => "<h1>Private</h1>",
+      },
+    ];
+
+    const result = await renderRouteStream(routes, new Request("https://example.com/private"));
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.status).toBe(302);
+    expect(result.value.headers.get("location")).toBe("/login");
+    expect(result.value.headers.get("set-cookie")).toBe("return-to=/private; Path=/");
+    const chunks: string[] = [];
+    for await (const chunk of result.value.chunks) chunks.push(chunk);
+    expect(chunks).toEqual([]);
+  });
+
+  it("commits delayed streaming errors before exposing a fallback", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        path: "/failure",
+        fallback: "<p>Loading</p>",
+        loader: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          throw new Error("loader failed");
+        },
+        error: () => "<h1>Recovered</h1>",
+        render: () => "<h1>Success</h1>",
+      },
+    ];
+
+    const result = await renderRouteStream(routes, new Request("https://example.com/failure"));
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.status).toBe(500);
+    const chunks: string[] = [];
+    for await (const chunk of result.value.chunks) chunks.push(chunk);
+    expect(chunks).toEqual(["<h1>Recovered</h1>"]);
   });
 
   it("applies security headers and route test utilities", async () => {
