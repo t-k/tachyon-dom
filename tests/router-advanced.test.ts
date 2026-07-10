@@ -79,6 +79,18 @@ describe("advanced router features", () => {
     ).toBe(`<h1>boom</h1>`);
   });
 
+  it("uses a route module not-found boundary for an unmatched descendant", async () => {
+    const route = routeFromModule("users", defineRouteModule({
+      path: "/users",
+      NotFound: ({ url }) => `<h1>Missing ${url.pathname}</h1>`,
+      render: () => "users",
+    }));
+
+    const result = await renderRoute([route], "https://example.com/users/missing");
+
+    expect(result.ok && result.value).toMatchObject({ status: 404, html: "<h1>Missing /users/missing</h1>" });
+  });
+
   it("collects preload resources from matched route branches", async () => {
     const routes: RouteDefinition[] = [
       {

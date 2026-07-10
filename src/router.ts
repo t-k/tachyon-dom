@@ -1025,6 +1025,24 @@ const applyHeaders = (headers: Headers, extra: HeadersInit): void => {
   new Headers(extra).forEach((value, key) => headers.set(key, value));
 };
 
+const nearestNotFoundBoundary = (
+  routes: readonly RouteDefinition[],
+  pathname: string,
+): RouteDefinition["notFound"] | undefined => {
+  let selected: { length: number; handler: NonNullable<RouteDefinition["notFound"]> } | undefined;
+  const visit = (entries: readonly RouteDefinition[]): void => {
+    for (const route of entries) {
+      const prefix = route.path.replace(/[:*][^/]+/g, "").replace(/\/$/, "");
+      if (route.notFound && prefix && (pathname === prefix || pathname.startsWith(`${prefix}/`))) {
+        if (!selected || prefix.length > selected.length) selected = { length: prefix.length, handler: route.notFound };
+      }
+      if (route.children) visit(route.children);
+    }
+  };
+  visit(routes);
+  return selected?.handler;
+};
+
 export const renderRoute = async (
   routes: readonly RouteDefinition[],
   input: Request | URL | string,
@@ -1112,7 +1130,8 @@ export const renderRoute = async (
   }
   const match = matchRoute(routes, url);
   if (!match.ok) {
-    const html = options.notFound ? await options.notFound({ request, url }) : `<h1>Not Found</h1>`;
+    const boundary = nearestNotFoundBoundary(routes, url.pathname);
+    const html = boundary ? await boundary({ request, url }) : options.notFound ? await options.notFound({ request, url }) : `<h1>Not Found</h1>`;
     return ok({
       status: 404,
       html,
