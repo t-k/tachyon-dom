@@ -1187,12 +1187,12 @@ describe("server adapters", () => {
     ];
     const expected = `<!doctype html><html><head><meta charset="UTF-8" /></head><body><!--tachyon-hydrate:x:start--><p>Hello <!---->Ada</p><!--tachyon-hydrate:x:end--></body></html>`;
 
-    const workers = await createWorkersHandler({ routes, htmlWhitespace: "condense" }).fetch(
+    const workers = await createWorkersHandler({ routes, htmlWhitespace: "normalize-tags" }).fetch(
       new Request("https://example.test/"),
     );
     expect(await workers.text()).toBe(expected);
 
-    const lambda = await createLambdaHandler({ routes, htmlWhitespace: "condense" })(lambdaEvent());
+    const lambda = await createLambdaHandler({ routes, htmlWhitespace: "normalize-tags" })(lambdaEvent());
     expect(lambda.body).toBe(expected);
 
     const chunks: string[] = [];
@@ -1211,7 +1211,7 @@ describe("server adapters", () => {
         response.writableEnded = true;
       },
     });
-    await createNodeHandler({ routes, htmlWhitespace: "condense" })(request as never, response as never);
+    await createNodeHandler({ routes, htmlWhitespace: "normalize-tags" })(request as never, response as never);
     expect(chunks.join("")).toBe(expected);
   });
 

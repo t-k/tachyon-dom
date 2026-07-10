@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { build as viteBuild, createServer, type Plugin } from "vite";
 import {
   addPageFiles,
@@ -24,7 +24,9 @@ import {
   pagesFromRouteFiles,
   renderAppDocument,
   renderAppResponse,
+  type HtmlWhitespacePolicy,
 } from "../src/app";
+import type { TemplateWhitespacePolicy } from "../src/compiler/types";
 import { diagnoseTachyonSfc, diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
@@ -80,6 +82,10 @@ const collectRelativeModuleSpecifiers = (sourceFile: ts.SourceFile): string[] =>
 };
 
 describe("DX helpers", () => {
+  it("keeps template and HTML tag whitespace policy types distinct", () => {
+    expectTypeOf<TemplateWhitespacePolicy>().not.toEqualTypeOf<HtmlWhitespacePolicy>();
+  });
+
   it("formats compiler diagnostics with line and column", () => {
     const result = diagnoseTemplate(`<main>\n<if></if>\n</main>`);
 

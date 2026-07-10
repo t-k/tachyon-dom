@@ -63,8 +63,8 @@ describe("safe HTML whitespace policy", () => {
       ],
     });
 
-    const preserved = app.renderDocument("/", { whitespace: "preserve" });
-    const condensed = app.renderDocument("/", { whitespace: "condense" });
+    const preserved = app.renderDocument("/", { whitespace: "preserve-tags" });
+    const condensed = app.renderDocument("/", { whitespace: "normalize-tags" });
     expect(condensed).toBe(app.renderDocument("/", { minify: true }));
     expect(condensed).not.toBe(preserved);
     expect(serialize(parse(condensed))).toBe(serialize(parse(preserved)));
@@ -79,13 +79,13 @@ describe("safe HTML whitespace policy", () => {
           `<!doctype html>\n<html>\n  <head><title>x</title></head>\n  <body>${meaningfulBody}</body>\n</html>`,
       },
     ];
-    const buffered = await renderRoute(routes, "https://example.test/", { htmlWhitespace: "condense" });
+    const buffered = await renderRoute(routes, "https://example.test/", { htmlWhitespace: "normalize-tags" });
     expect(buffered.ok).toBe(true);
     if (!buffered.ok) return;
     expect(buffered.value.html).toContain("\n  <head>");
     expect(buffered.value.html).toContain("<!---->Ada<!---->");
 
-    const streamed = await renderRouteStream(routes, "https://example.test/", { htmlWhitespace: "condense" });
+    const streamed = await renderRouteStream(routes, "https://example.test/", { htmlWhitespace: "normalize-tags" });
     expect(streamed.ok).toBe(true);
     if (!streamed.ok) return;
     const chunks: string[] = [];

@@ -1,6 +1,6 @@
 import { parse, parseFragment, type DefaultTreeAdapterMap } from "parse5";
 
-export type HtmlWhitespacePolicy = "preserve" | "condense";
+export type HtmlWhitespacePolicy = "preserve-tags" | "normalize-tags";
 
 type SourceRange = { startOffset: number; endOffset: number };
 type LocatedNode = DefaultTreeAdapterMap["node"] & {
@@ -90,4 +90,4 @@ export const normalizeHtmlTagWhitespace = (html: string): string => {
 export const condenseHtmlWhitespace = normalizeHtmlTagWhitespace;
 
 export const applyHtmlWhitespace = (html: string, policy: HtmlWhitespacePolicy): string =>
-  policy === "condense" ? normalizeHtmlTagWhitespace(html) : html;
+  policy === "normalize-tags" ? normalizeHtmlTagWhitespace(html) : html;

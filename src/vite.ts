@@ -550,7 +550,7 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
         fileName: page.fileName,
         source: app.renderDocument(page.path, {
           assets,
-          whitespace: options.htmlWhitespace ?? (options.minifyHtml === false ? "preserve" : "condense"),
+          whitespace: options.htmlWhitespace ?? (options.minifyHtml === false ? "preserve-tags" : "normalize-tags"),
         }),
         type: "asset",
       });

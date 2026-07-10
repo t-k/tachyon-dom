@@ -66,7 +66,7 @@ export type TachyonAppShellContext = {
 export type TachyonAppDocumentOptions = {
   assets?: TachyonAppAssets;
   whitespace?: HtmlWhitespacePolicy;
-  /** @deprecated Use `whitespace: "condense"` instead. */
+  /** @deprecated Use `whitespace: "normalize-tags"` instead. */
   minify?: boolean;
 };
 
@@ -269,7 +269,7 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
   </body>
 </html>
 `;
-    const whitespace = options.whitespace ?? (options.minify ? "condense" : "preserve");
+    const whitespace = options.whitespace ?? (options.minify ? "normalize-tags" : "preserve-tags");
     return applyHtmlWhitespace(html, whitespace);
   };
 

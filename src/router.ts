@@ -1273,7 +1273,7 @@ const renderRouteInternal = async (
         heads.unshift(await entry.route.head(context));
       }
     }
-    outlet = applyHtmlWhitespace(outlet, options.htmlWhitespace ?? "preserve");
+    outlet = applyHtmlWhitespace(outlet, options.htmlWhitespace ?? "preserve-tags");
     await options.hooks?.onRender?.({ request, url, html: outlet, match: match.value });
     const stateScript = Object.entries(loaderData)
       .map(([id, data]) =>
@@ -1371,7 +1371,7 @@ const renderRouteStreamInternal = async (
   options: RouteExecutionOptions = {},
 ): Promise<Result<RouteStreamResult, RouteError>> => {
   const request = requestFor(input);
-  const streamingOptions = { ...options, htmlWhitespace: "preserve" as const };
+  const streamingOptions = { ...options, htmlWhitespace: "preserve-tags" as const };
   const rendered = await renderRouteInternal(routes, request, streamingOptions);
   if (!rendered.ok) return err(rendered.error);
   const body = rendered.value.responseBody ?? rendered.value.html;
