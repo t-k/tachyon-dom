@@ -11,6 +11,9 @@ importers:
       oxc-parser:
         specifier: ^0.136.0
         version: 0.136.0
+      parse5:
+        specifier: ^7.3.0
+        version: 7.3.0
       typescript:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'

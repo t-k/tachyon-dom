@@ -1,25 +1,19 @@
+import { parse, parseFragment, type DefaultTreeAdapterMap } from "parse5";
+
 export type HtmlWhitespacePolicy = "preserve" | "condense";
 
-const rawTextElements = new Set([
-  "iframe",
-  "noembed",
-  "noframes",
-  "noscript",
-  "plaintext",
-  "pre",
-  "script",
-  "style",
-  "textarea",
-  "title",
-  "xmp",
-]);
-
-type TagToken = {
-  end: number;
-  name: string | undefined;
-  closing: boolean;
-  selfClosing: boolean;
+type SourceRange = { startOffset: number; endOffset: number };
+type LocatedNode = DefaultTreeAdapterMap["node"] & {
+  childNodes?: LocatedNode[];
+  content?: LocatedNode;
+  sourceCodeLocation?: {
+    startTag?: SourceRange;
+    endTag?: SourceRange;
+  };
 };
+
+const isHtmlSpace = (character: string): boolean =>
+  character === " " || character === "\t" || character === "\n" || character === "\f" || character === "\r";
 
 const condenseTag = (source: string): string => {
   let output = "";
@@ -39,11 +33,10 @@ const condenseTag = (source: string): string => {
       cursor += 1;
       continue;
     }
-    if (/\s/.test(character)) {
+    if (isHtmlSpace(character)) {
       let next = cursor + 1;
-      while (next < source.length && /\s/.test(source[next] ?? "")) next += 1;
-      const nextCharacter = source[next];
-      if (nextCharacter !== ">" && nextCharacter !== "/") output += " ";
+      while (next < source.length && isHtmlSpace(source[next] ?? "")) next += 1;
+      if (source[next] !== ">") output += " ";
       cursor = next;
       continue;
     }
@@ -53,68 +46,44 @@ const condenseTag = (source: string): string => {
   return output;
 };
 
-const readTag = (html: string, start: number): TagToken => {
-  if (html.startsWith("<!--", start)) {
-    const commentEnd = html.indexOf("-->", start + 4);
-    return { end: commentEnd < 0 ? html.length : commentEnd + 3, name: undefined, closing: false, selfClosing: true };
-  }
-
-  let cursor = start + 1;
-  const closing = html[cursor] === "/";
-  if (closing) cursor += 1;
-  while (cursor < html.length && /\s/.test(html[cursor] ?? "")) cursor += 1;
-  const nameStart = cursor;
-  while (cursor < html.length && /[A-Za-z0-9:-]/.test(html[cursor] ?? "")) cursor += 1;
-  const name = cursor > nameStart ? html.slice(nameStart, cursor).toLowerCase() : undefined;
-  let quote: '"' | "'" | undefined;
-  for (; cursor < html.length; cursor += 1) {
-    const character = html[cursor];
-    if (quote) {
-      if (character === quote) quote = undefined;
-    } else if (character === '"' || character === "'") {
-      quote = character;
-    } else if (character === ">") {
-      const source = html.slice(start, cursor + 1);
-      return { end: cursor + 1, name, closing, selfClosing: /\/\s*>$/.test(source) };
-    }
-  }
-  return { end: html.length, name, closing, selfClosing: false };
+const collectTagRanges = (node: LocatedNode, ranges: SourceRange[]): void => {
+  const location = node.sourceCodeLocation;
+  if (location?.startTag) ranges.push(location.startTag);
+  if (location?.endTag) ranges.push(location.endTag);
+  for (const child of node.childNodes ?? []) collectTagRanges(child, ranges);
+  if (node.content) collectTagRanges(node.content, ranges);
 };
 
 export const condenseHtmlWhitespace = (html: string): string => {
+  const errors: unknown[] = [];
+  const options = {
+    sourceCodeLocationInfo: true,
+    onParseError: (error: unknown) => errors.push(error),
+  };
+  const document = (
+    /<!doctype\b|<html\b/i.test(html) ? parse(html, options) : parseFragment(html, options)
+  ) as LocatedNode;
+  if (errors.length > 0) return html;
+
+  const ranges: SourceRange[] = [];
+  collectTagRanges(document, ranges);
+  ranges.sort((left, right) => left.startOffset - right.startOffset);
   let cursor = 0;
-  let rawTextElement: string | undefined;
   let output = "";
-  const lowerHtml = html.toLowerCase();
-
-  while (cursor < html.length) {
-    if (rawTextElement) {
-      const closing = lowerHtml.indexOf(`</${rawTextElement}`, cursor);
-      if (closing < 0) return html;
-      output += html.slice(cursor, closing);
-      cursor = closing;
-      rawTextElement = undefined;
-      continue;
+  for (const range of ranges) {
+    if (
+      range.startOffset < cursor ||
+      range.startOffset < 0 ||
+      range.endOffset > html.length ||
+      range.endOffset <= range.startOffset
+    ) {
+      return html;
     }
-    if (html[cursor] !== "<") {
-      const nextTag = html.indexOf("<", cursor);
-      const end = nextTag < 0 ? html.length : nextTag;
-      output += html.slice(cursor, end);
-      cursor = end;
-      continue;
-    }
-
-    const tag = readTag(html, cursor);
-    const source = html.slice(cursor, tag.end);
-    if (!source.endsWith(">")) return html;
-    output += tag.name ? condenseTag(source) : source;
-    if (tag.name && !tag.closing && !tag.selfClosing && rawTextElements.has(tag.name)) {
-      rawTextElement = tag.name;
-    }
-    cursor = tag.end;
+    output += html.slice(cursor, range.startOffset);
+    output += condenseTag(html.slice(range.startOffset, range.endOffset));
+    cursor = range.endOffset;
   }
-
-  return output;
+  return `${output}${html.slice(cursor)}`;
 };
 
 export const applyHtmlWhitespace = (html: string, policy: HtmlWhitespacePolicy): string =>

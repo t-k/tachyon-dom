@@ -102,7 +102,7 @@ describe("full app example", () => {
       const html = readFileSync(join(outDir, "counter", "index.html"), "utf8");
       expect(html).toContain('data-ssr-route="/counter/"');
       expect(html).toContain("Projected value is count plus two steps.");
-      expect(html).toContain('<meta charset="UTF-8"/>');
+      expect(html).toContain('<meta charset="UTF-8" />');
     } finally {
       rmSync(outDir, { force: true, recursive: true });
     }

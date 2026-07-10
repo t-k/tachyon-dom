@@ -55,7 +55,7 @@ describe("safe production HTML condensation", () => {
     const response = await fetch(`${baseUrl}/counter/`);
     const html = await response.text();
     expect(html).toContain("<!---->");
-    expect(html).toContain('<meta charset="UTF-8"/>');
+    expect(html).toContain('<meta charset="UTF-8" />');
 
     const page = await browser?.newPage();
     if (!page) throw new Error("Missing browser page.");

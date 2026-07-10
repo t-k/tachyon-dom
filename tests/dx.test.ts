@@ -523,7 +523,7 @@ const increment = (): void => {
       `<main id="app"><section><h1>Counter</h1><p>1</p></section></main>`,
     );
     expect(app.entries({ minify: true }).map((entry) => entry.fileName)).toEqual(["index.html", "counter/index.html"]);
-    expect(app.entries({ minify: true })[1]?.source).toContain('<meta charset="UTF-8"/>');
+    expect(app.entries({ minify: true })[1]?.source).toContain('<meta charset="UTF-8" />');
     expect(app.pageForPath("/missing/")).toBeUndefined();
     expect(app.renderRoute("/missing/")).toBe("");
     expect(() => renderAppDocument(app, "/missing/")).toThrow("No page found");

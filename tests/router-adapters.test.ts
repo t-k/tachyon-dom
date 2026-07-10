@@ -975,7 +975,7 @@ describe("server adapters", () => {
           `<!doctype html><html><head><meta   charset="UTF-8"   /></head><body><!--tachyon-hydrate:x:start--><p>Hello <!---->Ada</p><!--tachyon-hydrate:x:end--></body></html>`,
       },
     ];
-    const expected = `<!doctype html><html><head><meta charset="UTF-8"/></head><body><!--tachyon-hydrate:x:start--><p>Hello <!---->Ada</p><!--tachyon-hydrate:x:end--></body></html>`;
+    const expected = `<!doctype html><html><head><meta charset="UTF-8" /></head><body><!--tachyon-hydrate:x:start--><p>Hello <!---->Ada</p><!--tachyon-hydrate:x:end--></body></html>`;
 
     const workers = await createWorkersHandler({ routes, htmlWhitespace: "condense" }).fetch(
       new Request("https://example.test/"),
