@@ -1,36 +1,76 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "benchmark": {
-    "name": "streaming-backpressure",
-    "contractVersion": 2
+    "name": "streaming-backpressure-comparison",
+    "contractVersion": 1
   },
-  "baselineRevision": "5848458a668057f07669bde55e58d9d1ce05dfac",
-  "candidateRevision": "2d3adeb46170bcce2ddbbe1054e07216ff5158d7",
-  "controls": {
-    "compatible": true,
-    "legacyIncomplete": false,
-    "intentionalDifferences": [],
-    "accidentalDifferences": []
+  "provenance": {
+    "capturedAt": "2026-07-10T11:47:16.012Z",
+    "command": {
+      "argv": [
+        "/home/tk/.volta/tools/image/node/24.13.0/bin/node",
+        "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/streaming-backpressure-compare.ts",
+        "benchmark/streaming-backpressure-results/2026-07-10-tcp-baseline-5848458.json",
+        "benchmark/streaming-backpressure-results/2026-07-10-tcp-candidate-2d3adeb.json",
+        "benchmark/streaming-backpressure-results/2026-07-10-tcp-comparison.json"
+      ],
+      "display": "/home/tk/.volta/tools/image/node/24.13.0/bin/node /home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/streaming-backpressure-compare.ts benchmark/streaming-backpressure-results/2026-07-10-tcp-baseline-5848458.json benchmark/streaming-backpressure-results/2026-07-10-tcp-candidate-2d3adeb.json benchmark/streaming-backpressure-results/2026-07-10-tcp-comparison.json",
+      "cwd": "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues"
+    },
+    "git": {
+      "available": true,
+      "commit": "d3cf5ba8e03b62854b9815db6722c4ad54ad2f46",
+      "dirty": false,
+      "workingTreeSha256": "21965f44e0c3c21560236c2aaba28c8a1e7cad76ab59d09d1bebc727836c264c"
+    },
+    "runtime": {
+      "node": "v24.13.0",
+      "platform": "linux",
+      "arch": "x64",
+      "osRelease": "6.8.0-134-generic"
+    },
+    "host": {
+      "hostname": "ubuntu",
+      "cpuModel": "AMD Ryzen 9 9950X 16-Core Processor",
+      "logicalCpuCount": 32
+    },
+    "dependencies": {
+      "tsx": {
+        "version": "4.22.4"
+      }
+    }
   },
-  "ratios": {
-    "completionTime": 0.9923171715621866,
-    "peakQueuedBytes": 0.01874997765374048,
-    "peakRssDeltaBytes": 0.9141937560347603
+  "workload": {
+    "baselineRevision": "5848458a668057f07669bde55e58d9d1ce05dfac",
+    "candidateRevision": "2d3adeb46170bcce2ddbbe1054e07216ff5158d7",
+    "controls": {
+      "compatible": true,
+      "legacyIncomplete": false,
+      "intentionalDifferences": [],
+      "accidentalDifferences": []
+    }
   },
-  "baseline": {
-    "completionTimeMs": 422.601393,
-    "peakQueuedBytes": 20976665,
-    "sourcePullCount": 774,
-    "startingRssBytes": 75964416,
-    "peakRssBytes": 139595776,
-    "peakRssDeltaBytes": 63631360
-  },
-  "candidate": {
-    "completionTimeMs": 419.354619,
-    "peakQueuedBytes": 393312,
-    "sourcePullCount": 774,
-    "startingRssBytes": 74694656,
-    "peakRssBytes": 132866048,
-    "peakRssDeltaBytes": 58171392
+  "measurements": {
+    "ratios": {
+      "completionTime": 0.9923171715621866,
+      "peakQueuedBytes": 0.01874997765374048,
+      "peakRssDeltaBytes": 0.9141937560347603
+    },
+    "baseline": {
+      "completionTimeMs": 422.601393,
+      "peakQueuedBytes": 20976665,
+      "sourcePullCount": 774,
+      "startingRssBytes": 75964416,
+      "peakRssBytes": 139595776,
+      "peakRssDeltaBytes": 63631360
+    },
+    "candidate": {
+      "completionTimeMs": 419.354619,
+      "peakQueuedBytes": 393312,
+      "sourcePullCount": 774,
+      "startingRssBytes": 74694656,
+      "peakRssBytes": 132866048,
+      "peakRssDeltaBytes": 58171392
+    }
   }
 }

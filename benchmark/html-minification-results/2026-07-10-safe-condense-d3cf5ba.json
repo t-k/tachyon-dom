@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 2,
+  "benchmark": {
+    "name": "html-minification",
+    "contractVersion": 1
+  },
+  "provenance": {
+    "capturedAt": "2026-07-10T11:47:15.551Z",
+    "command": {
+      "argv": [
+        "/home/tk/.volta/tools/image/node/24.13.0/bin/node",
+        "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/html-minification.ts",
+        "--",
+        "--baseline",
+        "4b24a62",
+        "--iterations",
+        "5000",
+        "--output",
+        "benchmark/html-minification-results/2026-07-10-safe-condense-d3cf5ba.json"
+      ],
+      "display": "/home/tk/.volta/tools/image/node/24.13.0/bin/node /home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/html-minification.ts -- --baseline 4b24a62 --iterations 5000 --output benchmark/html-minification-results/2026-07-10-safe-condense-d3cf5ba.json",
+      "cwd": "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues"
+    },
+    "git": {
+      "available": true,
+      "commit": "d3cf5ba8e03b62854b9815db6722c4ad54ad2f46",
+      "dirty": false,
+      "workingTreeSha256": "21965f44e0c3c21560236c2aaba28c8a1e7cad76ab59d09d1bebc727836c264c"
+    },
+    "runtime": {
+      "node": "v24.13.0",
+      "platform": "linux",
+      "arch": "x64",
+      "osRelease": "6.8.0-134-generic"
+    },
+    "host": {
+      "hostname": "ubuntu",
+      "cpuModel": "AMD Ryzen 9 9950X 16-Core Processor",
+      "logicalCpuCount": 32
+    },
+    "dependencies": {}
+  },
+  "workload": {
+    "baselineRevision": "4b24a62",
+    "candidateRevision": "d3cf5ba8e03b62854b9815db6722c4ad54ad2f46",
+    "buildMode": "production",
+    "iterations": 5000,
+    "fixtures": {
+      "document": {
+        "rawBytes": 120,
+        "gzipBytes": 119,
+        "brotliBytes": 78
+      },
+      "hydration": {
+        "rawBytes": 130,
+        "gzipBytes": 108,
+        "brotliBytes": 76
+      },
+      "rawText": {
+        "rawBytes": 174,
+        "gzipBytes": 141,
+        "brotliBytes": 94
+      }
+    },
+    "streaming": {
+      "chunks": 2,
+      "delayMs": 10,
+      "policy": "preserve-for-all-streaming-modes"
+    }
+  },
+  "measurements": {
+    "baseline": {
+      "durationMs": 9.513007000000016,
+      "outputSizes": {
+        "document": {
+          "rawBytes": 108,
+          "gzipBytes": 107,
+          "brotliBytes": 62
+        },
+        "hydration": {
+          "rawBytes": 59,
+          "gzipBytes": 67,
+          "brotliBytes": 52
+        },
+        "rawText": {
+          "rawBytes": 168,
+          "gzipBytes": 139,
+          "brotliBytes": 93
+        }
+      }
+    },
+    "candidate": {
+      "durationMs": 34.566655999999966,
+      "outputSizes": {
+        "document": {
+          "rawBytes": 115,
+          "gzipBytes": 113,
+          "brotliBytes": 61
+        },
+        "hydration": {
+          "rawBytes": 130,
+          "gzipBytes": 108,
+          "brotliBytes": 76
+        },
+        "rawText": {
+          "rawBytes": 174,
+          "gzipBytes": 141,
+          "brotliBytes": 94
+        }
+      }
+    },
+    "streamingPreserve": {
+      "firstChunkMs": 0.06624499999998079,
+      "completionMs": 10.351377999999954,
+      "peakRssBytes": 232886272,
+      "chunks": 2,
+      "bytes": 44
+    },
+    "streamingCondenseRequested": {
+      "firstChunkMs": 0.02293299999996634,
+      "completionMs": 10.200071999999977,
+      "peakRssBytes": 232886272,
+      "chunks": 2,
+      "bytes": 44
+    }
+  }
+}
