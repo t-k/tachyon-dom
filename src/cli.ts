@@ -540,7 +540,7 @@ const starterTsConfigSource = (): string =>
         skipLibCheck: false,
         strict: true,
         target: "ES2022",
-        types: ["vite/client", "tachyon-dom/td-modules"],
+        types: ["vite/client", "node", "tachyon-dom/td-modules"],
       },
       include: ["src", "vite.config.ts"],
     },
@@ -624,6 +624,7 @@ const starterPackageJsonSource = (): string =>
         "tachyon-dom": "^0.1.0",
       },
       devDependencies: {
+        "@types/node": "^24.0.3",
         typescript: "^5.8.3",
         vite: "^8.0.0",
         vitest: "^4.1.9",

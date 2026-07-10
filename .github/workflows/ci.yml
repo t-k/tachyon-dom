@@ -33,6 +33,8 @@ jobs:
 
       - run: pnpm verify:package
 
+      - run: pnpm verify:starters
+
       - run: pnpm check:exports
 
       - run: pnpm check:size

@@ -218,6 +218,7 @@
     "check:exports": "publint --strict && attw --pack --no-emoji --profile esm-only",
     "check:size": "size-limit",
     "verify:package": "node scripts/verify-package-artifacts.mjs",
+    "verify:starters": "node scripts/verify-generated-starters.mjs",
     "prepublishOnly": "pnpm build && pnpm verify:package && pnpm check:exports && pnpm check:size",
     "lint": "oxlint .",
     "format": "oxfmt --write ."

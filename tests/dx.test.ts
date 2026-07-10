@@ -746,7 +746,8 @@ export default { selected: false };
       expect(ci).toContain("pnpm typecheck");
       expect(ci).toContain("pnpm test");
       expect(smokeTest).toContain("renders the starter page");
-      expect(tsconfig.compilerOptions?.types).toEqual(["vite/client", "tachyon-dom/td-modules"]);
+      expect(tsconfig.compilerOptions?.types).toEqual(["vite/client", "node", "tachyon-dom/td-modules"]);
+      expect(packageJson.devDependencies?.["@types/node"]).toBe("^24.0.3");
       expect(readme).toContain("Edit `src/routes/index/page.td`");
       expect(readme).toContain("Route registration");
       expect(readme).toContain("Do not put application code in `public/client/main.js`");
@@ -1311,7 +1312,12 @@ void chunks;
     };
     const workflow = await readFile(path.join(process.cwd(), ".github", "workflows", "ci.yml"), "utf8");
     expect(packageJson.scripts?.["verify:package"]).toBe("node scripts/verify-package-artifacts.mjs");
+    expect(packageJson.scripts?.["verify:starters"]).toBe("node scripts/verify-generated-starters.mjs");
     expect(workflow).toContain("pnpm verify:package");
+    expect(workflow).toContain("pnpm verify:starters");
+    await expect(readFile(path.join(process.cwd(), "scripts", "verify-generated-starters.mjs"), "utf8")).resolves.toContain(
+      '"create-tachyon-dom"',
+    );
 
     const realResult = await verifyPackageArtifacts({ packageDir: process.cwd(), checkPack: false });
     expect(realResult.ok).toBe(true);
