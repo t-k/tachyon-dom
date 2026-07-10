@@ -3,18 +3,20 @@ import { createTemplateIr } from "./ir.js";
 import { parseTemplate } from "./parser.js";
 import { lowerClientTemplate } from "./targets/client.js";
 import type { CompiledTemplate, CompilerError } from "./types.js";
+import type { CompileTemplateOptions, TemplateWhitespacePolicy } from "./types.js";
+import { applyTemplateWhitespace } from "./whitespace.js";
 
 const compileCacheLimit = 128;
 const compileCache = new Map<string, Result<CompiledTemplate, CompilerError>>();
 
 const rememberCompiledTemplate = (
-  source: string,
+  cacheKey: string,
   result: Result<CompiledTemplate, CompilerError>,
 ): Result<CompiledTemplate, CompilerError> => {
-  if (compileCache.has(source)) {
-    compileCache.delete(source);
+  if (compileCache.has(cacheKey)) {
+    compileCache.delete(cacheKey);
   }
-  compileCache.set(source, result);
+  compileCache.set(cacheKey, result);
   while (compileCache.size > compileCacheLimit) {
     const oldest = compileCache.keys().next().value;
     if (oldest === undefined) {
@@ -25,22 +27,28 @@ const rememberCompiledTemplate = (
   return result;
 };
 
-export const compileTemplate = (source: string): Result<CompiledTemplate, CompilerError> => {
-  const cached = compileCache.get(source);
+export const compileTemplate = (
+  source: string,
+  options: CompileTemplateOptions = {},
+): Result<CompiledTemplate, CompilerError> => {
+  const whitespace: TemplateWhitespacePolicy = options.whitespace ?? "preserve";
+  const cacheKey = `${whitespace}\0${source}`;
+  const cached = compileCache.get(cacheKey);
   if (cached) {
-    compileCache.delete(source);
-    compileCache.set(source, cached);
+    compileCache.delete(cacheKey);
+    compileCache.set(cacheKey, cached);
     return cached;
   }
   const rootResult = parseTemplate(source);
   if (!rootResult.ok) {
-    return rememberCompiledTemplate(source, err(rootResult.error));
+    return rememberCompiledTemplate(cacheKey, err(rootResult.error));
   }
-  const irResult = createTemplateIr(rootResult.value);
+  const root = applyTemplateWhitespace(rootResult.value, whitespace);
+  const irResult = createTemplateIr(root);
   if (!irResult.ok) {
-    return rememberCompiledTemplate(source, err(irResult.error));
+    return rememberCompiledTemplate(cacheKey, err(irResult.error));
   }
-  return rememberCompiledTemplate(source, ok({
+  return rememberCompiledTemplate(cacheKey, ok({
     source,
     ir: irResult.value,
     root: irResult.value.root,

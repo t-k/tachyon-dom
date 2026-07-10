@@ -51,6 +51,53 @@ describe("HTML-first compiler", () => {
     expect(second).toBe(first);
   });
 
+  it("condenses formatting newlines through one shared template tree", () => {
+    const source = `<main>
+  <ul>
+    <li>one</li>
+    <li>two</li>
+  </ul>
+  <p>Hello {name}!</p>
+</main>`;
+    const preserved = compileTemplate(source, { whitespace: "preserve" });
+    const condensed = compileTemplate(source, { whitespace: "condense" });
+    if (!preserved.ok) throw new Error(preserved.error.message);
+    if (!condensed.ok) throw new Error(condensed.error.message);
+
+    expect(renderServerTemplate(preserved.value, { name: "Ada" })).toContain("\n    <li>");
+    expect(renderServerTemplate(condensed.value, { name: "Ada" })).toBe(
+      `<main> <ul> <li>one</li> <li>two</li> </ul> <p>Hello <!---->Ada<!---->!</p> </main>`,
+    );
+    expect(condensed.value.client.templateHtml).toBe(
+      `<main> <ul> <li>one</li> <li>two</li> </ul> <p>Hello <!----> <!---->!</p> </main>`,
+    );
+    expect(condensed).not.toBe(preserved);
+    expect(generateServerStreamModule(condensed.value)).not.toContain("\\n");
+  });
+
+  it("preserves explicit inline, raw-text, and non-ASCII whitespace while condensing", () => {
+    const source = `<main>
+  <p><span>Hello </span><strong>world</strong> <em>a\u00a0b</em></p>
+  <pre>  pre
+    value  </pre>
+  <textarea>  text
+    value  </textarea>
+  <script>line one
+    line two</script>
+  <style>line one
+    line two</style>
+</main>`;
+    const result = compileTemplate(source, { whitespace: "condense" });
+    if (!result.ok) throw new Error(result.error.message);
+    const html = renderServerTemplate(result.value, {});
+
+    expect(html).toContain(`<span>Hello </span><strong>world</strong> <em>a\u00a0b</em>`);
+    expect(html).toContain(`<pre>  pre\n    value  </pre>`);
+    expect(html).toContain(`<textarea>  text\n    value  </textarea>`);
+    expect(html).toContain(`<script>line one\n    line two</script>`);
+    expect(html).toContain(`<style>line one\n    line two</style>`);
+  });
+
   it("caches generated target modules for repeated compiled template objects", () => {
     const result = compileTemplate(`<section><h1>{title}</h1></section>`);
     if (!result.ok) {

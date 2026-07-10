@@ -4,6 +4,12 @@ export type CompilerError = {
   endOffset?: number;
 };
 
+export type TemplateWhitespacePolicy = "preserve" | "condense";
+
+export type CompileTemplateOptions = {
+  whitespace?: TemplateWhitespacePolicy;
+};
+
 export type Attribute = {
   name: string;
   value: string | true;
