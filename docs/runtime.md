@@ -186,7 +186,7 @@ Routes can define `action()` and `revalidateOnAction`. `router.submit(href, init
 
 ## Error Boundaries and i18n
 
-`runtime/error-boundary` provides `createErrorBoundary()` for client enhancements that need a local fallback and reset hook instead of failing the whole mounted region.
+`runtime/error-boundary` provides `createErrorBoundary()` for client enhancements that need a local fallback and reset hook instead of failing the whole mounted region. Plain fallback strings are rendered as text. Intentional markup must use `rawHtml()`; DOM `Node`, `DocumentFragment`, and node arrays are also accepted explicitly.
 
 `tachyon-dom/i18n` provides `createI18n()` for dictionary lookup/interpolation and `localeMiddleware()` for request locale selection from route middleware.
 
