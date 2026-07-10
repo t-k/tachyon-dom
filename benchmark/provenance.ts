@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { promisify, isDeepStrictEqual } from "node:util";
+import { validateBenchmarkEnvelope, valueAtBenchmarkPath } from "./provenance-validation.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -158,13 +159,10 @@ export type BenchmarkDifference = {
 export type BenchmarkComparison = {
   compatible: boolean;
   legacyIncomplete: boolean;
+  invalidFields: string[];
   intentionalDifferences: BenchmarkDifference[];
   accidentalDifferences: BenchmarkDifference[];
 };
-
-const valueAtPath = (value: unknown, fieldPath: string): unknown =>
-  fieldPath.split(".").reduce<unknown>((current, field) =>
-    typeof current === "object" && current !== null ? (current as Record<string, unknown>)[field] : undefined, value);
 
 const isEnvelope = (value: unknown): value is BenchmarkEnvelope<unknown, unknown> =>
   typeof value === "object" && value !== null &&
@@ -177,20 +175,42 @@ export const compareBenchmarkEnvelopes = (
   options: { requiredEqualPaths: readonly string[]; allowedDifferences?: readonly string[] },
 ): BenchmarkComparison => {
   if (!isEnvelope(baseline) || !isEnvelope(candidate)) {
-    return { compatible: false, legacyIncomplete: true, intentionalDifferences: [], accidentalDifferences: [] };
+    return {
+      compatible: false,
+      legacyIncomplete: true,
+      invalidFields: [],
+      intentionalDifferences: [],
+      accidentalDifferences: [],
+    };
+  }
+  const requiredPaths = [...new Set([...options.requiredEqualPaths, ...(options.allowedDifferences ?? [])])];
+  const baselineValidation = validateBenchmarkEnvelope(baseline, requiredPaths);
+  const candidateValidation = validateBenchmarkEnvelope(candidate, requiredPaths);
+  const invalidFields = [
+    ...(baselineValidation.valid ? [] : baselineValidation.invalidFields.map((field) => `baseline.${field}`)),
+    ...(candidateValidation.valid ? [] : candidateValidation.invalidFields.map((field) => `candidate.${field}`)),
+  ];
+  if (invalidFields.length > 0) {
+    return {
+      compatible: false,
+      legacyIncomplete: false,
+      invalidFields,
+      intentionalDifferences: [],
+      accidentalDifferences: [],
+    };
   }
   const allowed = new Set(options.allowedDifferences ?? []);
   const intentionalDifferences = [...allowed].flatMap((fieldPath) => {
-    const baselineValue = valueAtPath(baseline, fieldPath);
-    const candidateValue = valueAtPath(candidate, fieldPath);
+    const baselineValue = valueAtBenchmarkPath(baseline, fieldPath);
+    const candidateValue = valueAtBenchmarkPath(candidate, fieldPath);
     return isDeepStrictEqual(baselineValue, candidateValue)
       ? []
       : [{ path: fieldPath, baseline: baselineValue, candidate: candidateValue }];
   });
   const accidentalDifferences = options.requiredEqualPaths.flatMap((fieldPath) => {
     if (allowed.has(fieldPath)) return [];
-    const baselineValue = valueAtPath(baseline, fieldPath);
-    const candidateValue = valueAtPath(candidate, fieldPath);
+    const baselineValue = valueAtBenchmarkPath(baseline, fieldPath);
+    const candidateValue = valueAtBenchmarkPath(candidate, fieldPath);
     return isDeepStrictEqual(baselineValue, candidateValue)
       ? []
       : [{ path: fieldPath, baseline: baselineValue, candidate: candidateValue }];
@@ -198,6 +218,7 @@ export const compareBenchmarkEnvelopes = (
   return {
     compatible: accidentalDifferences.length === 0,
     legacyIncomplete: false,
+    invalidFields: [],
     intentionalDifferences,
     accidentalDifferences,
   };

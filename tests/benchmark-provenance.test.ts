@@ -105,6 +105,53 @@ describe("benchmark provenance", () => {
     expect(legacy).toMatchObject({ compatible: false, legacyIncomplete: true });
   });
 
+  it("rejects schema-v2 comparisons when required provenance or workload fields are missing", () => {
+    const envelope = (): BenchmarkEnvelope<Record<string, unknown>, unknown> => ({
+      schemaVersion: 2,
+      benchmark: { name: "streaming-backpressure", contractVersion: 2 },
+      provenance: {
+        capturedAt: "2026-07-10T00:00:00.000Z",
+        command: { argv: ["pnpm", "bench"], display: "pnpm bench", cwd: "/repo" },
+        git: { available: true, commit: "a".repeat(40), dirty: false, workingTreeSha256: "b".repeat(64) },
+        runtime: { node: "v24.0.0", platform: "linux", arch: "x64", osRelease: "test" },
+        host: { hostname: "host", cpuModel: "cpu", logicalCpuCount: 8 },
+        dependencies: {},
+      },
+      workload: { connections: 6 },
+      measurements: {},
+    });
+    const missingRuntimeBaseline = structuredClone(envelope()) as any;
+    const missingRuntimeCandidate = structuredClone(envelope()) as any;
+    delete missingRuntimeBaseline.provenance.runtime.node;
+    delete missingRuntimeCandidate.provenance.runtime.node;
+
+    const missingRuntime = compareBenchmarkEnvelopes(missingRuntimeBaseline, missingRuntimeCandidate, {
+      requiredEqualPaths: ["workload.connections"],
+    });
+    expect(missingRuntime).toMatchObject({ compatible: false, legacyIncomplete: false });
+    expect(missingRuntime.invalidFields).toContain("baseline.provenance.runtime.node");
+    expect(missingRuntime.invalidFields).toContain("candidate.provenance.runtime.node");
+
+    const missingWorkloadBaseline = structuredClone(envelope()) as any;
+    const missingWorkloadCandidate = structuredClone(envelope()) as any;
+    delete missingWorkloadBaseline.workload.connections;
+    delete missingWorkloadCandidate.workload.connections;
+    const missingWorkload = compareBenchmarkEnvelopes(missingWorkloadBaseline, missingWorkloadCandidate, {
+      requiredEqualPaths: ["workload.connections"],
+    });
+    expect(missingWorkload.invalidFields).toEqual([
+      "baseline.workload.connections",
+      "candidate.workload.connections",
+    ]);
+
+    const wrongTypeBaseline = structuredClone(envelope()) as any;
+    wrongTypeBaseline.provenance.host.logicalCpuCount = "8";
+    const wrongType = compareBenchmarkEnvelopes(wrongTypeBaseline, envelope(), {
+      requiredEqualPaths: ["workload.connections"],
+    });
+    expect(wrongType.invalidFields).toContain("baseline.provenance.host.logicalCpuCount");
+  });
+
   it("records resolved and unavailable dependency versions from the requested project", async () => {
     const dependencies = await collectDependencyVersions(process.cwd(), ["vite", "@marko/run", "missing-benchmark-package"]);
 
