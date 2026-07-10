@@ -210,6 +210,9 @@ export const createCookieSessionStorage = <Data extends Record<string, unknown> 
   const cookieName = options.cookieName ?? "__Host-tachyon_session";
   const cookieOptions = options.cookie ?? defaultSessionCookie();
   const maxAgeMs = options.maxAgeMs;
+  if (maxAgeMs !== undefined && (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0)) {
+    throw new Error("Cookie session maxAgeMs must be a positive finite number.");
+  }
   const now = options.now ?? Date.now;
   const createId = options.id ?? sessionId;
   const secrets = [options.secret, ...(options.verificationSecrets ?? [])];
@@ -224,7 +227,10 @@ export const createCookieSessionStorage = <Data extends Record<string, unknown> 
       }
       try {
         const parsed = JSON.parse(verified) as Session<Data> & { expiresAt?: unknown };
-        if (typeof parsed.expiresAt === "number" && now() >= parsed.expiresAt) {
+        if (
+          maxAgeMs !== undefined &&
+          (typeof parsed.expiresAt !== "number" || !Number.isFinite(parsed.expiresAt) || now() >= parsed.expiresAt)
+        ) {
           return { id: "", data: {} as Data };
         }
         return { id: parsed.id, data: parsed.data };
