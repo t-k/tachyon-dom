@@ -303,6 +303,20 @@ describe("router security helpers", () => {
     await expect(storage.getSession(tampered)).resolves.toEqual({ id: "", data: {} });
   });
 
+  it("rejects an expired signed cookie session when it is replayed", async () => {
+    let now = 1_000;
+    const storage = createCookieSessionStorage<{ userId: string }>({
+      secret: "secret",
+      cookieName: "sid",
+      maxAgeMs: 100,
+      now: () => now,
+    });
+    const cookie = await storage.commitSession({ id: "s1", data: { userId: "u1" } });
+    now += 101;
+
+    await expect(storage.getSession(cookie)).resolves.toEqual({ id: "", data: {} });
+  });
+
   it("creates auth guard middleware for protected routes", async () => {
     const routes: RouteDefinition[] = [{ path: "/admin", render: () => "<h1>Admin</h1>" }];
     const { requireUser } = await import("../src/router");

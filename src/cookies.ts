@@ -23,6 +23,9 @@ export type MemorySessionStorageOptions = {
 
 export type CookieSessionStorageOptions = {
   secret: string;
+  verificationSecrets?: readonly string[];
+  maxAgeMs?: number;
+  now?: () => number;
   cookieName?: string;
   cookie?: CookieOptions;
   id?: () => string;
@@ -206,25 +209,38 @@ export const createCookieSessionStorage = <Data extends Record<string, unknown> 
 ) => {
   const cookieName = options.cookieName ?? "__Host-tachyon_session";
   const cookieOptions = options.cookie ?? defaultSessionCookie();
+  const maxAgeMs = options.maxAgeMs;
+  const now = options.now ?? Date.now;
   const createId = options.id ?? sessionId;
+  const secrets = [options.secret, ...(options.verificationSecrets ?? [])];
 
   return {
     createSession: async (data: Data): Promise<Session<Data>> => ({ id: createId(), data }),
     getSession: async (cookieHeader: string | null | undefined): Promise<Session<Data>> => {
       const signed = parseCookies(cookieHeader)[cookieName];
-      const verified = verifySignedCookieValue(signed, options.secret);
+      const verified = secrets.map((secret) => verifySignedCookieValue(signed, secret)).find((value) => value !== undefined);
       if (!verified) {
         return { id: "", data: {} as Data };
       }
       try {
-        const parsed = JSON.parse(verified) as Session<Data>;
+        const parsed = JSON.parse(verified) as Session<Data> & { expiresAt?: unknown };
+        if (typeof parsed.expiresAt === "number" && now() >= parsed.expiresAt) {
+          return { id: "", data: {} as Data };
+        }
         return { id: parsed.id, data: parsed.data };
       } catch {
         return { id: "", data: {} as Data };
       }
     },
-    commitSession: async (session: Session<Data>): Promise<string> =>
-      serializeCookie(cookieName, signCookieValue(JSON.stringify(session), options.secret), cookieOptions),
+    commitSession: async (session: Session<Data>): Promise<string> => {
+      const expiresAt = maxAgeMs === undefined ? undefined : now() + maxAgeMs;
+      const payload = expiresAt === undefined ? session : { ...session, expiresAt };
+      return serializeCookie(
+        cookieName,
+        signCookieValue(JSON.stringify(payload), options.secret),
+        maxAgeMs === undefined ? cookieOptions : { ...cookieOptions, maxAge: Math.ceil(maxAgeMs / 1_000) },
+      );
+    },
     destroySession: async (_session: Session<Data>): Promise<string> =>
       serializeCookie(cookieName, "", { ...cookieOptions, maxAge: 0 }),
   };
