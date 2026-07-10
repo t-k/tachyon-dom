@@ -1,7 +1,18 @@
 import type { ElementNode, TemplateNode, TemplateWhitespacePolicy, TextNode } from "./types.js";
 import { textExpressionSegments } from "./utils.js";
 
-const protectedTextElements = new Set(["pre", "script", "style", "textarea"]);
+const protectedTextElements = new Set([
+  "iframe",
+  "listing",
+  "noembed",
+  "noframes",
+  "plaintext",
+  "pre",
+  "script",
+  "style",
+  "textarea",
+  "xmp",
+]);
 const asciiWhitespaceOnly = /^[\t\n\f\r ]+$/;
 const internalFormattingLine = /[\t\f\r ]*(?:\r\n?|\n)[\t\n\f\r ]*/g;
 

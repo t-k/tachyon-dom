@@ -98,6 +98,19 @@ describe("HTML-first compiler", () => {
     expect(html).toContain(`<style>line one\n    line two</style>`);
   });
 
+  it.each(["pre", "textarea", "script", "style", "xmp", "listing", "plaintext", "iframe", "noembed", "noframes"])(
+    "preserves whitespace in the %s context for every compiler target",
+    (tagName) => {
+      const source = `<${tagName}>line one\n    line two</${tagName}>`;
+      const result = compileTemplate(source, { whitespace: "condense" });
+      if (!result.ok) throw new Error(result.error.message);
+
+      expect(renderServerTemplate(result.value, {})).toContain("line one\n    line two");
+      expect(result.value.client.templateHtml).toContain("line one\n    line two");
+      expect(generateServerStreamModule(result.value)).toContain("line one\\n    line two");
+    },
+  );
+
   it("condenses newline-derived whitespace at fragment boundaries without deleting separators", () => {
     const source = `<main><ul><for each={rows} key={row}>
       <li>{row}</li>
