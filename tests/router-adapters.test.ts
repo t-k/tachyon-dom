@@ -13,7 +13,7 @@ import {
   writeWebResponseToLambdaStream,
 } from "../src/adapters/lambda";
 import { createNodeFetchHandler, createNodeHandler, writeNodeResponse } from "../src/adapters/node";
-import { createWorkersFetchHandler, createWorkersHandler } from "../src/adapters/workers";
+import { createWorkersFetchHandler, createWorkersHandler, workersStreamFromChunks } from "../src/adapters/workers";
 import { createSecurityHeaders, redirect, type RouteDefinition } from "../src/router";
 
 const lambdaEvent = (overrides: Record<string, unknown> = {}) => ({
@@ -498,6 +498,48 @@ describe("server adapters", () => {
     res.emit("drain");
     res.write.mockReturnValueOnce(true);
     await writing;
+  });
+
+  it.each(["close", "error"] as const)("cancels a Node source when %s interrupts a drain wait", async (event) => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new TextEncoder().encode("chunk"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    }, { highWaterMark: 0 });
+    const res = Object.assign(new EventEmitter(), {
+      statusCode: 200,
+      writableEnded: false,
+      setHeader: vi.fn(),
+      write: vi.fn(() => false),
+      end: vi.fn(),
+    });
+    const writing = writeNodeResponse(new Response(body), res as never);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    res.emit(event, ...(event === "error" ? [new Error("connection reset")] : []));
+    await expect(Promise.race([writing.then(() => "done"), delay(20).then(() => "timeout")])).resolves.toBe("done");
+    expect(cancelled).toBe(true);
+    expect(res.end).not.toHaveBeenCalled();
+  });
+
+  it("forwards Workers stream cancellation to the route chunk iterator", async () => {
+    const iterator = {
+      next: vi.fn(async () => ({ done: false as const, value: "first" })),
+      return: vi.fn(async () => ({ done: true as const, value: undefined })),
+    };
+    const chunks = { [Symbol.asyncIterator]: () => iterator };
+    const reader = workersStreamFromChunks(chunks).getReader();
+
+    await expect(reader.read()).resolves.toMatchObject({ done: false });
+    await reader.cancel("client disconnected");
+
+    expect(iterator.next).toHaveBeenCalled();
+    expect(iterator.return).toHaveBeenCalledOnce();
   });
 
   it("preserves multiple Set-Cookie headers in Node fetch responses", async () => {

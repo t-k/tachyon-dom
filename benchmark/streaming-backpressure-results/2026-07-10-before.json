@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "label": "before",
+  "controls": {
+    "connections": 6,
+    "chunksPerConnection": 128,
+    "chunkBytes": 32768,
+    "drainDelayMs": 2
+  },
+  "metrics": {
+    "completionTimeMs": 26.969412000000005,
+    "peakQueuedBytes": 25165824,
+    "sourcePullCount": 774,
+    "startingRssBytes": 87134208,
+    "peakRssBytes": 132222976,
+    "peakRssDeltaBytes": 45088768
+  }
+}

@@ -167,6 +167,8 @@ Use the runtime-specific entries for deployable server bundles:
 
 Both runtime handlers can apply `securityHeaders` and can use `streaming: true` to route through `renderRouteStream()`. File-system static asset serving is Node-only. On Cloudflare Workers, pass an Assets binding instead:
 
+Streaming adapters preserve downstream backpressure. Node pauses source reads after `response.write()` returns `false` and resumes on `drain`; close or error cancels the source even during that wait. Workers converts route chunks with demand-driven `ReadableStream.pull()` and forwards cancellation to the async iterator. Lambda waits when `write()` returns `false` only when the runtime stream exposes the explicit async `drain()` capability; custom Lambda streaming integrations should provide it and may also provide `finished()` for final flush completion.
+
 ```ts
 import { createWorkersHandler } from "tachyon-dom/adapters/workers";
 

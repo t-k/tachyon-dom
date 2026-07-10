@@ -392,6 +392,24 @@ const responseForAsset = async <Env>(
   return withExtraHeaders(response, new Headers(assetOptions.headers), options.securityHeaders);
 };
 
+export const workersStreamFromChunks = (chunks: AsyncIterable<string>): ReadableStream<Uint8Array> => {
+  const iterator = chunks[Symbol.asyncIterator]();
+  const encoder = new TextEncoder();
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await iterator.next();
+      if (next.done) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(encoder.encode(next.value));
+    },
+    async cancel() {
+      await iterator.return?.();
+    },
+  });
+};
+
 const responseFor = async <Env>(
   options: WorkersHandlerOptions<Env>,
   request: Request,
@@ -428,21 +446,7 @@ const responseFor = async <Env>(
         await emitResponse(options.observability, state, response, true);
         return response;
       }
-      const iterator = result.value.chunks[Symbol.asyncIterator]();
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          const next = await iterator.next();
-          if (next.done) {
-            controller.close();
-            return;
-          }
-          controller.enqueue(encoder.encode(next.value));
-        },
-        async cancel() {
-          await iterator.return?.();
-        },
-      });
+      const stream = workersStreamFromChunks(result.value.chunks);
       const response = new Response(stream, {
         status: result.value.status,
         headers: mergeHeaders(result.value.headers, options.securityHeaders),
