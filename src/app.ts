@@ -4,9 +4,10 @@ import { escapeHtml } from "./html-escape.js";
 import type { ClientBinding, CompiledTemplate } from "./compiler/types.js";
 import { err, ok, type Result } from "./result.js";
 import type { TemplateScope, TypedTemplate } from "./typed.js";
-import { applyHtmlWhitespace, condenseHtmlWhitespace, type HtmlWhitespacePolicy } from "./html-whitespace.js";
+import { applyHtmlWhitespace, normalizeHtmlTagWhitespace, type HtmlWhitespacePolicy } from "./html-whitespace.js";
 
 export type { HtmlWhitespacePolicy } from "./html-whitespace.js";
+export { condenseHtmlWhitespace, normalizeHtmlTagWhitespace } from "./html-whitespace.js";
 
 type TachyonAppPageBase = {
   path: string;
@@ -134,7 +135,8 @@ const appPathMatches = (pattern: string, path: string): boolean => {
   return patternSegments.length === pathSegments.length;
 };
 
-export const minifyHtml = condenseHtmlWhitespace;
+/** @deprecated Use `normalizeHtmlTagWhitespace()`. */
+export const minifyHtml = normalizeHtmlTagWhitespace;
 
 const templateSource = (template: string | TypedTemplate<TemplateScope>): string =>
   typeof template === "string" ? template : template.source;

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { parse, serialize } from "parse5";
 
-import { defineApp, minifyHtml } from "../src/app.js";
+import {
+  condenseHtmlWhitespace,
+  defineApp,
+  minifyHtml,
+  normalizeHtmlTagWhitespace,
+} from "../src/app.js";
 import { renderRoute, renderRouteStream } from "../src/router.js";
 
 const meaningfulBody = `<main id="app">
@@ -16,6 +21,15 @@ const bodySource = (html: string): string =>
   html.slice(html.indexOf("<body>") + "<body>".length, html.indexOf("</body>"));
 
 describe("safe HTML whitespace policy", () => {
+  it("keeps deprecated minify names as tag-normalization aliases", () => {
+    const source = `<ul   class="items"   >\n    <li>one</li>\n    <li>two</li>\n</ul>`;
+    const expected = `<ul class="items">\n    <li>one</li>\n    <li>two</li>\n</ul>`;
+
+    expect(normalizeHtmlTagWhitespace(source)).toBe(expected);
+    expect(condenseHtmlWhitespace(source)).toBe(expected);
+    expect(minifyHtml(source)).toBe(expected);
+  });
+
   it("condenses document framing without changing body semantics or Tachyon anchors", () => {
     const source = `<!doctype html>
 <html>

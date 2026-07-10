@@ -54,7 +54,7 @@ const collectTagRanges = (node: LocatedNode, ranges: SourceRange[]): void => {
   if (node.content) collectTagRanges(node.content, ranges);
 };
 
-export const condenseHtmlWhitespace = (html: string): string => {
+export const normalizeHtmlTagWhitespace = (html: string): string => {
   const errors: unknown[] = [];
   const options = {
     sourceCodeLocationInfo: true,
@@ -86,5 +86,8 @@ export const condenseHtmlWhitespace = (html: string): string => {
   return `${output}${html.slice(cursor)}`;
 };
 
+/** @deprecated Use `normalizeHtmlTagWhitespace()`. */
+export const condenseHtmlWhitespace = normalizeHtmlTagWhitespace;
+
 export const applyHtmlWhitespace = (html: string, policy: HtmlWhitespacePolicy): string =>
-  policy === "condense" ? condenseHtmlWhitespace(html) : html;
+  policy === "condense" ? normalizeHtmlTagWhitespace(html) : html;
