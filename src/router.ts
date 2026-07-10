@@ -162,6 +162,7 @@ export type RouteMiddleware = (context: {
   request: Request;
   url: URL;
   env: RouteEnvironment;
+  bindings?: unknown;
 }) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>;
 
 export type RouteHooks = {
@@ -1002,6 +1003,7 @@ export const collectRouteResources = (
             params: context?.params ?? entry.params,
             route: entry.route,
             env: context?.env ?? {},
+            bindings: context?.bindings,
             data: routeData,
             loaderData: context?.loaderData ?? {},
             actionResult: context?.actionResult,
@@ -1099,7 +1101,7 @@ export const renderRoute = async (
   };
   await options.hooks?.onRequest?.({ request, url });
   for (const middleware of options.middleware ?? []) {
-    const result = await middleware({ request, url, env });
+    const result = await middleware({ request, url, env, bindings });
     if (isRouteResponse(result)) {
       return ok(routeResponseResult(result));
     }

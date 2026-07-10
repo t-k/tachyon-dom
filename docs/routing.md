@@ -177,6 +177,10 @@ export default createWorkersHandler<{ ASSETS: { fetch: (request: Request) => Pro
 });
 ```
 
+The `Env` type parameter is also the request-scoped `bindings` type for route middleware, loaders, actions, renderers, head/resource functions, header functions, and cache functions. Invocation bindings are kept separate from `RouteEnvironment`: `context.env` contains only the configured string values from handler options, while `context.bindings` is exactly the environment object passed to that Workers `fetch()` invocation. Invocation bindings do not merge into or override configured string environment values. Node and Lambda route handlers continue to use their platform-specific options and do not expose a Workers binding map.
+
+Bindings are server-only capability objects and can contain Secrets, KV, D1, R2, services, and `ASSETS`. Tachyon DOM does not serialize the binding object itself, but loader return values are hydration data. Do not return secrets or capability objects from loaders or interpolate them into HTML, head descriptors, resource URLs, or response headers. An asset request handled by the configured binding bypasses route callbacks; on a dynamic route, `context.bindings` still contains the complete invocation object, including `ASSETS`.
+
 If `basePath` is omitted, 404 responses from the binding fall through to the dynamic router. If `basePath` is provided, matching requests are treated as asset requests and the binding response is returned with `securityHeaders` merged.
 
 For Cloudflare Pages, `tachyon-dom/vite` also exports `packageCloudflarePages()`. It copies static assets into the Pages output directory and writes a bundled `_worker.js` with the Pages `fetch(request, env, ctx)` shape. The generated worker asks `env.ASSETS.fetch(request)` first and falls through to your renderer for configured statuses, 404 by default:

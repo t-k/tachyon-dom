@@ -5,7 +5,7 @@ import {
   type AdapterObservabilityMetadata,
   type AdapterFetchHandler,
   type WorkersFetchHandlerOptions,
-  type WorkersHandlerOptions,
+  type RouteAdapterHandlerOptions,
 } from "./workers.js";
 
 export type LambdaHttpEventV2 = {
@@ -37,7 +37,7 @@ export type LambdaProxyResponseV2 = {
   cookies?: string[];
 };
 
-export type LambdaHandlerOptions = WorkersHandlerOptions & {
+export type LambdaHandlerOptions = RouteAdapterHandlerOptions & {
   origin?: string | ((event: LambdaHttpEventV2) => string);
   trustedHosts?: readonly string[];
 };

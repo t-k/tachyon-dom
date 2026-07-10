@@ -9,10 +9,10 @@ import {
   type AdapterFetchHandler,
   type StaticRouteDefinition,
   type WorkersFetchHandlerOptions,
-  type WorkersHandlerOptions,
+  type RouteAdapterHandlerOptions,
 } from "./workers.js";
 
-export type NodeHandlerOptions = WorkersHandlerOptions & {
+export type NodeHandlerOptions = RouteAdapterHandlerOptions & {
   staticAssets?: StaticAssetOptions;
   origin?: string | ((request: IncomingMessage) => string);
   trustedHosts?: readonly string[];

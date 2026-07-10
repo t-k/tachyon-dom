@@ -792,32 +792,96 @@ describe("server adapters", () => {
     expect(await response.text()).toBe(`console.log("asset");`);
   });
 
-  it("passes Workers invocation bindings to route callbacks", async () => {
-    const handler = createWorkersHandler<{ RUNTIME_NAME: string }>({
+  it("passes typed Workers invocation bindings through every route callback", async () => {
+    type Bindings = {
+      RUNTIME_NAME: string;
+      KV: { get: (key: string) => Promise<string> };
+      DB: { prepare: (query: string) => { query: string } };
+    };
+    const seen = new Set<string>();
+    const assertBindings = (bindings: Bindings): void => {
+      expect(bindings.RUNTIME_NAME).toBe("edge");
+      expect(bindings.DB.prepare("select 1").query).toBe("select 1");
+    };
+    const handler = createWorkersHandler<Bindings>({
+      env: { RUNTIME_NAME: "configured" },
+      middleware: [({ bindings, env }) => {
+        assertBindings(bindings);
+        expect(env.RUNTIME_NAME).toBe("configured");
+        seen.add("middleware");
+      }],
       routes: [{
         path: "/",
-        loader: ({ bindings }) => (bindings as { RUNTIME_NAME: string }).RUNTIME_NAME,
-        render: ({ data }) => `<h1>${data}</h1>`,
+        action: ({ bindings }) => {
+          assertBindings(bindings);
+          seen.add("action");
+          return "saved";
+        },
+        loader: async ({ bindings }) => {
+          assertBindings(bindings);
+          seen.add("loader");
+          return bindings.KV.get("title");
+        },
+        head: ({ bindings }) => {
+          assertBindings(bindings);
+          seen.add("head");
+          return { title: bindings.RUNTIME_NAME };
+        },
+        resources: ({ bindings }) => {
+          assertBindings(bindings);
+          seen.add("resources");
+          return [{ rel: "stylesheet", href: `/${bindings.RUNTIME_NAME}.css` }];
+        },
+        headers: ({ bindings }) => {
+          assertBindings(bindings);
+          seen.add("headers");
+          return { "x-runtime": bindings.RUNTIME_NAME };
+        },
+        cache: ({ bindings }) => {
+          assertBindings(bindings);
+          seen.add("cache");
+          return { mode: "private", tags: [bindings.RUNTIME_NAME] };
+        },
+        render: ({ bindings, data, actionResult }) => {
+          assertBindings(bindings);
+          seen.add("render");
+          return `<h1>${data}:${actionResult}</h1>`;
+        },
       }],
     });
+    const bindings: Bindings = {
+      RUNTIME_NAME: "edge",
+      KV: { get: async () => "KV title" },
+      DB: { prepare: (query) => ({ query }) },
+    };
 
-    const response = await handler.fetch(new Request("https://example.com/"), { RUNTIME_NAME: "edge" });
+    const response = await handler.fetch(new Request("https://example.com/", { method: "POST" }), bindings);
 
-    expect(await response.text()).toBe("<h1>edge</h1>");
+    expect(await response.text()).toBe("<h1>KV title:saved</h1>");
+    expect(response.headers.get("x-runtime")).toBe("edge");
+    expect(response.headers.get("cache-control")).toBe("private");
+    expect(seen).toEqual(new Set(["middleware", "action", "loader", "render", "head", "headers", "cache", "resources"]));
   });
 
   it("falls through to dynamic routes when Cloudflare asset basePath does not match", async () => {
     const assetFetch = vi.fn(() => new Response("asset"));
+    let routeAssetsBinding: { fetch: typeof assetFetch } | undefined;
     const handler = createWorkersHandler<{ ASSETS: { fetch: typeof assetFetch } }>({
-      routes: [{ path: "/", render: () => "<h1>Home</h1>" }],
+      routes: [{
+        path: "/",
+        render: ({ bindings }) => {
+          routeAssetsBinding = bindings.ASSETS;
+          return "<h1>Home</h1>";
+        },
+      }],
       assets: { bindingName: "ASSETS", basePath: "/assets" },
     });
+    const assets = { fetch: assetFetch };
 
-    const response = await handler.fetch(new Request("https://example.com/"), {
-      ASSETS: { fetch: assetFetch },
-    });
+    const response = await handler.fetch(new Request("https://example.com/"), { ASSETS: assets });
 
     expect(assetFetch).not.toHaveBeenCalled();
+    expect(routeAssetsBinding).toBe(assets);
     expect(await response.text()).toBe("<h1>Home</h1>");
   });
 

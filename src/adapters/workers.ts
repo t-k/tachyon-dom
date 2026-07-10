@@ -3,6 +3,11 @@ import {
   renderRouteStream,
   type MatchedRoute,
   type RouteDefinition,
+  type RouteContext,
+  type RouteCachePolicy,
+  type RouteEnvironment,
+  type RouteHeadDescriptor,
+  type RouteResource,
   type RouteHooks,
   type RouteRenderOptions,
 } from "../router.js";
@@ -90,12 +95,64 @@ export type WorkersAssetOptions<Env> = {
   fallthroughStatuses?: readonly number[];
 };
 
-export type WorkersHandlerOptions<Env = Record<string, unknown>> = RouteRenderOptions & {
-  routes: readonly RouteDefinition[];
+export type WorkersRouteContext<Env, Data = unknown, ActionResult = unknown> = Omit<
+  RouteContext<Data, ActionResult>,
+  "bindings" | "route"
+> & {
+  bindings: Env;
+  route: WorkersRouteDefinition<Env, Data, ActionResult>;
+};
+
+export type WorkersRouteDefinition<Env, Data = unknown, ActionResult = unknown> = Omit<
+  RouteDefinition<Data, ActionResult>,
+  "action" | "cache" | "children" | "head" | "headers" | "loader" | "render" | "resources"
+> & {
+  loader?: (
+    context: Omit<WorkersRouteContext<Env, Data, ActionResult>, "data" | "outlet">,
+  ) => Data | Promise<Data>;
+  action?: (
+    context: Omit<WorkersRouteContext<Env, Data, ActionResult>, "data" | "outlet">,
+  ) => ActionResult | Promise<ActionResult>;
+  head?: (
+    context: WorkersRouteContext<Env, Data, ActionResult>,
+  ) => RouteHeadDescriptor | Promise<RouteHeadDescriptor>;
+  resources?:
+    | readonly RouteResource[]
+    | ((context: WorkersRouteContext<Env, Data, ActionResult>) => readonly RouteResource[]);
+  headers?: HeadersInit | ((context: WorkersRouteContext<Env, Data, ActionResult>) => HeadersInit | Promise<HeadersInit>);
+  cache?:
+    | RouteCachePolicy
+    | ((context: WorkersRouteContext<Env, Data, ActionResult>) => RouteCachePolicy | Promise<RouteCachePolicy>);
+  render: (context: WorkersRouteContext<Env, Data, ActionResult>) => string | Promise<string>;
+  children?: WorkersRouteDefinition<Env>[];
+};
+
+export type WorkersRouteMiddleware<Env> = (context: {
+  request: Request;
+  url: URL;
+  env: RouteEnvironment;
+  bindings: Env;
+}) => ReturnType<NonNullable<RouteRenderOptions["middleware"]>[number]>;
+
+export type WorkersHandlerOptions<Env = Record<string, unknown>> = Omit<
+  RouteRenderOptions,
+  "bindings" | "middleware"
+> & {
+  routes: readonly WorkersRouteDefinition<Env, any, any>[];
+  middleware?: readonly WorkersRouteMiddleware<Env>[];
   securityHeaders?: Headers;
   streaming?: boolean;
   staticRoutes?: readonly StaticRouteDefinition[];
   assets?: WorkersAssetOptions<Env>;
+  observability?: AdapterObservabilityHooks | undefined;
+};
+
+export type RouteAdapterHandlerOptions = RouteRenderOptions & {
+  routes: readonly RouteDefinition[];
+  securityHeaders?: Headers;
+  streaming?: boolean;
+  staticRoutes?: readonly StaticRouteDefinition[];
+  assets?: WorkersAssetOptions<Record<string, unknown>>;
   observability?: AdapterObservabilityHooks | undefined;
 };
 
@@ -358,13 +415,14 @@ const responseFor = async <Env>(
       return response;
     }
     const hooks = routeObservabilityHooks(options.hooks, options.observability, state);
-    const renderOptions = {
+    const renderOptions: RouteRenderOptions = {
       ...options,
       bindings: env,
+      middleware: options.middleware,
       ...(hooks ? { hooks } : {}),
-    };
+    } as RouteRenderOptions;
     if (options.streaming) {
-      const result = await renderRouteStream(options.routes, request, renderOptions);
+      const result = await renderRouteStream(options.routes as readonly RouteDefinition[], request, renderOptions);
       if (!result.ok) {
         const response = new Response(result.error.message, { status: result.error.status });
         await emitResponse(options.observability, state, response, true);
@@ -392,7 +450,7 @@ const responseFor = async <Env>(
       await emitResponse(options.observability, state, response, state.routeId === undefined);
       return response;
     }
-    const result = await renderRoute(options.routes, request, renderOptions);
+    const result = await renderRoute(options.routes as readonly RouteDefinition[], request, renderOptions);
     if (!result.ok) {
       const response = new Response(result.error.message, { status: result.error.status });
       await emitResponse(options.observability, state, response, true);
@@ -440,11 +498,19 @@ const responseForFetch = async <Env>(
   }
 };
 
-export const createWorkersHandler = <Env = Record<string, unknown>>(
+export function createWorkersHandler<Env = Record<string, unknown>>(
   options: WorkersHandlerOptions<Env>,
-): { fetch: (request: Request, env?: Env) => Promise<Response> } => ({
-  fetch: (request, env) => responseFor(options, request, env),
-});
+): { fetch: (request: Request, env?: Env) => Promise<Response> };
+export function createWorkersHandler(
+  options: RouteAdapterHandlerOptions,
+): { fetch: (request: Request, env?: unknown) => Promise<Response> };
+export function createWorkersHandler(
+  options: WorkersHandlerOptions<unknown> | RouteAdapterHandlerOptions,
+): { fetch: (request: Request, env?: unknown) => Promise<Response> } {
+  return {
+    fetch: (request, env) => responseFor(options as WorkersHandlerOptions<unknown>, request, env),
+  };
+}
 
 export const createWorkersFetchHandler = <Env = Record<string, unknown>>(
   options: WorkersFetchHandlerOptions<Env>,
