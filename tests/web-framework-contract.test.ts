@@ -24,10 +24,21 @@ describe("web framework benchmark contract", () => {
       const id = request.url?.split("/").at(-1) ?? "";
       response.end(`<h1>Product ${id}</h1>`);
     });
-    await expect(validateDynamicRouteSemantics(valid)).resolves.toBeUndefined();
+    await expect(validateDynamicRouteSemantics(valid)).resolves.toHaveLength(4);
 
     const precomputed = await serve((_request, response) => response.end("<h1>Product 42</h1>"));
-    await expect(validateDynamicRouteSemantics(precomputed)).rejects.toThrow("id 43");
+    await expect(validateDynamicRouteSemantics(precomputed)).rejects.toThrow("Dynamic product route did not render request id");
+
+    const finiteBodies = new Map([
+      ["/products/42", "<h1>Product 42</h1>"],
+      ["/products/43", "<h1>Product 43</h1>"],
+    ]);
+    const finite = await serve((request, response) => {
+      const body = finiteBodies.get(request.url ?? "");
+      response.statusCode = body === undefined ? 404 : 200;
+      response.end(body ?? "Not Found");
+    });
+    await expect(validateDynamicRouteSemantics(finite)).rejects.toThrow("Dynamic product route did not render request id");
   });
 
   it("requires a shell and delayed payload with distinct arrival timestamps", async () => {
@@ -54,6 +65,21 @@ describe("web framework benchmark contract", () => {
       );
     } finally {
       bufferedAgent.destroy();
+    }
+  });
+
+  it("accepts minified unquoted stream marker attributes", async () => {
+    const valid = await serve((_request, response) => {
+      response.write("<main data-stream=shell>Shell");
+      setTimeout(() => response.end("<section data-stream=done>Done</section></main>"), 20);
+    });
+    const agent = new http.Agent({ keepAlive: true });
+    try {
+      await expect(measureStreamSemantics(`${valid}/stream`, agent)).resolves.toMatchObject({
+        chunkArrivalMs: expect.any(Array),
+      });
+    } finally {
+      agent.destroy();
     }
   });
 });

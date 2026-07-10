@@ -1,0 +1,145 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { describe, expect, it } from "vitest";
+import {
+  collectBenchmarkProvenance,
+  collectDependencyVersions,
+  compareBenchmarkEnvelopes,
+  type BenchmarkEnvelope,
+} from "../benchmark/provenance";
+
+const execFileAsync = promisify(execFile);
+
+const commitFixture = async (directory: string): Promise<string> => {
+  await execFileAsync("git", ["init"], { cwd: directory });
+  await execFileAsync("git", ["config", "user.email", "benchmark@example.com"], { cwd: directory });
+  await execFileAsync("git", ["config", "user.name", "Benchmark Test"], { cwd: directory });
+  await writeFile(path.join(directory, "tracked.txt"), "clean\n");
+  await execFileAsync("git", ["add", "tracked.txt"], { cwd: directory });
+  await execFileAsync("git", ["commit", "-m", "fixture"], { cwd: directory });
+  return (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: directory })).stdout.trim();
+};
+
+describe("benchmark provenance", () => {
+  it("records clean, dirty, command, runtime, and unavailable Git metadata", async () => {
+    const repository = await mkdtemp(path.join(tmpdir(), "tachyon-provenance-repo-"));
+    const nonRepository = await mkdtemp(path.join(tmpdir(), "tachyon-provenance-nonrepo-"));
+    try {
+      const commit = await commitFixture(repository);
+      const argv = ["pnpm", "bench file.ts", "--label", "a'b", "--output", "x y.json"];
+      const clean = await collectBenchmarkProvenance({ cwd: repository, argv });
+
+      expect(clean.command.argv).toEqual(argv);
+      expect(clean.command.display).toContain("'a'\"'\"'b'");
+      expect(clean.git).toMatchObject({ available: true, commit, dirty: false });
+      expect(clean.git.workingTreeSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(clean.runtime.node).toBe(process.version);
+      expect(clean.runtime).toMatchObject({ platform: process.platform, arch: process.arch });
+      expect(clean.host.cpuModel.length).toBeGreaterThan(0);
+      expect(clean.host.logicalCpuCount).toBeGreaterThan(0);
+
+      await writeFile(path.join(repository, "tracked.txt"), "dirty\n");
+      await writeFile(path.join(repository, "untracked.txt"), "untracked\n");
+      const dirty = await collectBenchmarkProvenance({ cwd: repository, argv });
+      expect(dirty.git.dirty).toBe(true);
+      expect(dirty.git.workingTreeSha256).not.toBe(clean.git.workingTreeSha256);
+
+      const unavailable = await collectBenchmarkProvenance({ cwd: nonRepository, argv });
+      expect(unavailable.git).toMatchObject({ available: false, commit: null, dirty: null });
+      expect(unavailable.git.reason).toBeTruthy();
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+      await rm(nonRepository, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects accidental comparison mismatches and reports intentional revision differences", () => {
+    const envelope = (commit: string, connections: number): BenchmarkEnvelope<Record<string, unknown>, unknown> => ({
+      schemaVersion: 2,
+      benchmark: { name: "streaming-backpressure", contractVersion: 2 },
+      provenance: {
+        capturedAt: "2026-07-10T00:00:00.000Z",
+        command: { argv: ["pnpm", "bench"], display: "pnpm bench", cwd: "/repo" },
+        git: { available: true, commit, dirty: false, workingTreeSha256: "a".repeat(64) },
+        runtime: { node: "v24.0.0", platform: "linux", arch: "x64", osRelease: "test" },
+        host: { hostname: "host", cpuModel: "cpu", logicalCpuCount: 8 },
+        dependencies: {},
+      },
+      workload: { connections, chunksPerConnection: 128, chunkBytes: 32768, drainDelayMs: 2 },
+      measurements: {},
+    });
+
+    const compatible = compareBenchmarkEnvelopes(envelope("base", 6), envelope("candidate", 6), {
+      requiredEqualPaths: [
+        "benchmark.name",
+        "benchmark.contractVersion",
+        "workload.connections",
+        "workload.chunksPerConnection",
+        "workload.chunkBytes",
+        "workload.drainDelayMs",
+        "provenance.runtime",
+        "provenance.host.cpuModel",
+      ],
+      allowedDifferences: ["provenance.git.commit"],
+    });
+    expect(compatible.compatible).toBe(true);
+    expect(compatible.intentionalDifferences).toEqual([
+      expect.objectContaining({ path: "provenance.git.commit", baseline: "base", candidate: "candidate" }),
+    ]);
+
+    const mismatch = compareBenchmarkEnvelopes(envelope("base", 6), envelope("candidate", 7), {
+      requiredEqualPaths: ["workload.connections"],
+      allowedDifferences: ["provenance.git.commit"],
+    });
+    expect(mismatch.compatible).toBe(false);
+    expect(mismatch.accidentalDifferences).toEqual([
+      expect.objectContaining({ path: "workload.connections", baseline: 6, candidate: 7 }),
+    ]);
+
+    const legacy = compareBenchmarkEnvelopes({ controls: {} }, envelope("candidate", 6), {
+      requiredEqualPaths: ["workload.connections"],
+    });
+    expect(legacy).toMatchObject({ compatible: false, legacyIncomplete: true });
+  });
+
+  it("records resolved and unavailable dependency versions from the requested project", async () => {
+    const dependencies = await collectDependencyVersions(process.cwd(), ["vite", "@marko/run", "missing-benchmark-package"]);
+
+    expect(dependencies.vite?.version).toMatch(/^8\./);
+    expect(dependencies["@marko/run"]?.version).toMatch(/^0\.10\./);
+    expect(dependencies["missing-benchmark-package"]).toMatchObject({ version: null });
+    expect(dependencies["missing-benchmark-package"]?.reason).toBeTruthy();
+  });
+
+  it("writes a provenance envelope from the real TCP backpressure harness", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "tachyon-backpressure-envelope-"));
+    const output = path.join(directory, "result.json");
+    try {
+      await execFileAsync("pnpm", [
+        "exec", "tsx", "benchmark/streaming-backpressure.ts",
+        "--connections", "1",
+        "--chunks", "8",
+        "--chunk-bytes", "4096",
+        "--drain-delay-ms", "1",
+        "--label", "test",
+        "--output", output,
+      ], { cwd: process.cwd(), maxBuffer: 16 * 1024 * 1024 });
+      const result = JSON.parse(await readFile(output, "utf8")) as BenchmarkEnvelope<
+        { transport?: string; connections?: number },
+        { completionTimeMs?: number; sourcePullCount?: number }
+      >;
+
+      expect(result.schemaVersion).toBe(2);
+      expect(result.benchmark).toEqual({ name: "streaming-backpressure", contractVersion: 2 });
+      expect(result.workload).toMatchObject({ transport: "tcp", connections: 1 });
+      expect(result.provenance.command.argv).toContain("--connections");
+      expect(result.measurements.completionTimeMs).toBeGreaterThan(0);
+      expect(result.measurements.sourcePullCount).toBeGreaterThan(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+});

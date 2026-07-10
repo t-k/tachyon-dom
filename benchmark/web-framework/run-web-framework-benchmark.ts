@@ -6,8 +6,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
 import { chromium, type Browser, type Page } from "playwright";
+import { collectBenchmarkProvenance, collectDependencyVersions } from "../provenance";
 import { formatWebFrameworkRanking, scoreWebFrameworkMetrics, type WebFrameworkMetric } from "./report";
 import {
+  createDynamicChallengeIds,
   measureStreamSemantics,
   validateDynamicRouteSemantics,
   WEB_FRAMEWORK_CONTRACT_VERSION,
@@ -22,6 +24,7 @@ type CliOptions = {
 type FrameworkConfig = {
   name: string;
   cwd: string;
+  dependencies: readonly string[];
   build?: readonly string[];
   start: (port: number) => readonly string[];
 };
@@ -46,6 +49,7 @@ const frameworks: readonly FrameworkConfig[] = [
   {
     name: "tachyon-dom",
     cwd: projectRoot,
+    dependencies: ["vite"],
     build: ["pnpm", "build"],
     start: (port) => [
       "pnpm",
@@ -59,24 +63,28 @@ const frameworks: readonly FrameworkConfig[] = [
   {
     name: "marko-run",
     cwd: path.join(fixtureRoot, "marko-run"),
+    dependencies: ["@marko/run", "marko"],
     build: [workspaceBin("marko-run"), "build"],
     start: (port) => [workspaceBin("marko-run"), "preview", "--host", "127.0.0.1", "--port", String(port)],
   },
   {
     name: "solid-start",
     cwd: path.join(fixtureRoot, "solid-start"),
+    dependencies: ["@solidjs/start", "solid-js"],
     build: [workspaceBin("vinxi"), "build"],
     start: (port) => [workspaceBin("vinxi"), "start", "--host", "127.0.0.1", "--port", String(port)],
   },
   {
     name: "tanstack-start",
     cwd: path.join(fixtureRoot, "tanstack-start"),
+    dependencies: ["@tanstack/react-start", "@tanstack/react-router"],
     build: [workspaceBin("vite"), "build"],
     start: (port) => [workspaceBin("vite"), "preview", "--host", "127.0.0.1", "--port", String(port)],
   },
   {
     name: "next-app-router",
     cwd: projectRoot,
+    dependencies: ["next", "react"],
     build: ["pnpm", "exec", "next", "build", "benchmark/web-framework/fixtures/next"],
     start: (port) => [
       "pnpm",
@@ -93,6 +101,7 @@ const frameworks: readonly FrameworkConfig[] = [
   {
     name: "mreact-app-router",
     cwd: mreactAppRouterRoot,
+    dependencies: ["@reckona/mreact", "@reckona/mreact-router"],
     build: ["pnpm", "build"],
     start: () => ["pnpm", "start"],
   },
@@ -284,14 +293,14 @@ const validateTextRoute = async (baseUrl: string, routePath: string, markers: re
   }
 };
 
-const validateFrameworkFixture = async (baseUrl: string): Promise<void> => {
+const validateFrameworkFixture = async (baseUrl: string, dynamicChallengeIds: readonly string[]): Promise<void> => {
   await validateTextRoute(baseUrl, "/", ["data-route", "home", "Static route"]);
   await validateTextRoute(baseUrl, "/products/42", ["data-route", "product", "Product 42"]);
   await validateTextRoute(baseUrl, "/dashboard/users", ["data-route", "users", "Users"]);
   await validateTextRoute(baseUrl, "/dashboard/orders", ["data-route", "orders", "Orders"]);
   await validateTextRoute(baseUrl, "/interactive", ["data-route", "interactive", "Counter"]);
   await validateTextRoute(baseUrl, "/stream", ["data-route", "stream", "data-stream", "done"]);
-  await validateDynamicRouteSemantics(baseUrl);
+  await validateDynamicRouteSemantics(baseUrl, dynamicChallengeIds);
 };
 
 const measureStream = async (url: string): Promise<{ ttfb: number; complete: number }> => {
@@ -414,6 +423,7 @@ const measureFramework = async (
   framework: FrameworkConfig,
   options: CliOptions,
   browser: Browser,
+  dynamicChallengeIds: readonly string[],
 ): Promise<WebFrameworkMetric> => {
   if (framework.build && !options.skipBuild) {
     console.log(`Building ${framework.name}...`);
@@ -426,10 +436,10 @@ const measureFramework = async (
   const child = await startServer(framework, port);
   const baseUrl = `http://127.0.0.1:${port}`;
   try {
-    await validateFrameworkFixture(baseUrl);
+    await validateFrameworkFixture(baseUrl, dynamicChallengeIds);
     const stream = await measureStream(`${baseUrl}/stream`);
     const staticResult = await runAutocannon(`${baseUrl}/`, options);
-    const dynamicResult = await runAutocannon(`${baseUrl}/products/42`, options);
+    const dynamicResult = await runAutocannon(`${baseUrl}/products/${dynamicChallengeIds[0]}`, options);
     await settle(options.smoke ? 50 : 150);
     const clientNavigationMs = await measureClientNavigation(browser, baseUrl);
     const clientBundleBytes = await measureInteractiveBundle(browser, baseUrl);
@@ -459,11 +469,13 @@ const defaultOutputPath = (): string => {
 
 const run = async (): Promise<void> => {
   const options = parseArgs(process.argv.slice(2));
+  const dynamicChallengeIds = createDynamicChallengeIds(8);
   const browser = await chromium.launch({ headless: true });
+  const browserVersion = browser.version();
   const metrics: WebFrameworkMetric[] = [];
   try {
     for (const framework of frameworks) {
-      metrics.push(await measureFramework(framework, options, browser));
+      metrics.push(await measureFramework(framework, options, browser, dynamicChallengeIds));
     }
   } finally {
     await browser.close();
@@ -472,17 +484,46 @@ const run = async (): Promise<void> => {
   const ranking = scoreWebFrameworkMetrics(metrics);
   const table = formatWebFrameworkRanking(ranking);
   const outputPath = path.resolve(projectRoot, options.output ?? defaultOutputPath());
+  const dependencies = Object.fromEntries(await Promise.all(frameworks.map(async (framework) => [
+    framework.name,
+    await collectDependencyVersions(framework.cwd, framework.dependencies),
+  ])));
+  const durationSeconds = options.smoke ? 1 : 5;
+  const connections = options.smoke ? 5 : 30;
+  const provenance = await collectBenchmarkProvenance({
+    cwd: projectRoot,
+    argv: [process.execPath, ...process.argv.slice(1)],
+    dependencies: await collectDependencyVersions(projectRoot, ["autocannon", "playwright"]),
+    browser: { name: "chromium", version: browserVersion },
+  });
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(
     outputPath,
     `${JSON.stringify({
-      contractVersion: WEB_FRAMEWORK_CONTRACT_VERSION,
-      generatedAt: new Date().toISOString(),
-      smoke: options.smoke,
-      legacyDynamicAndStreamRankings: "non-authoritative",
-      metrics,
-      ranking,
-      table,
+      schemaVersion: 2,
+      benchmark: { name: "web-framework", contractVersion: WEB_FRAMEWORK_CONTRACT_VERSION },
+      provenance,
+      workload: {
+        smoke: options.smoke,
+        buildMode: "production",
+        durationSeconds,
+        connections,
+        dynamicChallengeIds,
+        streamMinimumChunkGapMs: 10,
+        frameworks: frameworks.map((framework) => ({
+          name: framework.name,
+          cwd: framework.cwd,
+          build: framework.build ?? null,
+          start: framework.start(0),
+          dependencies: dependencies[framework.name],
+        })),
+      },
+      measurements: {
+        legacyDynamicAndStreamRankings: "non-authoritative",
+        metrics,
+        ranking,
+        table,
+      },
     }, null, 2)}\n`,
   );
   console.log("");

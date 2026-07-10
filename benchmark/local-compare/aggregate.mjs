@@ -11,8 +11,32 @@ if (files.length === 0) {
   process.exit(1);
 }
 const runs = files.map((file) => JSON.parse(readFileSync(file, "utf8")));
-const candidate = runs[0].candidate;
-const impls = runs[0].implementations;
+if (runs.some((run) => run.schemaVersion !== 2 || run.benchmark?.name !== "local-compare" || !run.provenance)) {
+  throw new Error("Legacy benchmark artifacts have incomplete provenance and cannot be aggregated authoritatively.");
+}
+const requiredEqualPaths = [
+  "benchmark.contractVersion",
+  "workload.iterations",
+  "workload.warmup",
+  "workload.serveMode",
+  "workload.operationStatistic",
+  "workload.trimFraction",
+  "workload.implementations",
+  "provenance.runtime",
+  "provenance.host.cpuModel",
+  "provenance.browser",
+  "provenance.dependencies",
+];
+const valueAtPath = (value, fieldPath) => fieldPath.split(".").reduce((current, field) => current?.[field], value);
+for (const run of runs.slice(1)) {
+  for (const fieldPath of requiredEqualPaths) {
+    if (JSON.stringify(valueAtPath(run, fieldPath)) !== JSON.stringify(valueAtPath(runs[0], fieldPath))) {
+      throw new Error(`Incompatible benchmark artifacts differ at ${fieldPath}.`);
+    }
+  }
+}
+const candidate = runs[0].workload.candidate;
+const impls = runs[0].workload.implementations;
 
 const median = (values) => {
   const sorted = [...values].filter(Number.isFinite).sort((a, b) => a - b);
@@ -36,10 +60,10 @@ const collect = (extract) => {
 };
 
 const opMap = collect((run) =>
-  run.summaries.map((s) => ({ key: s.label, impl: s.implementation, value: s.trimmedMean })),
+  run.measurements.summaries.map((s) => ({ key: s.label, impl: s.implementation, value: s.trimmedMean })),
 );
 const auxMap = collect((run) =>
-  run.auxiliaryMetrics.map((m) => ({ key: `${m.label}|${m.unit}`, impl: m.implementation, value: m.value })),
+  run.measurements.auxiliaryMetrics.map((m) => ({ key: `${m.label}|${m.unit}`, impl: m.implementation, value: m.value })),
 );
 
 const report = (title, map, lowerIsBetter = true) => {

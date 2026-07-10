@@ -1,6 +1,7 @@
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 
-export const WEB_FRAMEWORK_CONTRACT_VERSION = 2;
+export const WEB_FRAMEWORK_CONTRACT_VERSION = 3;
 
 export type StreamTiming = {
   ttfb: number;
@@ -8,9 +9,21 @@ export type StreamTiming = {
   chunkArrivalMs: readonly number[];
 };
 
-export const validateDynamicRouteSemantics = async (baseUrl: string): Promise<void> => {
-  const [first, second] = await Promise.all(
-    ["42", "43"].map(async (id) => {
+const hasStreamMarker = (html: string, value: "shell" | "done"): boolean =>
+  new RegExp(`\\bdata-stream\\s*=\\s*(?:"${value}"|'${value}'|${value}(?=[\\s>]))`).test(html);
+
+export const createDynamicChallengeIds = (count = 4): readonly string[] =>
+  Array.from({ length: count }, () => randomUUID().replaceAll("-", ""));
+
+export const validateDynamicRouteSemantics = async (
+  baseUrl: string,
+  challengeIds: readonly string[] = createDynamicChallengeIds(),
+): Promise<readonly string[]> => {
+  if (challengeIds.length < 3 || new Set(challengeIds).size !== challengeIds.length) {
+    throw new Error("Dynamic route validation requires at least three distinct run-scoped challenge ids.");
+  }
+  const bodies = await Promise.all(
+    challengeIds.map(async (id) => {
       const response = await fetch(`${baseUrl}/products/${id}`, { signal: AbortSignal.timeout(5_000) });
       const body = await response.text();
       if (!response.ok || !body.includes(`Product ${id}`)) {
@@ -19,9 +32,10 @@ export const validateDynamicRouteSemantics = async (baseUrl: string): Promise<vo
       return body;
     }),
   );
-  if (first === second) {
-    throw new Error("Dynamic product responses for ids 42 and 43 were identical.");
+  if (new Set(bodies).size !== bodies.length) {
+    throw new Error("Dynamic product responses for run-scoped challenge ids were not distinct.");
   }
+  return challengeIds;
 };
 
 export const measureStreamSemantics = async (
@@ -50,13 +64,13 @@ export const measureStreamSemantics = async (
           reject(new Error("Stream route did not produce at least two downstream chunk arrival timestamps."));
           return;
         }
-        const shellChunkIndex = textChunks.findIndex((chunk) => chunk.includes('data-stream="shell"'));
-        const doneChunkIndex = textChunks.findIndex((chunk) => chunk.includes('data-stream="done"'));
+        const shellChunkIndex = textChunks.findIndex((chunk) => hasStreamMarker(chunk, "shell"));
+        const doneChunkIndex = textChunks.findIndex((chunk) => hasStreamMarker(chunk, "done"));
         if (shellChunkIndex < 0 || doneChunkIndex <= shellChunkIndex) {
           reject(new Error("The stream shell must arrive in an earlier downstream chunk than the deferred payload."));
           return;
         }
-        if (!body.includes('data-stream="done"')) {
+        if (!hasStreamMarker(body, "done")) {
           reject(new Error("Stream route did not produce the deferred payload marker."));
           return;
         }

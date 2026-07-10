@@ -7,6 +7,7 @@ import { chromium, type Browser, type CDPSession, type LaunchOptions, type Page 
 import solid from "vite-plugin-solid";
 import { build, createServer, preview, type PreviewServer, type ViteDevServer } from "vite";
 import { err, ok, type Result } from "../../src/result";
+import { collectBenchmarkProvenance, collectDependencyVersions } from "../provenance";
 import {
   buildAuxiliaryMetricMatrix,
   buildScenarioMatrix,
@@ -695,6 +696,7 @@ const defaultOutputPath = (): string => {
 
 const writeResults = async (
   options: CliOptions,
+  browserVersion: string,
   summaries: readonly ScenarioSummary[],
   auxiliaryMetrics: readonly AuxiliaryMetricSummary[],
   operationTable: string,
@@ -707,7 +709,15 @@ const writeResults = async (
     outputPath,
     `${JSON.stringify(
       {
-        generatedAt: new Date().toISOString(),
+        schemaVersion: 2,
+        benchmark: { name: "local-compare", contractVersion: 2 },
+        provenance: await collectBenchmarkProvenance({
+          cwd: projectRoot,
+          argv: [process.execPath, ...process.argv.slice(1)],
+          dependencies: await collectDependencyVersions(projectRoot, ["playwright", "vite", "marko", "solid-js"]),
+          browser: { name: "chromium", version: browserVersion },
+        }),
+        workload: {
         iterations: options.iterations,
         warmup: options.warmup,
         serveMode: options.serveMode,
@@ -716,12 +726,15 @@ const writeResults = async (
         baseline: "vanillajs-lite-keyed",
         candidate: "tachyon-dom",
         implementations: implementations.map((implementation) => implementation.name),
+        },
+        measurements: {
         summaries,
         auxiliaryMetrics,
         tables: {
           operations: operationTable,
           auxiliary: auxiliaryTable,
           directComparisons: directComparisonTable,
+        },
         },
       },
       null,
@@ -759,6 +772,7 @@ const run = async (options: CliOptions): Promise<void> => {
     const directComparisonTable = formatGeomeanComparisonTable(directComparisons);
     const outputPath = await writeResults(
       options,
+      browser.version(),
       summaries,
       auxiliaryMetrics,
       operationTable,

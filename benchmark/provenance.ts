@@ -1,0 +1,204 @@
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import os from "node:os";
+import path from "node:path";
+import { promisify, isDeepStrictEqual } from "node:util";
+
+const execFileAsync = promisify(execFile);
+
+export type BenchmarkDependency = {
+  version: string | null;
+  reason?: string;
+};
+
+export type BenchmarkProvenance = {
+  capturedAt: string;
+  command: { argv: string[]; display: string; cwd: string };
+  git: {
+    available: boolean;
+    commit: string | null;
+    dirty: boolean | null;
+    workingTreeSha256: string | null;
+    reason?: string;
+  };
+  runtime: { node: string; platform: string; arch: string; osRelease: string };
+  host: { hostname: string; cpuModel: string; logicalCpuCount: number };
+  dependencies: Record<string, BenchmarkDependency>;
+  browser?: { name: string; version: string };
+};
+
+export type BenchmarkEnvelope<Workload, Measurements> = {
+  schemaVersion: 2;
+  benchmark: { name: string; contractVersion: number };
+  provenance: BenchmarkProvenance;
+  workload: Workload;
+  measurements: Measurements;
+};
+
+const quoteArgument = (argument: string): string =>
+  /^[A-Za-z0-9_./:=@+-]+$/.test(argument) ? argument : `'${argument.replaceAll("'", `'"'"'`)}'`;
+
+const git = async (cwd: string, args: readonly string[]): Promise<string> =>
+  (await execFileAsync("git", [...args], { cwd, maxBuffer: 16 * 1024 * 1024 })).stdout;
+
+const workingTreeHash = async (cwd: string, commit: string): Promise<string> => {
+  const [status, diff, untracked] = await Promise.all([
+    git(cwd, ["status", "--porcelain=v1", "-z"]),
+    git(cwd, ["diff", "--binary", "HEAD"]),
+    git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]),
+  ]);
+  const hash = createHash("sha256").update(commit).update("\0").update(status).update("\0").update(diff);
+  for (const relativeFile of untracked.split("\0").filter(Boolean).sort()) {
+    hash.update("\0").update(relativeFile).update("\0").update(await readFile(path.join(cwd, relativeFile)));
+  }
+  return hash.digest("hex");
+};
+
+const collectGit = async (cwd: string): Promise<BenchmarkProvenance["git"]> => {
+  try {
+    const commit = (await git(cwd, ["rev-parse", "HEAD"])).trim();
+    const status = await git(cwd, ["status", "--porcelain=v1", "-z"]);
+    return {
+      available: true,
+      commit,
+      dirty: status.length > 0,
+      workingTreeSha256: await workingTreeHash(cwd, commit),
+    };
+  } catch (error) {
+    return {
+      available: false,
+      commit: null,
+      dirty: null,
+      workingTreeSha256: null,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+export const collectBenchmarkProvenance = async (options: {
+  cwd: string;
+  argv: readonly string[];
+  dependencies?: Record<string, BenchmarkDependency>;
+  browser?: { name: string; version: string };
+}): Promise<BenchmarkProvenance> => {
+  const cpus = os.cpus();
+  return {
+    capturedAt: new Date().toISOString(),
+    command: {
+      argv: [...options.argv],
+      display: options.argv.map(quoteArgument).join(" "),
+      cwd: path.resolve(options.cwd),
+    },
+    git: await collectGit(options.cwd),
+    runtime: {
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      osRelease: os.release(),
+    },
+    host: {
+      hostname: os.hostname(),
+      cpuModel: cpus[0]?.model ?? "unknown",
+      logicalCpuCount: cpus.length,
+    },
+    dependencies: options.dependencies ?? {},
+    ...(options.browser ? { browser: options.browser } : {}),
+  };
+};
+
+export const collectDependencyVersions = async (
+  cwd: string,
+  packageNames: readonly string[],
+): Promise<Record<string, BenchmarkDependency>> => {
+  const requireFromProject = createRequire(path.join(path.resolve(cwd), "package.json"));
+  const entries = await Promise.all(packageNames.map(async (packageName) => {
+    try {
+      let packageFile: string;
+      try {
+        packageFile = requireFromProject.resolve(`${packageName}/package.json`);
+      } catch {
+        let directory = path.dirname(requireFromProject.resolve(packageName));
+        while (true) {
+          const candidate = path.join(directory, "package.json");
+          try {
+            const manifest = JSON.parse(await readFile(candidate, "utf8")) as { name?: unknown };
+            if (manifest.name === packageName) {
+              packageFile = candidate;
+              break;
+            }
+          } catch {
+            // Continue toward the filesystem root.
+          }
+          const parent = path.dirname(directory);
+          if (parent === directory) throw new Error(`Could not locate package.json for ${packageName}.`);
+          directory = parent;
+        }
+      }
+      const manifest = JSON.parse(await readFile(packageFile, "utf8")) as { version?: unknown };
+      if (typeof manifest.version !== "string") throw new Error(`${packageFile} has no string version.`);
+      return [packageName, { version: manifest.version }] as const;
+    } catch (error) {
+      return [packageName, {
+        version: null,
+        reason: error instanceof Error ? error.message : String(error),
+      }] as const;
+    }
+  }));
+  return Object.fromEntries(entries);
+};
+
+export type BenchmarkDifference = {
+  path: string;
+  baseline: unknown;
+  candidate: unknown;
+};
+
+export type BenchmarkComparison = {
+  compatible: boolean;
+  legacyIncomplete: boolean;
+  intentionalDifferences: BenchmarkDifference[];
+  accidentalDifferences: BenchmarkDifference[];
+};
+
+const valueAtPath = (value: unknown, fieldPath: string): unknown =>
+  fieldPath.split(".").reduce<unknown>((current, field) =>
+    typeof current === "object" && current !== null ? (current as Record<string, unknown>)[field] : undefined, value);
+
+const isEnvelope = (value: unknown): value is BenchmarkEnvelope<unknown, unknown> =>
+  typeof value === "object" && value !== null &&
+  (value as { schemaVersion?: unknown }).schemaVersion === 2 &&
+  typeof (value as { provenance?: unknown }).provenance === "object";
+
+export const compareBenchmarkEnvelopes = (
+  baseline: unknown,
+  candidate: unknown,
+  options: { requiredEqualPaths: readonly string[]; allowedDifferences?: readonly string[] },
+): BenchmarkComparison => {
+  if (!isEnvelope(baseline) || !isEnvelope(candidate)) {
+    return { compatible: false, legacyIncomplete: true, intentionalDifferences: [], accidentalDifferences: [] };
+  }
+  const allowed = new Set(options.allowedDifferences ?? []);
+  const intentionalDifferences = [...allowed].flatMap((fieldPath) => {
+    const baselineValue = valueAtPath(baseline, fieldPath);
+    const candidateValue = valueAtPath(candidate, fieldPath);
+    return isDeepStrictEqual(baselineValue, candidateValue)
+      ? []
+      : [{ path: fieldPath, baseline: baselineValue, candidate: candidateValue }];
+  });
+  const accidentalDifferences = options.requiredEqualPaths.flatMap((fieldPath) => {
+    if (allowed.has(fieldPath)) return [];
+    const baselineValue = valueAtPath(baseline, fieldPath);
+    const candidateValue = valueAtPath(candidate, fieldPath);
+    return isDeepStrictEqual(baselineValue, candidateValue)
+      ? []
+      : [{ path: fieldPath, baseline: baselineValue, candidate: candidateValue }];
+  });
+  return {
+    compatible: accidentalDifferences.length === 0,
+    legacyIncomplete: false,
+    intentionalDifferences,
+    accidentalDifferences,
+  };
+};

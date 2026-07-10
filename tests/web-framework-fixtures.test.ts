@@ -39,9 +39,7 @@ describe("web framework benchmark fixtures", () => {
     expect(sources[2]).toContain("createAsync");
     expect(sources[3]).toContain("<Await");
     expect(sources[4]).toContain("<await|resolvedItems|");
-    expect(readFileSync(fixture("marko-run/src/routes/stream/+handler.ts"), "utf8")).toContain(
-      "new ReadableStream",
-    );
+    expect(existsSync(fixture("marko-run/src/routes/stream/+handler.ts"))).toBe(false);
     expect(sources[5]).toContain("defer(");
   });
 
@@ -49,7 +47,9 @@ describe("web framework benchmark fixtures", () => {
     const source = readFileSync(path.join(root, "benchmark/web-framework/run-web-framework-benchmark.ts"), "utf8");
 
     expect(source).toContain("WEB_FRAMEWORK_CONTRACT_VERSION");
+    expect(source).toContain("createDynamicChallengeIds(8)");
     expect(source).toContain("validateDynamicRouteSemantics");
+    expect(source).not.toContain('runAutocannon(`${baseUrl}/products/42`');
     expect(source).toContain("measureStreamSemantics");
     expect(source).toContain('legacyDynamicAndStreamRankings: "non-authoritative"');
   });
