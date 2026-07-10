@@ -137,7 +137,7 @@ const rawPathStartsWithBase = (rawPathname: string, basePath: string): boolean =
   if (basePath === "/") {
     return rawPathname.startsWith("/");
   }
-  return rawPathname === basePath || rawPathname.startsWith(`${basePath}/`);
+  return rawPathname === basePath || rawPathname.startsWith(`${basePath}/`) || rawPathname.startsWith(`${basePath}\\`);
 };
 
 const staticAssetTraversalResponse = (

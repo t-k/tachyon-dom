@@ -1292,6 +1292,9 @@ describe("server adapters", () => {
         "/assets/%2e%2e/secret.txt",
         "/assets/%2e%2e%2fsecret.txt",
         "/assets%2f%2e%2e%2fsecret.txt",
+        "/assets/..\\secret.txt",
+        "/assets/%2e%2e%5csecret.txt",
+        "/assets%5c%2e%2e%5csecret.txt",
         "/assets/.env",
         "/assets/.well-known/security.txt",
         "/assets/linked.txt",
@@ -1311,8 +1314,8 @@ describe("server adapters", () => {
 
         await handler(makeRequest(url) as never, res as never);
 
-        expect(res.statusCode).toBe(403);
-        expect(chunks.join("")).toBe("Forbidden");
+        expect(res.statusCode, url).toBe(403);
+        expect(chunks.join(""), url).toBe("Forbidden");
       }
       expect(fetchCalls).toBe(0);
     } finally {
