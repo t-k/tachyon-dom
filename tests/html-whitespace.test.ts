@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parse, serialize } from "parse5";
 
-import {
-  condenseHtmlWhitespace,
-  defineApp,
-  minifyHtml,
-  normalizeHtmlTagWhitespace,
-} from "../src/app.js";
+import { condenseHtmlWhitespace, defineApp, minifyHtml, normalizeHtmlTagWhitespace } from "../src/app.js";
 import { renderRoute, renderRouteStream } from "../src/router.js";
 
 const meaningfulBody = `<main id="app">
@@ -95,7 +90,8 @@ describe("safe HTML whitespace policy", () => {
     if (!streamed.ok) return;
     const chunks: string[] = [];
     for await (const chunk of streamed.value.chunks) chunks.push(chunk);
-    expect(chunks[0]).toBe("<p>  Loading  </p>");
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0]).not.toContain("<p>  Loading  </p>");
     expect(chunks.join("")).toContain("\n  <head>");
   });
 

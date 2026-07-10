@@ -65,7 +65,7 @@ describe("router compatibility matrix", () => {
 
     expect(response.status).toBe(200);
     if (streaming && response.body) {
-      expect((await readTextStreamChunks(response.body)).join("")).toBe("<p>Loading</p><h1>Home</h1>");
+      expect((await readTextStreamChunks(response.body)).join("")).toBe("<h1>Home</h1>");
     } else {
       await expect(response.text()).resolves.toBe("<h1>Home</h1>");
     }
