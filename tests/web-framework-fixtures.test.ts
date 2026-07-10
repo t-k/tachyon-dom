@@ -11,12 +11,13 @@ describe("web framework benchmark fixtures", () => {
     expect(existsSync(fixture("marko-run/src/routes/products/[id]/+page.marko"))).toBe(false);
   });
 
-  it("uses an explicit deferred stream payload in the Tachyon fixture", () => {
+  it("uses an explicit deferred stream generator in the Tachyon fixture", () => {
     const source = readFileSync(fixture("tachyon/server.ts"), "utf8");
 
-    expect(source).toContain("fallback:");
-    expect(source).toContain("await delay(");
-    expect(source).toContain("streaming: true");
+    expect(source).toContain("yield streamShell");
+    expect(source).toContain("await delay(20)");
+    expect(source).toContain("yield streamBody()");
+    expect(source).toContain("writeNodeResponse(renderToResponse(streamChunks()), response)");
   });
 
   it("uses delayed production streaming primitives in every framework fixture", () => {
@@ -49,7 +50,7 @@ describe("web framework benchmark fixtures", () => {
     expect(source).toContain("WEB_FRAMEWORK_CONTRACT_VERSION");
     expect(source).toContain("createDynamicChallengeIds(8)");
     expect(source).toContain("validateDynamicRouteSemantics");
-    expect(source).not.toContain('runAutocannon(`${baseUrl}/products/42`');
+    expect(source).not.toContain("runAutocannon(`${baseUrl}/products/42`");
     expect(source).toContain("measureStreamSemantics");
     expect(source).toContain('legacyDynamicAndStreamRankings: "non-authoritative"');
   });
