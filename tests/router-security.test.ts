@@ -173,6 +173,34 @@ describe("router security helpers", () => {
     expect(cookie).toContain("Secure");
   });
 
+  it("does not commit authenticated data under an unknown cookie session ID", async () => {
+    const storage = createMemorySessionStorage<{ userId?: string }>({
+      cookieName: "sid",
+      id: () => "rotated-id",
+    });
+    const untrusted = await storage.getSession("sid=attacker-id");
+    untrusted.data.userId = "victim";
+
+    const cookie = await storage.commitSession(untrusted);
+
+    expect(cookie).toContain("sid=rotated-id");
+    await expect(storage.getSession("sid=attacker-id")).resolves.toEqual({ id: "attacker-id", data: {} });
+    await expect(storage.getSession(cookie)).resolves.toEqual({ id: "rotated-id", data: { userId: "victim" } });
+  });
+
+  it("regenerates a known memory session ID for a privilege change", async () => {
+    const ids = ["before-login", "after-login"];
+    const storage = createMemorySessionStorage<{ userId?: string }>({ cookieName: "sid", id: () => ids.shift() ?? "extra" });
+    const beforeLogin = await storage.createSession({});
+    const afterLogin = await storage.regenerateSession(beforeLogin);
+    afterLogin.data.userId = "victim";
+
+    const cookie = await storage.commitSession(afterLogin);
+
+    await expect(storage.getSession("sid=before-login")).resolves.toEqual({ id: "before-login", data: {} });
+    await expect(storage.getSession(cookie)).resolves.toEqual({ id: "after-login", data: { userId: "victim" } });
+  });
+
   it("rejects cookie path and domain values that can inject attributes or headers", async () => {
     expect(() => serializeCookie("sid", "abc", { path: "/; SameSite=None" })).toThrow("Invalid cookie Path");
     expect(() => serializeCookie("sid", "abc", { path: "/\r\nSet-Cookie: injected=1" })).toThrow("Invalid cookie Path");

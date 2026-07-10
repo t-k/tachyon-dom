@@ -162,6 +162,7 @@ export const createMemorySessionStorage = <Data extends Record<string, unknown> 
   const cookieName = options.cookieName ?? "tachyon_session";
   const cookieOptions = options.cookie ?? defaultSessionCookie();
   const sessions = new Map<string, Data>();
+  const untrustedSessions = new WeakSet<Session<Data>>();
   const createId = options.id ?? sessionId;
 
   return {
@@ -175,11 +176,25 @@ export const createMemorySessionStorage = <Data extends Record<string, unknown> 
       if (!id) {
         return { id: "", data: {} as Data };
       }
-      return { id, data: sessions.get(id) ?? ({} as Data) };
+      const data = sessions.get(id);
+      if (data) {
+        return { id, data };
+      }
+      const session = { id, data: {} as Data };
+      untrustedSessions.add(session);
+      return session;
     },
     commitSession: async (session: Session<Data>): Promise<string> => {
+      if (untrustedSessions.delete(session)) {
+        session.id = createId();
+      }
       sessions.set(session.id, session.data);
       return serializeCookie(cookieName, session.id, cookieOptions);
+    },
+    regenerateSession: async (session: Session<Data>): Promise<Session<Data>> => {
+      untrustedSessions.delete(session);
+      sessions.delete(session.id);
+      return { id: createId(), data: session.data };
     },
     destroySession: async (session: Session<Data>): Promise<string> => {
       sessions.delete(session.id);
