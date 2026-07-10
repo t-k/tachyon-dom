@@ -10,6 +10,7 @@ export type Attribute = {
 
 export type ElementNode = {
   type: "element";
+  start?: number;
   tagName: string;
   attrs: Attribute[];
   children: TemplateNode[];

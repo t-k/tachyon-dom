@@ -22,7 +22,8 @@ import {
   textExpressionSegments,
 } from "./utils.js";
 
-const semanticError = (message: string): Result<never, CompilerError> => err({ message, offset: 0 });
+const semanticError = (message: string, node?: ElementNode): Result<never, CompilerError> =>
+  err({ message, offset: node?.start ?? 0 });
 
 export const storeDefinitionsFor = (node: ElementNode): StoreDefinition[] => {
   const stores: StoreDefinition[] = [];
@@ -110,59 +111,59 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     const each = attrExpression(node, "each");
     const key = attrExpression(node, "key");
     if (!each) {
-      return semanticError("<for> requires each={items}.");
+      return semanticError("<for> requires each={items}.", node);
     }
     if (!key) {
-      return semanticError("<for> requires key={item.id}.");
+      return semanticError("<for> requires key={item.id}.", node);
     }
   }
   if (node.tagName === "if" && !attrExpression(node, "test")) {
-    return semanticError("<if> requires test={condition}.");
+    return semanticError("<if> requires test={condition}.", node);
   }
   if (node.tagName === "component") {
     if (!componentName(node)) {
-      return semanticError("<component> requires a string name attribute.");
+      return semanticError("<component> requires a string name attribute.", node);
     }
     for (const attr of node.attrs) {
       if (attr.name !== "name" && readExpressionAttribute(attr.value) && !identifierNamePattern.test(attr.name)) {
-        return semanticError(`Invalid component prop binding name: ${attr.name}.`);
+        return semanticError(`Invalid component prop binding name: ${attr.name}.`, node);
       }
     }
     if (renderableChildren(node).length !== 1) {
-      return semanticError("<component> requires exactly one renderable root child.");
+      return semanticError("<component> requires exactly one renderable root child.", node);
     }
   }
   if (node.tagName === "store") {
     for (const attr of node.attrs) {
       if (readExpressionAttribute(attr.value) && !identifierNamePattern.test(attr.name)) {
-        return semanticError(`Invalid store binding name: ${attr.name}.`);
+        return semanticError(`Invalid store binding name: ${attr.name}.`, node);
       }
     }
   }
   if (node.tagName === "await") {
     if (!attrExpression(node, "value")) {
-      return semanticError("<await> requires value={promise}.");
+      return semanticError("<await> requires value={promise}.", node);
     }
     const thenName = attrString(node, "then");
     if (!thenName) {
-      return semanticError(`<await> requires then="name".`);
+      return semanticError(`<await> requires then="name".`, node);
     }
     if (!identifierNamePattern.test(thenName)) {
-      return semanticError(`Invalid await then binding: ${thenName}.`);
+      return semanticError(`Invalid await then binding: ${thenName}.`, node);
     }
     const reorder = attrString(node, "reorder");
     if (reorder && reorder !== "preserve" && reorder !== "resolve") {
-      return semanticError(`<await> reorder must be "preserve" or "resolve".`);
+      return semanticError(`<await> reorder must be "preserve" or "resolve".`, node);
     }
   }
   for (const attr of node.attrs) {
     if (attr.name.startsWith("hydrate:") && !isKnownHydrationAttribute(attr.name)) {
-      return semanticError(`Unknown hydration attribute: ${attr.name}.`);
+      return semanticError(`Unknown hydration attribute: ${attr.name}.`, node);
     }
     if (attr.name.startsWith("bind:")) {
       const expression = readExpressionAttribute(attr.value);
       if (!expression || !isAssignableExpression(expression)) {
-        return semanticError(`${attr.name} requires an assignable expression.`);
+        return semanticError(`${attr.name} requires an assignable expression.`, node);
       }
     }
   }

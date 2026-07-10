@@ -167,6 +167,7 @@ const consumeClosingTag = (parser: Parser, tagName: string): Result<void, Compil
 };
 
 const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
+  const start = parser.offset;
   if (peek(parser) !== "<") {
     return parserError(parser, "Expected an opening tag.");
   }
@@ -188,7 +189,7 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
   }
   if (startsWith(parser, "/>")) {
     parser.offset += 2;
-    return ok({ type: "element", tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
+    return ok({ type: "element", start, tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
   }
   if (peek(parser) !== ">") {
     return parserError(parser, "Expected end of opening tag.");
@@ -201,7 +202,7 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
         return err(closing.error);
       }
     }
-    return ok({ type: "element", tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
+    return ok({ type: "element", start, tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
   }
 
   const children = [];
@@ -226,7 +227,7 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
   if (!closing.ok) {
     return err(closing.error);
   }
-  return ok({ type: "element", tagName: tagNameResult.value, attrs: attrsResult.value, children });
+  return ok({ type: "element", start, tagName: tagNameResult.value, attrs: attrsResult.value, children });
 };
 
 export const parseTemplate = (source: string): Result<ElementNode, CompilerError> => {

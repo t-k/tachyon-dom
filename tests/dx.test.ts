@@ -80,11 +80,11 @@ describe("DX helpers", () => {
     }
     expect(result.error).toMatchObject({
       message: "<if> requires test={condition}.",
-      line: 1,
+      line: 2,
       column: 1,
     });
     expect(formatDiagnostic(result.error, "bad.tachyon.html")).toContain(
-      "bad.tachyon.html:1:1: <if> requires test={condition}.",
+      "bad.tachyon.html:2:1: <if> requires test={condition}.",
     );
   });
 
