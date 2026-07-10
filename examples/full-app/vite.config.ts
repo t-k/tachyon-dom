@@ -1,6 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin, UserConfig } from "vite";
+import { minifyHtml } from "../../src/app";
 import { tachyonDom } from "../../src/vite";
 import { fullAppPages, normalizedFullAppPath } from "./app";
 import { renderFullAppDocument, type FullAppDocumentAssets } from "./ssr";
@@ -14,23 +15,6 @@ const pageForPath = (url: string | undefined): (typeof fullAppPages)[number] | u
 };
 
 const prefixed = (prefix: string, fileName: string): string => `${prefix}/${fileName}`;
-
-const minifyHtml = (html: string): string => {
-  const preserved: string[] = [];
-  const preserve = (match: string): string => {
-    preserved.push(match);
-    return `___TACHYON_PRESERVE_${preserved.length - 1}___`;
-  };
-  const minified = html
-    .replace(/<pre\b[\s\S]*?<\/pre>/gi, preserve)
-    .replace(/<!--(?!\[if\b)[\s\S]*?-->/gi, "")
-    .replace(/\s+</g, "<")
-    .replace(/>\s+/g, ">")
-    .replace(/\s{2,}/g, " ")
-    .trim()
-    .replace(/___TACHYON_PRESERVE_(\d+)___/g, (_, index: string) => preserved[Number(index)] ?? "");
-  return `${minified}\n`;
-};
 
 const fullAppHtmlPlugin = (): Plugin => ({
   name: "tachyon-full-app-html",

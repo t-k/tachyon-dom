@@ -202,6 +202,7 @@
     "bench:local:dev": "tsx benchmark/local-compare/run-local-compare.ts --serve-mode dev",
     "bench:local:smoke": "tsx benchmark/local-compare/run-local-compare.ts --serve-mode dev --iterations 1 --warmup 1",
     "bench:stream-backpressure": "tsx benchmark/streaming-backpressure.ts",
+    "bench:html-minification": "tsx benchmark/html-minification.ts",
     "bench:local:stable": "tsx benchmark/local-compare/run-local-compare.ts --iterations 30 --warmup 5",
     "bench:local:trace": "tsx benchmark/local-compare/run-local-compare.ts --serve-mode dev --iterations 1 --warmup 1 --trace-implementation tachyon-dom --trace-scenario partialUpdate",
     "bench:web-framework": "tsx benchmark/web-framework/run-web-framework-benchmark.ts",

@@ -17,13 +17,22 @@ import {
   runCli,
   serverCommandMessage,
 } from "../src/cli";
-import { defineApp, generateTachyonModuleTypes, generateTemplateTypes, pagesFromRouteFiles, renderAppDocument, renderAppResponse } from "../src/app";
+import {
+  defineApp,
+  generateTachyonModuleTypes,
+  generateTemplateTypes,
+  pagesFromRouteFiles,
+  renderAppDocument,
+  renderAppResponse,
+} from "../src/app";
 import { diagnoseTachyonSfc, diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
 import { verifyPackageArtifacts } from "../src/package-integrity";
 import { loadRouteApp, packageCloudflarePages, tachyonApp, tachyonDom, tachyonDomRoutes } from "../src/vite";
 import * as viteIntegration from "../src/vite";
+import { diagnosticsForTachyonDocument } from "../src/language-server";
+import { renderTdForTest } from "../src/testing";
 
 type PanelScope = {
   title: string;
@@ -93,12 +102,15 @@ describe("DX helpers", () => {
     ["for", `<main>\n  <section>\n    <for each={items}></for>\n  </section>\n</main>`, 3, 5, 23],
     ["await", `<main>\n  <p>valid</p>\n  <await then="value"></await>\n</main>`, 3, 3, 23],
     ["component", `<main>\n  <section>\n    <component><p>child</p></component>\n  </section>\n</main>`, 3, 5, 16],
-  ] as const)("points a missing %s directive attribute at its opening tag", (_name, source, line, column, endColumn) => {
-    const result = diagnoseTemplate(source);
-    if (result.ok) throw new Error("Expected diagnostic.");
+  ] as const)(
+    "points a missing %s directive attribute at its opening tag",
+    (_name, source, line, column, endColumn) => {
+      const result = diagnoseTemplate(source);
+      if (result.ok) throw new Error("Expected diagnostic.");
 
-    expect(result.error).toMatchObject({ line, column, endLine: line, endColumn });
-  });
+      expect(result.error).toMatchObject({ line, column, endLine: line, endColumn });
+    },
+  );
 
   it("points invalid bindings at the complete attribute range", () => {
     const result = diagnoseTemplate(`<main>\n  <input bind:value={user?.name}>\n</main>`);
@@ -114,7 +126,9 @@ describe("DX helpers", () => {
   });
 
   it("maps semantic template ranges through preceding SFC scripts", () => {
-    const result = diagnoseTachyonSfc(`<script>\nexport const scope = () => ({});\n</script>\n<main>\n  <if></if>\n</main>`);
+    const result = diagnoseTachyonSfc(
+      `<script>\nexport const scope = () => ({});\n</script>\n<main>\n  <if></if>\n</main>`,
+    );
     if (result.ok) throw new Error("Expected diagnostic.");
 
     expect(result.error).toMatchObject({ line: 5, column: 3, endLine: 5, endColumn: 7 });
@@ -509,20 +523,23 @@ const increment = (): void => {
       `<main id="app"><section><h1>Counter</h1><p>1</p></section></main>`,
     );
     expect(app.entries({ minify: true }).map((entry) => entry.fileName)).toEqual(["index.html", "counter/index.html"]);
-    expect(app.entries({ minify: true })[1]?.source).not.toContain("\n  <");
+    expect(app.entries({ minify: true })[1]?.source).toContain('<meta charset="UTF-8"/>');
     expect(app.pageForPath("/missing/")).toBeUndefined();
     expect(app.renderRoute("/missing/")).toBe("");
     expect(() => renderAppDocument(app, "/missing/")).toThrow("No page found");
   });
 
   it("renders an SFC page source through defineApp", () => {
-    const define = (title: string) => defineApp({
-      pages: [{
-        path: "/",
-        fileName: "index.html",
-        template: `<script>export const scope = () => ({ title: ${JSON.stringify(title)} });</script><section><h1>{title}</h1></section>`,
-      }],
-    });
+    const define = (title: string) =>
+      defineApp({
+        pages: [
+          {
+            path: "/",
+            fileName: "index.html",
+            template: `<script>export const scope = () => ({ title: ${JSON.stringify(title)} });</script><section><h1>{title}</h1></section>`,
+          },
+        ],
+      });
 
     expect(define("Welcome").renderRoute("/")).toBe("<section><h1>Welcome</h1></section>");
     expect(define("Edited in page.td").renderRoute("/")).toBe("<section><h1>Edited in page.td</h1></section>");
@@ -797,7 +814,7 @@ export default { selected: false };
         resolve: { alias: [{ find: "tachyon-dom/app", replacement: path.join(process.cwd(), "src", "app.ts") }] },
         server: { middlewareMode: true },
       });
-      const loaded = await moduleServer.ssrLoadModule("/src/app.ts") as { app: ReturnType<typeof defineApp> };
+      const loaded = (await moduleServer.ssrLoadModule("/src/app.ts")) as { app: ReturnType<typeof defineApp> };
       await expect(readFile(indexDeclaration, "utf8")).resolves.toContain("ReturnType<typeof scope>");
       expect(loaded.app.renderRoute("/")).toContain("<h1>Welcome</h1>");
       expect(loaded.app.renderRoute("/settings/profile/")).toContain("<h1>Settings Profile</h1>");
@@ -807,7 +824,12 @@ export default { selected: false };
         [
           path.join(dir, "src", "app.ts"),
           path.join(dir, "src", "routes.generated.ts"),
-          ...loaded.app.pages.map((page) => path.join(routesDir, page.path === "/" ? "index/page.td.d.ts" : `${page.fileName.replace(/index\.html$/, "page.td.d.ts")}`)),
+          ...loaded.app.pages.map((page) =>
+            path.join(
+              routesDir,
+              page.path === "/" ? "index/page.td.d.ts" : `${page.fileName.replace(/index\.html$/, "page.td.d.ts")}`,
+            ),
+          ),
           path.join(process.cwd(), "src", "tachyon-html.d.ts"),
         ],
         {
@@ -823,7 +845,11 @@ export default { selected: false };
           target: ts.ScriptTarget.ES2022,
         },
       );
-      expect(ts.getPreEmitDiagnostics(typecheck).map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual([]);
+      expect(
+        ts
+          .getPreEmitDiagnostics(typecheck)
+          .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")),
+      ).toEqual([]);
 
       await viteBuild({
         configFile: false,
@@ -1117,7 +1143,15 @@ export const bindRows = (root, rows, options) => effect(() => {
       const plugin = tachyonDom({ declarationOutput: () => output });
       if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
 
-      await plugin.transform.call({ error: (error: string): never => { throw new Error(error); } } as never, `<main>{title}</main>`, "/src/page.td");
+      await plugin.transform.call(
+        {
+          error: (error: string): never => {
+            throw new Error(error);
+          },
+        } as never,
+        `<main>{title}</main>`,
+        "/src/page.td",
+      );
 
       await expect(readFile(output, "utf8")).resolves.toContain("title: unknown;");
     } finally {
@@ -1134,7 +1168,11 @@ export const bindRows = (root, rows, options) => effect(() => {
         throw new Error("Missing Vite hooks.");
       }
       await plugin.configResolved.call({} as never, { command: "serve", mode: "development", root: dir } as never);
-      const context = { error: (error: string): never => { throw new Error(error); } } as never;
+      const context = {
+        error: (error: string): never => {
+          throw new Error(error);
+        },
+      } as never;
 
       await plugin.transform.call(context, `<main>{title}</main>`, `${id}?raw`);
       await expect(readFile(`${id}.d.ts`, "utf8")).resolves.toContain("title: unknown;");
@@ -1156,12 +1194,55 @@ export const bindRows = (root, rows, options) => effect(() => {
       }
       await plugin.configResolved.call({} as never, { command: "serve", mode: "development", root: dir } as never);
 
-      await expect(plugin.transform.call({
-        error(error: string): never {
-          throw new Error(error);
-        },
-      } as never, source, `${id}?raw`)).rejects.toThrow(`${id}:5:3: <if> requires test={condition}.`);
+      await expect(
+        plugin.transform.call(
+          {
+            error(error: string): never {
+              throw new Error(error);
+            },
+          } as never,
+          source,
+          `${id}?raw`,
+        ),
+      ).rejects.toThrow(`${id}:5:3: <if> requires test={condition}.`);
       await expect(access(`${id}.d.ts`)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps CLI, Vite, testing, and LSP locations aligned for one SFC fixture", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-cross-surface-diagnostic-"));
+    try {
+      const id = path.join(dir, "page.td");
+      const source = `<script>\nexport const scope = () => ({});\n</script>\n<main>\n  <if></if>\n</main>`;
+      await writeFile(id, source);
+      const cli = await compileFile({ input: id, target: "server", reactive: false, sourcemap: false });
+      expect(cli.ok).toBe(false);
+      if (cli.ok) throw new Error("Expected CLI diagnostic.");
+      expect(cli.error).toContain(`${id}:5:3:`);
+      await expect(renderTdForTest(id)).rejects.toThrow(`${id}:5:3:`);
+      expect(diagnosticsForTachyonDocument(source)[0]?.range).toEqual({
+        start: { line: 4, character: 2 },
+        end: { line: 4, character: 6 },
+      });
+
+      const plugin = tachyonDom();
+      if (typeof plugin.transform !== "function" || typeof plugin.configResolved !== "function") {
+        throw new Error("Missing Vite hooks.");
+      }
+      await plugin.configResolved.call({} as never, { command: "serve", mode: "development", root: dir } as never);
+      await expect(
+        plugin.transform.call(
+          {
+            error(error: string): never {
+              throw new Error(error);
+            },
+          } as never,
+          source,
+          `${id}?raw`,
+        ),
+      ).rejects.toThrow(`${id}:5:3:`);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1186,9 +1267,9 @@ export const bindRows = (root, rows, options) => effect(() => {
           strict: true,
           target: ts.ScriptTarget.ES2022,
         });
-        return ts.getPreEmitDiagnostics(program).map((diagnostic) =>
-          ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
-        );
+        return ts
+          .getPreEmitDiagnostics(program)
+          .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
       };
       const missing = await diagnosticsFor(
         "missing",
@@ -1315,9 +1396,9 @@ void chunks;
     expect(packageJson.scripts?.["verify:starters"]).toBe("node scripts/verify-generated-starters.mjs");
     expect(workflow).toContain("pnpm verify:package");
     expect(workflow).toContain("pnpm verify:starters");
-    await expect(readFile(path.join(process.cwd(), "scripts", "verify-generated-starters.mjs"), "utf8")).resolves.toContain(
-      '"create-tachyon-dom"',
-    );
+    await expect(
+      readFile(path.join(process.cwd(), "scripts", "verify-generated-starters.mjs"), "utf8"),
+    ).resolves.toContain('"create-tachyon-dom"');
 
     const realResult = await verifyPackageArtifacts({ packageDir: process.cwd(), checkPack: false });
     expect(realResult.ok).toBe(true);

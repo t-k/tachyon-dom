@@ -12,6 +12,7 @@ import {
   type TachyonApp,
   type TachyonAppAssets,
   type TachyonAppDefinition,
+  type HtmlWhitespacePolicy,
 } from "./app.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
@@ -53,6 +54,8 @@ export type TachyonDomRoutesViteOptions = {
 
 export type TachyonAppViteOptions = {
   appScript?: string;
+  htmlWhitespace?: HtmlWhitespacePolicy;
+  /** @deprecated Use `htmlWhitespace` instead. */
   minifyHtml?: boolean;
 };
 
@@ -77,10 +80,7 @@ export type TachyonSsrContext = {
   clientScript?: string;
 };
 
-export type TachyonSsrFetchHandler = (
-  request: Request,
-  context: TachyonSsrContext,
-) => Response | Promise<Response>;
+export type TachyonSsrFetchHandler = (request: Request, context: TachyonSsrContext) => Response | Promise<Response>;
 
 export type TachyonSsrBypass = (url: URL, request: IncomingMessage) => boolean;
 
@@ -455,7 +455,8 @@ const viteInternalExactPaths = ["/@vite/client", "/@react-refresh", "/__vite_pin
 const viteInternalPrefixes = ["/@id/", "/@fs/", "/src/", "/node_modules/"];
 
 export const isViteSsrPassthroughRequest = (url: URL): boolean =>
-  viteInternalExactPaths.includes(url.pathname) || viteInternalPrefixes.some((prefix) => url.pathname.startsWith(prefix));
+  viteInternalExactPaths.includes(url.pathname) ||
+  viteInternalPrefixes.some((prefix) => url.pathname.startsWith(prefix));
 
 const resolveClientScript = async (
   request: Request,
@@ -540,7 +541,10 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
       };
       this.emitFile({
         fileName: page.fileName,
-        source: app.renderDocument(page.path, { assets, minify: options.minifyHtml ?? true }),
+        source: app.renderDocument(page.path, {
+          assets,
+          whitespace: options.htmlWhitespace ?? (options.minifyHtml === false ? "preserve" : "condense"),
+        }),
         type: "asset",
       });
     }

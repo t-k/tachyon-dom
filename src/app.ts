@@ -4,6 +4,9 @@ import { escapeHtml } from "./html-escape.js";
 import type { ClientBinding, CompiledTemplate } from "./compiler/types.js";
 import { err, ok, type Result } from "./result.js";
 import type { TemplateScope, TypedTemplate } from "./typed.js";
+import { applyHtmlWhitespace, condenseHtmlWhitespace, type HtmlWhitespacePolicy } from "./html-whitespace.js";
+
+export type { HtmlWhitespacePolicy } from "./html-whitespace.js";
 
 type TachyonAppPageBase = {
   path: string;
@@ -58,6 +61,8 @@ export type TachyonAppShellContext = {
 
 export type TachyonAppDocumentOptions = {
   assets?: TachyonAppAssets;
+  whitespace?: HtmlWhitespacePolicy;
+  /** @deprecated Use `whitespace: "condense"` instead. */
   minify?: boolean;
 };
 
@@ -129,22 +134,7 @@ const appPathMatches = (pattern: string, path: string): boolean => {
   return patternSegments.length === pathSegments.length;
 };
 
-export const minifyHtml = (html: string): string => {
-  const preserved: string[] = [];
-  const preserve = (match: string): string => {
-    preserved.push(match);
-    return `___TACHYON_PRESERVE_${preserved.length - 1}___`;
-  };
-  const minified = html
-    .replace(/<pre\b[\s\S]*?<\/pre>/gi, preserve)
-    .replace(/<!--(?!\[if\b)[\s\S]*?-->/gi, "")
-    .replace(/\s+</g, "<")
-    .replace(/>\s+/g, ">")
-    .replace(/\s{2,}/g, " ")
-    .trim()
-    .replace(/___TACHYON_PRESERVE_(\d+)___/g, (_match, index: string) => preserved[Number(index)] ?? "");
-  return `${minified}\n`;
-};
+export const minifyHtml = condenseHtmlWhitespace;
 
 const templateSource = (template: string | TypedTemplate<TemplateScope>): string =>
   typeof template === "string" ? template : template.source;
@@ -213,7 +203,9 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
   }
   const duplicates = [...conflicts.entries()].filter(([, group]) => group.length > 1);
   if (duplicates.length > 0) {
-    throw new Error(`Duplicate app pages:\n${duplicates.map(([key, group]) => `${key}: ${group.map((page) => page.fileName).join(", ")}`).join("\n")}`);
+    throw new Error(
+      `Duplicate app pages:\n${duplicates.map(([key, group]) => `${key}: ${group.map((page) => page.fileName).join(", ")}`).join("\n")}`,
+    );
   }
   const pagesByPath = new Map<string, TachyonAppPage>();
   for (const page of pages) {
@@ -268,7 +260,8 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
   </body>
 </html>
 `;
-    return options.minify ? minifyHtml(html) : html;
+    const whitespace = options.whitespace ?? (options.minify ? "condense" : "preserve");
+    return applyHtmlWhitespace(html, whitespace);
   };
 
   const renderDocument = (path: string, options: TachyonAppDocumentOptions = {}): string => {

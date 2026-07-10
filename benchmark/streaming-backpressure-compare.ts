@@ -1,9 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 
-import {
-  compareBenchmarkEnvelopes,
-  type BenchmarkEnvelope,
-} from "./provenance.js";
+import { collectBenchmarkProvenance, compareBenchmarkEnvelopes, type BenchmarkEnvelope } from "./provenance.js";
 
 type StreamingWorkload = {
   subject: { git: { commit: string | null; dirty: boolean | null } };
@@ -61,15 +58,9 @@ export const compareStreamingBackpressureResults = (
     candidateRevision: candidate.workload.subject.git.commit,
     controls,
     ratios: {
-      completionTime:
-        candidate.measurements.completionTimeMs /
-        baseline.measurements.completionTimeMs,
-      peakQueuedBytes:
-        candidate.measurements.peakQueuedBytes /
-        baseline.measurements.peakQueuedBytes,
-      peakRssDeltaBytes:
-        candidate.measurements.peakRssDeltaBytes /
-        baseline.measurements.peakRssDeltaBytes,
+      completionTime: candidate.measurements.completionTimeMs / baseline.measurements.completionTimeMs,
+      peakQueuedBytes: candidate.measurements.peakQueuedBytes / baseline.measurements.peakQueuedBytes,
+      peakRssDeltaBytes: candidate.measurements.peakRssDeltaBytes / baseline.measurements.peakRssDeltaBytes,
     },
     baseline: baseline.measurements,
     candidate: candidate.measurements,
@@ -84,15 +75,32 @@ const main = async () => {
     );
   }
   const [baseline, candidate] = (await Promise.all(
-    [baselinePath, candidatePath].map(async (filePath) =>
-      JSON.parse(await readFile(filePath, "utf8")),
-    ),
+    [baselinePath, candidatePath].map(async (filePath) => JSON.parse(await readFile(filePath, "utf8"))),
   )) as [
     BenchmarkEnvelope<StreamingWorkload, StreamingMeasurements>,
     BenchmarkEnvelope<StreamingWorkload, StreamingMeasurements>,
   ];
   const comparison = compareStreamingBackpressureResults(baseline, candidate);
-  await writeFile(outputPath, `${JSON.stringify(comparison, null, 2)}\n`);
+  const result = {
+    schemaVersion: 2,
+    benchmark: { name: "streaming-backpressure-comparison", contractVersion: 1 },
+    provenance: await collectBenchmarkProvenance({
+      cwd: process.cwd(),
+      argv: [process.execPath, ...process.argv.slice(1)],
+      dependencies: candidate.provenance.dependencies,
+    }),
+    workload: {
+      baselineRevision: comparison.baselineRevision,
+      candidateRevision: comparison.candidateRevision,
+      controls: comparison.controls,
+    },
+    measurements: {
+      ratios: comparison.ratios,
+      baseline: comparison.baseline,
+      candidate: comparison.candidate,
+    },
+  };
+  await writeFile(outputPath, `${JSON.stringify(result, null, 2)}\n`);
 };
 
 if (import.meta.url === `file://${process.argv[1]}`) {

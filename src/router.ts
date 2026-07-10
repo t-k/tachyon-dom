@@ -1,6 +1,7 @@
 import { escapeHtml } from "./html-escape.js";
 import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
+import { applyHtmlWhitespace, type HtmlWhitespacePolicy } from "./html-whitespace.js";
 
 export type RouteParams = Record<string, string>;
 
@@ -124,6 +125,8 @@ export type RouteRenderOptions = {
   middleware?: readonly RouteMiddleware[];
   hooks?: RouteHooks;
   env?: RouteEnvironment;
+  /** Applied only after buffered rendering. Streaming chunks are always preserved. */
+  htmlWhitespace?: HtmlWhitespacePolicy;
 };
 
 export type RouteError = {
@@ -167,9 +170,12 @@ type RouteExecutionContext = RouteContext & { bindings?: unknown };
 type RouteExecutionOptions = Omit<RouteRenderOptions, "csrf" | "middleware"> & {
   bindings?: unknown;
   csrf?: {
-    verify: (context: { request: Request; url: URL; env: RouteEnvironment; bindings?: unknown }) =>
-      | boolean
-      | Promise<boolean>;
+    verify: (context: {
+      request: Request;
+      url: URL;
+      env: RouteEnvironment;
+      bindings?: unknown;
+    }) => boolean | Promise<boolean>;
   };
   middleware?: readonly ((context: {
     request: Request;
@@ -1169,7 +1175,11 @@ const renderRouteInternal = async (
   const match = matchRoute(routes, url);
   if (!match.ok) {
     const boundary = nearestNotFoundBoundary(routes, url.pathname);
-    const html = boundary ? await boundary({ request, url }) : options.notFound ? await options.notFound({ request, url }) : `<h1>Not Found</h1>`;
+    const html = boundary
+      ? await boundary({ request, url })
+      : options.notFound
+        ? await options.notFound({ request, url })
+        : `<h1>Not Found</h1>`;
     return ok({
       status: 404,
       html,
@@ -1257,6 +1267,7 @@ const renderRouteInternal = async (
         heads.unshift(await entry.route.head(context));
       }
     }
+    outlet = applyHtmlWhitespace(outlet, options.htmlWhitespace ?? "preserve");
     await options.hooks?.onRender?.({ request, url, html: outlet, match: match.value });
     const stateScript = Object.entries(loaderData)
       .map(([id, data]) =>
@@ -1356,8 +1367,9 @@ const renderRouteStreamInternal = async (
   const request = requestFor(input);
   const url = new URL(request.url);
   const match = matchRoute(routes, url);
+  const streamingOptions = { ...options, htmlWhitespace: "preserve" as const };
   if (!match.ok) {
-    const rendered = await renderRouteInternal(routes, request, options);
+    const rendered = await renderRouteInternal(routes, request, streamingOptions);
     if (!rendered.ok) {
       return err(rendered.error);
     }
@@ -1379,7 +1391,7 @@ const renderRouteStreamInternal = async (
       }),
     });
   }
-  const renderedPromise = renderRouteInternal(routes, request, options);
+  const renderedPromise = renderRouteInternal(routes, request, streamingOptions);
   const requiresAuthoritativeCommit = request.method !== "GET" && request.method !== "HEAD";
   type SettledRender =
     | { settled: true; rendered: Awaited<typeof renderedPromise> }

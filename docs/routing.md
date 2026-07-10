@@ -169,6 +169,8 @@ Use the runtime-specific entries for deployable server bundles:
 
 Both runtime handlers can apply `securityHeaders` and can use `streaming: true` to route through `renderRouteStream()`. File-system static asset serving is Node-only. On Cloudflare Workers, pass an Assets binding instead:
 
+Buffered routes and their Node, Workers, and Lambda handlers accept `htmlWhitespace: "condense"`. The policy normalizes tag-syntax whitespace while preserving text nodes, comments, Tachyon hydration markers, and raw-text content. Buffered routes default to `"preserve"`. Streaming ignores condensation and preserves original chunks so it never delays the first chunk or changes backpressure and cancellation behavior.
+
 Streaming adapters preserve downstream backpressure. Node pauses source reads after `response.write()` returns `false` and resumes on `drain`; close or error cancels the source even during that wait. Workers converts route chunks with demand-driven `ReadableStream.pull()` and forwards cancellation to the async iterator. Lambda bridges the Web response body to the AWS-managed standard Node Writable with `pipeline()`, which coordinates backpressure, completion, cancellation, and destination errors without a custom `drain()` Promise contract.
 
 ```ts

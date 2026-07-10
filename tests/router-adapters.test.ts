@@ -253,9 +253,7 @@ describe("server adapters", () => {
     const routes: RouteDefinition[] = [
       { path: "/", render: () => "home", notFound: ({ url }) => `<h1>Missing ${url.pathname}</h1>` },
     ];
-    const workersResponse = await createWorkersHandler({ routes }).fetch(
-      new Request("https://example.com/missing"),
-    );
+    const workersResponse = await createWorkersHandler({ routes }).fetch(new Request("https://example.com/missing"));
     expect(workersResponse.status).toBe(404);
     expect(await workersResponse.text()).toBe("<h1>Missing /missing</h1>");
 
@@ -316,15 +314,18 @@ describe("server adapters", () => {
   it("cancels a streamed Node response body when the client connection closes", async () => {
     let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
     let cancelled = false;
-    const body = new ReadableStream<Uint8Array>({
-      start(nextController) {
-        controller = nextController;
-        nextController.enqueue(new TextEncoder().encode("event: ready\n\n"));
+    const body = new ReadableStream<Uint8Array>(
+      {
+        start(nextController) {
+          controller = nextController;
+          nextController.enqueue(new TextEncoder().encode("event: ready\n\n"));
+        },
+        cancel() {
+          cancelled = true;
+        },
       },
-      cancel() {
-        cancelled = true;
-      },
-    }, { highWaterMark: 0 });
+      { highWaterMark: 0 },
+    );
     const res = new EventEmitter() as EventEmitter & {
       statusCode: number;
       setHeader: ReturnType<typeof vi.fn>;
@@ -502,14 +503,17 @@ describe("server adapters", () => {
 
   it.each(["close", "error"] as const)("cancels a Node source when %s interrupts a drain wait", async (event) => {
     let cancelled = false;
-    const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        controller.enqueue(new TextEncoder().encode("chunk"));
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          controller.enqueue(new TextEncoder().encode("chunk"));
+        },
+        cancel() {
+          cancelled = true;
+        },
       },
-      cancel() {
-        cancelled = true;
-      },
-    }, { highWaterMark: 0 });
+      { highWaterMark: 0 },
+    );
     const res = Object.assign(new EventEmitter(), {
       statusCode: 200,
       writableEnded: false,
@@ -811,16 +815,18 @@ describe("server adapters", () => {
 
   it("commits a private cache policy before an asynchronous personalized stream", async () => {
     const handler = createWorkersHandler({
-      routes: [{
-        path: "/account",
-        fallback: "<p>Loading account</p>",
-        loader: async ({ request }) => {
-          await delay(10);
-          return request.headers.get("cookie") ?? "anonymous";
+      routes: [
+        {
+          path: "/account",
+          fallback: "<p>Loading account</p>",
+          loader: async ({ request }) => {
+            await delay(10);
+            return request.headers.get("cookie") ?? "anonymous";
+          },
+          cache: { maxAge: 60 },
+          render: ({ data }) => `<h1>${data}</h1>`,
         },
-        cache: { maxAge: 60 },
-        render: ({ data }) => `<h1>${data}</h1>`,
-      }],
+      ],
       streaming: true,
     });
 
@@ -834,7 +840,12 @@ describe("server adapters", () => {
     type Bindings = { sessions: { verify: (request: Request) => Promise<boolean> } };
     const action = vi.fn(() => "saved");
     const bindings: Bindings = {
-      sessions: { verify: async () => { await delay(10); return false; } },
+      sessions: {
+        verify: async () => {
+          await delay(10);
+          return false;
+        },
+      },
     };
     const handler = createWorkersHandler<Bindings>({
       routes: [{ path: "/action", fallback: "secret fallback", action, render: () => "ok" }],
@@ -842,10 +853,7 @@ describe("server adapters", () => {
       streaming: true,
     });
 
-    const response = await handler.fetch(
-      new Request("https://example.com/action", { method: "POST" }),
-      bindings,
-    );
+    const response = await handler.fetch(new Request("https://example.com/action", { method: "POST" }), bindings);
 
     expect(response.status).toBe(403);
     expect(await response.text()).toBe("<h1>Forbidden</h1>");
@@ -858,10 +866,12 @@ describe("server adapters", () => {
     let verifierBindings: Bindings | undefined;
     const handler = createWorkersHandler<Bindings>({
       routes: [{ path: "/action", action: () => "saved", render: () => "ok" }],
-      csrf: { verify: ({ request, bindings: seen }) => {
-        verifierBindings = seen;
-        return seen.sessions.verify(request);
-      } },
+      csrf: {
+        verify: ({ request, bindings: seen }) => {
+          verifierBindings = seen;
+          return seen.sessions.verify(request);
+        },
+      },
     });
 
     const response = await handler.fetch(new Request("https://example.com/action", { method: "POST" }), bindings);
@@ -872,19 +882,25 @@ describe("server adapters", () => {
 
   it("preserves streaming cache and delayed CSRF commit policies through Node and Lambda", async () => {
     const action = vi.fn(() => "saved");
-    const routes: RouteDefinition[] = [{
-      path: "/account",
-      fallback: "secret fallback",
-      loader: async () => { await delay(10); return "private account"; },
-      action,
-      cache: { maxAge: 60 },
-      render: ({ data }) => `<h1>${data}</h1>`,
-    }];
-    const nodeRequest = (method: string) => Object.assign(Readable.from([]), {
-      method,
-      url: "/account",
-      headers: { host: "example.com", cookie: "sid=a" },
-    });
+    const routes: RouteDefinition[] = [
+      {
+        path: "/account",
+        fallback: "secret fallback",
+        loader: async () => {
+          await delay(10);
+          return "private account";
+        },
+        action,
+        cache: { maxAge: 60 },
+        render: ({ data }) => `<h1>${data}</h1>`,
+      },
+    ];
+    const nodeRequest = (method: string) =>
+      Object.assign(Readable.from([]), {
+        method,
+        url: "/account",
+        headers: { host: "example.com", cookie: "sid=a" },
+      });
     const nodeResponse = () => {
       const headers = new Map<string, string | number | readonly string[]>();
       const chunks: string[] = [];
@@ -893,7 +909,10 @@ describe("server adapters", () => {
         writableEnded: false,
         setHeader: (name: string, value: string | number | readonly string[]) => headers.set(name, value),
         flushHeaders: () => undefined,
-        write: (chunk: Uint8Array) => { chunks.push(Buffer.from(chunk).toString("utf8")); return true; },
+        write: (chunk: Uint8Array) => {
+          chunks.push(Buffer.from(chunk).toString("utf8"));
+          return true;
+        },
         end: (chunk?: string) => {
           if (chunk) chunks.push(chunk);
           response.writableEnded = true;
@@ -907,30 +926,83 @@ describe("server adapters", () => {
     expect(nodeGet.headers.get("cache-control")).toBe("private");
 
     const nodePost = nodeResponse();
-    await createNodeHandler({ routes, streaming: true, csrf: { verify: async () => { await delay(10); return false; } } })(
-      nodeRequest("POST") as never,
-      nodePost.response as never,
-    );
+    await createNodeHandler({
+      routes,
+      streaming: true,
+      csrf: {
+        verify: async () => {
+          await delay(10);
+          return false;
+        },
+      },
+    })(nodeRequest("POST") as never, nodePost.response as never);
     expect(nodePost.response.statusCode).toBe(403);
     expect(nodePost.chunks.join("")).toBe("<h1>Forbidden</h1>");
 
-    const lambdaGet = await createLambdaHandler({ routes, streaming: true })(lambdaEvent({
-      rawPath: "/account",
-      requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/account" } },
-    }));
+    const lambdaGet = await createLambdaHandler({ routes, streaming: true })(
+      lambdaEvent({
+        rawPath: "/account",
+        requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/account" } },
+      }),
+    );
     expect(lambdaGet.headers["cache-control"]).toBe("private");
 
     const lambdaPost = await createLambdaHandler({
       routes,
       streaming: true,
-      csrf: { verify: async () => { await delay(10); return false; } },
-    })(lambdaEvent({
-      rawPath: "/account",
-      requestContext: { domainName: "lambda.example", http: { method: "POST", path: "/account" } },
-    }));
+      csrf: {
+        verify: async () => {
+          await delay(10);
+          return false;
+        },
+      },
+    })(
+      lambdaEvent({
+        rawPath: "/account",
+        requestContext: { domainName: "lambda.example", http: { method: "POST", path: "/account" } },
+      }),
+    );
     expect(lambdaPost.statusCode).toBe(403);
     expect(lambdaPost.body).toBe("<h1>Forbidden</h1>");
     expect(action).not.toHaveBeenCalled();
+  });
+
+  it("shares safe buffered HTML condensation across Workers, Node, and Lambda", async () => {
+    const routes: RouteDefinition[] = [
+      {
+        path: "/",
+        render: () =>
+          `<!doctype html><html><head><meta   charset="UTF-8"   /></head><body><!--tachyon-hydrate:x:start--><p>Hello <!---->Ada</p><!--tachyon-hydrate:x:end--></body></html>`,
+      },
+    ];
+    const expected = `<!doctype html><html><head><meta charset="UTF-8"/></head><body><!--tachyon-hydrate:x:start--><p>Hello <!---->Ada</p><!--tachyon-hydrate:x:end--></body></html>`;
+
+    const workers = await createWorkersHandler({ routes, htmlWhitespace: "condense" }).fetch(
+      new Request("https://example.test/"),
+    );
+    expect(await workers.text()).toBe(expected);
+
+    const lambda = await createLambdaHandler({ routes, htmlWhitespace: "condense" })(lambdaEvent());
+    expect(lambda.body).toBe(expected);
+
+    const chunks: string[] = [];
+    const request = Object.assign(Readable.from([]), { method: "GET", url: "/", headers: { host: "example.test" } });
+    const response = Object.assign(new EventEmitter(), {
+      statusCode: 200,
+      writableEnded: false,
+      setHeader: () => undefined,
+      flushHeaders: () => undefined,
+      write: (chunk: Uint8Array) => {
+        chunks.push(Buffer.from(chunk).toString("utf8"));
+        return true;
+      },
+      end: (chunk?: string) => {
+        if (chunk) chunks.push(chunk);
+        response.writableEnded = true;
+      },
+    });
+    await createNodeHandler({ routes, htmlWhitespace: "condense" })(request as never, response as never);
+    expect(chunks.join("")).toBe(expected);
   });
 
   it("serves Cloudflare assets from env binding with security headers", async () => {
@@ -971,49 +1043,53 @@ describe("server adapters", () => {
     };
     const handler = createWorkersHandler<Bindings>({
       env: { RUNTIME_NAME: "configured" },
-      middleware: [({ bindings, env }) => {
-        assertBindings(bindings);
-        expect(env.RUNTIME_NAME).toBe("configured");
-        seen.add("middleware");
-      }],
-      routes: [{
-        path: "/",
-        action: ({ bindings }) => {
+      middleware: [
+        ({ bindings, env }) => {
           assertBindings(bindings);
-          seen.add("action");
-          return "saved";
+          expect(env.RUNTIME_NAME).toBe("configured");
+          seen.add("middleware");
         },
-        loader: async ({ bindings }) => {
-          assertBindings(bindings);
-          seen.add("loader");
-          return bindings.KV.get("title");
+      ],
+      routes: [
+        {
+          path: "/",
+          action: ({ bindings }) => {
+            assertBindings(bindings);
+            seen.add("action");
+            return "saved";
+          },
+          loader: async ({ bindings }) => {
+            assertBindings(bindings);
+            seen.add("loader");
+            return bindings.KV.get("title");
+          },
+          head: ({ bindings }) => {
+            assertBindings(bindings);
+            seen.add("head");
+            return { title: bindings.RUNTIME_NAME };
+          },
+          resources: ({ bindings }) => {
+            assertBindings(bindings);
+            seen.add("resources");
+            return [{ rel: "stylesheet", href: `/${bindings.RUNTIME_NAME}.css` }];
+          },
+          headers: ({ bindings }) => {
+            assertBindings(bindings);
+            seen.add("headers");
+            return { "x-runtime": bindings.RUNTIME_NAME };
+          },
+          cache: ({ bindings }) => {
+            assertBindings(bindings);
+            seen.add("cache");
+            return { mode: "private", tags: [bindings.RUNTIME_NAME] };
+          },
+          render: ({ bindings, data, actionResult }) => {
+            assertBindings(bindings);
+            seen.add("render");
+            return `<h1>${data}:${actionResult}</h1>`;
+          },
         },
-        head: ({ bindings }) => {
-          assertBindings(bindings);
-          seen.add("head");
-          return { title: bindings.RUNTIME_NAME };
-        },
-        resources: ({ bindings }) => {
-          assertBindings(bindings);
-          seen.add("resources");
-          return [{ rel: "stylesheet", href: `/${bindings.RUNTIME_NAME}.css` }];
-        },
-        headers: ({ bindings }) => {
-          assertBindings(bindings);
-          seen.add("headers");
-          return { "x-runtime": bindings.RUNTIME_NAME };
-        },
-        cache: ({ bindings }) => {
-          assertBindings(bindings);
-          seen.add("cache");
-          return { mode: "private", tags: [bindings.RUNTIME_NAME] };
-        },
-        render: ({ bindings, data, actionResult }) => {
-          assertBindings(bindings);
-          seen.add("render");
-          return `<h1>${data}:${actionResult}</h1>`;
-        },
-      }],
+      ],
     });
     const bindings: Bindings = {
       RUNTIME_NAME: "edge",
@@ -1026,20 +1102,24 @@ describe("server adapters", () => {
     expect(await response.text()).toBe("<h1>KV title:saved</h1>");
     expect(response.headers.get("x-runtime")).toBe("edge");
     expect(response.headers.get("cache-control")).toBe("private");
-    expect(seen).toEqual(new Set(["middleware", "action", "loader", "render", "head", "headers", "cache", "resources"]));
+    expect(seen).toEqual(
+      new Set(["middleware", "action", "loader", "render", "head", "headers", "cache", "resources"]),
+    );
   });
 
   it("falls through to dynamic routes when Cloudflare asset basePath does not match", async () => {
     const assetFetch = vi.fn(() => new Response("asset"));
     let routeAssetsBinding: { fetch: typeof assetFetch } | undefined;
     const handler = createWorkersHandler<{ ASSETS: { fetch: typeof assetFetch } }>({
-      routes: [{
-        path: "/",
-        render: ({ bindings }) => {
-          routeAssetsBinding = bindings.ASSETS;
-          return "<h1>Home</h1>";
+      routes: [
+        {
+          path: "/",
+          render: ({ bindings }) => {
+            routeAssetsBinding = bindings.ASSETS;
+            return "<h1>Home</h1>";
+          },
         },
-      }],
+      ],
       assets: { bindingName: "ASSETS", basePath: "/assets" },
     });
     const assets = { fetch: assetFetch };
@@ -1641,44 +1721,65 @@ describe("server adapters", () => {
       HttpResponseStream: { from },
     };
     const chunks: string[] = [];
-    const responseStream = () => new Writable({
-      write(chunk, _encoding, callback) {
-        chunks.push(Buffer.from(chunk).toString("utf8"));
-        callback();
-      },
-    });
+    const responseStream = () =>
+      new Writable({
+        write(chunk, _encoding, callback) {
+          chunks.push(Buffer.from(chunk).toString("utf8"));
+          callback();
+        },
+      });
     const action = vi.fn(() => "saved");
-    const handler = createLambdaStreamingHandler({
-      routes: [{
-        path: "/account",
-        fallback: "secret fallback",
-        loader: async () => { await delay(10); return "private account"; },
-        action,
-        cache: { maxAge: 60 },
-        render: ({ data }) => `<h1>${data}</h1>`,
-      }],
-      streaming: true,
-      csrf: { verify: async () => { await delay(10); return false; } },
-    }, runtime) as (
-      event: ReturnType<typeof lambdaEvent>,
-      responseStream: Writable,
-      context: unknown,
-    ) => Promise<void>;
+    const handler = createLambdaStreamingHandler(
+      {
+        routes: [
+          {
+            path: "/account",
+            fallback: "secret fallback",
+            loader: async () => {
+              await delay(10);
+              return "private account";
+            },
+            action,
+            cache: { maxAge: 60 },
+            render: ({ data }) => `<h1>${data}</h1>`,
+          },
+        ],
+        streaming: true,
+        csrf: {
+          verify: async () => {
+            await delay(10);
+            return false;
+          },
+        },
+      },
+      runtime,
+    ) as (event: ReturnType<typeof lambdaEvent>, responseStream: Writable, context: unknown) => Promise<void>;
 
-    await handler(lambdaEvent({
-      rawPath: "/account",
-      requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/account" } },
-    }), responseStream(), {});
-    expect(from).toHaveBeenLastCalledWith(expect.any(Writable), expect.objectContaining({
-      statusCode: 200,
-      headers: expect.objectContaining({ "cache-control": "private" }),
-    }));
+    await handler(
+      lambdaEvent({
+        rawPath: "/account",
+        requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/account" } },
+      }),
+      responseStream(),
+      {},
+    );
+    expect(from).toHaveBeenLastCalledWith(
+      expect.any(Writable),
+      expect.objectContaining({
+        statusCode: 200,
+        headers: expect.objectContaining({ "cache-control": "private" }),
+      }),
+    );
 
     chunks.length = 0;
-    await handler(lambdaEvent({
-      rawPath: "/account",
-      requestContext: { domainName: "lambda.example", http: { method: "POST", path: "/account" } },
-    }), responseStream(), {});
+    await handler(
+      lambdaEvent({
+        rawPath: "/account",
+        requestContext: { domainName: "lambda.example", http: { method: "POST", path: "/account" } },
+      }),
+      responseStream(),
+      {},
+    );
     expect(from).toHaveBeenLastCalledWith(expect.any(Writable), expect.objectContaining({ statusCode: 403 }));
     expect(chunks.join("")).toBe("<h1>Forbidden</h1>");
     expect(action).not.toHaveBeenCalled();
@@ -1711,11 +1812,11 @@ describe("server adapters", () => {
     });
 
     let settled = false;
-    const pending = writeWebResponseToLambdaStream(
-      new Response(body),
-      stream,
-      { HttpResponseStream: { from: (value) => value } },
-    ).then(() => { settled = true; });
+    const pending = writeWebResponseToLambdaStream(new Response(body), stream, {
+      HttpResponseStream: { from: (value) => value },
+    }).then(() => {
+      settled = true;
+    });
     await delay(10);
 
     expect(sourcePulls).toBeLessThan(128);
@@ -1741,11 +1842,9 @@ describe("server adapters", () => {
       },
     });
 
-    await expect(writeWebResponseToLambdaStream(
-      new Response(body),
-      stream,
-      { HttpResponseStream: { from: (value) => value } },
-    )).rejects.toThrow("destination failed");
+    await expect(
+      writeWebResponseToLambdaStream(new Response(body), stream, { HttpResponseStream: { from: (value) => value } }),
+    ).rejects.toThrow("destination failed");
     expect(cancelled).toBe(true);
   });
 
