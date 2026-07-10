@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { compareStreamingBackpressureResults } from "../benchmark/streaming-backpressure-compare.ts";
-import type { BenchmarkEnvelope } from "../benchmark/provenance.ts";
+import { compareStreamingBackpressureResults } from "../benchmark/streaming-backpressure-compare.js";
+import type { BenchmarkEnvelope } from "../benchmark/provenance.js";
 
 const envelope = (options: { revision: string; queued: number; connections?: number; dirty?: boolean }) => ({
   schemaVersion: 2,

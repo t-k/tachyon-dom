@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import {
   compareBenchmarkEnvelopes,
   type BenchmarkEnvelope,
-} from "./provenance.ts";
+} from "./provenance.js";
 
 type StreamingWorkload = {
   subject: { git: { commit: string | null; dirty: boolean | null } };
