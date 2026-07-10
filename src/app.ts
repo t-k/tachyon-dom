@@ -186,7 +186,7 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
   const pageForPath = (path: string): TachyonAppPage | undefined => pagesByPath.get(normalizeAppPath(path));
 
   const renderRoute = (path: string): string => {
-    const page = pageForPath(path) ?? pageForPath("/");
+    const page = pageForPath(path);
     if (!page) {
       return "";
     }
@@ -196,7 +196,7 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
   };
 
   const renderShell = (path: string): string => {
-    const page = pageForPath(path) ?? pageForPath("/");
+    const page = pageForPath(path);
     if (!page) {
       return defaultShell({ page: { path: "/", fileName: "index.html", template: "" }, routeHtml: "" });
     }
@@ -205,7 +205,7 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
   };
 
   const renderDocument = (path: string, options: TachyonAppDocumentOptions = {}): string => {
-    const page = pageForPath(path) ?? pageForPath("/");
+    const page = pageForPath(path);
     if (!page) {
       throw new Error(`No page found for ${path}.`);
     }

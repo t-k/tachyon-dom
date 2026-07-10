@@ -478,6 +478,9 @@ const increment = (): void => {
     );
     expect(app.entries({ minify: true }).map((entry) => entry.fileName)).toEqual(["index.html", "counter/index.html"]);
     expect(app.entries({ minify: true })[1]?.source).not.toContain("\n  <");
+    expect(app.pageForPath("/missing/")).toBeUndefined();
+    expect(app.renderRoute("/missing/")).toBe("");
+    expect(() => renderAppDocument(app, "/missing/")).toThrow("No page found");
   });
 
   it("rejects duplicate normalized app paths and output names", () => {
