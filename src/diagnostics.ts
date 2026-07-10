@@ -1,7 +1,7 @@
 import { compileTemplate } from "./compiler/index.js";
 import { compileTachyonSfc } from "./compiler/sfc.js";
 import { err, ok, type Result } from "./result.js";
-import type { CompiledTemplate, CompilerError } from "./compiler/types.js";
+import type { CompiledTemplate, CompilerError, CompileTemplateOptions } from "./compiler/types.js";
 
 export type TemplateDiagnostic = {
   message: string;
@@ -53,11 +53,12 @@ export const diagnoseTemplate = (source: string): Result<CompiledTemplate, Templ
 
 export const diagnoseTachyonSfc = (
   source: string,
+  options: CompileTemplateOptions = {},
 ): Result<
   ReturnType<typeof compileTachyonSfc> extends Result<infer Value, CompilerError> ? Value : never,
   TemplateDiagnostic
 > => {
-  const result = compileTachyonSfc(source);
+  const result = compileTachyonSfc(source, options);
   if (result.ok) {
     return ok(result.value);
   }

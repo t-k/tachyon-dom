@@ -1136,6 +1136,32 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(typeof client === "object" && client?.code).toContain(`export const bind = (root, scope) =>`);
   });
 
+  it("applies one template whitespace policy to every Vite target", async () => {
+    const plugin = tachyonDom({ reactive: true, templateWhitespace: "condense" });
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+    const context = {
+      error(error: string): never {
+        throw new Error(error);
+      },
+    } as never;
+    const source = `<main>
+  <section hydrate:id={id}>Hello {name}!</section>
+</main>`;
+
+    const server = await plugin.transform.call(context, source, "/src/page.td?server");
+    const stream = await plugin.transform.call(context, source, "/src/page.td?stream");
+    const client = await plugin.transform.call(context, source, "/src/page.td?client");
+    const codes = [server, stream, client].map((result) =>
+      typeof result === "object" ? String(result?.code ?? "") : "",
+    );
+
+    expect(codes.every((code) => !code.includes("\\n  "))).toBe(true);
+    expect(codes[0]).toContain("tachyon-hydrate:");
+    expect(codes[1]).toContain("tachyon-hydrate:");
+    expect(codes[2]).toContain("<!---->");
+    expect(codes.every((code) => code.includes("Hello "))).toBe(true);
+  });
+
   it("writes synchronized module declarations during Vite transforms", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-vite-types-"));
     try {

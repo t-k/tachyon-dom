@@ -16,6 +16,7 @@ import {
 } from "./app.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
+import type { TemplateWhitespacePolicy } from "./compiler/types.js";
 import { diagnoseTachyonSfc, diagnosticFromCompilerError, formatDiagnostic } from "./diagnostics.js";
 import { createFileRouteManifest } from "./router.js";
 import { scanFileRoutes } from "./router-node.js";
@@ -26,6 +27,7 @@ export type TachyonDomViteOptions = {
   include?: RegExp;
   target?: "client" | "server" | "stream";
   reactive?: boolean;
+  templateWhitespace?: TemplateWhitespacePolicy;
   sourcemap?: boolean;
   productionSourceMap?: boolean;
   requestLog?: boolean | TachyonDomRequestLogOptions;
@@ -353,7 +355,9 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         return null;
       }
       const resolvedTarget = targetForId(id, target);
-      const result = diagnoseTachyonSfc(source);
+      const result = diagnoseTachyonSfc(source, {
+        whitespace: options.templateWhitespace ?? "preserve",
+      });
       if (!result.ok) {
         this.error(formatDiagnostic(result.error, id));
       }

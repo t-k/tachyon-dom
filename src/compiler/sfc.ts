@@ -1,7 +1,7 @@
 import * as ts from "typescript";
 import { err, ok, type Result } from "../result.js";
 import { compileTemplate } from "./index.js";
-import type { CompiledTemplate, CompilerError } from "./types.js";
+import type { CompiledTemplate, CompilerError, CompileTemplateOptions } from "./types.js";
 
 export const sfcDefaultScopeName = "__tachyonSfcDefaultScope";
 export const sfcNamedScopeName = "__tachyonSfcScope";
@@ -375,7 +375,10 @@ export const parseTachyonSfc = (source: string): Result<TachyonSfcDescriptor, Co
   });
 };
 
-export const compileTachyonSfc = (source: string): Result<CompiledTachyonSfc, CompilerError> => {
+export const compileTachyonSfc = (
+  source: string,
+  options: CompileTemplateOptions = {},
+): Result<CompiledTachyonSfc, CompilerError> => {
   const descriptor = parseTachyonSfc(source);
   if (!descriptor.ok) {
     return err(descriptor.error);
@@ -388,7 +391,7 @@ export const compileTachyonSfc = (source: string): Result<CompiledTachyonSfc, Co
       template: emptyTemplate(descriptor.value.template),
     });
   }
-  const template = compileTemplate(descriptor.value.template);
+  const template = compileTemplate(descriptor.value.template, options);
   if (!template.ok) {
     return err({
       message: template.error.message,
