@@ -18,6 +18,8 @@ import {
   type RouteDefinition,
 } from "../src/router";
 
+const sessionSecret = "s".repeat(32);
+
 describe("router security helpers", () => {
   it("sanitizes route HTML before creating trusted HTML responses", async () => {
     const safe = sanitizeHtml(
@@ -273,7 +275,7 @@ describe("router security helpers", () => {
     await expect(memoryStorage.commitSession({ id: "s1", data: {} })).rejects.toThrow("Invalid cookie Path");
 
     const cookieStorage = createCookieSessionStorage({
-      secret: "secret",
+      secret: sessionSecret,
       cookieName: "sid",
       cookie: { path: "/", domain: "example.test; Secure" },
       id: () => "s1",
@@ -302,7 +304,7 @@ describe("router security helpers", () => {
     expect(verifySignedCookieValue(`${signed}x`, "secret")).toBeUndefined();
 
     const storage = createCookieSessionStorage<{ userId: string }>({
-      secret: "secret",
+      secret: sessionSecret,
       cookieName: "__Host-session",
       id: () => "s1",
     });
@@ -321,22 +323,48 @@ describe("router security helpers", () => {
   it("rejects an expired signed cookie session when it is replayed", async () => {
     let now = 1_000;
     const storage = createCookieSessionStorage<{ userId: string }>({
-      secret: "secret",
+      secret: sessionSecret,
       cookieName: "sid",
       maxAgeMs: 100,
       now: () => now,
     });
     const cookie = await storage.commitSession({ id: "s1", data: { userId: "u1" } });
-    now += 101;
+    now += 100;
 
     await expect(storage.getSession(cookie)).resolves.toEqual({ id: "", data: {} });
   });
 
   it("rejects a legacy signed session without an expiry when expiry is required", async () => {
-    const legacy = serializeCookie("sid", signCookieValue(JSON.stringify({ id: "s1", data: { userId: "u1" } }), "secret"));
-    const storage = createCookieSessionStorage<{ userId: string }>({ secret: "secret", cookieName: "sid", maxAgeMs: 100 });
+    const legacy = serializeCookie("sid", signCookieValue(JSON.stringify({ id: "s1", data: { userId: "u1" } }), sessionSecret));
+    const storage = createCookieSessionStorage<{ userId: string }>({ secret: sessionSecret, cookieName: "sid", maxAgeMs: 100 });
 
     await expect(storage.getSession(legacy)).resolves.toEqual({ id: "", data: {} });
+  });
+
+  it("validates signed-session secrets and rotates signing keys", async () => {
+    expect(() => createCookieSessionStorage({ secret: "weak" })).toThrow("at least 32");
+    const oldSecret = "o".repeat(32);
+    const newSecret = "n".repeat(32);
+    const oldStorage = createCookieSessionStorage<{ userId: string }>({ secret: oldSecret, cookieName: "sid" });
+    const oldCookie = await oldStorage.commitSession({ id: "s1", data: { userId: "u1" } });
+    const rotated = createCookieSessionStorage<{ userId: string }>({
+      secret: newSecret,
+      verificationSecrets: [oldSecret],
+      cookieName: "sid",
+    });
+
+    await expect(rotated.getSession(oldCookie)).resolves.toEqual({ id: "s1", data: { userId: "u1" } });
+    const newCookie = await rotated.commitSession({ id: "s1", data: { userId: "u1" } });
+    await expect(oldStorage.getSession(newCookie)).resolves.toEqual({ id: "", data: {} });
+  });
+
+  it("documents copied-cookie replay after stateless destroy", async () => {
+    const storage = createCookieSessionStorage<{ userId: string }>({ secret: sessionSecret, cookieName: "sid" });
+    const session = { id: "s1", data: { userId: "u1" } };
+    const copiedCookie = await storage.commitSession(session);
+    await storage.destroySession(session);
+
+    await expect(storage.getSession(copiedCookie)).resolves.toEqual(session);
   });
 
   it("creates auth guard middleware for protected routes", async () => {

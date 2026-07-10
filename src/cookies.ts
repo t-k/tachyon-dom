@@ -207,6 +207,11 @@ export const createMemorySessionStorage = <Data extends Record<string, unknown> 
 export const createCookieSessionStorage = <Data extends Record<string, unknown> = Record<string, unknown>>(
   options: CookieSessionStorageOptions,
 ) => {
+  for (const secret of [options.secret, ...(options.verificationSecrets ?? [])]) {
+    if (Buffer.byteLength(secret, "utf8") < 32) {
+      throw new Error("Cookie session secrets must be at least 32 bytes.");
+    }
+  }
   const cookieName = options.cookieName ?? "__Host-tachyon_session";
   const cookieOptions = options.cookie ?? defaultSessionCookie();
   const maxAgeMs = options.maxAgeMs;
