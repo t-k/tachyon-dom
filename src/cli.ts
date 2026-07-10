@@ -35,6 +35,7 @@ export type CliAddPageOptions = {
   command: "add-page";
   name: string;
   routesDir: string;
+  force?: boolean;
 };
 
 export type CliTypegenOptions = {
@@ -49,6 +50,7 @@ export type CliInitOptions = {
   command: "init";
   outDir: string;
   template: "basic" | "ssr";
+  force?: boolean;
 };
 
 export type CliLanguageServerOptions = {
@@ -69,12 +71,12 @@ const usage =
   "Usage: tachyon-dom <compile|routes|dev|build|preview|add|typegen|init|language-server>. Use compile for templates, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, init for starters, and language-server for editor diagnostics.";
 
 const commandUsage: Record<string, string> = {
-  add: "Usage: tachyon-dom add page <name> [--routes-dir src/routes]",
+  add: "Usage: tachyon-dom add page <name> [--routes-dir src/routes] [--force]. Existing files are preserved unless --force is explicit.",
   build: "Usage: tachyon-dom build [--host 127.0.0.1] [--port 4173]",
   compile:
     "Usage: tachyon-dom compile <input> [--target client|server|stream] [--out file] [--reactive] [--no-sourcemap]",
   dev: "Usage: tachyon-dom dev [--host 127.0.0.1] [--port 5173]",
-  init: "Usage: tachyon-dom init [--out dir] [--template basic|ssr]",
+  init: "Usage: tachyon-dom init [--out dir] [--template basic|ssr] [--force]. Any conflict aborts all writes unless --force is explicit.",
   "language-server": "Usage: tachyon-dom language-server --stdio",
   preview: "Usage: tachyon-dom preview [--host 127.0.0.1] [--port 4173]",
   routes: "Usage: tachyon-dom routes <routes-dir> [--out route-manifest.json]",
@@ -209,6 +211,8 @@ const parseAddArgs = (kind: string, name: string, rest: readonly string[]): Resu
         return err("--routes-dir requires a path.");
       }
       options.routesDir = routesDir;
+    } else if (arg === "--force") {
+      options.force = true;
     } else {
       return err(`Unknown argument: ${arg}`);
     }
@@ -260,6 +264,8 @@ const parseInitArgs = (rest: readonly string[]): Result<CliInitOptions, string> 
         return err("--template must be basic or ssr.");
       }
       options.template = template;
+    } else if (arg === "--force") {
+      options.force = true;
     } else {
       return err(`Unknown argument: ${arg}`);
     }
@@ -364,9 +370,13 @@ export const addPageFiles = async (options: Omit<CliAddPageOptions, "command">):
     .map((segment) => (segment.startsWith("[...") && segment.endsWith("]") ? segment.slice(4, -1) : segment.startsWith("[") && segment.endsWith("]") ? segment.slice(1, -1) : segment))
     .join("/")}/`;
   const pageFile = join(targetDir, "page.td");
+  let overwriting = false;
   try {
     await access(pageFile);
-    return err(`Refusing to overwrite existing page file: ${pageFile}`);
+    if (!options.force) {
+      return err(`Refusing to overwrite existing page file: ${pageFile}`);
+    }
+    overwriting = true;
   } catch {
     // The target does not exist yet.
   }
@@ -385,7 +395,7 @@ export const scope = () => ({
   );
   return ok(
     [
-      `Created ${pageFile}.`,
+      overwriting ? `Overwrote ${pageFile}.` : `Created ${pageFile}.`,
       `Route URL: ${routeUrl}`,
       "Edit the generated page.td to define the route markup and scope.",
       `Run tachyon-dom typegen ${pageFile} --out ${pageFile}.ts --module if you want generated scope declarations.`,
@@ -607,7 +617,7 @@ export const createStarterFiles = async (options: Omit<CliInitOptions, "command"
       // Missing targets are safe to create after the full preflight.
     }
   }
-  if (conflicts.length > 0) {
+  if (conflicts.length > 0 && !options.force) {
     return err(`Refusing to overwrite existing starter files:\n${conflicts.join("\n")}`);
   }
   await mkdir(join(options.outDir, "src", "routes", "index"), { recursive: true });
@@ -626,7 +636,14 @@ export const createStarterFiles = async (options: Omit<CliInitOptions, "command"
   await writeFile(join(options.outDir, ".github", "workflows", "ci.yml"), starterCiSource());
   await writeFile(join(options.outDir, "README.md"), starterReadmeSource(options.template));
   await writeFile(join(options.outDir, "package.json"), starterPackageJsonSource());
-  return ok(`Created Tachyon DOM starter in ${options.outDir}. Edit src/routes/index/page.td to start building.`);
+  return ok(
+    [
+      conflicts.length > 0
+        ? `Overwrote Tachyon DOM starter files in ${options.outDir}.`
+        : `Created Tachyon DOM starter in ${options.outDir}. Edit src/routes/index/page.td to start building.`,
+      ...conflicts.map((file) => `Overwrote ${file}.`),
+    ].join("\n"),
+  );
 };
 
 export const serverCommandMessage = (options: CliServerOptions): string =>

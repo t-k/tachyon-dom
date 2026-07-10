@@ -595,6 +595,10 @@ export default { selected: false };
 
       expect(result).toEqual({ ok: false, error: expect.stringContaining("Refusing to overwrite") });
       await expect(readFile(page, "utf8")).resolves.toBe("user-authored\n");
+
+      const forced = await addPageFiles({ name: "settings", routesDir, force: true });
+      expect(forced.ok && forced.value).toContain(`Overwrote ${page}`);
+      await expect(readFile(page, "utf8")).resolves.toContain("<h1>{title}</h1>");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -667,12 +671,19 @@ export default { selected: false };
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-starter-conflict-"));
     try {
       await writeFile(path.join(dir, "package.json"), "user-authored\n");
+      await writeFile(path.join(dir, "README.md"), "user-readme\n");
 
       const result = await createStarterFiles({ outDir: dir, template: "basic" });
 
       expect(result).toEqual({ ok: false, error: expect.stringContaining("Refusing to overwrite") });
       await expect(readFile(path.join(dir, "package.json"), "utf8")).resolves.toBe("user-authored\n");
+      await expect(readFile(path.join(dir, "README.md"), "utf8")).resolves.toBe("user-readme\n");
       await expect(readFile(path.join(dir, "src", "routes", "index", "page.td"), "utf8")).rejects.toThrow();
+
+      const forced = await createStarterFiles({ outDir: dir, template: "basic", force: true });
+      expect(forced.ok && forced.value).toContain("Overwrote");
+      expect(forced.ok && forced.value).toContain(path.join(dir, "package.json"));
+      expect(forced.ok && forced.value).toContain(path.join(dir, "README.md"));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -748,6 +759,8 @@ export default { selected: false };
       await expect(runCli(["--version"])).resolves.toBe(0);
       await expect(runCli(["compile", "--help"])).resolves.toBe(0);
       await expect(runCli(["dev", "--help"])).resolves.toBe(0);
+      await expect(runCli(["add", "--help"])).resolves.toBe(0);
+      await expect(runCli(["init", "--help"])).resolves.toBe(0);
     } finally {
       console.log = originalLog;
     }
@@ -758,6 +771,19 @@ export default { selected: false };
     expect(messages[2]).toContain("tachyon-dom dev");
     expect(messages[2]).toContain("--host");
     expect(messages[2]).toContain("--port");
+    expect(messages[3]).toContain("Existing files are preserved unless --force is explicit.");
+    expect(messages[4]).toContain("Any conflict aborts all writes unless --force is explicit.");
+  });
+
+  it("parses explicit generator overwrite options", () => {
+    expect(parseArgs(["add", "page", "settings", "--force"])).toMatchObject({
+      ok: true,
+      value: { command: "add-page", name: "settings", force: true },
+    });
+    expect(parseArgs(["init", "--out", "app", "--force"])).toEqual({
+      ok: true,
+      value: { command: "init", outDir: "app", template: "basic", force: true },
+    });
   });
 
   it("detects CLI entrypoints through npm bin symlinks", async () => {

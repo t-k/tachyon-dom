@@ -257,6 +257,8 @@ tachyon-dom language-server --stdio
 
 `npm create tachyon-dom@latest my-app` and `pnpm create tachyon-dom my-app` create a route-local starter with `src/routes/index/page.td`, `src/client/main.ts`, `src/app.ts`, `vite.config.ts`, `tsconfig.json`, `.gitignore`, a smoke test, CI workflow, `README.md`, and `package.json`. `tachyon-dom init --template basic --out my-app` is the equivalent installed-package command. Use `tachyon-dom init --template ssr --out my-app` when you also want a small `src/server.ts` SSR composition entry.
 
+`tachyon-dom init` and `tachyon-dom add page` preserve existing files by default. A starter conflict aborts before any file is written. Pass `--force` only when you deliberately want to overwrite the listed managed files; the command reports every overwritten path.
+
 Template files use the short `.td` extension. The Vite plugin and file router also accept `.tachyon` and `.tachyon.html` for compatibility.
 
 `tachyon-dom language-server --stdio` starts a minimal Language Server Protocol server for editor integrations. The first version reports Tachyon template diagnostics for `.td`, `.tachyon`, and `.tachyon.html` documents; completion, hover, and semantic tokens are intentionally left to later editor-support slices.
