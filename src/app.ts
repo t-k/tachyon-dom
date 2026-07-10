@@ -1,5 +1,5 @@
 import { compileServerTemplate } from "./compiler/index.js";
-import { compileTachyonSfc, generateSfcScriptDeclarations } from "./compiler/sfc.js";
+import { compileTachyonSfc, extractStaticSfcScope, generateSfcScriptDeclarations } from "./compiler/sfc.js";
 import { escapeHtml } from "./html-escape.js";
 import type { ClientBinding, CompiledTemplate } from "./compiler/types.js";
 import { err, ok, type Result } from "./result.js";
@@ -116,6 +116,19 @@ export const normalizeAppPath = (path: string): string => {
   return withoutIndex.endsWith("/") ? withoutIndex : `${withoutIndex}/`;
 };
 
+const appPathMatches = (pattern: string, path: string): boolean => {
+  const patternSegments = normalizeAppPath(pattern).split("/").filter(Boolean);
+  const pathSegments = normalizeAppPath(path).split("/").filter(Boolean);
+  for (let index = 0; index < patternSegments.length; index += 1) {
+    const patternSegment = patternSegments[index];
+    if (patternSegment?.startsWith("*")) return pathSegments.length >= index + 1;
+    const pathSegment = pathSegments[index];
+    if (pathSegment === undefined) return false;
+    if (!patternSegment?.startsWith(":") && patternSegment !== pathSegment) return false;
+  }
+  return patternSegments.length === pathSegments.length;
+};
+
 export const minifyHtml = (html: string): string => {
   const preserved: string[] = [];
   const preserve = (match: string): string => {
@@ -146,6 +159,13 @@ const compilePage = (page: TachyonAppPage): CompiledTemplate => {
 
 const compilePageRenderer = (page: TachyonAppPage): ((scope: Record<string, unknown>) => string) =>
   compileServerTemplate(compilePage(page));
+
+const scopeForPage = (page: TachyonAppPage): Record<string, unknown> => {
+  if (page.scope) return page.scope;
+  const result = extractStaticSfcScope(templateSource(page.template));
+  if (!result.ok) throw new Error(result.error);
+  return result.value ?? {};
+};
 
 const defaultShell = ({ routeHtml }: TachyonAppShellContext): string => `<main id="app">${routeHtml}</main>`;
 
@@ -202,7 +222,10 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     }
   }
   const renderers = new Map<string, (scope: Record<string, unknown>) => string>();
-  const pageForPath = (path: string): TachyonAppPage | undefined => pagesByPath.get(normalizeAppPath(path));
+  const pageForPath = (path: string): TachyonAppPage | undefined => {
+    const normalized = normalizeAppPath(path);
+    return pagesByPath.get(normalized) ?? pages.find((page) => appPathMatches(page.path, normalized));
+  };
 
   const renderRoute = (path: string): string => {
     const page = pageForPath(path);
@@ -211,7 +234,7 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     }
     const render = renderers.get(page.path) ?? compilePageRenderer(page);
     renderers.set(page.path, render);
-    return render(page.scope ?? {});
+    return render(scopeForPage(page));
   };
 
   const renderShell = (path: string): string => {
@@ -363,6 +386,17 @@ const collectBindingIdentifiers = (binding: ClientBinding, identifiers: Set<stri
   collectExpressionIdentifiers(binding.expression, identifiers);
 };
 
+const collectBindingRequirements = (binding: ClientBinding, fields: Map<string, string>): void => {
+  const identifiers = new Set<string>();
+  collectBindingIdentifiers(binding, identifiers);
+  for (const identifier of identifiers) {
+    if (!fields.has(identifier)) fields.set(identifier, "unknown");
+  }
+  if (binding.kind === "event" && /^[$A-Z_a-z][$\w]*$/.test(binding.handler)) {
+    fields.set(binding.handler, "(event: Event) => unknown");
+  }
+};
+
 export const generateTemplateTypes = (source: string, options: TemplateTypeOptions = {}): Result<string, string> => {
   const result = compileTachyonSfc(source);
   if (!result.ok) {
@@ -391,22 +425,29 @@ export const generateTachyonModuleTypes = (
   if (!result.ok) {
     return err(result.error.message);
   }
-  const scopeTypes = generateTemplateTypes(source, options);
-  if (!scopeTypes.ok) {
-    return err(scopeTypes.error);
-  }
   const scriptTypes = generateSfcScriptDeclarations(result.value.descriptor.script);
   if (!scriptTypes.ok) {
     return err(scriptTypes.error);
   }
   const typeName = options.typeName ?? "TemplateScope";
+  const fields = new Map<string, string>();
+  for (const binding of result.value.template.client.bindings) collectBindingRequirements(binding, fields);
+  for (const store of result.value.template.client.stores) fields.set(store.name, "unknown");
+  const requiredType = `type __TachyonRequiredScope = {\n${Array.from(fields)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, type]) => `  ${name}: ${type};`)
+    .join("\n")}\n};`;
+  const hasNamedScope = /\bexport\s+declare\s+const\s+scope\s*:/.test(scriptTypes.value);
+  const scopeType = hasNamedScope
+    ? `type __TachyonAssertScope<T extends __TachyonRequiredScope> = T;\nexport type ${typeName} = __TachyonAssertScope<ReturnType<typeof scope>>;`
+    : `export type ${typeName} = __TachyonRequiredScope;`;
   const templateExports = [
     `export declare const templateHtml: string;`,
     `export declare const hydrationBoundaries: unknown[];`,
     `export declare const componentBoundaries: unknown[];`,
-    `export declare const bind: (root: Element, scope: ${typeName} & Record<string, unknown>) => void | (() => void);`,
+    `export declare const bind: (root: Element, scope: ${typeName}) => void | (() => void);`,
   ].join("\n");
   return ok(
-    [scriptTypes.value, scopeTypes.value.trim(), templateExports].filter((part) => part.length > 0).join("\n\n") + "\n",
+    [scriptTypes.value, requiredType, scopeType, templateExports].filter((part) => part.length > 0).join("\n\n") + "\n",
   );
 };

@@ -75,7 +75,7 @@ export default {
 };
 ```
 
-Route-local template conventions are available through `pagesFromRouteFiles()`: `src/routes/index/page.td` maps to `/`, `src/routes/counter/page.td` maps to `/counter/`, `[id]` maps to `:id`, and `[...slug]` maps to a named wildcard. `generateTemplateTypes()` can emit a first-pass scope type from a template's text, class, event, conditional, and list bindings.
+Route-local template conventions are available through `pagesFromRouteFiles()`: `src/routes/index/page.td` maps to `/`, `src/routes/counter/page.td` maps to `/counter/`, `[id]` maps to `:id`, and `[...slug]` maps to a named wildcard. Generated starters keep these pages in `src/routes.generated.ts`; `tachyon-dom add page settings/profile` updates that registry, so the new URL is available to the app, Vite, tests, and SSR without a manual import.
 
 `defineApp()` rejects every duplicate normalized route and output filename before compilation or serving. Path aliases such as `/`, `/index.html`, `/guide`, and `/guide/` share their normalized route keys. `renderAppDocument()` throws for an unknown path instead of falling back to home. SSR adapters should use `renderAppResponse()`, which returns `{ status, html }`; missing routes retain status 404 and render either the configured `notFound` page or the built-in not-found document.
 
@@ -90,6 +90,8 @@ src/
   routes/
     index/
       page.td
+      page.td.d.ts
+  routes.generated.ts
   client/
     main.ts
   app.ts
@@ -104,7 +106,7 @@ Add Tachyon DOM template module types when TypeScript imports `.td` files direct
 /// <reference types="tachyon-dom/td-modules" />
 ```
 
-For project-wide setup, add `"tachyon-dom/td-modules"` to `compilerOptions.types` alongside `"vite/client"`. The type entry covers `.td`, `.td?client`, `.td?server`, `.td?stream`, and `.td?raw` imports.
+For project-wide setup, add `"tachyon-dom/td-modules"` to `compilerOptions.types` alongside `"vite/client"`. The type entry covers `.td`, `.td?client`, `.td?server`, `.td?stream`, and `.td?raw` imports. During normal Vite development and builds, `tachyonDom()` writes an adjacent `.td.d.ts` for each transformed template. These declarations preserve exported SFC `scope()` types, require every referenced template field, and type event handlers. The generated starter and `add page` command create the initial declarations so a clean project typechecks before its first Vite run. `tachyon-dom typegen` remains available for non-Vite tooling but is not required by the standard workflow.
 
 ## Typed Templates and Environment Validation
 
@@ -260,6 +262,8 @@ tachyon-dom language-server --stdio
 `npm create tachyon-dom@latest my-app` and `pnpm create tachyon-dom my-app` create a route-local starter with `src/routes/index/page.td`, `src/client/main.ts`, `src/app.ts`, `vite.config.ts`, `tsconfig.json`, `.gitignore`, a smoke test, CI workflow, `README.md`, and `package.json`. `tachyon-dom init --template basic --out my-app` is the equivalent installed-package command. Use `tachyon-dom init --template ssr --out my-app` when you also want a small `src/server.ts` SSR composition entry.
 
 `tachyon-dom init` and `tachyon-dom add page` preserve existing files by default. A starter conflict aborts before any file is written. Pass `--force` only when you deliberately want to overwrite the listed managed files; the command reports every overwritten path.
+
+`tachyon-dom add page` also reports the normalized route URL, adjacent declaration file, and generated registry it changed. For example, `users/[id]` reports `/users/:id/`, while `blog/[...slug]` reports `/blog/*slug/`.
 
 Template files use the short `.td` extension. The Vite plugin and file router also accept `.tachyon` and `.tachyon.html` for compatibility.
 

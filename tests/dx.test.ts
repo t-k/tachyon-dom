@@ -4,7 +4,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
-import { createServer, type Plugin } from "vite";
+import { build as viteBuild, createServer, type Plugin } from "vite";
 import {
   addPageFiles,
   buildRouteManifestFile,
@@ -17,12 +17,12 @@ import {
   runCli,
   serverCommandMessage,
 } from "../src/cli";
-import { defineApp, generateTemplateTypes, pagesFromRouteFiles, renderAppDocument, renderAppResponse } from "../src/app";
+import { defineApp, generateTachyonModuleTypes, generateTemplateTypes, pagesFromRouteFiles, renderAppDocument, renderAppResponse } from "../src/app";
 import { diagnoseTachyonSfc, diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
 import { verifyPackageArtifacts } from "../src/package-integrity";
-import { packageCloudflarePages, tachyonApp, tachyonDom, tachyonDomRoutes } from "../src/vite";
+import { loadRouteApp, packageCloudflarePages, tachyonApp, tachyonDom, tachyonDomRoutes } from "../src/vite";
 import * as viteIntegration from "../src/vite";
 
 type PanelScope = {
@@ -423,7 +423,7 @@ export const scope = (input: Partial<AppState> = {}) => ({
       const dts = await readFile(types, "utf8");
       expect(dts).toContain(`export type AppState = {`);
       expect(dts).toContain(`export declare const mount:`);
-      expect(dts).toContain(`export type AppTemplateScope = {`);
+      expect(dts).toContain(`export type AppTemplateScope = __TachyonAssertScope<ReturnType<typeof scope>>;`);
       expect(dts).toContain(`export declare const bind:`);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -516,16 +516,16 @@ const increment = (): void => {
   });
 
   it("renders an SFC page source through defineApp", () => {
-    const app = defineApp({
+    const define = (title: string) => defineApp({
       pages: [{
         path: "/",
         fileName: "index.html",
-        template: `<script>export const scope = () => ({ title: "Welcome" });</script><section><h1>{title}</h1></section>`,
-        scope: { title: "Welcome" },
+        template: `<script>export const scope = () => ({ title: ${JSON.stringify(title)} });</script><section><h1>{title}</h1></section>`,
       }],
     });
 
-    expect(app.renderRoute("/")).toBe("<section><h1>Welcome</h1></section>");
+    expect(define("Welcome").renderRoute("/")).toBe("<section><h1>Welcome</h1></section>");
+    expect(define("Edited in page.td").renderRoute("/")).toBe("<section><h1>Edited in page.td</h1></section>");
   });
 
   it("rejects duplicate normalized app paths and output names", () => {
@@ -631,9 +631,16 @@ export default { selected: false };
       expect(result.value).toContain(path.join("settings", "profile", "page.td"));
       expect(result.value).toContain("Edit the generated page.td");
       expect(result.value).toContain("Route URL: /settings/profile/");
-      expect(result.value).toContain("tachyon-dom typegen");
+      expect(result.value).toContain("Generated declarations:");
+      expect(result.value).toContain("Generated route registry:");
       expect(await readFile(path.join(routesDir, "settings", "profile", "page.td"), "utf8")).toContain(
         "<h1>{title}</h1>",
+      );
+      await expect(readFile(path.join(routesDir, "settings", "profile", "page.td.d.ts"), "utf8")).resolves.toContain(
+        "__TachyonAssertScope",
+      );
+      await expect(readFile(path.join(dir, "src", "routes.generated.ts"), "utf8")).resolves.toContain(
+        'path: "/settings/profile/"',
       );
       expect(await readFile(path.join(routesDir, "settings", "profile", "page.td"), "utf8")).toContain(
         `title: "Settings Profile"`,
@@ -648,8 +655,10 @@ export default { selected: false };
     try {
       const routesDir = path.join(dir, "src", "routes");
       const page = path.join(routesDir, "settings", "page.td");
+      const declarations = `${page}.d.ts`;
       await mkdir(path.dirname(page), { recursive: true });
       await writeFile(page, "user-authored\n");
+      await writeFile(declarations, "user-authored declarations\n");
 
       const result = await addPageFiles({ name: "settings", routesDir });
 
@@ -658,6 +667,7 @@ export default { selected: false };
 
       const forced = await addPageFiles({ name: "settings", routesDir, force: true });
       expect(forced.ok && forced.value).toContain(`Overwrote ${page}`);
+      expect(forced.ok && forced.value).toContain(`Overwrote ${declarations}`);
       await expect(readFile(page, "utf8")).resolves.toContain("<h1>{title}</h1>");
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -677,6 +687,8 @@ export default { selected: false };
 
       const page = await readFile(path.join(dir, "src", "routes", "index", "page.td"), "utf8");
       const app = await readFile(path.join(dir, "src", "app.ts"), "utf8");
+      const registry = await readFile(path.join(dir, "src", "routes.generated.ts"), "utf8");
+      const declarations = await readFile(path.join(dir, "src", "routes", "index", "page.td.d.ts"), "utf8");
       const client = await readFile(path.join(dir, "src", "client", "main.ts"), "utf8");
       const viteConfig = await readFile(path.join(dir, "vite.config.ts"), "utf8");
       const gitignore = await readFile(path.join(dir, ".gitignore"), "utf8");
@@ -694,10 +706,13 @@ export default { selected: false };
 
       expect(page).toContain("<h1>{title}</h1>");
       expect(page).toContain("Welcome");
-      expect(app).toContain(`import pageTemplate from "./routes/index/page.td?raw";`);
-      expect(app).toContain("template: pageTemplate");
-      expect(app).not.toContain(`template: "<section>`);
+      expect(app).toContain(`import { pages } from "./routes.generated";`);
+      expect(app).toContain("pages,");
+      expect(registry).toContain(`import routeSource0 from "./routes/index/page.td?raw";`);
+      expect(registry).toContain('path: "/"');
+      expect(declarations).toContain("ReturnType<typeof scope>");
       expect(client).toContain("Client entry for Tachyon DOM runtime code.");
+      expect(viteConfig).toContain('loadRouteApp({ lang: "en", routesDir: "src/routes", title: "Tachyon App" })');
       expect(viteConfig).toContain("tachyonDom({ reactive: true })");
       expect(viteConfig).toContain('tachyonApp(app, { appScript: "/src/client/main.ts" })');
       expect(viteConfig).toContain(`input: "src/client/main.ts"`);
@@ -706,7 +721,7 @@ export default { selected: false };
       expect(ci).toContain("pnpm typecheck");
       expect(ci).toContain("pnpm test");
       expect(smokeTest).toContain("renders the starter page");
-      expect(tsconfig.compilerOptions?.types).toEqual(["vite/client"]);
+      expect(tsconfig.compilerOptions?.types).toEqual(["vite/client", "tachyon-dom/td-modules"]);
       expect(readme).toContain("Edit `src/routes/index/page.td`");
       expect(readme).toContain("Route registration");
       expect(readme).toContain("Do not put application code in `public/client/main.js`");
@@ -723,6 +738,95 @@ export default { selected: false };
       expect(packageJson).toHaveProperty("packageManager", "pnpm@10.32.1");
       await expect(readFile(path.join(dir, "public", "client", "main.js"), "utf8")).rejects.toThrow();
     } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("renders generated and added pages through the real app and Vite path", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-starter-integration-"));
+    let moduleServer: Awaited<ReturnType<typeof createServer>> | undefined;
+    let devServer: Awaited<ReturnType<typeof createServer>> | undefined;
+    try {
+      const starter = await createStarterFiles({ outDir: dir, template: "basic" });
+      if (!starter.ok) throw new Error(starter.error);
+      const routesDir = path.join(dir, "src", "routes");
+      for (const name of ["settings/profile", "users/[id]", "blog/[...slug]"]) {
+        const added = await addPageFiles({ name, routesDir });
+        if (!added.ok) throw new Error(added.error);
+      }
+      const dynamic = await addPageFiles({ name: "preview/[id]", routesDir });
+      expect(dynamic.ok && dynamic.value).toContain("Route URL: /preview/:id/");
+      const catchAll = await addPageFiles({ name: "archive/[...slug]", routesDir });
+      expect(catchAll.ok && catchAll.value).toContain("Route URL: /archive/*slug/");
+      const fileApp = await loadRouteApp({ routesDir, title: "Tachyon App" });
+      expect(fileApp.renderRoute("/users/42/")).toContain("<h1>Users Id</h1>");
+      const indexDeclaration = path.join(routesDir, "index", "page.td.d.ts");
+      await writeFile(indexDeclaration, "stale declaration\n");
+
+      moduleServer = await createServer({
+        configFile: false,
+        logLevel: "silent",
+        root: dir,
+        plugins: [tachyonDom({ reactive: true })],
+        resolve: { alias: [{ find: "tachyon-dom/app", replacement: path.join(process.cwd(), "src", "app.ts") }] },
+        server: { middlewareMode: true },
+      });
+      const loaded = await moduleServer.ssrLoadModule("/src/app.ts") as { app: ReturnType<typeof defineApp> };
+      await expect(readFile(indexDeclaration, "utf8")).resolves.toContain("ReturnType<typeof scope>");
+      expect(loaded.app.renderRoute("/")).toContain("<h1>Welcome</h1>");
+      expect(loaded.app.renderRoute("/settings/profile/")).toContain("<h1>Settings Profile</h1>");
+      expect(loaded.app.renderRoute("/users/42/")).toContain("<h1>Users Id</h1>");
+      expect(loaded.app.renderRoute("/blog/2026/launch/")).toContain("<h1>Blog Slug</h1>");
+      const typecheck = ts.createProgram(
+        [
+          path.join(dir, "src", "app.ts"),
+          path.join(dir, "src", "routes.generated.ts"),
+          ...loaded.app.pages.map((page) => path.join(routesDir, page.path === "/" ? "index/page.td.d.ts" : `${page.fileName.replace(/index\.html$/, "page.td.d.ts")}`)),
+          path.join(process.cwd(), "src", "tachyon-html.d.ts"),
+        ],
+        {
+          baseUrl: process.cwd(),
+          ignoreDeprecations: "6.0",
+          lib: ["lib.es2022.d.ts", "lib.dom.d.ts", "lib.dom.iterable.d.ts"],
+          module: ts.ModuleKind.ESNext,
+          moduleResolution: ts.ModuleResolutionKind.Bundler,
+          noEmit: true,
+          paths: { "tachyon-dom/app": ["src/app.ts"] },
+          skipLibCheck: false,
+          strict: true,
+          target: ts.ScriptTarget.ES2022,
+        },
+      );
+      expect(ts.getPreEmitDiagnostics(typecheck).map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual([]);
+
+      await viteBuild({
+        configFile: false,
+        logLevel: "silent",
+        root: dir,
+        plugins: [tachyonDom({ reactive: true }), tachyonApp(loaded.app, { appScript: "/src/client/main.ts" })],
+        build: { outDir: "dist", rollupOptions: { input: path.join(dir, "src", "client", "main.ts") } },
+      });
+      await expect(readFile(path.join(dir, "dist", "index.html"), "utf8")).resolves.toContain("Welcome");
+      await expect(readFile(path.join(dir, "dist", "settings", "profile", "index.html"), "utf8")).resolves.toContain(
+        "Settings Profile",
+      );
+
+      devServer = await createServer({
+        configFile: false,
+        logLevel: "silent",
+        root: dir,
+        plugins: [tachyonDom({ reactive: true }), tachyonApp(loaded.app, { appScript: "/src/client/main.ts" })],
+        server: { host: "127.0.0.1", port: 0 },
+      });
+      await devServer.listen();
+      const localUrl = devServer.resolvedUrls?.local.find((url) => url.startsWith("http://127.0.0.1"));
+      if (!localUrl) throw new Error("Missing Vite URL.");
+      const response = await fetch(localUrl);
+      expect(response.status).toBe(200);
+      expect(await response.text()).toContain("Welcome");
+    } finally {
+      await devServer?.close();
+      await moduleServer?.close();
       await rm(dir, { recursive: true, force: true });
     }
   });
@@ -758,7 +862,7 @@ export default { selected: false };
       const server = await readFile(path.join(dir, "src", "server.ts"), "utf8");
       const readme = await readFile(path.join(dir, "README.md"), "utf8");
 
-      expect(server).toContain("renderAppDocument");
+      expect(server).toContain("renderAppResponse");
       expect(readme).toContain("SSR entry");
       expect(result.ok && result.value).not.toContain("same Vite SSR shape as basic");
     } finally {
@@ -990,6 +1094,73 @@ export const bindRows = (root, rows, options) => effect(() => {
       await plugin.transform.call({ error: (error: string): never => { throw new Error(error); } } as never, `<main>{title}</main>`, "/src/page.td");
 
       await expect(readFile(output, "utf8")).resolves.toContain("title: unknown;");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("regenerates adjacent template declarations during normal Vite transforms", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-auto-types-"));
+    try {
+      const id = path.join(dir, "page.td");
+      const plugin = tachyonDom();
+      if (typeof plugin.transform !== "function" || typeof plugin.configResolved !== "function") {
+        throw new Error("Missing Vite hooks.");
+      }
+      await plugin.configResolved.call({} as never, { command: "serve", mode: "development", root: dir } as never);
+      const context = { error: (error: string): never => { throw new Error(error); } } as never;
+
+      await plugin.transform.call(context, `<main>{title}</main>`, `${id}?raw`);
+      await expect(readFile(`${id}.d.ts`, "utf8")).resolves.toContain("title: unknown;");
+      await plugin.transform.call(context, `<main>{title}<small>{subtitle}</small></main>`, `${id}?raw`);
+      await expect(readFile(`${id}.d.ts`, "utf8")).resolves.toContain("subtitle: unknown;");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports missing scope fields and incorrectly typed handlers from per-file declarations", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-scope-errors-"));
+    try {
+      const diagnosticsFor = async (name: string, source: string, usage: string): Promise<string[]> => {
+        const declarations = generateTachyonModuleTypes(source);
+        if (!declarations.ok) throw new Error(declarations.error);
+        const declarationFile = path.join(dir, `${name}.td.d.ts`);
+        const usageFile = path.join(dir, `${name}.ts`);
+        await writeFile(declarationFile, declarations.value);
+        await writeFile(usageFile, usage);
+        const program = ts.createProgram([usageFile, declarationFile], {
+          lib: ["lib.es2022.d.ts", "lib.dom.d.ts"],
+          module: ts.ModuleKind.ESNext,
+          moduleResolution: ts.ModuleResolutionKind.Bundler,
+          noEmit: true,
+          skipLibCheck: false,
+          strict: true,
+          target: ts.ScriptTarget.ES2022,
+        });
+        return ts.getPreEmitDiagnostics(program).map((diagnostic) =>
+          ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+        );
+      };
+      const missing = await diagnosticsFor(
+        "missing",
+        `<script lang="ts">\nexport const scope = () => ({ title: "Home" });\n</script>\n<main>{title}<p>{missing}</p></main>`,
+        `import { bind, scope } from "./missing.td";\nbind(document.body, scope());\n`,
+      );
+      const handler = await diagnosticsFor(
+        "handler",
+        `<script lang="ts">\nexport const scope = () => ({ onSave: 123 });\n</script>\n<button on:click={onSave}>Save</button>`,
+        `import { bind, scope } from "./handler.td";\nbind(document.body, scope());\n`,
+      );
+      const call = await diagnosticsFor(
+        "call",
+        `<script lang="ts">\nexport const scope = () => ({ title: "Home" });\n</script>\n<h1>{title}</h1>`,
+        `import { bind } from "./call.td";\nbind(document.body, {});\n`,
+      );
+
+      expect(missing.some((message) => message.includes("Property 'missing' is missing"))).toBe(true);
+      expect(handler.some((message) => message.includes("onSave") && message.includes("(event: Event)"))).toBe(true);
+      expect(call.some((message) => message.includes("Argument of type '{}'") && message.includes("title"))).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

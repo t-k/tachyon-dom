@@ -1,15 +1,23 @@
 import type { Plugin } from "vite";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createNodeFetchHandler, type NodeFetchHandlerOptions, type StaticAssetOptions } from "./adapters/node.js";
-import { generateTachyonModuleTypes, type TachyonApp, type TachyonAppAssets } from "./app.js";
+import {
+  defineApp,
+  generateTachyonModuleTypes,
+  pagesFromRouteFiles,
+  type TachyonApp,
+  type TachyonAppAssets,
+  type TachyonAppDefinition,
+} from "./app.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import { diagnoseTachyonSfc, diagnosticFromCompilerError, formatDiagnostic } from "./diagnostics.js";
 import { createFileRouteManifest } from "./router.js";
+import { scanFileRoutes } from "./router-node.js";
 import { err, ok, type Result } from "./result.js";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "./source-map.js";
 
@@ -20,7 +28,7 @@ export type TachyonDomViteOptions = {
   sourcemap?: boolean;
   productionSourceMap?: boolean;
   requestLog?: boolean | TachyonDomRequestLogOptions;
-  declarationOutput?: (id: string) => string | undefined;
+  declarationOutput?: false | ((id: string) => string | undefined);
   onSourceMap?: (artifact: { id: string; code: string; map: SourceMap; source: string }) => void | Promise<void>;
 };
 
@@ -46,6 +54,23 @@ export type TachyonDomRoutesViteOptions = {
 export type TachyonAppViteOptions = {
   appScript?: string;
   minifyHtml?: boolean;
+};
+
+export type TachyonRouteAppOptions = Omit<TachyonAppDefinition, "pages"> & {
+  routesDir: string;
+};
+
+export const loadRouteApp = async ({ routesDir, ...definition }: TachyonRouteAppOptions): Promise<TachyonApp> => {
+  const absoluteRoutesDir = resolve(routesDir);
+  const manifest = await scanFileRoutes(absoluteRoutesDir);
+  const pageFiles = manifest.filter((route) => route.kind === "template").map((route) => route.file);
+  const pages = await Promise.all(
+    pagesFromRouteFiles(pageFiles, { rootDir: absoluteRoutesDir }).map(async (page) => ({
+      ...page,
+      template: await readFile(page.file, "utf8"),
+    })),
+  );
+  return defineApp({ ...definition, pages });
 };
 
 export type TachyonSsrContext = {
@@ -211,6 +236,16 @@ const shouldIgnoreQueryRequest = (id: string): boolean => {
   return query.has("raw") || query.has("url");
 };
 
+const declarationSourceFor = (source: string, id: string): string => {
+  if (!queryForId(id).has("raw") || !source.trimStart().startsWith("export default")) {
+    return source;
+  }
+  const match = /^\s*export\s+default\s+("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')\s*;?\s*$/s.exec(source);
+  if (!match?.[1]) return source;
+  if (match[1].startsWith('"')) return JSON.parse(match[1]) as string;
+  return match[1].slice(1, -1).replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+};
+
 const entryCodeFor = (id: string): string => {
   const moduleId = cleanId(id);
   const query = queryForId(id);
@@ -248,12 +283,16 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
   const target = options.target ?? "client";
   let command = "serve";
   let mode = "development";
+  let configResolved = false;
+  let rootDir: string | undefined;
   return {
     name: "tachyon-dom",
     enforce: "pre",
     configResolved(config) {
       command = config.command;
       mode = config.mode;
+      configResolved = true;
+      rootDir = typeof config.root === "string" ? config.root : undefined;
     },
     configureServer(server) {
       if (!shouldLogRequests(options.requestLog)) {
@@ -278,6 +317,24 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       });
     },
     async transform(source, id) {
+      if (include.test(cleanId(id)) && !queryForId(id).has("url") && !isEntryRequest(id)) {
+        const declarationOutput =
+          options.declarationOutput === false
+            ? undefined
+            : typeof options.declarationOutput === "function"
+              ? options.declarationOutput(cleanId(id))
+              : configResolved && rootDir && cleanId(id).startsWith(rootDir)
+                ? `${cleanId(id)}.d.ts`
+                : undefined;
+        if (declarationOutput) {
+          const declarations = generateTachyonModuleTypes(declarationSourceFor(source, id));
+          if (!declarations.ok) {
+            this.error(declarations.error);
+          }
+          await mkdir(dirname(declarationOutput), { recursive: true });
+          await writeFile(declarationOutput, declarations.value);
+        }
+      }
       if (shouldIgnoreQueryRequest(id)) {
         return null;
       }
@@ -291,15 +348,6 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         return null;
       }
       const resolvedTarget = targetForId(id, target);
-      const declarationOutput = options.declarationOutput?.(cleanId(id));
-      if (declarationOutput) {
-        const declarations = generateTachyonModuleTypes(source);
-        if (!declarations.ok) {
-          this.error(declarations.error);
-        }
-        await mkdir(dirname(declarationOutput), { recursive: true });
-        await writeFile(declarationOutput, declarations.value);
-      }
       const result = diagnoseTachyonSfc(source);
       if (!result.ok) {
         this.error(formatDiagnostic(result.error, id));

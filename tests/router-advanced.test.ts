@@ -35,6 +35,8 @@ describe("advanced router features", () => {
       "/app/src/routes/blog/[...slug].td",
       "/app/src/routes/admin/route.ts",
       "/app/src/routes/admin/layout.ts",
+      "/app/src/routes/shop/[id]/page.td",
+      "/app/src/routes/news/[...slug]/page.td",
     ];
 
     expect(createFileRouteManifest(files, { rootDir: "/app/src/routes" })).toEqual([
@@ -44,6 +46,8 @@ describe("advanced router features", () => {
       { id: "blog-slug", path: "/blog/*slug", file: "/app/src/routes/blog/[...slug].td", kind: "template" },
       { id: "admin-route", path: "/admin", file: "/app/src/routes/admin/route.ts", kind: "module" },
       { id: "admin-layout", path: "/admin", file: "/app/src/routes/admin/layout.ts", kind: "layout" },
+      { id: "shop-id", path: "/shop/:id", file: "/app/src/routes/shop/[id]/page.td", kind: "template" },
+      { id: "news-slug", path: "/news/*slug", file: "/app/src/routes/news/[...slug]/page.td", kind: "template" },
     ]);
 
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-routes-"));

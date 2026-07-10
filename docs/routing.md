@@ -311,6 +311,8 @@ If TypeScript imports Tachyon template modules directly, add the ambient module 
 
 Single files can also use `/// <reference types="tachyon-dom/td-modules" />`. The entry declares `.td`, `.td?client`, `.td?server`, `.td?stream`, and `.td?raw` modules with the Vite plugin output types.
 
+`tachyonDom()` automatically refreshes adjacent `.td.d.ts` files during dev and build transforms. A named SFC `scope()` export becomes the declaration's concrete `TemplateScope`; required template identifiers constrain that return type, and simple event handlers require an `(event: Event) => unknown` function. Pass `declarationOutput: false` only when another build system owns these artifacts, or provide a callback to choose a custom output path.
+
 `createRouteBuildManifest(routes, { buildId, assets })` creates a route build manifest containing route paths, per-route assets, and generated route types.
 
 `createHrefBuilder(manifest)` and `hrefForRoute(manifest, id, params)` build URLs from route IDs and params. `createRoutePreloadPlan(manifest, routeId)` converts route assets into preload/modulepreload/prefetch entries for route-aware preloading.

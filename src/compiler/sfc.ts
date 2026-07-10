@@ -106,6 +106,91 @@ export const sfcScriptLanguage = (script: TachyonSfcScript | undefined): "js" | 
 export const isSfcSetupScript = (script: TachyonSfcScript | undefined): boolean =>
   hasBooleanAttr(script?.attrs ?? "", "setup");
 
+const unwrapStaticExpression = (node: ts.Expression): ts.Expression => {
+  if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
+    return unwrapStaticExpression(node.expression);
+  }
+  return node;
+};
+
+const staticPropertyName = (name: ts.PropertyName): string | undefined => {
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
+    return name.text;
+  }
+  return undefined;
+};
+
+const staticExpressionValue = (input: ts.Expression): Result<unknown, string> => {
+  const node = unwrapStaticExpression(input);
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return ok(node.text);
+  if (ts.isNumericLiteral(node)) return ok(Number(node.text));
+  if (node.kind === ts.SyntaxKind.TrueKeyword) return ok(true);
+  if (node.kind === ts.SyntaxKind.FalseKeyword) return ok(false);
+  if (node.kind === ts.SyntaxKind.NullKeyword) return ok(null);
+  if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken) {
+    const value = staticExpressionValue(node.operand);
+    return value.ok && typeof value.value === "number" ? ok(-value.value) : err("Static scope has an invalid number.");
+  }
+  if (ts.isArrayLiteralExpression(node)) {
+    const values: unknown[] = [];
+    for (const element of node.elements) {
+      if (ts.isSpreadElement(element)) return err("Static scope does not support spread elements.");
+      const value = staticExpressionValue(element);
+      if (!value.ok) return value;
+      values.push(value.value);
+    }
+    return ok(values);
+  }
+  if (ts.isObjectLiteralExpression(node)) {
+    const value: Record<string, unknown> = {};
+    for (const property of node.properties) {
+      if (!ts.isPropertyAssignment(property)) return err("Static scope supports property assignments only.");
+      const name = staticPropertyName(property.name);
+      if (name === undefined) return err("Static scope has an unsupported property name.");
+      const propertyValue = staticExpressionValue(property.initializer);
+      if (!propertyValue.ok) return propertyValue;
+      value[name] = propertyValue.value;
+    }
+    return ok(value);
+  }
+  return err("Static scope values must be literals, arrays, or object literals.");
+};
+
+export const extractStaticSfcScope = (source: string): Result<Record<string, unknown> | undefined, string> => {
+  const descriptor = parseTachyonSfc(source);
+  if (!descriptor.ok) return err(descriptor.error.message);
+  const script = descriptor.value.script;
+  if (!script) return ok(undefined);
+  const sourceFile = sourceFileFor(script.content, script);
+  for (const statement of sourceFile.statements) {
+    if (!ts.isVariableStatement(statement) || !statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+      continue;
+    }
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || declaration.name.text !== "scope" || !declaration.initializer) continue;
+      const initializer = unwrapStaticExpression(declaration.initializer);
+      if (!ts.isArrowFunction(initializer) && !ts.isFunctionExpression(initializer)) {
+        return err("SFC scope must be a function returning a static object or be supplied explicitly by defineApp().");
+      }
+      let returned: ts.Expression | undefined;
+      if (ts.isBlock(initializer.body)) {
+        const returnStatement = initializer.body.statements.find(ts.isReturnStatement);
+        returned = returnStatement?.expression;
+      } else {
+        returned = initializer.body;
+      }
+      if (!returned) return err("SFC scope must return a static object.");
+      const value = staticExpressionValue(returned);
+      if (!value.ok) return err(`${value.error} Supply page.scope explicitly for dynamic values.`);
+      if (!value.value || typeof value.value !== "object" || Array.isArray(value.value)) {
+        return err("SFC scope must return an object.");
+      }
+      return ok(value.value as Record<string, unknown>);
+    }
+  }
+  return ok(undefined);
+};
+
 const sourceFileFor = (source: string, script: TachyonSfcScript | undefined): ts.SourceFile =>
   ts.createSourceFile(
     sfcScriptLanguage(script) === "ts" ? "component.td.ts" : "component.td.js",

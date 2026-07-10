@@ -625,7 +625,10 @@ export const createFileRouteManifest = (
     const withoutExtension = relative.replace(/\.(?:td|tachyon(?:\.html)?)$/, "").replace(/\.[tj]s$/, "");
     const parts = withoutExtension.split("/");
     const fileName = parts.at(-1) ?? "";
-    const routeParts = kind === "module" || kind === "layout" ? parts.slice(0, -1) : parts;
+    const routeParts =
+      kind === "module" || kind === "layout" || (kind === "template" && fileName === "page")
+        ? parts.slice(0, -1)
+        : parts;
     const pathSegments = routeParts.map(routeSegmentFromFile).filter(Boolean);
     const routePath = pathSegments.length === 0 ? "/" : `/${pathSegments.join("/")}`;
     const idParts = [

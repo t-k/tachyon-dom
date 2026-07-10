@@ -16,6 +16,7 @@
     "tachyon-dom": "^0.1.0"
   },
   "devDependencies": {
+    "@types/node": "^24.0.3",
     "typescript": "^7.0.2"
   },
   "scripts": {
