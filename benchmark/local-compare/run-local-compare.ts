@@ -1,4 +1,5 @@
 import { cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import marko from "@marko/vite";
@@ -119,7 +120,7 @@ const scenarios: readonly Scenario[] = [
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../..");
 const mreactRoot = path.resolve(projectRoot, "../mreact");
-const mreactPackageAliases = [
+const mreactPackageAliases = existsSync(path.join(mreactRoot, "packages")) ? [
   {
     find: /^@reckona\/mreact-reactive-core$/,
     replacement: path.join(mreactRoot, "packages/reactive-core/src/index.ts"),
@@ -144,7 +145,7 @@ const mreactPackageAliases = [
     find: /^@reckona\/mreact-shared\/(.+)$/,
     replacement: `${path.join(mreactRoot, "packages/shared/src")}/$1.ts`,
   },
-];
+] : [];
 const benchmarkPlugins = () => [solid(), marko({ linked: false })];
 
 const parsePositiveInteger = (value: string, name: string): Result<number, string> => {
