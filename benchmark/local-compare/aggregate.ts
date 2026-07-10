@@ -4,7 +4,7 @@
 //
 // Usage: pnpm exec tsx benchmark/local-compare/aggregate.ts results/AFTER-clean.json results/AFTER-2.json ...
 import { readFileSync } from "node:fs";
-import { isDeepStrictEqual } from "node:util";
+import { compareBenchmarkEnvelopes } from "../provenance.js";
 import { validateBenchmarkEnvelope, valueAtBenchmarkPath } from "../provenance-validation.js";
 
 type Summary = { label: string; implementation: string; trimmedMean: number };
@@ -28,8 +28,11 @@ const requiredEqualPaths = [
   "workload.operationStatistic",
   "workload.trimFraction",
   "workload.implementations",
+  "provenance.git.commit",
+  "provenance.git.dirty",
+  "provenance.git.workingTreeSha256",
   "provenance.runtime",
-  "provenance.host.cpuModel",
+  "provenance.host",
   "provenance.browser",
   "provenance.dependencies",
 ];
@@ -40,11 +43,14 @@ for (const [index, run] of runs.entries()) {
     throw new Error(`Benchmark artifact ${files[index]} is incomplete or invalid at: ${details}.`);
   }
 }
-for (const run of runs.slice(1)) {
-  for (const fieldPath of requiredEqualPaths) {
-    if (!isDeepStrictEqual(valueAtBenchmarkPath(run, fieldPath), valueAtBenchmarkPath(runs[0], fieldPath))) {
-      throw new Error(`Incompatible benchmark artifacts differ at ${fieldPath}.`);
-    }
+for (const [index, run] of runs.entries()) {
+  const comparison = compareBenchmarkEnvelopes(runs[0], run, { requiredEqualPaths });
+  if (!comparison.compatible) {
+    const details =
+      comparison.invalidFields.length > 0
+        ? comparison.invalidFields.join(", ")
+        : comparison.accidentalDifferences.map((difference) => difference.path).join(", ");
+    throw new Error(`Benchmark artifact ${files[index]} is not authoritative or compatible at: ${details}.`);
   }
 }
 const validatedRuns = runs as LocalCompareRun[];

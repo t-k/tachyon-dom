@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { minifyHtml } from "../src/app.js";
-import { collectBenchmarkProvenance } from "./provenance.js";
+import { collectBenchmarkProvenance, collectDependencyVersions } from "./provenance.js";
 
 const fixtures = {
   document: `<!doctype html>\n<html>\n  <head><meta   charset="UTF-8"   /></head>\n  <body><main><h1>Account</h1></main></body>\n</html>\n`,
@@ -72,6 +72,7 @@ const main = async () => {
   const provenance = await collectBenchmarkProvenance({
     cwd: process.cwd(),
     argv: [process.execPath, ...process.argv.slice(1)],
+    dependencies: await collectDependencyVersions(process.cwd(), ["parse5"]),
   });
   const result = {
     schemaVersion: 2,

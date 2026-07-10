@@ -66,7 +66,7 @@ describe("benchmark provenance", () => {
         git: { available: true, commit, dirty: false, workingTreeSha256: "a".repeat(64) },
         runtime: { node: "v24.0.0", platform: "linux", arch: "x64", osRelease: "test" },
         host: { hostname: "host", cpuModel: "cpu", logicalCpuCount: 8 },
-        dependencies: {},
+        dependencies: { tsx: { version: "4.22.4" } },
       },
       workload: { connections, chunksPerConnection: 128, chunkBytes: 32768, drainDelayMs: 2 },
       measurements: {},
@@ -115,7 +115,7 @@ describe("benchmark provenance", () => {
         git: { available: true, commit: "a".repeat(40), dirty: false, workingTreeSha256: "b".repeat(64) },
         runtime: { node: "v24.0.0", platform: "linux", arch: "x64", osRelease: "test" },
         host: { hostname: "host", cpuModel: "cpu", logicalCpuCount: 8 },
-        dependencies: {},
+        dependencies: { tsx: { version: "4.22.4" } },
       },
       workload: { connections: 6 },
       measurements: {},
@@ -147,6 +147,52 @@ describe("benchmark provenance", () => {
       requiredEqualPaths: ["workload.connections"],
     });
     expect(wrongType.invalidFields).toContain("baseline.provenance.host.logicalCpuCount");
+  });
+
+  it("rejects authoritative comparisons from dirty or unavailable Git sources", () => {
+    const envelope = (): BenchmarkEnvelope<Record<string, unknown>, unknown> => ({
+      schemaVersion: 2,
+      benchmark: { name: "local-compare", contractVersion: 2 },
+      provenance: {
+        capturedAt: "2026-07-10T00:00:00.000Z",
+        command: { argv: ["pnpm", "bench"], display: "pnpm bench", cwd: "/repo" },
+        git: { available: true, commit: "a".repeat(40), dirty: false, workingTreeSha256: "b".repeat(64) },
+        runtime: { node: "v24.0.0", platform: "linux", arch: "x64", osRelease: "test" },
+        host: { hostname: "host", cpuModel: "cpu", logicalCpuCount: 8 },
+        dependencies: { tsx: { version: "4.22.4" } },
+      },
+      workload: { iterations: 3 },
+      measurements: {},
+    });
+    const dirty = structuredClone(envelope());
+    dirty.provenance.git.dirty = true;
+    const dirtyComparison = compareBenchmarkEnvelopes(dirty, dirty, {
+      requiredEqualPaths: ["provenance.git.commit", "provenance.git.workingTreeSha256", "workload.iterations"],
+    });
+    expect(dirtyComparison).toMatchObject({ compatible: false, legacyIncomplete: false });
+    expect(dirtyComparison.invalidFields).toContain("baseline.provenance.git.dirty");
+    expect(dirtyComparison.invalidFields).toContain("candidate.provenance.git.dirty");
+
+    const unavailable = structuredClone(envelope());
+    unavailable.provenance.git = {
+      available: false,
+      commit: null,
+      dirty: null,
+      workingTreeSha256: null,
+      reason: "not a repository",
+    };
+    const unavailableComparison = compareBenchmarkEnvelopes(unavailable, unavailable, {
+      requiredEqualPaths: ["provenance.git.commit", "workload.iterations"],
+    });
+    expect(unavailableComparison.invalidFields).toContain("baseline.provenance.git.available");
+    expect(unavailableComparison.invalidFields).toContain("candidate.provenance.git.available");
+
+    const missingDependencies = structuredClone(envelope());
+    missingDependencies.provenance.dependencies = {};
+    const dependencyComparison = compareBenchmarkEnvelopes(missingDependencies, envelope(), {
+      requiredEqualPaths: ["provenance.dependencies", "workload.iterations"],
+    });
+    expect(dependencyComparison.invalidFields).toContain("baseline.provenance.dependencies");
   });
 
   it("records resolved and unavailable dependency versions from the requested project", async () => {

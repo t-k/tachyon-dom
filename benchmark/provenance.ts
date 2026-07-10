@@ -200,6 +200,19 @@ export const compareBenchmarkEnvelopes = (
     ...(baselineValidation.valid ? [] : baselineValidation.invalidFields.map((field) => `baseline.${field}`)),
     ...(candidateValidation.valid ? [] : candidateValidation.invalidFields.map((field) => `candidate.${field}`)),
   ];
+  for (const [label, envelope] of [
+    ["baseline", baseline],
+    ["candidate", candidate],
+  ] as const) {
+    if (envelope.provenance.git.available !== true) {
+      invalidFields.push(`${label}.provenance.git.available`);
+    } else if (envelope.provenance.git.dirty !== false) {
+      invalidFields.push(`${label}.provenance.git.dirty`);
+    }
+    if (Object.keys(envelope.provenance.dependencies).length === 0) {
+      invalidFields.push(`${label}.provenance.dependencies`);
+    }
+  }
   if (invalidFields.length > 0) {
     return {
       compatible: false,
