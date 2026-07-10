@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "benchmark": {
+    "name": "streaming-backpressure",
+    "contractVersion": 2
+  },
+  "baselineRevision": "5848458a668057f07669bde55e58d9d1ce05dfac",
+  "candidateRevision": "2d3adeb46170bcce2ddbbe1054e07216ff5158d7",
+  "controls": {
+    "compatible": true,
+    "legacyIncomplete": false,
+    "intentionalDifferences": [],
+    "accidentalDifferences": []
+  },
+  "ratios": {
+    "completionTime": 0.9923171715621866,
+    "peakQueuedBytes": 0.01874997765374048,
+    "peakRssDeltaBytes": 0.9141937560347603
+  },
+  "baseline": {
+    "completionTimeMs": 422.601393,
+    "peakQueuedBytes": 20976665,
+    "sourcePullCount": 774,
+    "startingRssBytes": 75964416,
+    "peakRssBytes": 139595776,
+    "peakRssDeltaBytes": 63631360
+  },
+  "candidate": {
+    "completionTimeMs": 419.354619,
+    "peakQueuedBytes": 393312,
+    "sourcePullCount": 774,
+    "startingRssBytes": 74694656,
+    "peakRssBytes": 132866048,
+    "peakRssDeltaBytes": 58171392
+  }
+}

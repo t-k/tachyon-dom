@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 2,
+  "benchmark": {
+    "name": "streaming-backpressure",
+    "contractVersion": 2
+  },
+  "provenance": {
+    "capturedAt": "2026-07-10T11:28:22.108Z",
+    "command": {
+      "argv": [
+        "/home/tk/.volta/tools/image/node/24.13.0/bin/node",
+        "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/streaming-backpressure.ts",
+        "--label",
+        "baseline-5848458",
+        "--subject-root",
+        "/home/tk/work/tachyon-dom/.worktrees/backpressure-baseline-v2",
+        "--adapter-module",
+        "/home/tk/work/tachyon-dom/.worktrees/backpressure-baseline-v2/dist/adapters/node.js",
+        "--output",
+        "benchmark/streaming-backpressure-results/2026-07-10-tcp-baseline-5848458.json"
+      ],
+      "display": "/home/tk/.volta/tools/image/node/24.13.0/bin/node /home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues/benchmark/streaming-backpressure.ts --label baseline-5848458 --subject-root /home/tk/work/tachyon-dom/.worktrees/backpressure-baseline-v2 --adapter-module /home/tk/work/tachyon-dom/.worktrees/backpressure-baseline-v2/dist/adapters/node.js --output benchmark/streaming-backpressure-results/2026-07-10-tcp-baseline-5848458.json",
+      "cwd": "/home/tk/work/tachyon-dom/.worktrees/resolve-reopened-issues"
+    },
+    "git": {
+      "available": true,
+      "commit": "2d3adeb46170bcce2ddbbe1054e07216ff5158d7",
+      "dirty": false,
+      "workingTreeSha256": "5a92ba25583eeed64848c372a2d0aef5e0785cb8a64ab7d3214c0b84cabd394c"
+    },
+    "runtime": {
+      "node": "v24.13.0",
+      "platform": "linux",
+      "arch": "x64",
+      "osRelease": "6.8.0-134-generic"
+    },
+    "host": {
+      "hostname": "ubuntu",
+      "cpuModel": "AMD Ryzen 9 9950X 16-Core Processor",
+      "logicalCpuCount": 32
+    },
+    "dependencies": {
+      "tsx": {
+        "version": "4.22.4"
+      }
+    }
+  },
+  "workload": {
+    "label": "baseline-5848458",
+    "transport": "tcp",
+    "connections": 6,
+    "chunksPerConnection": 128,
+    "chunkBytes": 32768,
+    "drainDelayMs": 2,
+    "adapterModule": "/home/tk/work/tachyon-dom/.worktrees/backpressure-baseline-v2/dist/adapters/node.js",
+    "subject": {
+      "root": "/home/tk/work/tachyon-dom/.worktrees/backpressure-baseline-v2",
+      "git": {
+        "available": true,
+        "commit": "5848458a668057f07669bde55e58d9d1ce05dfac",
+        "dirty": false,
+        "workingTreeSha256": "378e3a1d0c5a9a7bdb6f91da4aef5fb88bec01b33bdf01fd696bef6798773c64"
+      }
+    }
+  },
+  "measurements": {
+    "completionTimeMs": 422.601393,
+    "peakQueuedBytes": 20976665,
+    "sourcePullCount": 774,
+    "startingRssBytes": 75964416,
+    "peakRssBytes": 139595776,
+    "peakRssDeltaBytes": 63631360
+  }
+}
