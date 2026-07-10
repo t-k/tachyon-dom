@@ -242,6 +242,21 @@ describe("router security helpers", () => {
     await expect(storage.getSession(cookie)).resolves.toEqual({ id: "after-login", data: { userId: "victim" } });
   });
 
+  it("destroys memory sessions and treats the last duplicate cookie as untrusted", async () => {
+    const ids = ["known", "rotated"];
+    const storage = createMemorySessionStorage<{ userId?: string }>({ cookieName: "sid", id: () => ids.shift() ?? "extra" });
+    const session = await storage.createSession({ userId: "u1" });
+    await storage.destroySession(session);
+    await expect(storage.getSession("sid=known")).resolves.toEqual({ id: "known", data: {} });
+
+    const duplicate = await storage.getSession("sid=known; sid=attacker-selected");
+    duplicate.data.userId = "victim";
+    const cookie = await storage.commitSession(duplicate);
+
+    expect(cookie).toContain("sid=rotated");
+    await expect(storage.getSession("sid=attacker-selected")).resolves.toEqual({ id: "attacker-selected", data: {} });
+  });
+
   it("rejects cookie path and domain values that can inject attributes or headers", async () => {
     expect(() => serializeCookie("sid", "abc", { path: "/; SameSite=None" })).toThrow("Invalid cookie Path");
     expect(() => serializeCookie("sid", "abc", { path: "/\r\nSet-Cookie: injected=1" })).toThrow("Invalid cookie Path");
