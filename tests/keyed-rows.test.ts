@@ -39,6 +39,15 @@ describe("createKeyedRows", () => {
     expect(() => createKeyedRows<Item>({ tbody, row: "<div></div>", bind: () => {} })).toThrow();
   });
 
+  it("rejects invalid chunk counts and update strides before DOM mutation", () => {
+    expect(() => setup(0)).toThrow("chunks");
+    const { tbody, list } = setup();
+    list.replace(items(2));
+    const before = tbody.innerHTML;
+    expect(() => list.update(0, () => {})).toThrow("stride");
+    expect(tbody.innerHTML).toBe(before);
+  });
+
   it("replaces and appends rows from arrays", () => {
     const { tbody, list } = setup();
     list.replace(items(3));

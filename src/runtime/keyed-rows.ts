@@ -63,11 +63,18 @@ export type KeyedRows<T> = {
 
 const defaultChunks = 50;
 
+const positiveInteger = (name: string, value: number): void => {
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+    throw new TypeError(`keyed-rows: \`${name}\` must be a positive finite integer.`);
+  }
+};
+
 export const createKeyedRows = <T>(options: KeyedRowsOptions<T>): KeyedRows<T> => {
   const tbody = options.tbody;
   const bind = options.bind;
   const selectedClass = options.selectedClass ?? "selected";
   const targetChunks = options.chunks ?? defaultChunks;
+  positiveInteger("chunks", targetChunks);
 
   const single = document.createElement("template");
   single.innerHTML = options.row;
@@ -146,6 +153,7 @@ export const createKeyedRows = <T>(options: KeyedRowsOptions<T>): KeyedRows<T> =
   const appendEach = (count: number, make: (index: number) => T): void => build(count, make, tbody.childElementCount);
 
   const update = (stride: number, patch: (row: HTMLTableRowElement, index: number) => void): void => {
+    positiveInteger("stride", stride);
     const rows = tbody.children;
     const total = rows.length;
     for (let index = 0; index < total; index += stride) {
