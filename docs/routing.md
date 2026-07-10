@@ -117,6 +117,18 @@ await renderRoute(routes, request, { cspNonce: nonce });
 - `middleware`
 - `hooks`
 
+Resolve the expected CSRF token from the current request's server-side session, then use the timing-safe request helper:
+
+```ts
+const csrf = {
+  verify: async ({ request }: { request: Request }) => {
+    const session = await sessions.getSession(request.headers.get("cookie"));
+    const token = typeof session.data.csrfToken === "string" ? session.data.csrfToken : undefined;
+    return token ? verifyCsrfRequest(request, { token }) : false;
+  },
+};
+```
+
 `createSecurityHeaders()` returns default defense-in-depth headers including `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `COOP`, optional HSTS, and optional nonce-based CSP. CSP `nonce` and `frameAncestors` values are validated before they are inserted into the header; invalid values throw instead of producing a weakened or injected policy. Use `applySecurityHeaders(response, headers)` to merge them onto a response.
 
 `tachyon-dom/security` also exports:
