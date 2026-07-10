@@ -118,10 +118,38 @@ describe("router security helpers", () => {
   it("blocks route actions when CSRF verification fails", async () => {
     const routes: RouteDefinition[] = [{ path: "/action", action: () => ({ ok: true }), render: () => "ok" }];
     const result = await renderRoute(routes, new Request("https://x.test/action", { method: "POST" }), {
-      csrf: { token: "expected" },
+      csrf: { verify: () => false },
     });
 
     expect(result.ok && result.value).toMatchObject({ status: 403, html: "<h1>Forbidden</h1>" });
+  });
+
+  it("rejects a CSRF token resolved for a different session", async () => {
+    const routes: RouteDefinition[] = [{ path: "/action", action: () => ({ ok: true }), render: () => "ok" }];
+    const options = {
+      csrf: {
+        verify: async ({ request }: { request: Request }) => {
+          const session = parseCookies(request.headers.get("cookie")).sid;
+          return request.headers.get("x-csrf-token") === `token-for-${session}`;
+        },
+      },
+    };
+    const sessionA = new Request("https://x.test/action", {
+      method: "POST",
+      headers: { cookie: "sid=a", "x-csrf-token": "token-for-a" },
+    });
+    const replayAgainstB = new Request("https://x.test/action", {
+      method: "POST",
+      headers: { cookie: "sid=b", "x-csrf-token": "token-for-a" },
+    });
+
+    const [accepted, rejected] = await Promise.all([
+      renderRoute(routes, sessionA, options),
+      renderRoute(routes, replayAgainstB, options),
+    ]);
+
+    expect(accepted.ok && accepted.value.status).toBe(200);
+    expect(rejected.ok && rejected.value.status).toBe(403);
   });
 
   it("applies the configured body byte cap before POST loaders consume the stream", async () => {

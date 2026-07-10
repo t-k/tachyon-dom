@@ -1,4 +1,3 @@
-import { timingSafeEqual } from "./constant-time.js";
 import { escapeHtml } from "./html-escape.js";
 import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
@@ -120,9 +119,7 @@ export type RouteRenderOptions = {
   maxActionBodyBytes?: number;
   cspNonce?: string;
   csrf?: {
-    token: string;
-    headerName?: string;
-    fieldName?: string;
+    verify: (context: { request: Request; url: URL; env: RouteEnvironment }) => boolean | Promise<boolean>;
   };
   middleware?: readonly RouteMiddleware[];
   hooks?: RouteHooks;
@@ -400,19 +397,12 @@ export const renderDeferredDataScript = async <T extends Record<string, unknown>
   return `<script type="application/json" data-tachyon-deferred="${escapeAttribute(id)}"${nonce}>${escapeScriptJson(JSON.stringify(resolved) ?? "null")}</script>`;
 };
 
-const verifyCsrf = async (request: Request, options: NonNullable<RouteRenderOptions["csrf"]>): Promise<boolean> => {
-  const headerName = options.headerName ?? "x-csrf-token";
-  const fieldName = options.fieldName ?? "_csrf";
-  if (await timingSafeEqual(request.headers.get(headerName), options.token)) {
-    return true;
-  }
-  const contentType = request.headers.get("content-type") ?? "";
-  if (contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data")) {
-    const form = await request.clone().formData();
-    return await timingSafeEqual(form.get(fieldName), options.token);
-  }
-  return false;
-};
+const verifyCsrf = async (
+  request: Request,
+  url: URL,
+  env: RouteEnvironment,
+  options: NonNullable<RouteRenderOptions["csrf"]>,
+): Promise<boolean> => options.verify({ request, url, env });
 
 const payloadTooLargeResult = (match: MatchedRoute): RouteRenderResult => ({
   status: 413,
@@ -1140,7 +1130,7 @@ export const renderRoute = async (
     let actionResult: unknown;
     const loaderData: Record<string, unknown> = {};
     if (request.method !== "GET" && request.method !== "HEAD" && match.value.route.action) {
-      if (options.csrf && !(await verifyCsrf(request, options.csrf))) {
+      if (options.csrf && !(await verifyCsrf(request, url, env, options.csrf))) {
         return ok({
           status: 403,
           html: "<h1>Forbidden</h1>",

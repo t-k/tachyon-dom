@@ -113,7 +113,7 @@ await renderRoute(routes, request, { cspNonce: nonce });
 
 - `allowedMethods`
 - `maxActionBodyBytes`, enforced from both `Content-Length` and the actual action body bytes read by the router
-- `csrf: { token }` for action requests. Token checks use timing-safe comparison for header and form tokens.
+- `csrf: { verify }` for action requests. `verify` receives the current request, URL, and configured environment, so applications can compare a submitted token with the current session without shared mutable handler state.
 - `middleware`
 - `hooks`
 
