@@ -1,4 +1,4 @@
-import { Readable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1526,17 +1526,18 @@ describe("server adapters", () => {
 
   it("streams Lambda responses through awslambda metadata and chunk writes", async () => {
     const chunks: string[] = [];
-    const from = vi.fn((stream: { write: (chunk: string | Uint8Array) => void; end: () => void }) => stream);
+    const from = vi.fn((stream: Writable) => stream);
     const runtime = {
       streamifyResponse: vi.fn((handler) => handler),
       HttpResponseStream: { from },
     };
-    const stream = {
-      write: vi.fn((chunk: string | Uint8Array) => {
+    const stream = new Writable({
+      write(chunk, _encoding, callback) {
         chunks.push(typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk));
-      }),
-      end: vi.fn(),
-    };
+        callback();
+      },
+    });
+    const end = vi.spyOn(stream, "end");
     const handler = createLambdaStreamingHandler(
       {
         routes: [
@@ -1567,25 +1568,72 @@ describe("server adapters", () => {
       }),
     );
     expect(chunks.join("")).toBe("<p>Loading</p><h1>Ready</h1>");
-    expect(stream.end).toHaveBeenCalledOnce();
+    expect(end).toHaveBeenCalledOnce();
   });
 
-  it("waits for an explicit Lambda drain capability after a saturated write", async () => {
-    let drainCalls = 0;
-    const stream = {
-      write: vi.fn(() => false),
-      drain: vi.fn(async () => {
-        drainCalls += 1;
-      }),
-      end: vi.fn(),
-    };
-    await writeWebResponseToLambdaStream(
-      new Response(new ReadableStream<Uint8Array>({ start: (controller) => { controller.enqueue(new TextEncoder().encode("one")); controller.close(); } })),
+  it("uses standard Writable backpressure for Lambda response streams", async () => {
+    let sourcePulls = 0;
+    let releaseFirstWrite: (() => void) | undefined;
+    let receivedChunks = 0;
+    const chunk = new Uint8Array(32 * 1024);
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        sourcePulls += 1;
+        controller.enqueue(chunk);
+        if (sourcePulls === 128) controller.close();
+      },
+    });
+    let firstWrite = true;
+    const stream = new Writable({
+      highWaterMark: 1,
+      write(_chunk, _encoding, callback) {
+        receivedChunks += 1;
+        if (firstWrite) {
+          firstWrite = false;
+          releaseFirstWrite = callback;
+          return;
+        }
+        callback();
+      },
+    });
+
+    let settled = false;
+    const pending = writeWebResponseToLambdaStream(
+      new Response(body),
       stream,
       { HttpResponseStream: { from: (value) => value } },
-    );
+    ).then(() => { settled = true; });
+    await delay(10);
 
-    expect(drainCalls).toBe(1);
+    expect(sourcePulls).toBeLessThan(128);
+    expect(settled).toBe(false);
+    releaseFirstWrite?.();
+    await pending;
+    expect(receivedChunks).toBe(128);
+  });
+
+  it("cancels the Lambda Web source when the Writable pipeline fails", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(32 * 1024));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const stream = new Writable({
+      write(_chunk, _encoding, callback) {
+        callback(new Error("destination failed"));
+      },
+    });
+
+    await expect(writeWebResponseToLambdaStream(
+      new Response(body),
+      stream,
+      { HttpResponseStream: { from: (value) => value } },
+    )).rejects.toThrow("destination failed");
+    expect(cancelled).toBe(true);
   });
 
   it("keeps the Workers entry and router runtime free of top-level Node imports", async () => {

@@ -169,7 +169,7 @@ Use the runtime-specific entries for deployable server bundles:
 
 Both runtime handlers can apply `securityHeaders` and can use `streaming: true` to route through `renderRouteStream()`. File-system static asset serving is Node-only. On Cloudflare Workers, pass an Assets binding instead:
 
-Streaming adapters preserve downstream backpressure. Node pauses source reads after `response.write()` returns `false` and resumes on `drain`; close or error cancels the source even during that wait. Workers converts route chunks with demand-driven `ReadableStream.pull()` and forwards cancellation to the async iterator. Lambda waits when `write()` returns `false` only when the runtime stream exposes the explicit async `drain()` capability; custom Lambda streaming integrations should provide it and may also provide `finished()` for final flush completion.
+Streaming adapters preserve downstream backpressure. Node pauses source reads after `response.write()` returns `false` and resumes on `drain`; close or error cancels the source even during that wait. Workers converts route chunks with demand-driven `ReadableStream.pull()` and forwards cancellation to the async iterator. Lambda bridges the Web response body to the AWS-managed standard Node Writable with `pipeline()`, which coordinates backpressure, completion, cancellation, and destination errors without a custom `drain()` Promise contract.
 
 ```ts
 import { createWorkersHandler } from "tachyon-dom/adapters/workers";
@@ -289,7 +289,7 @@ export const handler = createLambdaStreamingHandler({
 });
 ```
 
-The streaming handler uses the AWS Node runtime's `awslambda.streamifyResponse()` and `awslambda.HttpResponseStream.from()` helpers. It should run on a Lambda Node.js runtime with response streaming enabled. Static assets should usually live in S3/CloudFront or another static origin rather than being served from the Lambda function package.
+The streaming handler uses the AWS Node runtime's `awslambda.streamifyResponse()` and `awslambda.HttpResponseStream.from()` helpers. The managed response stream is treated as a standard Node Writable and completed by `pipeline()`; custom runtime integrations must return the same Writable contract. It should run on a Lambda Node.js runtime with response streaming enabled. Static assets should usually live in S3/CloudFront or another static origin rather than being served from the Lambda function package.
 
 The adapter uses `rawPath` and `rawQueryString` as delivered by the Lambda event. API Gateway custom domains and stage mappings can change which prefix appears in `rawPath`; configure the gateway mapping or normalize routes before they reach the adapter if your deployment includes a stage prefix that should not be part of application routing.
 

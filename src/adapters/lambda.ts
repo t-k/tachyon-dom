@@ -7,6 +7,8 @@ import {
   type WorkersFetchHandlerOptions,
   type RouteAdapterHandlerOptions,
 } from "./workers.js";
+import { Readable, type Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 export type LambdaHttpEventV2 = {
   version?: string;
@@ -48,12 +50,7 @@ export type LambdaFetchHandlerOptions = Omit<WorkersFetchHandlerOptions, "fetch"
   trustedHosts?: readonly string[];
 };
 
-export type LambdaResponseStream = {
-  write: (chunk: string | Uint8Array) => boolean | void;
-  drain?: () => Promise<void>;
-  end: () => void;
-  finished?: () => Promise<void>;
-};
+export type LambdaResponseStream = Writable;
 
 export type LambdaHttpResponseMetadata = {
   statusCode: number;
@@ -80,7 +77,6 @@ export type LambdaContextMetadata = {
   logStreamName?: string;
 };
 
-const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 const headerValue = (headers: Record<string, string | undefined> | undefined, name: string): string | undefined => {
@@ -294,27 +290,10 @@ export const writeWebResponseToLambdaStream = async (
   runtime: Pick<LambdaStreamingRuntime, "HttpResponseStream">,
 ): Promise<void> => {
   const stream = runtime.HttpResponseStream.from(responseStream, metadataFromWebResponse(response));
-  if (response.body) {
-    const reader = response.body.getReader();
-    while (true) {
-      const result = await reader.read();
-      if (result.done) {
-        break;
-      }
-      if (stream.write(result.value) === false) {
-        await stream.drain?.();
-      }
-    }
-  } else {
-    const body = await response.text();
-    if (body) {
-      if (stream.write(textEncoder.encode(body)) === false) {
-        await stream.drain?.();
-      }
-    }
-  }
-  stream.end();
-  await stream.finished?.();
+  const source = response.body
+    ? Readable.fromWeb(response.body as never)
+    : Readable.from([]);
+  await pipeline(source, stream);
 };
 
 export const createLambdaHandler =
