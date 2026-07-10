@@ -251,4 +251,71 @@ describe("signal runtime", () => {
     expect(calls).toEqual(["first", "second"]);
     expect(resource.data()).toBe("SECOND");
   });
+
+  it("keeps the newest resource result when its source changes in flight", async () => {
+    const key = createSignal("first");
+    const calls: string[] = [];
+    const signals: AbortSignal[] = [];
+    const resolve = new Map<string, (value: string) => void>();
+    const resource = createResource(key, (value, { signal }) => {
+      calls.push(value);
+      signals.push(signal);
+      return new Promise<string>((done) => resolve.set(value, done));
+    });
+
+    await Promise.resolve();
+    key.set("second");
+    await Promise.resolve();
+    expect(calls).toEqual(["first", "second"]);
+    expect(signals[0]?.aborted).toBe(true);
+
+    resolve.get("second")?.("SECOND");
+    await resource.refetch();
+    resolve.get("first")?.("STALE");
+    await Promise.resolve();
+    expect(resource.data()).toBe("SECOND");
+    expect(resource.loading()).toBe(false);
+    resource.dispose();
+  });
+
+  it("does not reload resources for equal source values and clears errors after recovery", async () => {
+    const key = createSignal("bad");
+    const calls: string[] = [];
+    const resource = createResource(key, async (value) => {
+      calls.push(value);
+      if (value === "bad") throw new Error("broken");
+      return value.toUpperCase();
+    });
+
+    await resource.refetch();
+    key.set("bad");
+    expect(calls).toEqual(["bad"]);
+    expect(resource.error()).toBeInstanceOf(Error);
+
+    key.set("good");
+    await resource.refetch();
+    expect(calls).toEqual(["bad", "good"]);
+    expect(resource.data()).toBe("GOOD");
+    expect(resource.error()).toBeUndefined();
+    resource.dispose();
+  });
+
+  it("aborts and detaches resource tracking when disposed", async () => {
+    const key = createSignal("first");
+    let signal: AbortSignal | undefined;
+    const calls: string[] = [];
+    const resource = createResource(key, (value, context) => {
+      calls.push(value);
+      signal = context.signal;
+      return new Promise<string>(() => undefined);
+    });
+
+    await Promise.resolve();
+    resource.dispose();
+    key.set("ignored");
+
+    expect(signal?.aborted).toBe(true);
+    expect(resource.loading()).toBe(false);
+    expect(calls).toEqual(["first"]);
+  });
 });

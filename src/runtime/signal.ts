@@ -234,29 +234,50 @@ export type Resource<T> = {
   error: Accessor<unknown | undefined>;
   loading: Accessor<boolean>;
   refetch: () => Promise<T | undefined>;
+  dispose: () => void;
+};
+
+export type ResourceFetcherContext = {
+  signal: AbortSignal;
 };
 
 export const createResource = <Source, T>(
   source: Source | Accessor<Source>,
-  fetcher: (source: Source) => Promise<T> | T,
+  fetcher: (source: Source, context: ResourceFetcherContext) => Promise<T> | T,
 ): Resource<T> => {
   const data = createSignal<T | undefined>(undefined);
   const error = createSignal<unknown | undefined>(undefined);
   const loading = createSignal(true);
   let current: Promise<T | undefined> | undefined;
   let version = 0;
+  let disposed = false;
+  let controller: AbortController | undefined;
+  let disposeTracking: (() => void) | undefined;
+  let hasSource = false;
+  let lastSource: Source;
   const sourceValue = (): Source => (isSignal(source) ? source() : source);
-  const run = (): Promise<T | undefined> => {
-    if (loading() && current) {
+  const run = (value = sourceValue()): Promise<T | undefined> => {
+    if (disposed) {
+      return Promise.resolve(undefined);
+    }
+    if (loading() && current && hasSource && Object.is(lastSource, value)) {
       return current;
     }
+    hasSource = true;
+    lastSource = value;
+    controller?.abort();
+    const nextController = new AbortController();
+    controller = nextController;
     const runVersion = ++version;
-    loading.set(true);
+    batch(() => {
+      loading.set(true);
+      error.set(undefined);
+    });
     current = Promise.resolve()
-      .then(() => fetcher(sourceValue()))
+      .then(() => fetcher(value, { signal: nextController.signal }))
       .then(
         (value) => {
-          if (runVersion === version) {
+          if (!disposed && runVersion === version) {
             batch(() => {
               data.set(value);
               error.set(undefined);
@@ -266,7 +287,7 @@ export const createResource = <Source, T>(
           return value;
         },
         (reason) => {
-          if (runVersion === version) {
+          if (!disposed && runVersion === version) {
             batch(() => {
               error.set(reason);
               loading.set(false);
@@ -278,12 +299,30 @@ export const createResource = <Source, T>(
     return current;
   };
   if (isSignal(source)) {
-    effect(() => {
-      source();
-      void untrack(run);
+    disposeTracking = effect(() => {
+      const value = source();
+      if (!hasSource || !Object.is(lastSource, value)) {
+        void untrack(() => run(value));
+      }
     });
   } else {
     void run();
   }
-  return { data, error, loading, refetch: run };
+  return {
+    data,
+    error,
+    loading,
+    refetch: run,
+    dispose: () => {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+      version += 1;
+      controller?.abort();
+      disposeTracking?.();
+      current = undefined;
+      loading.set(false);
+    },
+  };
 };

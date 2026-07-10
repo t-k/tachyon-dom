@@ -147,7 +147,7 @@ Only keys marked `public: true` are exposed under `result.value.publicEnv`. By d
 
 ## Runtime APIs
 
-The root entry exports the small reactive runtime: `createSignal()`, `createMemo()`, `effect()`, `batch()`, `untrack()`, `createResource()`, and `catchError()`. Use `createResource(source, loader)` for signal-driven async data with `data`, `error`, `loading`, and `refetch` accessors. Use `untrack(fn)` to read signals without subscribing the active effect, and use `catchError(fn, onError)` when an effect should recover and keep tracking after a thrown error.
+The root entry exports the small reactive runtime: `createSignal()`, `createMemo()`, `effect()`, `batch()`, `untrack()`, `createResource()`, and `catchError()`. Use `createResource(source, loader)` for signal-driven async data with `data`, `error`, `loading`, and `refetch` accessors. Source changes abort superseded loads; the loader receives an `AbortSignal`, and `resource.dispose()` detaches tracking and aborts in-flight work. Use `untrack(fn)` to read signals without subscribing the active effect, and use `catchError(fn, onError)` when an effect should recover and keep tracking after a thrown error.
 
 `createErrorBoundary()` is available from the root entry and `tachyon-dom/runtime/error-boundary` for DOM-mounted fallback UI around client enhancements. `createI18n()` and `localeMiddleware()` are available from the root entry and `tachyon-dom/i18n` for dictionary lookup, interpolation, and request locale selection.
 
