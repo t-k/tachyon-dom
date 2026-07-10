@@ -9,6 +9,7 @@ import {
   renderServerTemplate,
 } from "../src/compiler";
 import { setText, textAt } from "../src/runtime/text";
+import { parseTemplate } from "../src/compiler/parser";
 
 const mountClientTextBindings = (
   templateHtml: string,
@@ -30,6 +31,17 @@ const mountClientTextBindings = (
 };
 
 describe("HTML-first compiler", () => {
+  it("preserves element, attribute, and text source spans in parser nodes", () => {
+    const result = parseTemplate(`<main>\n  <input bind:value={name}>text\n</main>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const input = result.value.children.find((node) => node.type === "element");
+    if (!input || input.type !== "element") throw new Error("Missing input node.");
+
+    expect(input).toMatchObject({ start: 9, openEnd: 34, end: 34 });
+    expect(input.attrs[0]).toMatchObject({ start: 16, end: 33, nameStart: 16, nameEnd: 26, valueStart: 27, valueEnd: 33 });
+    const text = result.value.children.find((node) => node.type === "text" && node.value.includes("text"));
+    expect(text).toMatchObject({ start: 34, end: 39 });
+  });
   it("reuses compiled templates for repeated source strings", () => {
     const source = `<section><h1>{title}</h1></section>`;
     const first = compileTemplate(source);

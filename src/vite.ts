@@ -8,7 +8,7 @@ import { createNodeFetchHandler, type NodeFetchHandlerOptions, type StaticAssetO
 import { generateTachyonModuleTypes, type TachyonApp, type TachyonAppAssets } from "./app.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
-import { diagnoseTachyonSfc, formatDiagnostic, locateOffset } from "./diagnostics.js";
+import { diagnoseTachyonSfc, diagnosticFromCompilerError, formatDiagnostic } from "./diagnostics.js";
 import { createFileRouteManifest } from "./router.js";
 import { err, ok, type Result } from "./result.js";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "./source-map.js";
@@ -306,7 +306,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       }
       const script = transformSfcScript(result.value.descriptor.script);
       if (!script.ok) {
-        this.error(formatDiagnostic({ ...script.error, ...locateOffset(source, script.error.offset) }, id));
+        this.error(formatDiagnostic(diagnosticFromCompilerError(source, script.error), id));
       }
       const code = `${script.value.code}${codeForTarget(
         resolvedTarget,

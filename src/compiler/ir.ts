@@ -2,6 +2,7 @@ import { err, ok, type Result } from "../result.js";
 import { isAssignableExpression, parseExpression } from "./expression.js";
 import type {
   CompilerError,
+  Attribute,
   ComponentProp,
   ElementNode,
   StoreDefinition,
@@ -22,8 +23,18 @@ import {
   textExpressionSegments,
 } from "./utils.js";
 
-const semanticError = (message: string, node?: ElementNode): Result<never, CompilerError> =>
-  err({ message, offset: node?.start ?? 0 });
+type SourceSpan = { start: number | undefined; end: number | undefined };
+
+const semanticError = (message: string, span?: SourceSpan): Result<never, CompilerError> =>
+  err({
+    message,
+    offset: span?.start ?? 0,
+    ...(span?.end === undefined ? {} : { endOffset: span.end }),
+  });
+
+const openingTagSpan = (node: ElementNode): SourceSpan => ({ start: node.start, end: node.openEnd });
+
+const attributeSpan = (attribute: Attribute): SourceSpan => ({ start: attribute.start, end: attribute.end });
 
 export const storeDefinitionsFor = (node: ElementNode): StoreDefinition[] => {
   const stores: StoreDefinition[] = [];
@@ -65,10 +76,10 @@ const componentStores = (node: ElementNode): StoreDefinition[] => {
   return stores;
 };
 
-const validateExpression = (expression: string, context: string): Result<void, CompilerError> => {
+const validateExpression = (expression: string, context: string, span: SourceSpan): Result<void, CompilerError> => {
   const parsed = parseExpression(expression);
   if (!parsed.ok) {
-    return semanticError(`Invalid ${context} expression: ${expression}.`);
+    return semanticError(`Invalid ${context} expression: ${expression}.`, span);
   }
   return ok(undefined);
 };
@@ -77,7 +88,10 @@ const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError
   if (node.type === "text") {
     for (const segment of textExpressionSegments(node.value)) {
       if (segment.kind === "expression") {
-        const result = validateExpression(segment.value, "text");
+        const result = validateExpression(segment.value, "text", {
+          start: (node.start ?? 0) + segment.start,
+          end: (node.start ?? 0) + segment.end,
+        });
         if (!result.ok) {
           return result;
         }
@@ -91,7 +105,7 @@ const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError
     }
     const expression = readExpressionAttribute(attr.value);
     if (expression) {
-      const result = validateExpression(expression, `${attr.name} attribute`);
+      const result = validateExpression(expression, `${attr.name} attribute`, attributeSpan(attr));
       if (!result.ok) {
         return result;
       }
@@ -111,59 +125,65 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     const each = attrExpression(node, "each");
     const key = attrExpression(node, "key");
     if (!each) {
-      return semanticError("<for> requires each={items}.", node);
+      return semanticError("<for> requires each={items}.", openingTagSpan(node));
     }
     if (!key) {
-      return semanticError("<for> requires key={item.id}.", node);
+      return semanticError("<for> requires key={item.id}.", openingTagSpan(node));
     }
   }
   if (node.tagName === "if" && !attrExpression(node, "test")) {
-    return semanticError("<if> requires test={condition}.", node);
+    return semanticError("<if> requires test={condition}.", openingTagSpan(node));
   }
   if (node.tagName === "component") {
     if (!componentName(node)) {
-      return semanticError("<component> requires a string name attribute.", node);
+      return semanticError("<component> requires a string name attribute.", openingTagSpan(node));
     }
     for (const attr of node.attrs) {
       if (attr.name !== "name" && readExpressionAttribute(attr.value) && !identifierNamePattern.test(attr.name)) {
-        return semanticError(`Invalid component prop binding name: ${attr.name}.`, node);
+        return semanticError(`Invalid component prop binding name: ${attr.name}.`, attributeSpan(attr));
       }
     }
     if (renderableChildren(node).length !== 1) {
-      return semanticError("<component> requires exactly one renderable root child.", node);
+      return semanticError("<component> requires exactly one renderable root child.", openingTagSpan(node));
     }
   }
   if (node.tagName === "store") {
     for (const attr of node.attrs) {
       if (readExpressionAttribute(attr.value) && !identifierNamePattern.test(attr.name)) {
-        return semanticError(`Invalid store binding name: ${attr.name}.`, node);
+        return semanticError(`Invalid store binding name: ${attr.name}.`, attributeSpan(attr));
       }
     }
   }
   if (node.tagName === "await") {
     if (!attrExpression(node, "value")) {
-      return semanticError("<await> requires value={promise}.", node);
+      return semanticError("<await> requires value={promise}.", openingTagSpan(node));
     }
     const thenName = attrString(node, "then");
     if (!thenName) {
-      return semanticError(`<await> requires then="name".`, node);
+      return semanticError(`<await> requires then="name".`, openingTagSpan(node));
     }
     if (!identifierNamePattern.test(thenName)) {
-      return semanticError(`Invalid await then binding: ${thenName}.`, node);
+      return semanticError(
+        `Invalid await then binding: ${thenName}.`,
+        attributeSpan(node.attrs.find((attr) => attr.name === "then") as Attribute),
+      );
     }
     const reorder = attrString(node, "reorder");
     if (reorder && reorder !== "preserve" && reorder !== "resolve") {
-      return semanticError(`<await> reorder must be "preserve" or "resolve".`, node);
+      return semanticError(
+        `<await> reorder must be "preserve" or "resolve".`,
+        attributeSpan(node.attrs.find((attr) => attr.name === "reorder") as Attribute),
+      );
     }
   }
   for (const attr of node.attrs) {
     if (attr.name.startsWith("hydrate:") && !isKnownHydrationAttribute(attr.name)) {
-      return semanticError(`Unknown hydration attribute: ${attr.name}.`, node);
+      return semanticError(`Unknown hydration attribute: ${attr.name}.`, attributeSpan(attr));
     }
     if (attr.name.startsWith("bind:")) {
       const expression = readExpressionAttribute(attr.value);
       if (!expression || !isAssignableExpression(expression)) {
-        return semanticError(`${attr.name} requires an assignable expression.`, node);
+        return semanticError(`${attr.name} requires an assignable expression.`, attributeSpan(attr));
       }
     }
   }
@@ -185,7 +205,7 @@ const validateTree = (node: TemplateNode, hydrateIds: Set<string>): Result<void,
   const hydrateBoundary = hydrationBoundaryFor(node, []);
   if (hydrateBoundary && hydrateBoundary.idKind !== "static") {
     if (hydrateIds.has(hydrateBoundary.id)) {
-      return semanticError(`Duplicate hydrate boundary id expression: ${hydrateBoundary.id}.`);
+      return semanticError(`Duplicate hydrate boundary id expression: ${hydrateBoundary.id}.`, openingTagSpan(node));
     }
     hydrateIds.add(hydrateBoundary.id);
   }

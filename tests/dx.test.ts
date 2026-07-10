@@ -18,7 +18,7 @@ import {
   serverCommandMessage,
 } from "../src/cli";
 import { defineApp, generateTemplateTypes, pagesFromRouteFiles, renderAppDocument, renderAppResponse } from "../src/app";
-import { diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
+import { diagnoseTachyonSfc, diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
 import { verifyPackageArtifacts } from "../src/package-integrity";
@@ -86,6 +86,38 @@ describe("DX helpers", () => {
     expect(formatDiagnostic(result.error, "bad.tachyon.html")).toContain(
       "bad.tachyon.html:2:1: <if> requires test={condition}.",
     );
+  });
+
+  it.each([
+    ["if", `<main>\n  <p>valid</p>\n  <if></if>\n</main>`, 3, 3, 7],
+    ["for", `<main>\n  <section>\n    <for each={items}></for>\n  </section>\n</main>`, 3, 5, 23],
+    ["await", `<main>\n  <p>valid</p>\n  <await then="value"></await>\n</main>`, 3, 3, 23],
+    ["component", `<main>\n  <section>\n    <component><p>child</p></component>\n  </section>\n</main>`, 3, 5, 16],
+  ] as const)("points a missing %s directive attribute at its opening tag", (_name, source, line, column, endColumn) => {
+    const result = diagnoseTemplate(source);
+    if (result.ok) throw new Error("Expected diagnostic.");
+
+    expect(result.error).toMatchObject({ line, column, endLine: line, endColumn });
+  });
+
+  it("points invalid bindings at the complete attribute range", () => {
+    const result = diagnoseTemplate(`<main>\n  <input bind:value={user?.name}>\n</main>`);
+    if (result.ok) throw new Error("Expected diagnostic.");
+
+    expect(result.error).toMatchObject({
+      message: "bind:value requires an assignable expression.",
+      line: 2,
+      column: 10,
+      endLine: 2,
+      endColumn: 33,
+    });
+  });
+
+  it("maps semantic template ranges through preceding SFC scripts", () => {
+    const result = diagnoseTachyonSfc(`<script>\nexport const scope = () => ({});\n</script>\n<main>\n  <if></if>\n</main>`);
+    if (result.ok) throw new Error("Expected diagnostic.");
+
+    expect(result.error).toMatchObject({ line: 5, column: 3, endLine: 5, endColumn: 7 });
   });
 
   it("appends an inline source map with sourcesContent", () => {

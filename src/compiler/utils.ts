@@ -7,7 +7,9 @@ export const expressionPattern = /\{([^{}]+)\}/g;
 export const identifierNamePattern = /^[A-Za-z_$][\w$]*$/;
 export const identifierPattern = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
 
-export type TextExpressionSegment = { kind: "text"; value: string } | { kind: "expression"; value: string };
+export type TextExpressionSegment =
+  | { kind: "text"; value: string; start: number; end: number }
+  | { kind: "expression"; value: string; start: number; end: number };
 
 const findExpressionEnd = (value: string, start: number): number => {
   let depth = 0;
@@ -62,18 +64,18 @@ export const textExpressionSegments = (value: string): TextExpressionSegment[] =
   while (cursor < value.length) {
     const start = value.indexOf("{", cursor);
     if (start < 0) {
-      segments.push({ kind: "text", value: value.slice(cursor) });
+      segments.push({ kind: "text", value: value.slice(cursor), start: cursor, end: value.length });
       break;
     }
     if (start > cursor) {
-      segments.push({ kind: "text", value: value.slice(cursor, start) });
+      segments.push({ kind: "text", value: value.slice(cursor, start), start: cursor, end: start });
     }
     const end = findExpressionEnd(value, start + 1);
     if (end < 0) {
-      segments.push({ kind: "text", value: value.slice(start) });
+      segments.push({ kind: "text", value: value.slice(start), start, end: value.length });
       break;
     }
-    segments.push({ kind: "expression", value: value.slice(start + 1, end).trim() });
+    segments.push({ kind: "expression", value: value.slice(start + 1, end).trim(), start, end: end + 1 });
     cursor = end + 1;
   }
   return segments;

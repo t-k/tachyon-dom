@@ -113,22 +113,36 @@ const parseAttributes = (parser: Parser): Result<Attribute[], CompilerError> => 
     if (char === ">" || startsWith(parser, "/>")) {
       return ok(attrs);
     }
+    const start = parser.offset;
+    const nameStart = parser.offset;
     const nameResult = readName(parser);
     if (!nameResult.ok) {
       return err(nameResult.error);
     }
+    const nameEnd = parser.offset;
     consumeWhitespace(parser);
     if (peek(parser) !== "=") {
-      attrs.push({ name: nameResult.value, value: true });
+      attrs.push({ name: nameResult.value, value: true, start, end: nameEnd, nameStart, nameEnd });
       continue;
     }
     parser.offset++;
     consumeWhitespace(parser);
+    const valueStart = parser.offset;
     const valueResult = readAttributeValue(parser);
     if (!valueResult.ok) {
       return err(valueResult.error);
     }
-    attrs.push({ name: nameResult.value, value: valueResult.value });
+    const valueEnd = parser.offset;
+    attrs.push({
+      name: nameResult.value,
+      value: valueResult.value,
+      start,
+      end: valueEnd,
+      nameStart,
+      nameEnd,
+      valueStart,
+      valueEnd,
+    });
   }
   return parserError(parser, "Unclosed attribute list.");
 };
@@ -138,7 +152,7 @@ const parseText = (parser: Parser): TextNode => {
   while (parser.offset < parser.source.length && peek(parser) !== "<") {
     parser.offset++;
   }
-  return { type: "text", value: parser.source.slice(start, parser.offset) };
+  return { type: "text", value: parser.source.slice(start, parser.offset), start, end: parser.offset };
 };
 
 const consumeComment = (parser: Parser): Result<void, CompilerError> => {
@@ -189,12 +203,13 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
   }
   if (startsWith(parser, "/>")) {
     parser.offset += 2;
-    return ok({ type: "element", start, tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
+    return ok({ type: "element", start, end: parser.offset, openEnd: parser.offset, tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
   }
   if (peek(parser) !== ">") {
     return parserError(parser, "Expected end of opening tag.");
   }
   parser.offset++;
+  const openEnd = parser.offset;
   if (voidElementNames.has(tagNameResult.value)) {
     if (startsWith(parser, `</${tagNameResult.value}`)) {
       const closing = consumeClosingTag(parser, tagNameResult.value);
@@ -202,7 +217,7 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
         return err(closing.error);
       }
     }
-    return ok({ type: "element", start, tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
+    return ok({ type: "element", start, end: parser.offset, openEnd, tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
   }
 
   const children = [];
@@ -227,7 +242,7 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
   if (!closing.ok) {
     return err(closing.error);
   }
-  return ok({ type: "element", start, tagName: tagNameResult.value, attrs: attrsResult.value, children });
+  return ok({ type: "element", start, end: parser.offset, openEnd, tagName: tagNameResult.value, attrs: attrsResult.value, children });
 };
 
 export const parseTemplate = (source: string): Result<ElementNode, CompilerError> => {

@@ -1,16 +1,25 @@
 export type CompilerError = {
   message: string;
   offset: number;
+  endOffset?: number;
 };
 
 export type Attribute = {
   name: string;
   value: string | true;
+  start?: number;
+  end?: number;
+  nameStart?: number;
+  nameEnd?: number;
+  valueStart?: number;
+  valueEnd?: number;
 };
 
 export type ElementNode = {
   type: "element";
   start?: number;
+  end?: number;
+  openEnd?: number;
   tagName: string;
   attrs: Attribute[];
   children: TemplateNode[];
@@ -19,6 +28,8 @@ export type ElementNode = {
 export type TextNode = {
   type: "text";
   value: string;
+  start?: number;
+  end?: number;
 };
 
 export type TemplateNode = ElementNode | TextNode;

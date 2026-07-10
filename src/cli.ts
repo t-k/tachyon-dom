@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { generateTachyonModuleTypes, generateTemplateTypes } from "./app.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
-import { diagnoseTachyonSfc, formatDiagnostic, locateOffset } from "./diagnostics.js";
+import { diagnoseTachyonSfc, diagnosticFromCompilerError, formatDiagnostic } from "./diagnostics.js";
 import { scanFileRoutes } from "./router-node.js";
 import { appendInlineSourceMap, createSourceMap } from "./source-map.js";
 import { err, ok, type Result } from "./result.js";
@@ -318,7 +318,7 @@ export const compileFile = async (options: Omit<CliCompileOptions, "command">): 
   }
   const script = transformSfcScript(result.value.descriptor.script);
   if (!script.ok) {
-    return err(formatDiagnostic({ ...script.error, ...locateOffset(source, script.error.offset) }, options.input));
+    return err(formatDiagnostic(diagnosticFromCompilerError(source, script.error), options.input));
   }
   const code = result.value.scriptOnly
     ? generateScriptOnlyModule(options.target)

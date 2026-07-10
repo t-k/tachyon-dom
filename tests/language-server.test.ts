@@ -26,6 +26,17 @@ describe("Tachyon language server diagnostics", () => {
     expect(diagnosticsForTachyonDocument("<main><h1>{title}</h1></main>")).toEqual([]);
   });
 
+  it("maps nested SFC semantic diagnostics to the same opening-tag range", () => {
+    const diagnostics = diagnosticsForTachyonDocument(
+      `<script>\nexport const scope = () => ({});\n</script>\n<main>\n  <section>\n    <if></if>\n  </section>\n</main>`,
+    );
+
+    expect(diagnostics[0]?.range).toEqual({
+      start: { line: 5, character: 4 },
+      end: { line: 5, character: 8 },
+    });
+  });
+
   it("debounces change diagnostics so keypresses do not compile immediately", () => {
     vi.useFakeTimers();
     const sent: Array<{ uri: string; diagnostics: ReturnType<typeof diagnosticsForTachyonDocument> }> = [];

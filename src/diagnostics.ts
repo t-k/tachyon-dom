@@ -6,12 +6,18 @@ import type { CompiledTemplate, CompilerError } from "./compiler/types.js";
 export type TemplateDiagnostic = {
   message: string;
   offset: number;
+  endOffset: number;
   line: number;
   column: number;
+  endLine: number;
+  endColumn: number;
   sourceLine: string;
 };
 
-export const locateOffset = (source: string, offset: number): Omit<TemplateDiagnostic, "message" | "offset"> => {
+export const locateOffset = (
+  source: string,
+  offset: number,
+): { line: number; column: number; sourceLine: string } => {
   const before = source.slice(0, offset);
   const lines = before.split(/\r?\n/);
   const sourceLines = source.split(/\r?\n/);
@@ -24,16 +30,25 @@ export const locateOffset = (source: string, offset: number): Omit<TemplateDiagn
   };
 };
 
+export const diagnosticFromCompilerError = (source: string, error: CompilerError): TemplateDiagnostic => {
+  const endOffset = error.endOffset ?? Math.min(source.length, error.offset + 1);
+  const end = locateOffset(source, endOffset);
+  return {
+    message: error.message,
+    offset: error.offset,
+    endOffset,
+    ...locateOffset(source, error.offset),
+    endLine: end.line,
+    endColumn: end.column,
+  };
+};
+
 export const diagnoseTemplate = (source: string): Result<CompiledTemplate, TemplateDiagnostic> => {
   const result = compileTemplate(source);
   if (result.ok) {
     return ok(result.value);
   }
-  return err({
-    message: result.error.message,
-    offset: result.error.offset,
-    ...locateOffset(source, result.error.offset),
-  });
+  return err(diagnosticFromCompilerError(source, result.error));
 };
 
 export const diagnoseTachyonSfc = (
@@ -46,11 +61,7 @@ export const diagnoseTachyonSfc = (
   if (result.ok) {
     return ok(result.value);
   }
-  return err({
-    message: result.error.message,
-    offset: result.error.offset,
-    ...locateOffset(source, result.error.offset),
-  });
+  return err(diagnosticFromCompilerError(source, result.error));
 };
 
 export const formatDiagnostic = (diagnostic: TemplateDiagnostic, file = "<template>"): string => {

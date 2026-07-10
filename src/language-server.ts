@@ -30,12 +30,14 @@ export const diagnosticsForTachyonDocument = (text: string): Diagnostic[] => {
   const diagnostic = result.error;
   const line = Math.max(0, diagnostic.line - 1);
   const character = Math.max(0, diagnostic.column - 1);
+  const endLine = Math.max(line, diagnostic.endLine - 1);
+  const endCharacter = Math.max(0, diagnostic.endColumn - 1);
   return [
     {
       message: diagnostic.message,
       range: {
         start: { line, character },
-        end: { line, character: character + 4 },
+        end: { line: endLine, character: endCharacter },
       },
       severity: DiagnosticSeverity.Error,
       source,

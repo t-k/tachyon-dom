@@ -308,6 +308,9 @@ export const compileTachyonSfc = (source: string): Result<CompiledTachyonSfc, Co
     return err({
       message: template.error.message,
       offset: descriptor.value.mapTemplateOffset(template.error.offset),
+      ...(template.error.endOffset === undefined
+        ? {}
+        : { endOffset: descriptor.value.mapTemplateOffset(template.error.endOffset) }),
     });
   }
   return ok({
