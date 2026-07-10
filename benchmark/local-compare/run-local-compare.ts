@@ -274,6 +274,7 @@ type BenchmarkServer = ViteDevServer | PreviewServer;
 const startDevServer = async (): Promise<ViteDevServer> => {
   const requestedPort = Number.parseInt(process.env.PORT ?? "0", 10);
   const server = await createServer({
+    configFile: false,
     root: projectRoot,
     logLevel: "silent",
     plugins: benchmarkPlugins(),
@@ -307,6 +308,7 @@ const startProductionServer = async (): Promise<PreviewServer> => {
   const requestedPort = Number.parseInt(process.env.PORT ?? "0", 10);
   await rm(productionOutDir, { recursive: true, force: true });
   await build({
+    configFile: false,
     root: projectRoot,
     logLevel: "silent",
     plugins: benchmarkPlugins(),
@@ -334,6 +336,7 @@ const startProductionServer = async (): Promise<PreviewServer> => {
     ),
   ]);
   return await preview({
+    configFile: false,
     root: projectRoot,
     logLevel: "silent",
     plugins: benchmarkPlugins(),
