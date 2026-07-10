@@ -3,6 +3,7 @@ dist/
 coverage/
 .vite/
 .codex/
+.worktrees/
 docs.local/
 benchmark/local-compare/results/
 benchmark/web-framework/results/
