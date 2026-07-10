@@ -359,6 +359,10 @@ export const addPageFiles = async (options: Omit<CliAddPageOptions, "command">):
   }
   const targetDir = join(options.routesDir, normalized);
   const title = titleCase(normalized);
+  const routeUrl = `/${normalized
+    .split("/")
+    .map((segment) => (segment.startsWith("[...") && segment.endsWith("]") ? segment.slice(4, -1) : segment.startsWith("[") && segment.endsWith("]") ? segment.slice(1, -1) : segment))
+    .join("/")}/`;
   const pageFile = join(targetDir, "page.td");
   try {
     await access(pageFile);
@@ -382,6 +386,7 @@ export const scope = () => ({
   return ok(
     [
       `Created ${pageFile}.`,
+      `Route URL: ${routeUrl}`,
       "Edit the generated page.td to define the route markup and scope.",
       `Run tachyon-dom typegen ${pageFile} --out ${pageFile}.ts --module if you want generated scope declarations.`,
       "Register the route through your app definition or file-route collection.",

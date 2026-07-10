@@ -570,6 +570,7 @@ export default { selected: false };
       }
       expect(result.value).toContain(path.join("settings", "profile", "page.td"));
       expect(result.value).toContain("Edit the generated page.td");
+      expect(result.value).toContain("Route URL: /settings/profile/");
       expect(result.value).toContain("tachyon-dom typegen");
       expect(await readFile(path.join(routesDir, "settings", "profile", "page.td"), "utf8")).toContain(
         "<h1>{title}</h1>",
