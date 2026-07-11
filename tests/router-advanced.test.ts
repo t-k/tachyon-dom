@@ -329,9 +329,13 @@ describe("advanced router features", () => {
         {
           path: "/before",
           render: () => "buffered",
-          stream: async function* () {
-            throw new Error("before-secret");
-          },
+          stream: () => ({
+            [Symbol.asyncIterator]: () => ({
+              next: async () => {
+                throw new Error("before-secret");
+              },
+            }),
+          }),
         },
       ],
       "https://example.com/before",
