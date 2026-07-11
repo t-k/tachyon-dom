@@ -321,9 +321,14 @@ type TachyonRouteStreamEvidence = {
   peakRssBytes: number;
   peakRssDeltaBytes: number;
   peakRssDeltaLimitBytes: number;
+  streamTtfbMs: number;
+  streamTtfbLimitMs: number;
 };
 
-const measureTachyonRouteStreamEvidence = async (baseUrl: string): Promise<TachyonRouteStreamEvidence> => {
+const measureTachyonRouteStreamEvidence = async (
+  baseUrl: string,
+  streamTtfbMs: number,
+): Promise<TachyonRouteStreamEvidence> => {
   await new Promise<void>((resolve, reject) => {
     const request = http.get(`${baseUrl}/stream`, (response) => {
       response.once("data", () => {
@@ -349,12 +354,16 @@ const measureTachyonRouteStreamEvidence = async (baseUrl: string): Promise<Tachy
   const peakRssBytes = diagnostics.peakRssBytes ?? 0;
   const peakRssDeltaBytes = Math.max(0, peakRssBytes - startingRssBytes);
   const peakRssDeltaLimitBytes = 16 * 1024 * 1024;
+  const streamTtfbLimitMs = 1_000;
   if ((diagnostics.cancelled ?? 0) < 1) throw new Error("Tachyon route stream cancellation did not reach the generator.");
   if ((diagnostics.completed ?? 0) < 2 || (diagnostics.emittedChunks ?? 0) < 10) {
     throw new Error("Tachyon route stream did not complete the measured multi-chunk requests.");
   }
   if (peakRssDeltaBytes > peakRssDeltaLimitBytes) {
     throw new Error(`Tachyon route stream RSS delta ${peakRssDeltaBytes} exceeded ${peakRssDeltaLimitBytes}.`);
+  }
+  if (!Number.isFinite(streamTtfbMs) || streamTtfbMs < 0 || streamTtfbMs > streamTtfbLimitMs) {
+    throw new Error(`Tachyon route stream TTFB ${streamTtfbMs}ms exceeded ${streamTtfbLimitMs}ms.`);
   }
   return {
     cancellationObserved: true,
@@ -364,6 +373,8 @@ const measureTachyonRouteStreamEvidence = async (baseUrl: string): Promise<Tachy
     peakRssBytes,
     peakRssDeltaBytes,
     peakRssDeltaLimitBytes,
+    streamTtfbMs,
+    streamTtfbLimitMs,
   };
 };
 
@@ -493,7 +504,7 @@ const measureFramework = async (
     await validateFrameworkFixture(baseUrl, dynamicChallengeIds);
     const stream = await measureStream(`${baseUrl}/stream`);
     const routeStreamEvidence =
-      framework.name === "tachyon-dom" ? await measureTachyonRouteStreamEvidence(baseUrl) : undefined;
+      framework.name === "tachyon-dom" ? await measureTachyonRouteStreamEvidence(baseUrl, stream.ttfb) : undefined;
     const staticResult = await runAutocannon(`${baseUrl}/`, options);
     const dynamicResult = await runAutocannon(`${baseUrl}/products/${dynamicChallengeIds[0]}`, options);
     await settle(options.smoke ? 50 : 150);

@@ -61,6 +61,7 @@ describe("web framework benchmark fixtures", () => {
     expect(source).toContain('"tachyon-dom": "tachyon-route-stream-node-adapter"');
     expect(source).toContain("measureTachyonRouteStreamEvidence");
     expect(source).toContain("peakRssDeltaLimitBytes");
+    expect(source).toContain("streamTtfbLimitMs");
   });
 
   it("uses request-time Tachyon routing for the dynamic benchmark scenario", () => {

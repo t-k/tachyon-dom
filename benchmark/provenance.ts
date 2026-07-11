@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { open, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -46,6 +47,34 @@ const quoteArgument = (argument: string): string =>
 const git = async (cwd: string, args: readonly string[]): Promise<string> =>
   (await execFileAsync("git", [...args], { cwd, maxBuffer: 16 * 1024 * 1024 })).stdout;
 
+const readBoundedRegularFile = async (absoluteFile: string, relativeFile: string): Promise<Buffer> => {
+  const handle = await open(absoluteFile, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) throw new Error(`Untracked provenance path ${relativeFile} must be a regular file.`);
+    if (metadata.size > MAX_UNTRACKED_FILE_BYTES) {
+      throw new Error(`Untracked provenance file ${relativeFile} exceeds ${MAX_UNTRACKED_FILE_BYTES} bytes.`);
+    }
+    const content = Buffer.allocUnsafe(Math.min(metadata.size + 1, MAX_UNTRACKED_FILE_BYTES + 1));
+    let offset = 0;
+    while (offset < content.length) {
+      const { bytesRead } = await handle.read(content, offset, content.length - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
+    if (offset > MAX_UNTRACKED_FILE_BYTES) {
+      throw new Error(`Untracked provenance file ${relativeFile} exceeds ${MAX_UNTRACKED_FILE_BYTES} bytes.`);
+    }
+    const verified = await handle.stat();
+    if (!verified.isFile() || verified.dev !== metadata.dev || verified.ino !== metadata.ino || verified.size !== offset) {
+      throw new Error(`Untracked provenance file ${relativeFile} changed while it was being hashed.`);
+    }
+    return content.subarray(0, offset);
+  } finally {
+    await handle.close();
+  }
+};
+
 const workingTreeHash = async (cwd: string, commit: string): Promise<string> => {
   const [status, diff, untracked] = await Promise.all([
     git(cwd, ["status", "--porcelain=v1", "-z"]),
@@ -56,12 +85,8 @@ const workingTreeHash = async (cwd: string, commit: string): Promise<string> => 
   let totalBytes = 0;
   for (const relativeFile of untracked.split("\0").filter(Boolean).sort()) {
     const absoluteFile = path.join(cwd, relativeFile);
-    const metadata = await lstat(absoluteFile);
-    if (!metadata.isFile()) throw new Error(`Untracked provenance path ${relativeFile} must be a regular file.`);
-    if (metadata.size > MAX_UNTRACKED_FILE_BYTES) {
-      throw new Error(`Untracked provenance file ${relativeFile} exceeds ${MAX_UNTRACKED_FILE_BYTES} bytes.`);
-    }
-    totalBytes += metadata.size;
+    const content = await readBoundedRegularFile(absoluteFile, relativeFile);
+    totalBytes += content.byteLength;
     if (totalBytes > MAX_UNTRACKED_TOTAL_BYTES) {
       throw new Error(`Untracked provenance files exceed ${MAX_UNTRACKED_TOTAL_BYTES} bytes in total.`);
     }
@@ -69,7 +94,7 @@ const workingTreeHash = async (cwd: string, commit: string): Promise<string> => 
       .update("\0")
       .update(relativeFile)
       .update("\0")
-      .update(await readFile(absoluteFile));
+      .update(content);
   }
   return hash.digest("hex");
 };

@@ -67,7 +67,7 @@ describe("benchmark provenance", () => {
       const provenance = await collectBenchmarkProvenance({ cwd: repository, argv: ["benchmark"] });
       expect(provenance.git.available).toBe(false);
       expect(provenance.git.reason).toContain("untracked-link");
-      expect(provenance.git.reason).toContain("regular file");
+      expect(provenance.git.reason).toMatch(/(?:ELOOP|regular file)/);
     } finally {
       await rm(repository, { recursive: true, force: true });
       await rm(external, { recursive: true, force: true });

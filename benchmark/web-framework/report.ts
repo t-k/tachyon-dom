@@ -16,6 +16,8 @@ export type WebFrameworkMetric = {
     peakRssBytes: number;
     peakRssDeltaBytes: number;
     peakRssDeltaLimitBytes: number;
+    streamTtfbMs: number;
+    streamTtfbLimitMs: number;
   };
 };
 
