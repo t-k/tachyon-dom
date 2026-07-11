@@ -52,6 +52,28 @@ const nonEmptyString = (value: unknown): value is string => typeof value === "st
 const positiveInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) > 0;
 const nonNegativeInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 0;
 const finiteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+const requiredScenarioIds = new Set([
+  "createRows",
+  "replaceAllRows",
+  "partialUpdate",
+  "selectRow",
+  "swapRows",
+  "removeRow",
+  "createManyRows",
+  "appendRows",
+  "clearRows",
+]);
+const requiredAuxiliaryUnits = new Map([
+  ["startup", "ms"],
+  ["readyHeap", "mb"],
+  ["runHeap", "mb"],
+  ["runClearHeap", "mb"],
+  ["readyDomNodes", "count"],
+  ["runDomNodes", "count"],
+  ["runClearDomNodes", "count"],
+  ["localSourceSize", "kib"],
+  ["entrySourceSize", "kib"],
+]);
 
 const validateBrowserAndMeasurements = (value: unknown, prefix: string): string[] => {
   const invalid: string[] = [];
@@ -108,6 +130,16 @@ const validateBrowserAndMeasurements = (value: unknown, prefix: string): string[
       ) {
         invalid.push(`${prefix}.measurements.${collectionName}`);
       }
+    }
+    const requiredIds = collectionName === "summaries" ? requiredScenarioIds : new Set(requiredAuxiliaryUnits.keys());
+    if (byId.size !== requiredIds.size || [...requiredIds].some((id) => !byId.has(id))) {
+      invalid.push(`${prefix}.measurements.${collectionName}`);
+    }
+    if (
+      collectionName === "auxiliaryMetrics" &&
+      [...requiredAuxiliaryUnits].some(([id, unit]) => byId.get(id)?.some((entry) => entry.unit !== unit))
+    ) {
+      invalid.push(`${prefix}.measurements.auxiliaryMetrics`);
     }
   }
   return invalid;

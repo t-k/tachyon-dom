@@ -2,6 +2,30 @@ import { describe, expect, it } from "vitest";
 
 import { validateLocalCompareRuns } from "../benchmark/local-compare/validation.js";
 
+const scenarioIds = [
+  "createRows",
+  "replaceAllRows",
+  "partialUpdate",
+  "selectRow",
+  "swapRows",
+  "removeRow",
+  "createManyRows",
+  "appendRows",
+  "clearRows",
+] as const;
+const auxiliaryMetricDefinitions = [
+  ["startup", "ms"],
+  ["readyHeap", "mb"],
+  ["runHeap", "mb"],
+  ["runClearHeap", "mb"],
+  ["readyDomNodes", "count"],
+  ["runDomNodes", "count"],
+  ["runClearDomNodes", "count"],
+  ["localSourceSize", "kib"],
+  ["entrySourceSize", "kib"],
+] as const;
+const implementationNames = ["vanillajs-lite-keyed", "tachyon-dom"] as const;
+
 const run = () => ({
   schemaVersion: 2,
   benchmark: { name: "local-compare", contractVersion: 2 },
@@ -22,17 +46,15 @@ const run = () => ({
     trimFraction: 0.2,
     baseline: "vanillajs-lite-keyed",
     candidate: "tachyon-dom",
-    implementations: ["vanillajs-lite-keyed", "tachyon-dom"],
+    implementations: [...implementationNames],
   },
   measurements: {
-    summaries: [
-      { id: "render", label: "render", implementation: "vanillajs-lite-keyed", trimmedMean: 1 },
-      { id: "render", label: "render", implementation: "tachyon-dom", trimmedMean: 1 },
-    ],
-    auxiliaryMetrics: [
-      { id: "size", label: "size", unit: "kib", implementation: "vanillajs-lite-keyed", value: 1 },
-      { id: "size", label: "size", unit: "kib", implementation: "tachyon-dom", value: 1 },
-    ],
+    summaries: scenarioIds.flatMap((id) =>
+      implementationNames.map((implementation) => ({ id, label: id, implementation, trimmedMean: 1 })),
+    ),
+    auxiliaryMetrics: auxiliaryMetricDefinitions.flatMap(([id, unit]) =>
+      implementationNames.map((implementation) => ({ id, label: id, unit, implementation, value: 1 })),
+    ),
   },
 });
 
@@ -93,6 +115,25 @@ describe("local compare validation", () => {
     expect(result).toEqual(expect.objectContaining({ ok: false }));
     if (result.ok) throw new Error("Expected invalid run");
     expect(result.invalidFields).toContain(`runs[0].measurements.${collectionName}`);
+  });
+
+  it.each([
+    ["scenario", "summaries", "createRows"],
+    ["auxiliary metric", "auxiliaryMetrics", "startup"],
+  ] as const)("rejects an artifact missing the complete %s id", (_label, collectionName, removedId) => {
+    const value = run();
+    const collection = value.measurements[collectionName];
+    value.measurements[collectionName] = collection.filter((entry) => entry.id !== removedId) as never;
+    const result = validateLocalCompareRuns([value]);
+    expect(result).toEqual(expect.objectContaining({ ok: false }));
+    if (result.ok) throw new Error("Expected invalid run");
+    expect(result.invalidFields).toContain(`runs[0].measurements.${collectionName}`);
+  });
+
+  it.each([0, 0.499999])("accepts valid trimFraction boundary %s", (trimFraction) => {
+    const value = run();
+    value.workload.trimFraction = trimFraction;
+    expect(validateLocalCompareRuns([value])).toEqual(expect.objectContaining({ ok: true }));
   });
 
   it.each([
