@@ -1,12 +1,7 @@
 import { escapeHtml } from "./html-escape.js";
 import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
-import {
-  applyHtmlWhitespace,
-  type CompatibleHtmlWhitespacePolicy,
-  type HtmlWhitespacePolicy,
-  type HtmlWhitespacePolicyInput,
-} from "./html-whitespace.js";
+import { applyHtmlWhitespace, type HtmlWhitespacePolicy } from "./html-whitespace.js";
 
 export type RouteParams = Record<string, string>;
 
@@ -135,11 +130,10 @@ type RouteRenderOptionsBase = {
   env?: RouteEnvironment;
 };
 
-export type RouteRenderOptions<Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy> =
-  RouteRenderOptionsBase & {
-    /** Applied only after buffered rendering. Streaming chunks are always preserved. */
-    htmlWhitespace?: CompatibleHtmlWhitespacePolicy<Whitespace>;
-  };
+export type RouteRenderOptions = RouteRenderOptionsBase & {
+  /** Applied only after buffered rendering. Streaming chunks are always preserved. */
+  htmlWhitespace?: HtmlWhitespacePolicy;
+};
 
 export type RouteError = {
   message: string;
@@ -183,7 +177,7 @@ type RouteExecutionContext = RouteContext & { bindings?: unknown };
 type RouteExecutionOptions = Omit<RouteRenderOptionsBase, "csrf" | "middleware"> & {
   bindings?: unknown;
   progressiveBody?: boolean;
-  htmlWhitespace?: HtmlWhitespacePolicyInput;
+  htmlWhitespace?: HtmlWhitespacePolicy;
   csrf?: {
     verify: (context: {
       request: Request;
@@ -1400,10 +1394,10 @@ const renderRouteInternal = async (
   }
 };
 
-export const renderRoute = async <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+export const renderRoute = async (
   routes: readonly RouteDefinition[],
   input: Request | URL | string,
-  options: RouteRenderOptions<Whitespace> = {},
+  options: RouteRenderOptions = {},
 ): Promise<Result<RouteRenderResult, RouteError>> => renderRouteInternal(routes, input, options);
 
 /** @internal */
@@ -1448,10 +1442,10 @@ const renderRouteStreamInternal = async (
   });
 };
 
-export const renderRouteStream = async <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+export const renderRouteStream = async (
   routes: readonly RouteDefinition[],
   input: Request | URL | string,
-  options: RouteRenderOptions<Whitespace> = {},
+  options: RouteRenderOptions = {},
 ): Promise<Result<RouteStreamResult, RouteError>> => renderRouteStreamInternal(routes, input, options);
 
 /** @internal */

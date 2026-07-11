@@ -220,7 +220,7 @@
     "check:size": "size-limit",
     "verify:package": "node scripts/verify-package-artifacts.mjs",
     "verify:starters": "node scripts/verify-generated-starters.mjs",
-    "verify:whitespace-types": "node scripts/verify-whitespace-policy-types.mjs",
+    "verify:whitespace-types": "pnpm build && node scripts/verify-whitespace-policy-types.mjs",
     "prepublishOnly": "pnpm build && pnpm verify:package && pnpm check:exports && pnpm check:size",
     "lint": "oxlint .",
     "format": "oxfmt --write ."

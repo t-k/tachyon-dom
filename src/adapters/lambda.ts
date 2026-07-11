@@ -7,7 +7,6 @@ import {
   type WorkersFetchHandlerOptions,
   type RouteAdapterHandlerOptions,
 } from "./workers.js";
-import type { HtmlWhitespacePolicy, HtmlWhitespacePolicyInput } from "../html-whitespace.js";
 import { Readable, type Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
@@ -40,11 +39,10 @@ export type LambdaProxyResponseV2 = {
   cookies?: string[];
 };
 
-export type LambdaHandlerOptions<Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy> =
-  RouteAdapterHandlerOptions<Whitespace> & {
-    origin?: string | ((event: LambdaHttpEventV2) => string);
-    trustedHosts?: readonly string[];
-  };
+export type LambdaHandlerOptions = RouteAdapterHandlerOptions & {
+  origin?: string | ((event: LambdaHttpEventV2) => string);
+  trustedHosts?: readonly string[];
+};
 
 export type LambdaFetchHandlerOptions = Omit<WorkersFetchHandlerOptions, "fetch"> & {
   fetch: AdapterFetchHandler;
@@ -297,9 +295,7 @@ export const writeWebResponseToLambdaStream = async (
 };
 
 export const createLambdaHandler =
-  <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
-    options: LambdaHandlerOptions<Whitespace>,
-  ) =>
+  (options: LambdaHandlerOptions) =>
   async (event: LambdaHttpEventV2, context?: unknown): Promise<LambdaProxyResponseV2> => {
     const request = requestFromLambdaEvent(event, options);
     const response = await createWorkersHandler({
@@ -320,8 +316,8 @@ export const createLambdaFetchHandler =
     return lambdaResponseFromWebResponse(response);
   };
 
-export const createLambdaStreamingHandler = <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
-  options: LambdaHandlerOptions<Whitespace>,
+export const createLambdaStreamingHandler = (
+  options: LambdaHandlerOptions,
   runtime?: LambdaStreamingRuntime,
 ): unknown => {
   const resolvedRuntime = resolveStreamingRuntime(runtime);

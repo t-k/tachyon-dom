@@ -1,54 +1,74 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import ts from "typescript";
 
+const execFileAsync = promisify(execFile);
 const projectRoot = process.cwd();
-const directory = await mkdtemp(path.join(tmpdir(), "tachyon-whitespace-types-"));
-const usageFile = path.join(directory, "usage.ts");
-const modulePath = (file) => path.join(projectRoot, "dist", file).replaceAll("\\", "/");
+const directory = await mkdtemp(path.join(tmpdir(), "tachyon-whitespace-package-"));
+const consumer = path.join(directory, "consumer");
 
 const source = `
-import { defineApp, renderAppDocument, type HtmlWhitespacePolicy, type LegacyHtmlWhitespacePolicy } from ${JSON.stringify(modulePath("app.js"))};
-import type { TemplateWhitespacePolicy } from ${JSON.stringify(modulePath("compiler.js"))};
-import { renderRoute, type RouteDefinition } from ${JSON.stringify(modulePath("router.js"))};
-import { createWorkersHandler } from ${JSON.stringify(modulePath("adapters/workers.js"))};
-import { createNodeHandler } from ${JSON.stringify(modulePath("adapters/node.js"))};
-import { createLambdaHandler } from ${JSON.stringify(modulePath("adapters/lambda.js"))};
-import { tachyonApp } from ${JSON.stringify(modulePath("vite.js"))};
+import { defineApp, renderAppDocument, type HtmlWhitespacePolicy } from "tachyon-dom/app";
+import type { TemplateWhitespacePolicy } from "tachyon-dom/compiler";
+import { renderRoute, type RouteDefinition } from "tachyon-dom/router";
+import { createWorkersHandler } from "tachyon-dom/adapters/workers";
+import { createNodeHandler } from "tachyon-dom/adapters/node";
+import { createLambdaHandler, createLambdaStreamingHandler } from "tachyon-dom/adapters/lambda";
+import { tachyonApp } from "tachyon-dom/vite";
 
 const app = defineApp({ pages: [{ path: "/", fileName: "index.html", template: "<main>ok</main>", scope: {} }] });
 const routes: RouteDefinition[] = [{ path: "/", render: () => "ok" }];
 declare const htmlPolicy: HtmlWhitespacePolicy;
-declare const templatePolicy: TemplateWhitespacePolicy;
-declare const legacyPolicy: LegacyHtmlWhitespacePolicy;
+const literalTemplatePolicy: TemplateWhitespacePolicy = "condense";
+let mutableTemplatePolicy: TemplateWhitespacePolicy = "preserve";
+if (Math.random() > 0.5) mutableTemplatePolicy = "condense";
+declare const partialMixed: "condense" | "normalize-tags";
 
-app.renderDocument("/", { whitespace: "preserve" });
-renderAppDocument(app, "/", { whitespace: "condense" });
-tachyonApp(app, { htmlWhitespace: "condense" });
-void renderRoute(routes, "/", { htmlWhitespace: "preserve" });
+app.renderDocument("/", { whitespace: "preserve-tags" });
+renderAppDocument(app, "/", { whitespace: "normalize-tags" });
+tachyonApp(app, { htmlWhitespace: htmlPolicy });
+void renderRoute(routes, "/", { htmlWhitespace: "preserve-tags" });
 createWorkersHandler({ routes, htmlWhitespace: htmlPolicy });
-createNodeHandler({ routes, htmlWhitespace: "condense" });
-createLambdaHandler({ routes, htmlWhitespace: "preserve" });
+createNodeHandler({ routes, htmlWhitespace: "normalize-tags" });
+createLambdaHandler({ routes, htmlWhitespace: htmlPolicy });
+createLambdaStreamingHandler({ routes, htmlWhitespace: "preserve-tags" });
 
-// @ts-expect-error Template policy variables cannot configure tag normalization.
-app.renderDocument("/", { whitespace: templatePolicy });
-// @ts-expect-error Template policy variables cannot configure tag normalization.
-renderAppDocument(app, "/", { whitespace: templatePolicy });
-// @ts-expect-error Template policy variables cannot configure tag normalization.
-tachyonApp(app, { htmlWhitespace: templatePolicy });
-// @ts-expect-error Template policy variables cannot configure tag normalization.
-void renderRoute(routes, "/", { htmlWhitespace: templatePolicy });
-// @ts-expect-error Widened legacy variables are ambiguous.
-createWorkersHandler({ routes, htmlWhitespace: legacyPolicy });
-// @ts-expect-error Widened legacy variables are ambiguous.
-createNodeHandler({ routes, htmlWhitespace: legacyPolicy });
-// @ts-expect-error Widened legacy variables are ambiguous.
-createLambdaHandler({ routes, htmlWhitespace: legacyPolicy });
+// @ts-expect-error Legacy literals are rejected.
+app.renderDocument("/", { whitespace: "condense" });
+// @ts-expect-error Legacy literals are rejected.
+renderAppDocument(app, "/", { whitespace: "preserve" });
+// @ts-expect-error Literal-narrowed template policies are rejected.
+tachyonApp(app, { htmlWhitespace: literalTemplatePolicy });
+// @ts-expect-error Control-flow-narrowed template policies are rejected.
+void renderRoute(routes, "/", { htmlWhitespace: mutableTemplatePolicy });
+// @ts-expect-error Partial mixed unions are rejected.
+createWorkersHandler({ routes, htmlWhitespace: partialMixed });
+// @ts-expect-error Legacy literals are rejected by Node.
+createNodeHandler({ routes, htmlWhitespace: "condense" });
+// @ts-expect-error Template policies are rejected by Lambda.
+createLambdaHandler({ routes, htmlWhitespace: literalTemplatePolicy });
+// @ts-expect-error Legacy literals are rejected by Lambda streaming.
+createLambdaStreamingHandler({ routes, htmlWhitespace: "preserve" });
 `;
 
 try {
+  await execFileAsync("pnpm", ["pack", "--pack-destination", directory], { cwd: projectRoot });
+  const tarballName = (await readdir(directory)).find((name) => name.endsWith(".tgz"));
+  if (!tarballName) throw new Error("pnpm pack did not create a tarball.");
+  await mkdir(consumer);
+  await writeFile(
+    path.join(consumer, "package.json"),
+    `${JSON.stringify({ private: true, type: "module" }, null, 2)}\n`,
+  );
+  await execFileAsync("pnpm", ["add", "--ignore-workspace", path.join(directory, tarballName)], { cwd: consumer });
+  const usageFile = path.join(consumer, "usage.ts");
   await writeFile(usageFile, source);
+  const installedRoot = await realpath(path.join(consumer, "node_modules/tachyon-dom"));
+  if (installedRoot.startsWith(projectRoot))
+    throw new Error("Type probe resolved the workspace instead of the packed package.");
   const program = ts.createProgram([usageFile], {
     strict: true,
     noEmit: true,
@@ -63,7 +83,7 @@ try {
       diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")).join("\n"),
     );
   }
-  console.log("Packaged whitespace policy declarations verified.");
+  console.log(`Installed package whitespace policy declarations verified from ${installedRoot}.`);
 } finally {
   await rm(directory, { recursive: true, force: true });
 }
