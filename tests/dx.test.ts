@@ -289,6 +289,8 @@ describe("DX helpers", () => {
     };
     const ci = await readFile(".github/workflows/ci.yml", "utf8");
     const release = await readFile(".github/workflows/release.yml", "utf8");
+    const publisher = await readFile("scripts/publish-release-package.mjs", "utf8");
+    const finalizer = await readFile("scripts/finalize-release-tags.mjs", "utf8");
     const publicJsExportNames = Object.entries(packageJson.exports ?? {}).flatMap(([specifier, target]) => {
       if (!target.import) {
         return [];
@@ -308,7 +310,14 @@ describe("DX helpers", () => {
     expect(ci).toContain("github.event_name == 'workflow_dispatch'");
     expect(ci).toContain("pnpm bench:local:smoke");
     expect(release).toContain("tags:");
-    expect(release).toContain("npm publish --provenance --access public");
+    expect(release).toContain("node scripts/publish-release-package.mjs --artifact-dir release-artifacts");
+    expect(release).toContain("--package root");
+    expect(release).toContain("--package create");
+    expect(publisher).toMatch(
+      /"publish",\s*entry\.filename,\s*"--provenance",\s*"--access",\s*"public",\s*"--tag",\s*stagingTagFor\(verified\.version\)/,
+    );
+    expect(publisher).toContain("if (confirmed.integrity !== entry.integrity) throw error");
+    expect(finalizer).toContain("await addDistTag(entry.name, verified.version, verified.npmTag)");
   });
 
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
@@ -1497,6 +1506,42 @@ void chunks;
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("validates and dry-runs both npm packages before ordered publication", async () => {
+    const workflow = await readFile(path.join(process.cwd(), ".github", "workflows", "release.yml"), "utf8");
+    const createPackage = JSON.parse(
+      await readFile(path.join(process.cwd(), "packages", "create-tachyon-dom", "package.json"), "utf8"),
+    ) as { files?: string[]; dependencies?: Record<string, string> };
+    const preparation = workflow.indexOf("pnpm prepare:release");
+    const dryRun = workflow.indexOf("--dry-run-artifacts", preparation);
+    const upload = workflow.indexOf("actions/upload-artifact@", dryRun);
+    const publishJob = workflow.indexOf("publish:", upload);
+    const artifactVerification = workflow.indexOf("--verify-artifacts", publishJob);
+    const preflight = workflow.indexOf("preflight-release-publication.mjs", artifactVerification);
+    const rootPublish = workflow.indexOf("--package root", preflight);
+    const createPublish = workflow.indexOf("--package create", rootPublish + 1);
+    const finalize = workflow.indexOf("finalize-release-tags.mjs", createPublish);
+
+    expect(preparation).toBeGreaterThan(-1);
+    expect(dryRun).toBeGreaterThan(preparation);
+    expect(upload).toBeGreaterThan(dryRun);
+    expect(publishJob).toBeGreaterThan(upload);
+    expect(artifactVerification).toBeGreaterThan(publishJob);
+    expect(preflight).toBeGreaterThan(artifactVerification);
+    expect(rootPublish).toBeGreaterThan(preflight);
+    expect(createPublish).toBeGreaterThan(rootPublish);
+    expect(finalize).toBeGreaterThan(createPublish);
+    expect(workflow).toContain("permissions: {}\n");
+    expect(workflow).toContain("group: tachyon-dom-npm-release");
+    expect(workflow).toContain("cancel-in-progress: false");
+    expect(workflow).toMatch(/publish:\n\s+needs: verify[\s\S]+permissions:\n\s+contents: read\n\s+id-token: write/);
+    expect(workflow).toContain("NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}");
+    expect(workflow).toContain("34e114876b0b11c390a56381ad16ebd13914f8d5");
+    expect(workflow).toContain("ea165f8d65b6e75b540449e92b4886f43607fa02");
+    expect(workflow).toContain("d3f86a106a0bac45b974a628896c90dbdf5c8093");
+    expect(createPackage.files).toContain("LICENSE");
+    expect(createPackage.dependencies?.["tachyon-dom"]).toBe("0.1.0");
   });
 
   it("packages a Cloudflare Pages worker with copied assets and ASSETS fallback", async () => {
