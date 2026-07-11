@@ -154,7 +154,8 @@ describe("local compare validation", () => {
     ],
     [
       "unknown implementation",
-      (value: ReturnType<typeof run>) => (value.measurements.summaries[0]!.implementation = "unknown"),
+      (value: ReturnType<typeof run>) =>
+        ((value.measurements.summaries[0]!.implementation as unknown) = "unknown"),
       "measurements.summaries[0].implementation",
     ],
     [
