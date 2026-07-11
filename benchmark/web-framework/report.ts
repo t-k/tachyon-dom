@@ -6,6 +6,12 @@ export type WebFrameworkMetric = {
   dynamicLatencyP95Ms: number;
   streamTtfbMs: number;
   streamCompleteMs: number;
+  streamWarmups: number;
+  streamSamples: readonly {
+    ttfb: number;
+    complete: number;
+    chunkArrivalMs: readonly number[];
+  }[];
   clientNavigationMs: number;
   clientBundleBytes: number;
   routeStreamEvidence?: {

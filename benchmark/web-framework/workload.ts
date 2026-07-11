@@ -20,3 +20,9 @@ export const SCORED_STREAM_WORKLOADS = {
   "marko-run": scoredStreamWorkload(),
   "mreact-app-router": scoredStreamWorkload(),
 } as const;
+
+export const createWebRunPlan = (
+  frameworks: readonly string[],
+  identity: { runId: string; runIndex: number; seed: number },
+) => ({ ...identity, frameworkOrder: balancedOrder(frameworks, identity.runIndex, identity.seed) });
+import { balancedOrder } from "../shared/statistical-authority.js";

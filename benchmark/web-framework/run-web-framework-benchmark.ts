@@ -1,4 +1,5 @@
 import { createWriteStream } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
@@ -10,15 +11,20 @@ import { collectBenchmarkProvenance, collectDependencyVersions } from "../proven
 import { formatWebFrameworkRanking, scoreWebFrameworkMetrics, type WebFrameworkMetric } from "./report";
 import {
   createDynamicChallengeIds,
+  measureStreamDistribution,
   measureStreamSemantics,
   validateDynamicRouteSemantics,
   WEB_FRAMEWORK_CONTRACT_VERSION,
 } from "./contract";
+import { createWebRunPlan } from "./workload";
 
 type CliOptions = {
   smoke: boolean;
   skipBuild: boolean;
   output?: string;
+  seed: number;
+  runIndex: number;
+  runId: string;
 };
 
 type FrameworkConfig = {
@@ -108,7 +114,7 @@ const frameworks: readonly FrameworkConfig[] = [
 ];
 
 const parseArgs = (argv: readonly string[]): CliOptions => {
-  const options: CliOptions = { smoke: false, skipBuild: false };
+  const options: CliOptions = { smoke: false, skipBuild: false, seed: 1, runIndex: 0, runId: randomUUID() };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === "--smoke") {
@@ -121,6 +127,16 @@ const parseArgs = (argv: readonly string[]): CliOptions => {
         throw new Error("--output requires a value.");
       }
       options.output = value;
+    } else if (arg === "--seed" || arg === "--run-index") {
+      const value = argv[++index];
+      const parsed = value === undefined ? Number.NaN : Number(value);
+      if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${arg} must be a non-negative integer.`);
+      if (arg === "--seed") options.seed = parsed;
+      else options.runIndex = parsed;
+    } else if (arg === "--run-id") {
+      const value = argv[++index];
+      if (!value) throw new Error("--run-id requires a value.");
+      options.runId = value;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -303,14 +319,25 @@ const validateFrameworkFixture = async (baseUrl: string, dynamicChallengeIds: re
   await validateDynamicRouteSemantics(baseUrl, dynamicChallengeIds);
 };
 
-const measureStream = async (url: string): Promise<{ ttfb: number; complete: number }> => {
-  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
-  try {
-    await measureStreamSemantics(url, agent);
-    return await measureStreamSemantics(url, agent);
-  } finally {
-    agent.destroy();
-  }
+const median = (values: readonly number[]): number => {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? (sorted[middle] as number)
+    : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
+};
+
+const measureStream = async (url: string, smoke: boolean) => {
+  const distribution = await measureStreamDistribution(url, {
+    warmups: smoke ? 1 : 5,
+    samples: smoke ? 1 : 20,
+  });
+  return {
+    ttfb: median(distribution.samples.map((sample) => sample.ttfb)),
+    complete: median(distribution.samples.map((sample) => sample.complete)),
+    warmups: distribution.warmups,
+    samples: distribution.samples,
+  };
 };
 
 type TachyonRouteStreamEvidence = {
@@ -509,7 +536,7 @@ const measureFramework = async (
   const baseUrl = `http://127.0.0.1:${port}`;
   try {
     await validateFrameworkFixture(baseUrl, dynamicChallengeIds);
-    const stream = await measureStream(`${baseUrl}/stream`);
+    const stream = await measureStream(`${baseUrl}/stream`, options.smoke);
     const routeStreamEvidence =
       framework.name === "tachyon-dom" ? await measureTachyonRouteStreamEvidence(baseUrl, stream.ttfb) : undefined;
     const staticResult = await runAutocannon(`${baseUrl}/`, options);
@@ -525,6 +552,8 @@ const measureFramework = async (
       dynamicLatencyP95Ms: latencyP95(dynamicResult),
       streamTtfbMs: stream.ttfb,
       streamCompleteMs: stream.complete,
+      streamWarmups: stream.warmups,
+      streamSamples: stream.samples,
       clientNavigationMs,
       clientBundleBytes,
       ...(routeStreamEvidence ? { routeStreamEvidence } : {}),
@@ -548,8 +577,15 @@ const run = async (): Promise<void> => {
   const browser = await chromium.launch({ headless: true });
   const browserVersion = browser.version();
   const metrics: WebFrameworkMetric[] = [];
+  const plan = createWebRunPlan(
+    frameworks.map((framework) => framework.name),
+    { runId: options.runId, runIndex: options.runIndex, seed: options.seed },
+  );
+  const measuredFrameworks = plan.frameworkOrder.map(
+    (name) => frameworks.find((framework) => framework.name === name) as FrameworkConfig,
+  );
   try {
-    for (const framework of frameworks) {
+    for (const framework of measuredFrameworks) {
       metrics.push(await measureFramework(framework, options, browser, dynamicChallengeIds));
     }
   } finally {
@@ -584,6 +620,10 @@ const run = async (): Promise<void> => {
         benchmark: { name: "web-framework", contractVersion: WEB_FRAMEWORK_CONTRACT_VERSION },
         provenance,
         workload: {
+          runId: plan.runId,
+          runIndex: plan.runIndex,
+          seed: plan.seed,
+          frameworkOrder: plan.frameworkOrder,
           smoke: options.smoke,
           buildMode: "production",
           durationSeconds,

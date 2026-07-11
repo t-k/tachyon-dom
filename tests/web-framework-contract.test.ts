@@ -1,7 +1,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import http from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { measureStreamSemantics, validateDynamicRouteSemantics } from "../benchmark/web-framework/contract";
+import {
+  measureStreamDistribution,
+  measureStreamSemantics,
+  validateDynamicRouteSemantics,
+  WEB_FRAMEWORK_CONTRACT_VERSION,
+} from "../benchmark/web-framework/contract";
 
 const servers: Array<ReturnType<typeof createServer>> = [];
 
@@ -19,6 +24,18 @@ afterEach(async () => {
 });
 
 describe("web framework benchmark contract", () => {
+  it("versions and retains every repeated stream sample", async () => {
+    expect(WEB_FRAMEWORK_CONTRACT_VERSION).toBe(4);
+    const valid = await serve((_request, response) => {
+      response.write('<main data-stream="shell">Shell');
+      setTimeout(() => response.end('<section data-stream="done">Done</section></main>'), 12);
+    });
+    const measured = await measureStreamDistribution(`${valid}/stream`, { warmups: 1, samples: 3 });
+    expect(measured.warmups).toBe(1);
+    expect(measured.samples).toHaveLength(3);
+    expect(measured.samples.every((sample) => sample.chunkArrivalMs.length >= 2)).toBe(true);
+  });
+
   it("requires two distinct request-time dynamic route responses", async () => {
     const valid = await serve((request, response) => {
       const id = request.url?.split("/").at(-1) ?? "";

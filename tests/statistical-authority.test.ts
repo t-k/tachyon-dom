@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { analyzeRatios, balancedOrder } from "../benchmark/shared/statistical-authority";
 import { createLocalRunPlan } from "../benchmark/local-compare/run-plan";
+import { createWebRunPlan } from "../benchmark/web-framework/workload";
 
 describe("benchmark statistical authority", () => {
   it("classifies a stable one-percent-or-better win as meaningful", () => {
@@ -60,5 +61,16 @@ describe("benchmark statistical authority", () => {
         ),
       ),
     ).toEqual(new Set(implementations));
+  });
+
+  it("balances web framework positions across fresh runs", () => {
+    const frameworks = ["a", "b", "c"];
+    expect(
+      new Set(
+        [0, 1, 2].map(
+          (runIndex) => createWebRunPlan(frameworks, { runId: `run-${runIndex}`, runIndex, seed: 4 }).frameworkOrder[0],
+        ),
+      ),
+    ).toEqual(new Set(frameworks));
   });
 });
