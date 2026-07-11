@@ -13,7 +13,7 @@ import {
   type TachyonAppAssets,
   type TachyonAppDefinition,
 } from "./app.js";
-import type { HtmlWhitespacePolicy } from "./html-whitespace.js";
+import { resolveHtmlWhitespacePolicy, type HtmlWhitespacePolicy } from "./html-whitespace.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import type { TemplateWhitespacePolicy } from "./compiler/types.js";
@@ -61,10 +61,11 @@ export type TachyonAppViteOptions = {
   minifyHtml?: boolean;
 };
 
-const normalizedAppHtmlWhitespace = (
-  policy: HtmlWhitespacePolicy | undefined,
-  minifyHtml: boolean | undefined,
-): HtmlWhitespacePolicy => policy ?? (minifyHtml === false ? "preserve-tags" : "normalize-tags");
+const configuredAppHtmlWhitespace = (options: TachyonAppViteOptions): HtmlWhitespacePolicy | undefined => {
+  if (options.htmlWhitespace !== undefined) return resolveHtmlWhitespacePolicy(options.htmlWhitespace);
+  if (options.minifyHtml !== undefined) return options.minifyHtml ? "normalize-tags" : "preserve-tags";
+  return undefined;
+};
 
 export type TachyonRouteAppOptions = Omit<TachyonAppDefinition, "pages"> & {
   routesDir: string;
@@ -519,9 +520,13 @@ export const tachyonSsr = (options: TachyonSsrViteOptions): Plugin => ({
   },
 });
 
-export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {}): Plugin => ({
-  name: "tachyon-dom-app",
-  configureServer(server) {
+export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {}): Plugin => {
+  const configuredWhitespace = configuredAppHtmlWhitespace(options);
+  const whitespaceFor = (mode: "development" | "production"): HtmlWhitespacePolicy =>
+    configuredWhitespace ?? (mode === "development" ? "preserve-tags" : "normalize-tags");
+  return {
+    name: "tachyon-dom-app",
+    configureServer(server) {
     server.middlewares.use((request, response, next) => {
       const page = app.pageForPath(new URL(request.url ?? "/", "http://tachyon.local").pathname);
       if (!page) {
@@ -536,11 +541,12 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
             scripts: [options.appScript ?? `${page.assetPrefix ?? "."}/main.ts`],
             styles: [`${page.assetPrefix ?? "."}/styles.css`],
           },
+          whitespace: whitespaceFor("development"),
         }),
       );
     });
-  },
-  generateBundle(_outputOptions, bundle) {
+    },
+    generateBundle(_outputOptions, bundle) {
     const entry = Object.values(bundle).find((item) => item.type === "chunk" && item.isEntry);
     const cssFiles = Object.values(bundle).flatMap((item) =>
       item.type === "asset" && item.fileName.endsWith(".css") ? [item.fileName] : [],
@@ -555,12 +561,13 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
         fileName: page.fileName,
         source: app.renderDocument(page.path, {
           assets,
-          whitespace: normalizedAppHtmlWhitespace(options.htmlWhitespace, options.minifyHtml),
+          whitespace: whitespaceFor("production"),
         }),
         type: "asset",
       });
     }
-  },
-});
+    },
+  };
+};
 
 export default tachyonDom;

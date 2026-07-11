@@ -46,7 +46,7 @@ The first list runtime path, `tachyon-dom/runtime/list`, preserves keyed row ele
 
 ## App Layer
 
-`tachyon-dom/app` provides a small app definition layer for examples and applications that should not need duplicated `main.ts`, `ssr.ts`, and HTML entry files. Define pages once, render SSR documents from the same definition, and let the Vite preset serve generated HTML in development and emit minified HTML in production:
+`tachyon-dom/app` provides a small app definition layer for examples and applications that should not need duplicated `main.ts`, `ssr.ts`, and HTML entry files. Define pages once, render SSR documents from the same definition, and let the Vite preset serve generated HTML in development and emit normalized HTML in production. With no option, development preserves tag formatting while production normalizes it. An explicit `htmlWhitespace` policy applies identically in both modes; legacy JavaScript values use the same runtime mapping, and invalid values fail during plugin creation before a server starts. The deprecated `minifyHtml` boolean also applies to both modes when explicitly set, while `htmlWhitespace` takes precedence:
 
 Create a starter app with:
 
