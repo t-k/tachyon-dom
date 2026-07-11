@@ -25,13 +25,13 @@ Write obligations `BENCH-01` through `BENCH-05`, `HTML-01` through `HTML-06`, `S
 - [ ] **Step 2: Write the pairwise model**
 
 ```text
-Context: ordinary, title, pre, svg_text
+Context: ordinary, title, pre, svg_text, math_text, foreign_object
 Policy: preserve, condense
 Target: client, server, stream
 Whitespace: newline_indent, crlf_indent, spaces_only, inline_spaces
 XmlSpace: absent, preserve, default
 
-IF [Context] <> "svg_text" THEN [XmlSpace] = "absent";
+IF [Context] <> "svg_text" AND [Context] <> "math_text" THEN [XmlSpace] = "absent";
 IF [Context] = "title" OR [Context] = "pre" THEN [XmlSpace] = "absent";
 ```
 
@@ -72,16 +72,20 @@ Expected: FAIL because null required values and unavailable dependency versions 
 
 - [ ] **Step 3: Add availability-aware required-path validation**
 
-Introduce a required-value validator that rejects `undefined`, `null`, and dependency entries whose `version` is not a non-empty string. Keep nullable Git fields valid in the base schema when `git.available === false`; comparison authority continues to reject unavailable Git metadata separately.
+Introduce comparator-supplied required validators rather than treating mere presence as validity. Use positive integers for iteration controls, non-empty strings for identities, typed arrays for implementation sets, and available dependency records whose versions are non-empty strings. Keep nullable Git fields valid in the base schema when `git.available === false`; comparison authority continues to reject unavailable Git metadata separately.
 
 ```ts
-const availableRequiredValue = (fieldPath: string, value: unknown): boolean => {
-  if (value === undefined || value === null) return false;
-  if (fieldPath === "provenance.dependencies") {
-    return validAvailableDependencies(value);
-  }
-  return true;
+export type BenchmarkRequiredField = {
+  path: string;
+  validate: (value: unknown) => boolean;
 };
+
+export const availableDependencies = (value: unknown): boolean =>
+  isRecord(value) &&
+  Object.keys(value).length > 0 &&
+  Object.values(value).every(
+    (dependency) => isRecord(dependency) && nonEmptyString(dependency.version),
+  );
 ```
 
 - [ ] **Step 4: Verify GREEN and existing compatibility**
@@ -108,7 +112,7 @@ git commit -m "fix: reject unavailable benchmark provenance"
 
 - [ ] **Step 1: Write failing local-comparison tests**
 
-Test a pure `validateLocalCompareRuns()` function with valid artifacts, mismatched `workload.candidate`, a candidate missing from `workload.implementations`, and mismatched baseline identity. Assert invalid identity paths and a verified summary containing runtime, dependencies, host, and workload.
+Test a pure `validateLocalCompareRuns()` function with valid artifacts, mismatched `workload.candidate`, a candidate missing or duplicated in `workload.implementations`, mismatched `workload.baseline`, a baseline missing or duplicated in implementations, empty or duplicate implementations, and wrong benchmark name. Assert invalid identity paths and a verified summary containing runtime, dependencies, host, and workload.
 
 - [ ] **Step 2: Verify RED**
 
@@ -118,11 +122,11 @@ Expected: FAIL because the module and pure validator do not exist.
 
 - [ ] **Step 3: Implement comparator-specific validation**
 
-Move local required paths into `validation.ts`, validate `benchmark.name === "local-compare"`, require a non-empty candidate and implementation list, require the candidate to appear exactly once, and compare intended identity fields across every run. Return a `Result` containing typed runs and a printable verified-controls object.
+Move local required validators into `validation.ts`, validate `benchmark.name === "local-compare"`, require distinct non-empty baseline and candidate identities, require each to appear exactly once in a non-empty unique implementation list, and compare both identities across every run. Return a `Result` containing typed runs and a machine-testable verified-controls object.
 
 - [ ] **Step 4: Print verified controls before measurements**
 
-Update the aggregate report to print candidate identity, Git tree identity, Node/platform/CPU controls, dependency versions, and workload controls after validation succeeds. Apply the same benchmark-specific required-field pattern to streaming and HTML-minification comparison output so a successful authoritative claim shows its basis.
+Update the aggregate report to print baseline and candidate identities, Git tree identity, Node/platform/CPU controls, dependency versions, and workload controls after validation succeeds. Apply the same benchmark-specific required-field pattern to streaming, including subject Git availability, commit, tree hash, and precise structural error paths. Treat HTML minification as a same-process algorithm comparison, not a revision comparison: remove the arbitrary baseline-revision claim and report the two algorithm identities plus current checkout provenance and workload.
 
 - [ ] **Step 5: Verify GREEN**
 
@@ -156,11 +160,12 @@ Expected: FAIL for `title` and SVG preservation.
 
 - [ ] **Step 3: Implement inherited preservation state**
 
-Replace the boolean recursion parameter with a state describing protected HTML text and XML-space inheritance. Add `title` to protected text elements. For SVG descendants, read a static `xml:space` attribute case-sensitively: `preserve` enables preservation, `default` disables inherited XML preservation, and absent inherits the parent state. Protected HTML elements remain protected regardless of XML reset.
+Replace the boolean recursion parameter with a state describing protected HTML text, foreign-content namespace, and XML-space inheritance. Add `title` to protected text elements. In SVG and MathML descendants only, read a static literal `xml:space` attribute case-sensitively: `preserve` enables preservation, `default` disables inherited XML preservation, and absent inherits the parent state. Dynamic expression values, unknown values, spread-derived values, and case variants do not change compile-time state. `foreignObject` returns descendants to HTML context. Protected HTML elements remain protected regardless of XML reset.
 
 ```ts
 type WhitespaceContext = {
   protectedHtmlText: boolean;
+  foreignContent: "html" | "svg" | "math";
   xmlSpace: "default" | "preserve";
 };
 ```
@@ -191,16 +196,19 @@ git commit -m "fix: preserve semantic template whitespace"
 ### Task 5: Add metadata-first progressive route bodies
 
 **Files:**
-- Modify: `tests/router-stream.test.ts`
 - Modify: `src/router.ts`
+- Modify: `src/adapters/workers.ts`
+- Modify: `tests/router-advanced.test.ts`
+- Modify: `tests/router-adapters.test.ts`
+- Modify: `tests/workers-binding-types.ts`
 
 - [ ] **Step 1: Write failing progressive-stream regressions**
 
-Define a route with buffered `render` plus a `stream` async generator that yields `"first"`, waits on a test-controlled promise, then yields `"second"`. Assert `renderRouteStream()` resolves authoritative status and headers before consuming chunks, the first chunk is observable before the second is released, and `renderRoute()` still uses buffered `render`. Add `HEAD` coverage proving the generator is not started.
+Define a route with buffered `render` plus a `stream` async generator that yields `"first"`, waits on a test-controlled promise, then yields `"second"`. Assert `renderRouteStream()` resolves authoritative status and headers after prefetching only the first iterator result, the first chunk is observable before the second is released, and `renderRoute()` still uses buffered `render`. Add `HEAD`, redirect, middleware/loader response, 404, CSRF rejection, and loader-error coverage proving the stream callback is not started. Add synchronous callback throw, throw before first yield, throw after first yield, and consumer cancellation tests.
 
 - [ ] **Step 2: Verify RED**
 
-Run: `pnpm vitest run tests/router-stream.test.ts`
+Run: `pnpm vitest run tests/router-advanced.test.ts tests/router-adapters.test.ts`
 
 Expected: FAIL because `RouteDefinition.stream` is absent and the current implementation emits one buffered chunk.
 
@@ -218,22 +226,22 @@ export type RouteDefinition<Data = unknown, ActionResult = unknown> = {
 };
 ```
 
-Streaming uses the deepest route's `stream` callback after loaders and metadata are resolved. Header/cache contexts use an empty outlet for progressive routes and this behavior is documented in the public type comment. Nested buffered layouts are applied only when no progressive callback exists; avoid inventing streaming layout composition in this change.
+Also add `stream` to `RouteModule`, forward it from `routeFromModule()`, and add a bindings-aware `stream` signature to `WorkersRouteDefinition`. Streaming uses the deepest route's callback after loaders and metadata are resolved. Header/cache contexts use an empty outlet for progressive routes and this behavior is documented in the public type comment. Nested buffered layouts are applied only when no progressive callback exists; avoid inventing streaming layout composition in this change.
 
 - [ ] **Step 4: Forward chunks without buffering**
 
-Return the prepared metadata immediately and expose the route source as `chunks`. Do not call `Array.from`, concatenate chunks, or await source completion. For `HEAD`, return an empty async iterable without invoking the callback. Let iteration errors reject the consumer's iteration without changing `final` metadata.
+Invoke the callback and prefetch exactly one iterator result before returning the prepared metadata. A synchronous callback failure or failure before the first yield is handled by the existing error boundary and may produce an authoritative 500. Expose the prefetched result followed by the remaining iterator as `chunks`; do not collect or concatenate the rest. For `HEAD` and non-success route outcomes, return an empty async iterable without invoking the callback. After the first yielded chunk, let iteration errors reject without appending error HTML or exception text and call `iterator.return()` on consumer cancellation. Verify adapter cancellation reaches the generator `finally` block exactly once and does not begin the second chunk's work.
 
 - [ ] **Step 5: Verify GREEN and metadata regressions**
 
-Run: `pnpm vitest run tests/router-stream.test.ts tests/adapter-streaming.test.ts tests/router-security-cache.test.ts`
+Run: `pnpm vitest run tests/router-advanced.test.ts tests/router-adapters.test.ts tests/router-security.test.ts tests/workers-binding-types.ts`
 
 Expected: PASS, including delayed redirects, CSP, multiple Set-Cookie, Vary, and no-store cases.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/router.ts tests/router-stream.test.ts
+git add src/router.ts src/adapters/workers.ts tests/router-advanced.test.ts tests/router-adapters.test.ts tests/workers-binding-types.ts
 git commit -m "feat: stream route bodies after metadata commit"
 ```
 
@@ -252,7 +260,7 @@ git commit -m "feat: stream route bodies after metadata commit"
 
 - [ ] **Step 1: Write failing source and package type tests**
 
-Compile snippets that pass direct `"preserve"` and `"condense"` literals to app, Vite, router, Workers, Node, and Lambda APIs. Compile negative snippets with `const policy: TemplateWhitespacePolicy` and `@ts-expect-error`; assert TypeScript reports an unused directive before the fix and no diagnostic after the boundary is enforced. Repeat against the packed package declarations.
+Compile snippets that pass direct `"preserve"` and `"condense"` literals and `HtmlWhitespacePolicy` variables to app object methods, standalone app helpers, Vite, router, Workers, Node, and Lambda APIs. Compile negative snippets with `TemplateWhitespacePolicy` and `LegacyHtmlWhitespacePolicy` variables plus `@ts-expect-error`; assert TypeScript reports an unused directive before the fix and no diagnostic after the boundary is enforced. Repeat against the packed package declarations.
 
 - [ ] **Step 2: Verify RED**
 
@@ -267,7 +275,7 @@ export type CompatibleHtmlWhitespacePolicy<Value extends HtmlWhitespacePolicyInp
   TemplateWhitespacePolicy extends Value ? never : Value;
 ```
 
-Make each public option container generic with a `const` type parameter defaulting to `HtmlWhitespacePolicy`, and type the property as `CompatibleHtmlWhitespacePolicy<Value>`. Runtime normalization remains unchanged.
+Make each public option container and every public function or object-method call signature that accepts it generic with a `const` type parameter defaulting to `HtmlWhitespacePolicy`. Type the property as `CompatibleHtmlWhitespacePolicy<Value>`. Verify inference independently for app helpers, `TachyonApp` methods, Vite, router, Workers, Node, and Lambda because a single non-generic boundary can either reject legacy literals or re-admit the wide union. Runtime normalization remains unchanged.
 
 - [ ] **Step 4: Update public documentation**
 
@@ -297,7 +305,7 @@ git commit -m "fix: separate template and tag whitespace types"
 Run:
 
 ```bash
-pnpm vitest run tests/benchmark-provenance.test.ts tests/local-compare-validation.test.ts tests/compiler-whitespace.test.ts tests/compiler-whitespace-property.test.ts tests/router-stream.test.ts tests/whitespace-policy-types.test.ts
+pnpm vitest run tests/benchmark-provenance.test.ts tests/local-compare-validation.test.ts tests/compiler-whitespace.test.ts tests/compiler-whitespace-property.test.ts tests/router-advanced.test.ts tests/router-adapters.test.ts tests/router-security.test.ts tests/whitespace-policy-types.test.ts
 pnpm lint
 pnpm build
 ```
