@@ -223,6 +223,23 @@ The helper reads and compiles the template with Tachyon DOM diagnostics, then re
 
 `sanitizeHtml(markup)` has a small built-in allowlist sanitizer for constrained, already-simple backend HTML. Do not rely on the default sanitizer for arbitrary untrusted HTML. For user-generated or third-party markup, pass a vetted adapter through `createHtmlSanitizer()`/`sanitizeHtml(..., { adapter })`, such as a DOMPurify-backed sanitizer in the target runtime.
 
+Progressive route `stream()` strings are trusted raw HTML. Node, Workers, and Lambda adapters never escape or sanitize chunks. Escape untrusted text explicitly:
+
+```ts
+import { escapeToHtml, trustedHtmlChunk, type RouteDefinition } from "tachyon-dom/router";
+
+const route: RouteDefinition = {
+  path: "/search",
+  loader: ({ url }) => url.searchParams.get("q") ?? "",
+  render: () => "",
+  stream: async function* ({ data }) {
+    yield `<p>${trustedHtmlChunk(escapeToHtml(data))}</p>`;
+  },
+};
+```
+
+`escapeToHtml()` is for HTML text content, not unquoted attributes, script/style source, URLs, or other parser contexts. For intentionally accepted markup, use a vetted sanitizer adapter and pass its factory-created `TrustedHtml` through `trustedHtmlChunk()`; forged structural objects are rejected.
+
 `tachyon-dom/server/html` is an escaping helper, not a sanitizer. Use `rawHtml()` only for trusted framework or application output. Sanitize user-generated HTML before it reaches `rawHtml()`.
 
 The built-in sanitizer rejects protocol-relative URLs and removes absolute `http:`/`https:` URLs unless their origin is explicitly listed in `allowedUrlOrigins`. `redirect()` similarly accepts path-relative targets by default; external redirects require `allowExternal: true` plus an `allowedOrigins` entry for the target origin.

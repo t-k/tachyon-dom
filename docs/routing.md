@@ -173,6 +173,23 @@ Buffered routes and their Node, Workers, and Lambda handlers accept `htmlWhitesp
 
 Streaming adapters preserve downstream backpressure. Node pauses source reads after `response.write()` returns `false` and resumes on `drain`; close or error cancels the source even during that wait. Workers converts route chunks with demand-driven `ReadableStream.pull()` and forwards cancellation to the async iterator. Lambda bridges the Web response body to the AWS-managed standard Node Writable with `pipeline()`, which coordinates backpressure, completion, cancellation, and destination errors without a custom `drain()` Promise contract.
 
+Every progressive `stream()` string is trusted raw HTML. Adapters never escape or sanitize it. Use `trustedHtmlChunk(escapeToHtml(value))` when inserting untrusted text. This helper is safe for an HTML text node only; do not reuse it for unquoted attributes, script/style source, URLs, or other parser contexts. When an application intentionally accepts markup, pass it through a vetted sanitizer adapter created with `createHtmlSanitizer()` and convert the returned factory-created `TrustedHtml` with `trustedHtmlChunk()`. Structurally forged trusted values are rejected.
+
+```ts
+import { escapeToHtml, trustedHtmlChunk, type RouteDefinition } from "tachyon-dom/router";
+
+const searchRoute: RouteDefinition = {
+  path: "/search",
+  loader: ({ url }) => url.searchParams.get("q") ?? "",
+  render: () => "",
+  stream: async function* ({ data }) {
+    yield "<p>";
+    yield trustedHtmlChunk(escapeToHtml(data));
+    yield "</p>";
+  },
+};
+```
+
 ```ts
 import { createWorkersHandler } from "tachyon-dom/adapters/workers";
 

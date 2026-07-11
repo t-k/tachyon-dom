@@ -83,6 +83,20 @@ try {
       diagnostics.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")).join("\n"),
     );
   }
+  const runtimeFile = path.join(consumer, "trusted-html.mjs");
+  await writeFile(
+    runtimeFile,
+    `import { escapeToHtml, trustedHtmlChunk } from "tachyon-dom/router";
+import { sanitizeHtml } from "tachyon-dom/security";
+const escaped = trustedHtmlChunk(escapeToHtml("<img src=x onerror=alert(1)>"));
+if (escaped !== "&lt;img src=x onerror=alert(1)&gt;") throw new Error("Escaping helper was not usable from package exports.");
+if (!trustedHtmlChunk(sanitizeHtml("<b>safe</b>")).includes("<b>safe</b>")) throw new Error("Sanitized TrustedHtml was not accepted.");
+let rejected = false;
+try { trustedHtmlChunk({ __tachyonTrustedHtml: true, value: "<img>" }); } catch { rejected = true; }
+if (!rejected) throw new Error("Forged TrustedHtml was accepted.");
+`,
+  );
+  await execFileAsync(process.execPath, [runtimeFile], { cwd: consumer });
   console.log(`Installed package whitespace policy declarations verified from ${installedRoot}.`);
 } finally {
   await rm(directory, { recursive: true, force: true });

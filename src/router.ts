@@ -76,7 +76,12 @@ export type RouteDefinition<Data = unknown, ActionResult = unknown> = {
   fallback?: string;
   error?: (context: { request: Request; url: URL; error: unknown }) => string | Promise<string>;
   notFound?: (context: { request: Request; url: URL }) => string | Promise<string>;
-  /** Streams the deepest matched route after loaders and authoritative metadata resolve. */
+  /**
+   * Streams the deepest matched route after loaders and authoritative metadata resolve.
+   * Every string is trusted raw HTML: adapters do not escape or sanitize chunks. Use
+   * trustedHtmlChunk(escapeToHtml(value)) for untrusted text and a vetted sanitizer
+   * followed by trustedHtmlChunk() for intentionally accepted markup.
+   */
   stream?: (context: RouteContext<Data, ActionResult>) => AsyncIterable<string>;
   render: (context: RouteContext<Data, ActionResult>) => string | Promise<string>;
   children?: RouteDefinition[];
@@ -336,6 +341,14 @@ const trustedHtmlValue = (value: TrustedHtml | string): string => {
   }
   return value.value;
 };
+
+/**
+ * Converts a factory-created TrustedHtml value into a raw progressive response chunk.
+ * Route stream chunks are inserted as HTML without adapter escaping. Escape untrusted
+ * text with escapeToHtml(), or sanitize intentional markup with a vetted sanitizer,
+ * before calling this helper.
+ */
+export const trustedHtmlChunk = (value: TrustedHtml): string => trustedHtmlValue(value);
 
 export const html = (body: TrustedHtml, init: ResponseInit = {}): RouteResponse => {
   const headers = new Headers(init.headers);
