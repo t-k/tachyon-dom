@@ -261,3 +261,81 @@ export const validateLocalCompareRuns = (values: readonly unknown[]): LocalCompa
     },
   };
 };
+
+const validateBalancedPositions = (
+  orders: readonly (readonly string[])[],
+  expectedItems: readonly string[],
+  field: string,
+): string[] => {
+  if (
+    orders.some(
+      (order) =>
+        order.length !== expectedItems.length ||
+        new Set(order).size !== expectedItems.length ||
+        expectedItems.some((item) => !order.includes(item)),
+    )
+  ) {
+    return [field];
+  }
+  for (const item of expectedItems) {
+    const counts = Array(expectedItems.length).fill(0) as number[];
+    for (const order of orders) {
+      const position = order.indexOf(item);
+      counts[position] = (counts[position] ?? 0) + 1;
+    }
+    if (Math.max(...counts) - Math.min(...counts) > 1) return [field];
+  }
+  return [];
+};
+
+export const validateAuthoritativeLocalCompareRuns = (values: readonly unknown[]): LocalCompareValidation => {
+  const base = validateLocalCompareRuns(values);
+  if (!base.ok) return base;
+
+  const invalidFields: string[] = [];
+  if (values.length < 5) invalidFields.push("runs");
+  const runIds: string[] = [];
+  const implementationOrders: string[][] = [];
+  const scenarioOrders: string[][] = [];
+  for (const [index, value] of values.entries()) {
+    const prefix = `runs[${index}]`;
+    if (valueAtBenchmarkPath(value, "benchmark.contractVersion") !== 3) {
+      invalidFields.push(`${prefix}.benchmark.contractVersion`);
+    }
+    const runId = valueAtBenchmarkPath(value, "workload.runId");
+    if (!nonEmptyString(runId)) invalidFields.push(`${prefix}.workload.runId`);
+    else runIds.push(runId);
+    if (!Number.isInteger(valueAtBenchmarkPath(value, "workload.seed"))) {
+      invalidFields.push(`${prefix}.workload.seed`);
+    }
+    if (Number(valueAtBenchmarkPath(value, "workload.iterations")) < 30) {
+      invalidFields.push(`${prefix}.workload.iterations`);
+    }
+    if (Number(valueAtBenchmarkPath(value, "workload.warmup")) < 5) {
+      invalidFields.push(`${prefix}.workload.warmup`);
+    }
+    const order = valueAtBenchmarkPath(value, "workload.order");
+    implementationOrders.push(Array.isArray(order) && order.every(nonEmptyString) ? order : []);
+    const scenarioOrder = valueAtBenchmarkPath(value, "workload.scenarioOrder");
+    scenarioOrders.push(Array.isArray(scenarioOrder) && scenarioOrder.every(nonEmptyString) ? scenarioOrder : []);
+    const summaries = valueAtBenchmarkPath(value, "measurements.summaries");
+    if (Array.isArray(summaries)) {
+      for (const [summaryIndex, summaryValue] of summaries.entries()) {
+        const summary = isRecord(summaryValue) ? summaryValue : {};
+        if (
+          !Array.isArray(summary.values) ||
+          summary.values.length < 30 ||
+          !summary.values.every((sample) => finiteNumber(sample) && sample >= 0)
+        ) {
+          invalidFields.push(`${prefix}.measurements.summaries[${summaryIndex}].values`);
+        }
+      }
+    }
+  }
+  if (new Set(runIds).size !== runIds.length) invalidFields.push("runs.workload.runId");
+  invalidFields.push(
+    ...validateBalancedPositions(implementationOrders, base.verifiedControls.workload.implementations, "runs.workload.order"),
+    ...validateBalancedPositions(scenarioOrders, [...requiredScenarioIds], "runs.workload.scenarioOrder"),
+  );
+  return invalidFields.length > 0 ? { ok: false, invalidFields: [...new Set(invalidFields)] } : base;
+};
