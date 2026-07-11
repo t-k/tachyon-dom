@@ -77,7 +77,7 @@ const hashPrivateDependencyTree = async (nodeModules: string): Promise<string> =
   const hash = createHash("sha256");
   const visit = async (directory: string): Promise<void> => {
     const entries = await readdir(directory, { withFileTypes: true });
-    entries.sort((left, right) => left.name.localeCompare(right.name));
+    entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0));
     for (const entry of entries) {
       const absolute = path.join(directory, entry.name);
       const relative = path.relative(canonicalNodeModules, absolute).split(path.sep).join("/");

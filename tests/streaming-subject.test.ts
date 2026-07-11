@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -131,10 +131,43 @@ describe("streaming benchmark adapter identity", () => {
         path.dirname(path.dirname(prepared.executionModule)),
         "node_modules/fixture-dependency/index.js",
       );
+      const dependencyMetadata = await lstat(preparedDependency);
+      expect(dependencyMetadata.isSymbolicLink()).toBe(false);
+      expect(dependencyMetadata.nlink).toBe(1);
       await expect(writeFile(preparedDependency, 'export const dependencyValue = "tampered";\n')).rejects.toThrow();
       await expect(prepared.verify()).resolves.toBeUndefined();
+      await chmod(preparedDependency, 0o644);
+      await writeFile(preparedDependency, 'export const dependencyValue = "tampered";\n');
+      await expect(prepared.verify()).rejects.toThrow(/dependencies do not match/);
     } finally {
       await prepared.cleanup();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a lockfile changed after the snapshot was sealed", async () => {
+    const fixture = await repositoryFixture();
+    const prepared = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+    try {
+      const preparedLockfile = path.join(path.dirname(path.dirname(prepared.executionModule)), "pnpm-lock.yaml");
+      await chmod(preparedLockfile, 0o644);
+      await writeFile(preparedLockfile, "tampered\n");
+      await expect(prepared.verify()).rejects.toThrow(/lockfile does not match/);
+    } finally {
+      await prepared.cleanup();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an authoritative subject without a pinned lockfile", async () => {
+    const fixture = await repositoryFixture();
+    try {
+      await execFileAsync("git", ["rm", "pnpm-lock.yaml"], { cwd: fixture.root });
+      await execFileAsync("git", ["commit", "-m", "remove lockfile"], { cwd: fixture.root });
+      await expect(prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter)).rejects.toThrow(
+        /pinned pnpm-lock\.yaml/,
+      );
+    } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }
   });
