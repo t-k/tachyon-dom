@@ -136,9 +136,33 @@ describe("streaming benchmark adapter identity", () => {
       expect(dependencyMetadata.nlink).toBe(1);
       await expect(writeFile(preparedDependency, 'export const dependencyValue = "tampered";\n')).rejects.toThrow();
       await expect(prepared.verify()).resolves.toBeUndefined();
+      await expect(prepared.importAdapter<{ adapter: string }>()).resolves.toMatchObject({ adapter: "pinned" });
+      await chmod(preparedDependency, 0o555);
+      await expect(prepared.verify()).rejects.toThrow(/dependencies do not match/);
+      await chmod(preparedDependency, 0o444);
+      await expect(prepared.verify()).resolves.toBeUndefined();
       await chmod(preparedDependency, 0o644);
       await writeFile(preparedDependency, 'export const dependencyValue = "tampered";\n');
       await expect(prepared.verify()).rejects.toThrow(/dependencies do not match/);
+      await expect((prepared as any).importAdapter()).rejects.toThrow(/dependencies do not match/);
+    } finally {
+      await prepared.cleanup();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("binds execution to one hashed bundle and detects execution-relevant mode changes", async () => {
+    const fixture = await repositoryFixture();
+    const prepared = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+    try {
+      expect((prepared as any).executionBundle).toMatchObject({
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        bundler: expect.stringMatching(/^esbuild@/),
+      });
+      await expect((prepared as any).importAdapter()).resolves.toMatchObject({ adapter: true });
+      const preparedAdapter = prepared.executionModule;
+      await chmod(preparedAdapter, 0o755);
+      await expect(prepared.verify()).rejects.toThrow(/source tree|mode|snapshot/i);
     } finally {
       await prepared.cleanup();
       await rm(fixture.root, { recursive: true, force: true });

@@ -292,7 +292,7 @@ describe("benchmark provenance", () => {
       >;
 
       expect(result.schemaVersion).toBe(2);
-      expect(result.benchmark).toEqual({ name: "streaming-backpressure", contractVersion: 2 });
+      expect(result.benchmark).toEqual({ name: "streaming-backpressure", contractVersion: 3 });
       expect(result.workload).toMatchObject({ transport: "tcp", connections: 1 });
       expect((result.workload as any).subject.git).toMatchObject({
         available: true,
@@ -303,6 +303,10 @@ describe("benchmark provenance", () => {
         relativePath: "src/adapters/node.ts",
         sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
         gitBlob: expect.stringMatching(/^[a-f0-9]{40,64}$/),
+        executionBundle: {
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+          bundler: expect.stringMatching(/^esbuild@/),
+        },
       });
       expect(result.provenance.command.argv).toContain("--connections");
       expect(result.measurements.completionTimeMs).toBeGreaterThan(0);
