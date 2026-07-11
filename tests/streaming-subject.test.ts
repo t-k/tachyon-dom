@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, chmod, lstat, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,7 +7,9 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 import {
+  hashPrivateDependencyTree,
   identifyStreamingBenchmarkAdapter,
+  materializeDependencyTree,
   prepareStreamingBenchmarkAdapter,
   writeVerifiedBenchmarkArtifact,
 } from "../benchmark/streaming-subject.js";
@@ -31,6 +33,97 @@ const repositoryFixture = async (): Promise<{ root: string; adapter: string }> =
 };
 
 describe("streaming benchmark adapter identity", () => {
+  it("rejects computed dynamic imports that remain outside the hashed execution bundle", async () => {
+    const fixture = await repositoryFixture();
+    try {
+      await writeFile(path.join(fixture.root, "src/dynamic.mjs"), 'export const value = "live";\n');
+      await writeFile(
+        fixture.adapter,
+        'const modulePath = "./dynamic.mjs"; export const load = () => import(modulePath);\n',
+      );
+      await execFileAsync("git", ["add", "src/adapter.mjs", "src/dynamic.mjs"], { cwd: fixture.root });
+      await execFileAsync("git", ["commit", "-m", "computed import"], { cwd: fixture.root });
+      await expect(prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter)).rejects.toThrow(
+        /dynamic import.*authoritative/i,
+      );
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a nested escaping symlink before dependency materialization reads it", async () => {
+    const snapshot = await mkdtemp(path.join(tmpdir(), "tachyon-materialize-snapshot-"));
+    const external = await mkdtemp(path.join(tmpdir(), "tachyon-materialize-external-"));
+    const nodeModules = path.join(snapshot, "node_modules");
+    const packageRoot = path.join(snapshot, "vendor/package");
+    try {
+      await mkdir(nodeModules);
+      await mkdir(packageRoot, { recursive: true });
+      const secret = path.join(external, "secret.mjs");
+      await writeFile(secret, 'export const secret = "outside";\n');
+      await symlink(secret, path.join(packageRoot, "nested.mjs"));
+      await symlink(packageRoot, path.join(nodeModules, "package"), "dir");
+      await expect(materializeDependencyTree(snapshot, nodeModules)).rejects.toThrow(/escapes.*snapshot/i);
+    } finally {
+      await rm(snapshot, { recursive: true, force: true });
+      await rm(external, { recursive: true, force: true });
+    }
+  });
+
+  it("materializes every contained nested dependency symlink without retaining a live link", async () => {
+    const snapshot = await mkdtemp(path.join(tmpdir(), "tachyon-materialize-contained-"));
+    const nodeModules = path.join(snapshot, "node_modules");
+    const packageRoot = path.join(snapshot, "vendor/package");
+    const shared = path.join(snapshot, "shared/value.mjs");
+    try {
+      await mkdir(nodeModules);
+      await mkdir(packageRoot, { recursive: true });
+      await mkdir(path.dirname(shared), { recursive: true });
+      await writeFile(shared, 'export const value = "contained";\n');
+      await symlink(shared, path.join(packageRoot, "nested.mjs"));
+      await symlink(packageRoot, path.join(nodeModules, "package"), "dir");
+      await materializeDependencyTree(snapshot, nodeModules);
+      const materialized = path.join(nodeModules, "package/nested.mjs");
+      expect((await lstat(materialized)).isSymbolicLink()).toBe(false);
+      expect(await readFile(materialized, "utf8")).toContain('"contained"');
+    } finally {
+      await rm(snapshot, { recursive: true, force: true });
+    }
+  });
+
+  it("uses unambiguous length framing for dependency tree records", async () => {
+    const oneFile = await mkdtemp(path.join(tmpdir(), "tachyon-hash-one-"));
+    const twoFiles = await mkdtemp(path.join(tmpdir(), "tachyon-hash-two-"));
+    try {
+      const delimiter = Buffer.from([0]);
+      await writeFile(
+        path.join(oneFile, "a"),
+        Buffer.concat([
+          Buffer.from("A"),
+          delimiter,
+          Buffer.from("file"),
+          delimiter,
+          Buffer.from("b"),
+          delimiter,
+          Buffer.from("292"),
+          delimiter,
+          Buffer.from("B"),
+        ]),
+      );
+      await writeFile(path.join(twoFiles, "a"), "A");
+      await writeFile(path.join(twoFiles, "b"), "B");
+      await Promise.all([
+        chmod(path.join(oneFile, "a"), 0o444),
+        chmod(path.join(twoFiles, "a"), 0o444),
+        chmod(path.join(twoFiles, "b"), 0o444),
+      ]);
+      await expect(hashPrivateDependencyTree(oneFile)).resolves.not.toBe(await hashPrivateDependencyTree(twoFiles));
+    } finally {
+      await rm(oneFile, { recursive: true, force: true });
+      await rm(twoFiles, { recursive: true, force: true });
+    }
+  });
+
   it("binds a tracked adapter to its subject-relative path and commit bytes", async () => {
     const fixture = await repositoryFixture();
     try {

@@ -3,7 +3,6 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
   copyFile,
-  cp,
   lstat,
   mkdir,
   mkdtemp,
@@ -18,6 +17,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
+import { parseSync } from "oxc-parser";
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -48,12 +48,51 @@ const isInside = (root: string, candidate: string): boolean => {
   return relative === "" || (!relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 };
 
-const materializeDependencyTree = async (snapshotRoot: string, nodeModules: string): Promise<void> => {
+export const materializeDependencyTree = async (snapshotRoot: string, nodeModules: string): Promise<void> => {
   const [canonicalSnapshotRoot, canonicalNodeModules] = await Promise.all([
     realpath(snapshotRoot),
     realpath(nodeModules),
   ]);
   let copyIndex = 0;
+  const copyContainedEntry = async (
+    source: string,
+    destination: string,
+    activeDirectories: Set<string>,
+  ): Promise<void> => {
+    const metadata = await lstat(source);
+    if (metadata.isSymbolicLink()) {
+      const resolved = await realpath(source);
+      if (!isInside(canonicalSnapshotRoot, resolved)) {
+        throw new Error(`Prepared dependency symlink escapes the private snapshot: ${source}`);
+      }
+      await copyContainedEntry(resolved, destination, activeDirectories);
+      return;
+    }
+    if (metadata.isDirectory()) {
+      const canonicalSource = await realpath(source);
+      if (!isInside(canonicalSnapshotRoot, canonicalSource)) {
+        throw new Error(`Prepared dependency directory escapes the private snapshot: ${source}`);
+      }
+      if (activeDirectories.has(canonicalSource)) {
+        throw new Error(`Prepared dependency symlink cycle is not allowed: ${source}`);
+      }
+      activeDirectories.add(canonicalSource);
+      await mkdir(destination, { recursive: true });
+      try {
+        for (const entry of await readdir(canonicalSource)) {
+          await copyContainedEntry(path.join(canonicalSource, entry), path.join(destination, entry), activeDirectories);
+        }
+      } finally {
+        activeDirectories.delete(canonicalSource);
+      }
+      return;
+    }
+    if (metadata.isFile()) {
+      await copyFile(source, destination);
+      return;
+    }
+    throw new Error(`Prepared dependency entry has an unsupported type: ${source}`);
+  };
   const visit = async (directory: string): Promise<void> => {
     const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
@@ -66,7 +105,7 @@ const materializeDependencyTree = async (snapshotRoot: string, nodeModules: stri
         }
         if (!isInside(canonicalNodeModules, resolved)) {
           await rm(absolute, { force: true });
-          await cp(resolved, absolute, { recursive: true, dereference: true, force: true });
+          await copyContainedEntry(resolved, absolute, new Set());
           const replacement = await lstat(absolute);
           if (replacement.isDirectory()) await visit(absolute);
         }
@@ -88,7 +127,15 @@ const materializeDependencyTree = async (snapshotRoot: string, nodeModules: stri
 
 const ignoredPnpmMetadata = new Set([".modules.yaml", ".pnpm-workspace-state-v1.json"]);
 
-const hashPrivateDependencyTree = async (nodeModules: string): Promise<string> => {
+const updateHashFrame = (hash: ReturnType<typeof createHash>, value: Uint8Array | string): void => {
+  const bytes = typeof value === "string" ? Buffer.from(value, "utf8") : Buffer.from(value);
+  const length = Buffer.allocUnsafe(8);
+  length.writeBigUInt64BE(BigInt(bytes.byteLength));
+  hash.update(length);
+  hash.update(bytes);
+};
+
+export const hashPrivateDependencyTree = async (nodeModules: string): Promise<string> => {
   const canonicalNodeModules = await realpath(nodeModules);
   const hash = createHash("sha256");
   const visit = async (directory: string): Promise<void> => {
@@ -104,17 +151,22 @@ const hashPrivateDependencyTree = async (nodeModules: string): Promise<string> =
         if (!isInside(canonicalNodeModules, resolved)) {
           throw new Error(`Prepared dependency symlink escapes the private snapshot: ${relative}`);
         }
-        hash.update(`link\0${relative}\0${path.relative(canonicalNodeModules, resolved).split(path.sep).join("/")}\0`);
+        updateHashFrame(hash, "link");
+        updateHashFrame(hash, relative);
+        updateHashFrame(hash, path.relative(canonicalNodeModules, resolved).split(path.sep).join("/"));
       } else if (metadata.isDirectory()) {
-        hash.update(`directory\0${relative}\0${metadata.mode & 0o777n}\0`);
+        updateHashFrame(hash, "directory");
+        updateHashFrame(hash, relative);
+        updateHashFrame(hash, String(metadata.mode & 0o777n));
         await visit(absolute);
       } else if (metadata.isFile()) {
         if (metadata.nlink !== 1n) {
           throw new Error(`Prepared dependency file is not private to the snapshot: ${relative}`);
         }
-        hash.update(`file\0${relative}\0${metadata.mode & 0o777n}\0`);
-        hash.update(await readFile(absolute));
-        hash.update("\0");
+        updateHashFrame(hash, "file");
+        updateHashFrame(hash, relative);
+        updateHashFrame(hash, String(metadata.mode & 0o777n));
+        updateHashFrame(hash, await readFile(absolute));
         const after = await lstat(absolute, { bigint: true });
         if (
           after.dev !== metadata.dev ||
@@ -132,6 +184,26 @@ const hashPrivateDependencyTree = async (nodeModules: string): Promise<string> =
   };
   await visit(canonicalNodeModules);
   return hash.digest("hex");
+};
+
+const validateAuthoritativeBundle = (bundleBytes: Buffer): void => {
+  const parsed = parseSync("tachyon-benchmark-bundle.mjs", bundleBytes.toString("utf8"));
+  if (parsed.errors.length > 0) {
+    throw new Error(`The benchmark execution bundle is not valid ESM: ${parsed.errors[0]?.message ?? "parse error"}`);
+  }
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const node = value as Record<string, unknown>;
+    if (node.type === "ImportExpression") {
+      throw new Error("A computed or residual dynamic import is not allowed in an authoritative benchmark bundle.");
+    }
+    for (const child of Object.values(node)) visit(child);
+  };
+  visit(parsed.program);
 };
 
 const setTreeWritable = async (root: string, writable: boolean): Promise<void> => {
@@ -265,6 +337,7 @@ export const prepareStreamingBenchmarkAdapter = async (
     }
     const bundleBytes = bundleProcess.stdout;
     if (bundleBytes.length === 0) throw new Error("The benchmark adapter bundler did not produce an execution module.");
+    validateAuthoritativeBundle(bundleBytes);
     const bundlerVersion = (
       (await execFileAsync(process.execPath, [esbuildCli, "--version"], {
         cwd: snapshotRoot,
