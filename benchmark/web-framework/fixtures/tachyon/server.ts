@@ -7,6 +7,7 @@ import {
   type RouteDefinition,
   type StaticRouteDefinition,
 } from "../../../../src/adapters";
+import { SCORED_STREAM_WORKLOADS } from "../../workload";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distRoot = path.resolve(__dirname, "../../../../dist");
@@ -36,7 +37,9 @@ const ordersNavBody = () => `<h1>Dashboard</h1><h2 data-route="orders">Orders</h
 
 const streamShell = `<main id="app" data-route="stream"><h1>Stream</h1><p data-stream="shell">Shell</p>`;
 const streamSection = (index: number, done: boolean) =>
-  `<section${done ? ` data-stream="done"` : ""}><h2>Deferred payload ${index}</h2><ul>${items(`stream-${index}`)}</ul></section>${done ? "</main>" : ""}`;
+  `<section${done ? ` data-stream="done"` : ""}><h2>Deferred payload ${index}</h2><ul>${items(`stream-${index}`, SCORED_STREAM_WORKLOADS["tachyon-dom"].items)}</ul></section>${done ? "</main>" : ""}`;
+const evidenceStreamSection = (index: number, done: boolean) =>
+  `<section${done ? ` data-stream="done"` : ""}><h2>Evidence payload ${index}</h2><ul>${items(`evidence-${index}`)}</ul></section>${done ? "</main>" : ""}`;
 const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const streamDiagnostics = {
   started: 0,
@@ -46,7 +49,12 @@ const streamDiagnostics = {
   peakRssBytes: 0,
   emittedChunks: 0,
 };
-const streamChunks = async function* () {
+const scoredStreamChunks = async function* () {
+  yield streamShell;
+  await delay(SCORED_STREAM_WORKLOADS["tachyon-dom"].delayMs);
+  yield streamSection(1, true);
+};
+const evidenceStreamChunks = async function* () {
   streamDiagnostics.started += 1;
   const startingRssBytes = process.memoryUsage().rss;
   if (streamDiagnostics.startingRssBytes === 0) streamDiagnostics.startingRssBytes = startingRssBytes;
@@ -58,7 +66,7 @@ const streamChunks = async function* () {
     for (let index = 1; index <= 4; index += 1) {
       await delay(20);
       streamDiagnostics.peakRssBytes = Math.max(streamDiagnostics.peakRssBytes, process.memoryUsage().rss);
-      yield streamSection(index, index === 4);
+      yield evidenceStreamSection(index, index === 4);
       streamDiagnostics.emittedChunks += 1;
     }
     completed = true;
@@ -165,7 +173,12 @@ const routes: RouteDefinition[] = [
   {
     path: "/stream",
     render: () => "",
-    stream: streamChunks,
+    stream: scoredStreamChunks,
+  },
+  {
+    path: "/stream-evidence",
+    render: () => "",
+    stream: evidenceStreamChunks,
   },
   {
     path: "/stream-diagnostics",

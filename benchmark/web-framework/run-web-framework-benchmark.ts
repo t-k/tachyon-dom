@@ -329,8 +329,15 @@ const measureTachyonRouteStreamEvidence = async (
   baseUrl: string,
   streamTtfbMs: number,
 ): Promise<TachyonRouteStreamEvidence> => {
+  const evidenceAgent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  try {
+    await measureStreamSemantics(`${baseUrl}/stream-evidence`, evidenceAgent);
+    await measureStreamSemantics(`${baseUrl}/stream-evidence`, evidenceAgent);
+  } finally {
+    evidenceAgent.destroy();
+  }
   await new Promise<void>((resolve, reject) => {
-    const request = http.get(`${baseUrl}/stream`, (response) => {
+    const request = http.get(`${baseUrl}/stream-evidence`, (response) => {
       response.once("data", () => {
         response.destroy();
         request.destroy();

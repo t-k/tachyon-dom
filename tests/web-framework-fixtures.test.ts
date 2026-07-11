@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { SCORED_STREAM_WORKLOADS } from "../benchmark/web-framework/workload";
 
 const root = path.resolve(import.meta.dirname, "..");
 const fixture = (...segments: string[]): string => path.join(root, "benchmark/web-framework/fixtures", ...segments);
@@ -11,15 +12,29 @@ describe("web framework benchmark fixtures", () => {
     expect(existsSync(fixture("marko-run/src/routes/products/[id]/+page.marko"))).toBe(false);
   });
 
-  it("uses an explicit deferred stream generator in the Tachyon fixture", () => {
+  it("keeps every scored stream fixture on the same deferred workload", () => {
+    expect(Object.values(SCORED_STREAM_WORKLOADS)).toEqual(
+      Array(Object.keys(SCORED_STREAM_WORKLOADS).length).fill({
+        delayDependencies: 1,
+        delayMs: 20,
+        items: 80,
+        deferredBoundaries: 1,
+      }),
+    );
+  });
+
+  it("separates the scored Tachyon stream from the multi-chunk evidence route", () => {
     const source = readFileSync(fixture("tachyon/server.ts"), "utf8");
 
     expect(source).toContain("yield streamShell");
     expect(source).toContain("await delay(20)");
-    expect(source).toContain("yield streamSection(index, index === 4)");
+    expect(source).toContain("yield streamSection(1, true)");
+    expect(source).toContain("yield evidenceStreamSection(index, index === 4)");
     expect(source).toContain("streamDiagnostics.cancelled += 1");
     expect(source).toContain('path: "/stream"');
-    expect(source).toContain("stream: streamChunks");
+    expect(source).toContain('path: "/stream-evidence"');
+    expect(source).toContain("stream: scoredStreamChunks");
+    expect(source).toContain("stream: evidenceStreamChunks");
     expect(source).toContain("streaming: true");
     expect(source).not.toContain("writeNodeResponse(renderToResponse(streamChunks()), response)");
     expect(source).not.toContain('pathname === "/stream"');
