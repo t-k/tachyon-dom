@@ -136,6 +136,14 @@ describe("createKeyedRows", () => {
     ]);
   });
 
+  it("passes ascending global indices for a non-divisible stride", () => {
+    const { list } = setup();
+    list.replace(items(11));
+    const indices: number[] = [];
+    list.update(3, (_row, index) => indices.push(index));
+    expect(indices).toEqual([0, 3, 6, 9]);
+  });
+
   it("swaps rows while preserving element identity (adjacent and distant)", () => {
     const { tbody, list } = setup();
     list.replace(items(5));
@@ -148,6 +156,25 @@ describe("createKeyedRows", () => {
 
     list.swap(2, 3); // adjacent
     expect(ids(tbody)).toEqual(["1", "4", "2", "3", "5"]);
+  });
+
+  it("preserves focused form state across reverse swaps and ignores invalid swaps", () => {
+    const { tbody, list } = setup();
+    list.replace(items(5));
+    const input = document.createElement("input");
+    input.value = "retained";
+    tbody.rows[3]!.cells[1]!.append(input);
+    input.focus();
+
+    list.swap(3, 1);
+    expect(tbody.rows[1]?.contains(input)).toBe(true);
+    expect(document.activeElement).toBe(input);
+    expect(input.value).toBe("retained");
+    const before = ids(tbody);
+    list.swap(1, 1);
+    list.swap(-1, 3);
+    list.swap(1, 99);
+    expect(ids(tbody)).toEqual(before);
   });
 
   it("removes by index and by element, clearing selection when needed", () => {
@@ -198,6 +225,19 @@ describe("createKeyedRows", () => {
     expect(tbody.rows[1]?.className).toBe("row-base");
   });
 
+  it("does not mutate classes when selecting the same row twice", async () => {
+    const { tbody, list } = setup();
+    list.replace(items(2));
+    list.selectAt(0);
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((mutations) => records.push(...mutations));
+    observer.observe(tbody.rows[0]!, { attributes: true, attributeFilter: ["class"] });
+    list.selectAt(0);
+    await Promise.resolve();
+    observer.disconnect();
+    expect(records).toHaveLength(0);
+  });
+
   it("clears all rows and selection", () => {
     const { tbody, list } = setup();
     list.replace(items(5));
@@ -206,5 +246,29 @@ describe("createKeyedRows", () => {
     expect(list.length()).toBe(0);
     expect(list.selectedIndex()).toBe(-1);
     expect(tbody.rows.length).toBe(0);
+  });
+
+  it("preserves tbody identity and supports reuse after clear", () => {
+    const { tbody, list } = setup();
+    const parent = tbody.parentNode;
+    list.replace(items(5));
+    list.selectAt(2);
+    const selected = tbody.rows[2]!;
+    list.clear();
+    parent?.append(tbody);
+    tbody.append(selected);
+    expect(list.selectedIndex()).toBe(-1);
+    selected.remove();
+    list.append(items(2));
+    expect(tbody.parentNode).toBe(parent);
+    expect(ids(tbody)).toEqual(["1", "2"]);
+  });
+
+  it.each([1, 49, 50, 51, 101])("replaces and appends exact chunk-boundary count %s", (count) => {
+    const { tbody, list } = setup(50);
+    list.replaceEach(count, (index) => ({ id: index + 1, label: `row ${index + 1}` }));
+    expect(tbody.rows).toHaveLength(count);
+    list.appendEach(3, (index) => ({ id: index + 1, label: `row ${index + 1}` }));
+    expect(ids(tbody).slice(-3)).toEqual([String(count + 1), String(count + 2), String(count + 3)]);
   });
 });

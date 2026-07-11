@@ -191,14 +191,24 @@ export const createKeyedRows = <T>(options: KeyedRowsOptions<T>): KeyedRows<T> =
     if (!rowA || !rowB) {
       return;
     }
+    const activeElement = tbody.ownerDocument.activeElement;
+    const restoreFocus =
+      activeElement &&
+      activeElement !== tbody.ownerDocument.body &&
+      (rowA.contains(activeElement) || rowB.contains(activeElement)) &&
+      "focus" in activeElement
+        ? (activeElement as HTMLElement)
+        : undefined;
     const nextA = rowA.nextSibling;
     if (nextA === rowB) {
       tbody.insertBefore(rowB, rowA);
+      restoreFocus?.focus({ preventScroll: true });
       return;
     }
     const nextB = rowB.nextSibling;
     tbody.insertBefore(rowB, nextA);
     tbody.insertBefore(rowA, nextB);
+    restoreFocus?.focus({ preventScroll: true });
   };
 
   const clear = (): void => {
