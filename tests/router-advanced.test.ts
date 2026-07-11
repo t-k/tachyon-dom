@@ -284,6 +284,141 @@ describe("advanced router features", () => {
     ).toContain(`"user": { path: "/users/:id"; params: ParamsForPath<"/users/:id"> }`);
   });
 
+  it("streams progressive route chunks without buffering the completed body", async () => {
+    let releaseSecond: (() => void) | undefined;
+    const secondReady = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let streamCalls = 0;
+    const routes: RouteDefinition[] = [
+      {
+        path: "/progressive",
+        loader: () => "Ada",
+        headers: { "x-route": "ready" },
+        render: ({ data }) => `<h1>buffered ${data}</h1>`,
+        stream: async function* ({ data }) {
+          streamCalls += 1;
+          yield `<h1>${data}</h1>`;
+          await secondReady;
+          yield "<p>done</p>";
+        },
+      },
+    ];
+
+    const result = await renderRouteStream(routes, "https://example.com/progressive");
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.headers.get("x-route")).toBe("ready");
+    expect(streamCalls).toBe(1);
+    const iterator = result.value.chunks[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toEqual({ done: false, value: "<h1>Ada</h1>" });
+    const pendingSecond = iterator.next();
+    await expect(Promise.race([pendingSecond.then(() => "settled"), Promise.resolve("pending")])).resolves.toBe(
+      "pending",
+    );
+    releaseSecond?.();
+    await expect(pendingSecond).resolves.toEqual({ done: false, value: "<p>done</p>" });
+
+    const buffered = await renderRoute(routes, "https://example.com/progressive");
+    expect(buffered.ok && buffered.value.html).toBe("<h1>buffered Ada</h1>");
+    expect(streamCalls).toBe(1);
+  });
+
+  it("turns pre-first-chunk failures into authoritative errors without appending post-commit failures", async () => {
+    const before = await renderRouteStream(
+      [
+        {
+          path: "/before",
+          render: () => "buffered",
+          stream: async function* () {
+            throw new Error("before-secret");
+          },
+        },
+      ],
+      "https://example.com/before",
+    );
+    if (!before.ok) throw new Error(before.error.message);
+    expect(before.value.status).toBe(500);
+    const beforeChunks: string[] = [];
+    for await (const chunk of before.value.chunks) beforeChunks.push(chunk);
+    expect(beforeChunks.join("")).toBe("<h1>Internal Server Error</h1>");
+    expect(beforeChunks.join("")).not.toContain("before-secret");
+
+    const after = await renderRouteStream(
+      [
+        {
+          path: "/after",
+          render: () => "buffered",
+          stream: async function* () {
+            yield "<main>safe";
+            throw new Error("after-secret");
+          },
+        },
+      ],
+      "https://example.com/after",
+    );
+    if (!after.ok) throw new Error(after.error.message);
+    const iterator = after.value.chunks[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toEqual({ done: false, value: "<main>safe" });
+    await expect(iterator.next()).rejects.toThrow("after-secret");
+  });
+
+  it("returns the progressive source iterator when the consumer cancels", async () => {
+    let cleaned = 0;
+    let secondStarted = false;
+    const result = await renderRouteStream(
+      [
+        {
+          path: "/cancel",
+          render: () => "buffered",
+          stream: async function* () {
+            try {
+              yield "first";
+              secondStarted = true;
+              yield "second";
+            } finally {
+              cleaned += 1;
+            }
+          },
+        },
+      ],
+      "https://example.com/cancel",
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    const iterator = result.value.chunks[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toEqual({ done: false, value: "first" });
+    await iterator.return?.();
+    expect(cleaned).toBe(1);
+    expect(secondStarted).toBe(false);
+  });
+
+  it("forwards route-module streams and never starts them for HEAD", async () => {
+    let calls = 0;
+    const route = routeFromModule(
+      "module-stream",
+      defineRouteModule({
+        path: "/module-stream",
+        render: () => "buffered",
+        stream: async function* () {
+          calls += 1;
+          yield "progressive";
+        },
+      }),
+    );
+    const head = await renderRouteStream([route], new Request("https://example.com/module-stream", { method: "HEAD" }));
+    if (!head.ok) throw new Error(head.error.message);
+    expect(calls).toBe(0);
+    const headChunks: string[] = [];
+    for await (const chunk of head.value.chunks) headChunks.push(chunk);
+    expect(headChunks).toEqual([]);
+
+    const get = await renderRouteStream([route], "https://example.com/module-stream");
+    if (!get.ok) throw new Error(get.error.message);
+    const getChunks: string[] = [];
+    for await (const chunk of get.value.chunks) getChunks.push(chunk);
+    expect(getChunks).toEqual(["progressive"]);
+    expect(calls).toBe(1);
+  });
+
   it("does not commit streaming fallbacks before loader metadata is authoritative", async () => {
     const routes: RouteDefinition[] = [
       {

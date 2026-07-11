@@ -76,6 +76,8 @@ export type RouteDefinition<Data = unknown, ActionResult = unknown> = {
   fallback?: string;
   error?: (context: { request: Request; url: URL; error: unknown }) => string | Promise<string>;
   notFound?: (context: { request: Request; url: URL }) => string | Promise<string>;
+  /** Streams the deepest matched route after loaders and authoritative metadata resolve. */
+  stream?: (context: RouteContext<Data, ActionResult>) => AsyncIterable<string>;
   render: (context: RouteContext<Data, ActionResult>) => string | Promise<string>;
   children?: RouteDefinition[];
 };
@@ -111,6 +113,7 @@ export type RouteRenderResult = {
   match: MatchedRoute;
   headers: Headers;
   responseBody?: string;
+  responseChunks?: AsyncIterable<string>;
 };
 
 export type RouteRenderOptions = {
@@ -143,6 +146,7 @@ export type RouteModule<Data = unknown, ActionResult = unknown> = {
   headers?: RouteDefinition<Data, ActionResult>["headers"];
   cache?: RouteDefinition<Data, ActionResult>["cache"];
   fallback?: string;
+  stream?: RouteDefinition<Data, ActionResult>["stream"];
   template?: RouteDefinition<Data, ActionResult>["render"];
   render?: RouteDefinition<Data, ActionResult>["render"];
   ErrorBoundary?: (context: { request: Request; url: URL; error: unknown }) => string | Promise<string>;
@@ -169,6 +173,7 @@ type RouteExecutionContext = RouteContext & { bindings?: unknown };
 
 type RouteExecutionOptions = Omit<RouteRenderOptions, "csrf" | "middleware"> & {
   bindings?: unknown;
+  progressiveBody?: boolean;
   csrf?: {
     verify: (context: {
       request: Request;
@@ -580,6 +585,7 @@ export const routeFromModule = <Data = unknown, ActionResult = unknown>(
   ...(module.headers ? { headers: module.headers } : {}),
   ...(module.cache ? { cache: module.cache } : {}),
   ...(module.fallback ? { fallback: module.fallback } : {}),
+  ...(module.stream ? { stream: module.stream } : {}),
   ...(module.ErrorBoundary ? { error: module.ErrorBoundary } : {}),
   ...(module.NotFound ? { notFound: module.NotFound } : {}),
   render: module.render ?? module.template ?? (() => ""),
@@ -1251,6 +1257,7 @@ const renderRouteInternal = async (
         await options.hooks?.onLoader?.({ request, url, route: entry.route, data: loaderData[id] });
       }
     }
+    const progressive = options.progressiveBody === true && request.method !== "HEAD" && match.value.route.stream;
     let outlet = "";
     const heads: RouteHeadDescriptor[] = [];
     for (const entry of [...match.value.branch].reverse()) {
@@ -1268,7 +1275,7 @@ const renderRouteInternal = async (
         actionResult,
         outlet,
       };
-      outlet = await entry.route.render(context);
+      if (!progressive) outlet = await entry.route.render(context);
       if (entry.route.head) {
         heads.unshift(await entry.route.head(context));
       }
@@ -1307,6 +1314,24 @@ const renderRouteInternal = async (
         applyHeaders(headers, cacheControl(policy));
       }
     }
+    let responseChunks: AsyncIterable<string> | undefined;
+    if (progressive) {
+      const iterator = progressive(deepestContext)[Symbol.asyncIterator]();
+      const first = await iterator.next();
+      responseChunks = (async function* () {
+        let completed = first.done === true;
+        try {
+          if (!first.done) yield first.value;
+          while (!completed) {
+            const next = await iterator.next();
+            completed = next.done === true;
+            if (!next.done) yield next.value;
+          }
+        } finally {
+          if (!completed) await iterator.return?.();
+        }
+      })();
+    }
     return ok({
       status: 200,
       html: outlet,
@@ -1327,6 +1352,7 @@ const renderRouteInternal = async (
       actionResult,
       headers,
       match: match.value,
+      ...(responseChunks ? { responseChunks } : {}),
     });
   } catch (error) {
     await options.hooks?.onError?.({ request, url, error, match: match.value });
@@ -1372,6 +1398,7 @@ const renderRouteStreamInternal = async (
 ): Promise<Result<RouteStreamResult, RouteError>> => {
   const request = requestFor(input);
   const streamingOptions = { ...options, htmlWhitespace: "preserve-tags" as const };
+  streamingOptions.progressiveBody = true;
   const rendered = await renderRouteInternal(routes, request, streamingOptions);
   if (!rendered.ok) return err(rendered.error);
   const body = rendered.value.responseBody ?? rendered.value.html;
@@ -1384,9 +1411,11 @@ const renderRouteStreamInternal = async (
   };
   return ok({
     ...final,
-    chunks: (async function* () {
-      if (request.method !== "HEAD" && body) yield body;
-    })(),
+    chunks:
+      rendered.value.responseChunks ??
+      (async function* () {
+        if (request.method !== "HEAD" && body) yield body;
+      })(),
     final: Promise.resolve(final),
   });
 };

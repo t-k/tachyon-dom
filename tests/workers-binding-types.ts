@@ -9,24 +9,31 @@ type Bindings = {
 
 const request = new Request("https://example.com/");
 const workers = createWorkersHandler<Bindings>({
-  routes: [{
-    path: "/",
-    loader: ({ bindings }) => bindings.KV.get("title"),
-    render: ({ bindings, data }) => `${bindings}:${data}`,
-  }],
+  routes: [
+    {
+      path: "/",
+      loader: ({ bindings }) => bindings.KV.get("title"),
+      render: ({ bindings, data }) => `${bindings}:${data}`,
+      stream: async function* ({ bindings, data }) {
+        yield `${await bindings.KV.get("stream")}:${data}`;
+      },
+    },
+  ],
 });
 
 // @ts-expect-error Explicit Workers bindings must be supplied for every invocation.
 void workers.fetch(request);
 void workers.fetch(request, { KV: { get: async () => "title" } });
 
-const routes: RouteDefinition[] = [{
-  path: "/",
-  render: (context) => {
-    // @ts-expect-error Workers bindings are not part of the platform-neutral route context.
-    return String(context.bindings);
+const routes: RouteDefinition[] = [
+  {
+    path: "/",
+    render: (context) => {
+      // @ts-expect-error Workers bindings are not part of the platform-neutral route context.
+      return String(context.bindings);
+    },
   },
-}];
+];
 
 createNodeHandler({
   routes,

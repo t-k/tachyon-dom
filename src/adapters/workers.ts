@@ -105,25 +105,24 @@ export type WorkersRouteContext<Env, Data = unknown, ActionResult = unknown> = O
 
 export type WorkersRouteDefinition<Env, Data = unknown, ActionResult = unknown> = Omit<
   RouteDefinition<Data, ActionResult>,
-  "action" | "cache" | "children" | "head" | "headers" | "loader" | "render" | "resources"
+  "action" | "cache" | "children" | "head" | "headers" | "loader" | "render" | "resources" | "stream"
 > & {
-  loader?: (
-    context: Omit<WorkersRouteContext<Env, Data, ActionResult>, "data" | "outlet">,
-  ) => Data | Promise<Data>;
+  loader?: (context: Omit<WorkersRouteContext<Env, Data, ActionResult>, "data" | "outlet">) => Data | Promise<Data>;
   action?: (
     context: Omit<WorkersRouteContext<Env, Data, ActionResult>, "data" | "outlet">,
   ) => ActionResult | Promise<ActionResult>;
-  head?: (
-    context: WorkersRouteContext<Env, Data, ActionResult>,
-  ) => RouteHeadDescriptor | Promise<RouteHeadDescriptor>;
+  head?: (context: WorkersRouteContext<Env, Data, ActionResult>) => RouteHeadDescriptor | Promise<RouteHeadDescriptor>;
   resources?:
     | readonly RouteResource[]
     | ((context: WorkersRouteContext<Env, Data, ActionResult>) => readonly RouteResource[]);
-  headers?: HeadersInit | ((context: WorkersRouteContext<Env, Data, ActionResult>) => HeadersInit | Promise<HeadersInit>);
+  headers?:
+    | HeadersInit
+    | ((context: WorkersRouteContext<Env, Data, ActionResult>) => HeadersInit | Promise<HeadersInit>);
   cache?:
     | RouteCachePolicy
     | ((context: WorkersRouteContext<Env, Data, ActionResult>) => RouteCachePolicy | Promise<RouteCachePolicy>);
   render: (context: WorkersRouteContext<Env, Data, ActionResult>) => string | Promise<string>;
+  stream?: (context: WorkersRouteContext<Env, Data, ActionResult>) => AsyncIterable<string>;
   children?: WorkersRouteDefinition<Env>[];
 };
 
@@ -135,15 +134,10 @@ export type WorkersRouteMiddleware<Env> = (context: {
 }) => ReturnType<NonNullable<RouteRenderOptions["middleware"]>[number]>;
 
 export type WorkersCsrfOptions<Env> = {
-  verify: (context: { request: Request; url: URL; env: RouteEnvironment; bindings: Env }) =>
-    | boolean
-    | Promise<boolean>;
+  verify: (context: { request: Request; url: URL; env: RouteEnvironment; bindings: Env }) => boolean | Promise<boolean>;
 };
 
-export type WorkersHandlerOptions<Env = Record<string, unknown>> = Omit<
-  RouteRenderOptions,
-  "csrf" | "middleware"
-> & {
+export type WorkersHandlerOptions<Env = Record<string, unknown>> = Omit<RouteRenderOptions, "csrf" | "middleware"> & {
   routes: readonly WorkersRouteDefinition<Env, any, any>[];
   middleware?: readonly WorkersRouteMiddleware<Env>[];
   csrf?: WorkersCsrfOptions<Env>;
@@ -447,7 +441,11 @@ const responseFor = async <Env>(
       ...(hooks ? { hooks } : {}),
     } as unknown as Parameters<typeof renderRouteWithBindings>[2];
     if (options.streaming) {
-      const result = await renderRouteStreamWithBindings(options.routes as unknown as readonly RouteDefinition[], request, renderOptions);
+      const result = await renderRouteStreamWithBindings(
+        options.routes as unknown as readonly RouteDefinition[],
+        request,
+        renderOptions,
+      );
       if (!result.ok) {
         const response = new Response(result.error.message, { status: result.error.status });
         await emitResponse(options.observability, state, response, true);
@@ -461,7 +459,11 @@ const responseFor = async <Env>(
       await emitResponse(options.observability, state, response, state.routeId === undefined);
       return response;
     }
-    const result = await renderRouteWithBindings(options.routes as unknown as readonly RouteDefinition[], request, renderOptions);
+    const result = await renderRouteWithBindings(
+      options.routes as unknown as readonly RouteDefinition[],
+      request,
+      renderOptions,
+    );
     if (!result.ok) {
       const response = new Response(result.error.message, { status: result.error.status });
       await emitResponse(options.observability, state, response, true);
@@ -510,21 +512,16 @@ const responseForFetch = async <Env>(
 };
 
 type WorkersHandler<Env> = {
-  fetch: (
-    request: Request,
-    ...args: [Env] extends [never] ? [env?: undefined] : [env: Env]
-  ) => Promise<Response>;
+  fetch: (request: Request, ...args: [Env] extends [never] ? [env?: undefined] : [env: Env]) => Promise<Response>;
 };
 
-export function createWorkersHandler<Env = never>(
-  options: WorkersHandlerOptions<Env>,
-): WorkersHandler<Env>;
-export function createWorkersHandler(
-  options: RouteAdapterHandlerOptions,
-): { fetch: (request: Request, env?: unknown) => Promise<Response> };
-export function createWorkersHandler(
-  options: WorkersHandlerOptions<unknown> | RouteAdapterHandlerOptions,
-): { fetch: (request: Request, env?: unknown) => Promise<Response> } {
+export function createWorkersHandler<Env = never>(options: WorkersHandlerOptions<Env>): WorkersHandler<Env>;
+export function createWorkersHandler(options: RouteAdapterHandlerOptions): {
+  fetch: (request: Request, env?: unknown) => Promise<Response>;
+};
+export function createWorkersHandler(options: WorkersHandlerOptions<unknown> | RouteAdapterHandlerOptions): {
+  fetch: (request: Request, env?: unknown) => Promise<Response>;
+} {
   return {
     fetch: (request, env) => responseFor(options as WorkersHandlerOptions<unknown>, request, env),
   };
