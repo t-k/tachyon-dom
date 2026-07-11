@@ -259,6 +259,8 @@ describe("benchmark provenance", () => {
         path.join(subject, "node_modules/parse5"),
         "dir",
       );
+      const subjectCommit = (await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: subject })).stdout.trim();
+      expect((await execFileAsync("git", ["status", "--porcelain=v1"], { cwd: subject })).stdout).toBe("");
       await execFileAsync(
         "pnpm",
         [
@@ -292,9 +294,19 @@ describe("benchmark provenance", () => {
       expect(result.schemaVersion).toBe(2);
       expect(result.benchmark).toEqual({ name: "streaming-backpressure", contractVersion: 2 });
       expect(result.workload).toMatchObject({ transport: "tcp", connections: 1 });
+      expect((result.workload as any).subject.git).toMatchObject({
+        available: true,
+        commit: subjectCommit,
+        dirty: false,
+      });
+      expect((result.workload as any).adapter).toMatchObject({
+        relativePath: "src/adapters/node.ts",
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        gitBlob: expect.stringMatching(/^[a-f0-9]{40,64}$/),
+      });
       expect(result.provenance.command.argv).toContain("--connections");
       expect(result.measurements.completionTimeMs).toBeGreaterThan(0);
-      expect(result.measurements.sourcePullCount).toBeGreaterThan(0);
+      expect(result.measurements.sourcePullCount).toBe(9);
     } finally {
       await execFileAsync("git", ["worktree", "remove", "--force", subject], { cwd: process.cwd() }).catch(
         () => undefined,
