@@ -309,7 +309,7 @@ describe("benchmark provenance", () => {
         },
       });
       expect(result.provenance.command.argv).toContain("--connections");
-      expect(result.provenance.dependencies.esbuild.version).toBe("0.28.1");
+      expect(result.provenance.dependencies.esbuild?.version).toBe("0.28.1");
       expect(result.measurements.completionTimeMs).toBeGreaterThan(0);
       expect(result.measurements.sourcePullCount).toBe(9);
     } finally {
