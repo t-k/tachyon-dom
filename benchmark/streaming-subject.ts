@@ -15,7 +15,7 @@ import {
 } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createRequire } from "node:module";
+import { createRequire, registerHooks, type ModuleHooks } from "node:module";
 import { promisify } from "node:util";
 import { parseSync } from "oxc-parser";
 
@@ -296,6 +296,7 @@ export type PreparedStreamingBenchmarkAdapter = StreamingBenchmarkAdapterIdentit
   dependencySnapshot: StreamingBenchmarkDependencySnapshot;
   verify: () => Promise<void>;
   importAdapter: <T = Record<string, unknown>>() => Promise<T>;
+  releaseExecutionBoundary: () => void;
   cleanup: () => Promise<void>;
 };
 
@@ -371,7 +372,20 @@ export const prepareStreamingBenchmarkAdapter = async (
       }
     };
     await verify();
+    let executionHooks: ModuleHooks | undefined;
+    const releaseExecutionBoundary = (): void => {
+      executionHooks?.deregister();
+      executionHooks = undefined;
+    };
     const importAdapter = async <T = Record<string, unknown>>(): Promise<T> => {
+      executionHooks ??= registerHooks({
+        resolve(specifier, context, nextResolve) {
+          if (specifier === executionUrl || specifier.startsWith("node:")) {
+            return nextResolve(specifier, context);
+          }
+          throw new Error(`Runtime module loading is not allowed in an authoritative benchmark bundle: ${specifier}`);
+        },
+      });
       const loaded = (await import(executionUrl)) as T;
       await verify();
       return loaded;
@@ -384,8 +398,10 @@ export const prepareStreamingBenchmarkAdapter = async (
       dependencySnapshot,
       verify,
       importAdapter,
+      releaseExecutionBoundary,
       cleanup: async () => {
         if (cleaned) return;
+        releaseExecutionBoundary();
         await setTreeWritable(snapshotRoot, true).catch(() => undefined);
         try {
           await git(identity.subjectRoot, ["worktree", "remove", "--force", snapshotRoot]);

@@ -51,6 +51,40 @@ describe("streaming benchmark adapter identity", () => {
     }
   });
 
+  it("denies runtime imports hidden in indirect eval and Function while the adapter executes", async () => {
+    const fixture = await repositoryFixture();
+    const external = await mkdtemp(path.join(tmpdir(), "tachyon-dynamic-external-"));
+    try {
+      const externalModule = path.join(external, "live.mjs");
+      await writeFile(externalModule, 'export const value = "external";\n');
+      const externalCommonJs = path.join(external, "live.cjs");
+      await writeFile(externalCommonJs, 'module.exports = { value: "external" };\n');
+      const importSource = `import(${JSON.stringify(pathToFileURL(externalModule).href)})`;
+      await writeFile(
+        fixture.adapter,
+        `export const evalLoad = () => globalThis.eval(${JSON.stringify(importSource)}); export const functionLoad = () => Function(${JSON.stringify(`return ${importSource}`)})(); export const requireLoad = () => process.getBuiltinModule("node:module").createRequire("/tmp/tachyon-benchmark.cjs")(${JSON.stringify(externalCommonJs)});\n`,
+      );
+      await execFileAsync("git", ["add", "src/adapter.mjs"], { cwd: fixture.root });
+      await execFileAsync("git", ["commit", "-m", "hidden imports"], { cwd: fixture.root });
+      const prepared = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+      try {
+        const loaded = await prepared.importAdapter<{
+          evalLoad: () => Promise<unknown>;
+          functionLoad: () => Promise<unknown>;
+          requireLoad: () => unknown;
+        }>();
+        await expect(loaded.evalLoad()).rejects.toThrow(/not allowed.*authoritative/i);
+        await expect(loaded.functionLoad()).rejects.toThrow(/not allowed.*authoritative/i);
+        expect(() => loaded.requireLoad()).toThrow(/not allowed.*authoritative/i);
+      } finally {
+        await prepared.cleanup();
+      }
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+      await rm(external, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a nested escaping symlink before dependency materialization reads it", async () => {
     const snapshot = await mkdtemp(path.join(tmpdir(), "tachyon-materialize-snapshot-"));
     const external = await mkdtemp(path.join(tmpdir(), "tachyon-materialize-external-"));
@@ -88,6 +122,30 @@ describe("streaming benchmark adapter identity", () => {
       expect(await readFile(materialized, "utf8")).toContain('"contained"');
     } finally {
       await rm(snapshot, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects contained self-referential and multi-directory symlink cycles", async () => {
+    for (const cycle of ["self", "multi"] as const) {
+      const snapshot = await mkdtemp(path.join(tmpdir(), `tachyon-materialize-${cycle}-`));
+      const nodeModules = path.join(snapshot, "node_modules");
+      const packageRoot = path.join(snapshot, "vendor/package");
+      try {
+        await mkdir(nodeModules);
+        await mkdir(packageRoot, { recursive: true });
+        if (cycle === "self") {
+          await symlink(packageRoot, path.join(packageRoot, "cycle"), "dir");
+        } else {
+          const second = path.join(snapshot, "vendor/second");
+          await mkdir(second);
+          await symlink(second, path.join(packageRoot, "second"), "dir");
+          await symlink(packageRoot, path.join(second, "package"), "dir");
+        }
+        await symlink(packageRoot, path.join(nodeModules, "package"), "dir");
+        await expect(materializeDependencyTree(snapshot, nodeModules)).rejects.toThrow(/cycle/i);
+      } finally {
+        await rm(snapshot, { recursive: true, force: true });
+      }
     }
   });
 
