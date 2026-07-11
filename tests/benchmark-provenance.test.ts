@@ -292,7 +292,7 @@ describe("benchmark provenance", () => {
       >;
 
       expect(result.schemaVersion).toBe(2);
-      expect(result.benchmark).toEqual({ name: "streaming-backpressure", contractVersion: 3 });
+      expect(result.benchmark).toEqual({ name: "streaming-backpressure", contractVersion: 4 });
       expect(result.workload).toMatchObject({ transport: "tcp", connections: 1 });
       expect((result.workload as any).subject.git).toMatchObject({
         available: true,

@@ -6,7 +6,7 @@ import type { BenchmarkEnvelope } from "../benchmark/provenance.js";
 const envelope = (options: { revision: string; queued: number; connections?: number; dirty?: boolean }) =>
   ({
     schemaVersion: 2,
-    benchmark: { name: "streaming-backpressure", contractVersion: 3 },
+    benchmark: { name: "streaming-backpressure", contractVersion: 4 },
     provenance: {
       capturedAt: "2026-07-10T00:00:00.000Z",
       command: { argv: ["benchmark"], display: "benchmark", cwd: "/repo" },
@@ -58,6 +58,15 @@ const envelope = (options: { revision: string; queued: number; connections?: num
   }) as BenchmarkEnvelope<any, any>;
 
 describe("streaming backpressure comparison", () => {
+  it("rejects complete contract-v3 artifacts from the prior fail-open execution policy", () => {
+    const baseline = envelope({ revision: "baseline", queued: 1_000 });
+    const candidate = envelope({ revision: "candidate", queued: 100 });
+    baseline.benchmark.contractVersion = candidate.benchmark.contractVersion = 3;
+    expect(() =>
+      compareStreamingBackpressureResults(baseline, candidate),
+    ).toThrow(/contractVersion must be 4/);
+  });
+
   it("records explicit revisions and ratios when controls match", () => {
     const result = compareStreamingBackpressureResults(
       envelope({ revision: "baseline", queued: 1_000 }),
