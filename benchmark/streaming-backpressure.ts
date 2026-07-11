@@ -114,7 +114,7 @@ try {
   const provenance = await collectBenchmarkProvenance({
     cwd: projectRoot,
     argv,
-    dependencies: await collectDependencyVersions(projectRoot, ["tsx"]),
+    dependencies: await collectDependencyVersions(projectRoot, ["tsx", "esbuild"]),
   });
   const result = {
     schemaVersion: 2,
