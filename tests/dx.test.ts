@@ -1499,6 +1499,37 @@ void chunks;
     }
   });
 
+  it("validates and dry-runs both npm packages before ordered publication", async () => {
+    const workflow = await readFile(path.join(process.cwd(), ".github", "workflows", "release.yml"), "utf8");
+    const createPackage = JSON.parse(
+      await readFile(path.join(process.cwd(), "packages", "create-tachyon-dom", "package.json"), "utf8"),
+    ) as { files?: string[]; dependencies?: Record<string, string> };
+    const validation = workflow.indexOf('pnpm verify:release --tag "$GITHUB_REF_NAME"');
+    const rootDryRun = workflow.indexOf("npm publish --dry-run --provenance --access public", validation);
+    const createDryRun = workflow.indexOf("npm publish --dry-run --provenance --access public", rootDryRun + 1);
+    const rootPublish = workflow.indexOf("npm publish --provenance --access public --tag", createDryRun);
+    const createPublish = workflow.indexOf("npm publish --provenance --access public --tag", rootPublish + 1);
+
+    expect(validation).toBeGreaterThan(-1);
+    expect(rootDryRun).toBeGreaterThan(validation);
+    expect(createDryRun).toBeGreaterThan(rootDryRun);
+    expect(rootPublish).toBeGreaterThan(createDryRun);
+    expect(createPublish).toBeGreaterThan(rootPublish);
+    expect(workflow).toContain("working-directory: packages/create-tachyon-dom");
+    expect(workflow.match(/working-directory: packages\/create-tachyon-dom/g)).toHaveLength(2);
+    expect(workflow).toMatch(
+      /npm publish --dry-run --provenance --access public --tag "\$NPM_TAG"\n\s+working-directory: packages\/create-tachyon-dom/,
+    );
+    expect(workflow).toMatch(
+      /npm publish --provenance --access public --tag "\$NPM_TAG"\n\s+working-directory: packages\/create-tachyon-dom/,
+    );
+    expect(workflow).toContain("contains(github.ref_name, '-')");
+    expect(workflow).toContain("'next' || 'latest'");
+    expect(workflow).toContain('--tag "$NPM_TAG"');
+    expect(createPackage.files).toContain("LICENSE");
+    expect(createPackage.dependencies?.["tachyon-dom"]).toBe("0.1.0");
+  });
+
   it("packages a Cloudflare Pages worker with copied assets and ASSETS fallback", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-pages-package-"));
     try {

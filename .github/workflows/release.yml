@@ -13,6 +13,8 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      NPM_TAG: ${{ contains(github.ref_name, '-') && 'next' || 'latest' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -30,12 +32,28 @@ jobs:
 
       - run: pnpm build
 
+      - run: pnpm build:create-package
+
+      - run: pnpm test
+
       - run: pnpm verify:package
 
       - run: pnpm check:exports
 
       - run: pnpm check:size
 
-      - run: npm publish --provenance --access public
+      - run: pnpm verify:release --tag "$GITHUB_REF_NAME"
+
+      - run: npm publish --dry-run --provenance --access public --tag "$NPM_TAG"
+
+      - run: npm publish --dry-run --provenance --access public --tag "$NPM_TAG"
+        working-directory: packages/create-tachyon-dom
+
+      - run: npm publish --provenance --access public --tag "$NPM_TAG"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - run: npm publish --provenance --access public --tag "$NPM_TAG"
+        working-directory: packages/create-tachyon-dom
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

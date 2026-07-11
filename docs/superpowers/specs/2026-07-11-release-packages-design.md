@@ -20,7 +20,7 @@ The `create-tachyon-dom` tarball must contain its executable entry, README, pack
 
 ## Workflow
 
-The release job performs installation, build, tests and existing package checks, then runs the release-contract verifier with `GITHUB_REF_NAME`. It performs `npm publish --dry-run` for both package directories before any external mutation. Once all checks pass, it publishes the root package first and `packages/create-tachyon-dom` second, both with provenance and public access.
+The release job performs installation, build, tests and existing package checks, then runs the release-contract verifier with `GITHUB_REF_NAME`. A fixed `NPM_TAG` environment value maps stable tags to `latest` and prerelease tags to `next`. It performs `npm publish --dry-run` for both package directories before any external mutation. Once all checks pass, it publishes the root package first and `packages/create-tachyon-dom` second, both with provenance, public access, and the fixed dist-tag.
 
 Publishing the root package first ensures the initializer's exact dependency exists when the initializer becomes installable. A failure between publishes is visible and retryable; npm's immutability means the workflow must not silently rewrite versions or continue after an error.
 

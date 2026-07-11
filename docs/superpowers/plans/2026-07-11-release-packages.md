@@ -114,7 +114,7 @@ git commit -m "fix: package initializer license and release artifacts"
 
 - [ ] **Step 1: Write failing workflow contract assertions**
 
-Read the workflow as text and locate commands by index. Assert that `pnpm verify:release --tag "$GITHUB_REF_NAME"`, both `npm publish --dry-run` commands, root publish, and initializer publish exist in that strict order. Assert stable publish steps use `--tag latest`, prerelease publish steps use `--tag next`, and each pair has mutually exclusive GitHub conditions. Assert the initializer package metadata uses an exact `tachyon-dom` dependency and includes `LICENSE`.
+Read the workflow as text and locate commands by index. Assert that `pnpm verify:release --tag "$GITHUB_REF_NAME"`, both `npm publish --dry-run` commands, root publish, and initializer publish exist in that strict order. Assert the fixed `NPM_TAG` expression maps stable tags to `latest` and prerelease tags to `next`, and every dry-run and publish uses it. Assert the initializer package metadata uses an exact `tachyon-dom` dependency and includes `LICENSE`.
 
 - [ ] **Step 2: Verify RED**
 
@@ -122,7 +122,7 @@ Run `pnpm exec vitest run tests/dx.test.ts`. Expected: the release workflow asse
 
 - [ ] **Step 3: Update the workflow**
 
-After the existing checks, build the initializer, run `pnpm verify:release --tag "$GITHUB_REF_NAME"`, and dry-run root and initializer packages. Add mutually exclusive stable and prerelease publish pairs using `if: ${{ !contains(github.ref_name, '-') }}` with `--tag latest` and `if: ${{ contains(github.ref_name, '-') }}` with `--tag next`. Within each pair, publish root before initializer:
+After the existing checks, build the initializer, run the tests and `pnpm verify:release --tag "$GITHUB_REF_NAME"`, then dry-run root and initializer packages. Define `NPM_TAG` with the fixed GitHub expression `${{ contains(github.ref_name, '-') && 'next' || 'latest' }}` and use `--tag "$NPM_TAG"` for every dry-run and publish. Publish root before initializer:
 
 ```yaml
 - run: npm publish --provenance --access public --tag latest
