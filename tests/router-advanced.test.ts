@@ -454,6 +454,29 @@ describe("advanced router features", () => {
     expect(calls).toBe(1);
   });
 
+  it.each([
+    ["dynamic", "/users/:id", "/users/42", "loaded:42"],
+    ["wildcard", "/files/*path", "/files/a/b", "loaded:a/b"],
+  ])("passes loader data to an idless %s progressive route", async (_label, path, requestPath, expected) => {
+    const result = await renderRouteStream(
+      [
+        {
+          path,
+          loader: ({ params }) => `loaded:${Object.values(params)[0]}`,
+          render: () => "buffered",
+          stream: async function* ({ data }) {
+            yield String(data);
+          },
+        },
+      ],
+      `https://example.com${requestPath}`,
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    const chunks: string[] = [];
+    for await (const chunk of result.value.chunks) chunks.push(chunk);
+    expect(chunks).toEqual([expected]);
+  });
+
   it("does not commit streaming fallbacks before loader metadata is authoritative", async () => {
     const routes: RouteDefinition[] = [
       {

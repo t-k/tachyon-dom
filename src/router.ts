@@ -1329,6 +1329,7 @@ const renderRouteInternal = async (
       )
       .join("");
     const headers = new Headers({ "content-type": "text/html; charset=utf-8" });
+    const deepestEntry = match.value.branch.at(-1);
     const deepestContext = {
       request,
       url,
@@ -1336,7 +1337,7 @@ const renderRouteInternal = async (
       route: match.value.route,
       env,
       bindings,
-      data: loaderData[routeId(match.value.route, match.value.pathname)],
+      data: deepestEntry ? loaderData[routeId(deepestEntry.route, deepestEntry.path)] : undefined,
       loaderData,
       actionResult,
       outlet,
