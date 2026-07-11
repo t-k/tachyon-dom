@@ -5,7 +5,12 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import * as releaseContract from "../scripts/release-contract.mjs";
-import { decideDistTagTransition, readRegistryState } from "../scripts/npm-registry-state.mjs";
+import {
+  decideDistTagTransition,
+  decideOwnedTagMutation,
+  readRegistryState,
+  stagingTagFor,
+} from "../scripts/npm-registry-state.mjs";
 import { preflightReleasePublication } from "../scripts/preflight-release-publication.mjs";
 
 const { verifyReleaseIdentity } = releaseContract;
@@ -261,6 +266,16 @@ describe("retryable npm publication", () => {
     });
   });
 
+  it("rejects stale forward updates and rollbacks after another release changes ownership", () => {
+    expect(decideOwnedTagMutation({ currentVersion: "1.2.4", expectedVersion: "1.2.2", nextVersion: "1.2.3" })).toEqual(
+      { ok: false, error: expect.stringMatching(/ownership changed/) },
+    );
+    expect(decideOwnedTagMutation({ currentVersion: "1.2.4", expectedVersion: "1.2.3", nextVersion: "1.2.2" })).toEqual(
+      { ok: false, error: expect.stringMatching(/ownership changed/) },
+    );
+    expect(stagingTagFor("1.2.3")).not.toBe(stagingTagFor("1.2.4"));
+  });
+
   it("distinguishes registry absence from authentication and rate-limit failures", async () => {
     const server = createServer((request, response) => {
       if (request.url === "/missing") {
@@ -273,6 +288,11 @@ describe("retryable npm publication", () => {
       }
       if (request.url === "/limited") {
         response.writeHead(429).end("limited");
+        return;
+      }
+      if (request.url === "/malformed") {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ versions: "invalid", "dist-tags": {} }));
         return;
       }
       response.setHeader("content-type", "application/json");
@@ -301,6 +321,7 @@ describe("retryable npm publication", () => {
       });
       await expect(readRegistryState({ registryUrl, name: "unauthorized", version: "1.2.3" })).rejects.toThrow(/401/);
       await expect(readRegistryState({ registryUrl, name: "limited", version: "1.2.3" })).rejects.toThrow(/429/);
+      await expect(readRegistryState({ registryUrl, name: "malformed", version: "1.2.3" })).rejects.toThrow(/versions/);
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }

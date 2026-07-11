@@ -51,6 +51,18 @@ export const decideDistTagTransition = ({ currentVersion, targetVersion }) => {
 
 export const npmRegistryUrl = "https://registry.npmjs.org/";
 
+export const stagingTagFor = (version) =>
+  `tachyon-staging-${createHash("sha256").update(version).digest("hex").slice(0, 16)}`;
+
+export const decideOwnedTagMutation = ({ currentVersion, expectedVersion, nextVersion }) => {
+  if (currentVersion === nextVersion) return { ok: true, action: "noop" };
+  if (currentVersion === expectedVersion) return { ok: true, action: nextVersion === undefined ? "remove" : "update" };
+  return {
+    ok: false,
+    error: `Dist-tag ownership changed from ${String(expectedVersion)} to ${String(currentVersion)}.`,
+  };
+};
+
 export const readRegistryState = async ({ registryUrl = npmRegistryUrl, name, version }) => {
   const response = await fetch(new URL(encodeURIComponent(name), registryUrl), { redirect: "error" });
   if (response.status === 404) return { integrity: null, distTags: {} };
@@ -59,7 +71,7 @@ export const readRegistryState = async ({ registryUrl = npmRegistryUrl, name, ve
   if (!packument || typeof packument !== "object" || Array.isArray(packument)) {
     throw new Error(`npm registry returned an invalid packument for ${name}.`);
   }
-  const rawTags = packument["dist-tags"] ?? {};
+  const rawTags = packument["dist-tags"];
   if (!rawTags || typeof rawTags !== "object" || Array.isArray(rawTags)) {
     throw new Error(`npm registry returned invalid dist-tags for ${name}.`);
   }
@@ -68,9 +80,25 @@ export const readRegistryState = async ({ registryUrl = npmRegistryUrl, name, ve
     if (typeof value !== "string") throw new Error(`npm registry returned an invalid ${tag} dist-tag for ${name}.`);
     distTags[tag] = value;
   }
-  const integrity = packument.versions?.[version]?.dist?.integrity ?? null;
-  if (integrity !== null && (typeof integrity !== "string" || !integrity.startsWith("sha512-"))) {
-    throw new Error(`npm registry returned invalid integrity for ${name}@${version}.`);
+  const versions = packument.versions;
+  if (!versions || typeof versions !== "object" || Array.isArray(versions)) {
+    throw new Error(`npm registry returned invalid versions for ${name}.`);
+  }
+  const target = versions[version];
+  let integrity = null;
+  if (target !== undefined) {
+    if (!target || typeof target !== "object" || Array.isArray(target)) {
+      throw new Error(`npm registry returned an invalid version record for ${name}@${version}.`);
+    }
+    const dist = target.dist;
+    if (!dist || typeof dist !== "object" || Array.isArray(dist)) {
+      throw new Error(`npm registry returned invalid dist metadata for ${name}@${version}.`);
+    }
+    integrity = dist.integrity;
+    if (typeof integrity !== "string" || !integrity.startsWith("sha512-")) {
+      throw new Error(`npm registry returned invalid integrity for ${name}@${version}.`);
+    }
   }
   return { integrity, distTags };
 };
+import { createHash } from "node:crypto";

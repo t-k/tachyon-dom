@@ -314,7 +314,7 @@ describe("DX helpers", () => {
     expect(release).toContain("--package root");
     expect(release).toContain("--package create");
     expect(publisher).toMatch(
-      /"publish",\s*entry\.filename,\s*"--provenance",\s*"--access",\s*"public",\s*"--tag",\s*"tachyon-staging"/,
+      /"publish",\s*entry\.filename,\s*"--provenance",\s*"--access",\s*"public",\s*"--tag",\s*stagingTagFor\(verified\.version\)/,
     );
     expect(finalizer).toContain("await addDistTag(entry.name, verified.version, verified.npmTag)");
   });
@@ -1532,6 +1532,8 @@ void chunks;
     expect(createPublish).toBeGreaterThan(rootPublish);
     expect(finalize).toBeGreaterThan(createPublish);
     expect(workflow).toContain("permissions: {}\n");
+    expect(workflow).toContain("group: tachyon-dom-npm-release");
+    expect(workflow).toContain("cancel-in-progress: false");
     expect(workflow).toMatch(/publish:\n\s+needs: verify[\s\S]+permissions:\n\s+contents: read\n\s+id-token: write/);
     expect(workflow).toContain("NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}");
     expect(workflow).toContain("34e114876b0b11c390a56381ad16ebd13914f8d5");

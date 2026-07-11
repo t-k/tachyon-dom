@@ -126,7 +126,7 @@ Run `pnpm exec vitest run tests/dx.test.ts`. Expected: the release workflow asse
 
 - [ ] **Step 3: Update the workflow**
 
-After the existing checks, build the initializer and create both tarballs with `pnpm prepare:release --tag "$GITHUB_REF_NAME" --output release-artifacts`. Dry-run those exact artifacts, upload them with pinned Actions, then use a separate publication job to download and reverify them. Preflight root and create registry state together, run `publish-release-package.mjs` for root before create under the internal staging tag, then run `finalize-release-tags.mjs` to apply only equal or forward final tags with compensating rollback.
+After the existing checks, build the initializer and create both tarballs with `pnpm prepare:release --tag "$GITHUB_REF_NAME" --output release-artifacts`. Dry-run those exact artifacts, upload them with pinned Actions, then use a separate publication job to download and reverify them. Serialize release workflows with one non-cancelling concurrency group. Preflight root and create registry state together, run `publish-release-package.mjs` for root before create under a version-hashed staging tag, then run `finalize-release-tags.mjs` to apply only equal or forward final tags with ownership rechecks and compensating rollback.
 
 ```yaml
 - run: node scripts/release-contract.mjs --verify-artifacts release-artifacts --tag "$GITHUB_REF_NAME"

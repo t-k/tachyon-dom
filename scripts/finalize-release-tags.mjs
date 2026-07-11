@@ -2,7 +2,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { npmRegistryUrl, readRegistryState } from "./npm-registry-state.mjs";
+import { decideOwnedTagMutation, npmRegistryUrl, readRegistryState, stagingTagFor } from "./npm-registry-state.mjs";
 import { preflightReleasePublication } from "./preflight-release-publication.mjs";
 import { verifyReleaseArtifacts } from "./release-contract.mjs";
 
@@ -42,8 +42,15 @@ export const finalizeReleaseTags = async ({ artifactDir, tag }) => {
   try {
     for (const key of ["root", "create"]) {
       const plan = preflight.packages[key];
-      if (plan.distTag === "noop") continue;
       const entry = verified.manifest.packages[key];
+      const registry = await readRegistryState({ name: entry.name, version: verified.version });
+      const ownership = decideOwnedTagMutation({
+        currentVersion: registry.distTags[verified.npmTag],
+        expectedVersion: plan.previousTag,
+        nextVersion: verified.version,
+      });
+      if (!ownership.ok) throw new Error(`${entry.name}: ${ownership.error}`);
+      if (ownership.action === "noop") continue;
       await addDistTag(entry.name, verified.version, verified.npmTag);
       changed.push({ name: entry.name, previousTag: plan.previousTag });
     }
@@ -51,8 +58,15 @@ export const finalizeReleaseTags = async ({ artifactDir, tag }) => {
     const rollbackErrors = [];
     for (const change of changed.reverse()) {
       try {
-        if (change.previousTag === undefined) await removeDistTag(change.name, verified.npmTag, verified.version);
-        else await addDistTag(change.name, change.previousTag, verified.npmTag);
+        const registry = await readRegistryState({ name: change.name, version: verified.version });
+        const ownership = decideOwnedTagMutation({
+          currentVersion: registry.distTags[verified.npmTag],
+          expectedVersion: verified.version,
+          nextVersion: change.previousTag,
+        });
+        if (!ownership.ok) throw new Error(`${change.name}: ${ownership.error}`);
+        if (ownership.action === "remove") await removeDistTag(change.name, verified.npmTag, verified.version);
+        else if (ownership.action === "update") await addDistTag(change.name, change.previousTag, verified.npmTag);
       } catch (rollbackError) {
         rollbackErrors.push(rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
       }
@@ -65,12 +79,16 @@ export const finalizeReleaseTags = async ({ artifactDir, tag }) => {
     throw error;
   }
 
+  const stagingTag = stagingTagFor(verified.version);
   for (const key of ["root", "create"]) {
     const entry = verified.manifest.packages[key];
     const registry = await readRegistryState({ name: entry.name, version: verified.version });
-    if (registry.distTags["tachyon-staging"] === verified.version) {
-      await removeDistTag(entry.name, "tachyon-staging", verified.version);
+    const currentStaging = registry.distTags[stagingTag];
+    if (currentStaging === undefined) continue;
+    if (currentStaging !== verified.version) {
+      throw new Error(`${entry.name}: staging dist-tag ownership changed to ${currentStaging}.`);
     }
+    await removeDistTag(entry.name, stagingTag, verified.version);
   }
   return { version: verified.version, npmTag: verified.npmTag };
 };
