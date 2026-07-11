@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 
 import { collectBenchmarkProvenance, compareBenchmarkEnvelopes, type BenchmarkEnvelope } from "./provenance.js";
+import { valueAtBenchmarkPath } from "./provenance-validation.js";
 
 type StreamingWorkload = {
   transport: string;
@@ -21,7 +22,59 @@ type StreamingWorkload = {
 type StreamingMeasurements = {
   completionTimeMs: number;
   peakQueuedBytes: number;
+  sourcePullCount: number;
+  startingRssBytes: number;
+  peakRssBytes: number;
   peakRssDeltaBytes: number;
+};
+
+const controlValidators = [
+  ["workload.transport", (value: unknown) => value === "tcp"],
+  [
+    "workload.connections",
+    (value: unknown) => Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 10_000,
+  ],
+  [
+    "workload.chunksPerConnection",
+    (value: unknown) => Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 1_000_000,
+  ],
+  [
+    "workload.chunkBytes",
+    (value: unknown) => Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 16 * 1024 * 1024,
+  ],
+  [
+    "workload.drainDelayMs",
+    (value: unknown) => Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 60_000,
+  ],
+] as const;
+
+const measurementValidators = [
+  [
+    "measurements.completionTimeMs",
+    (value: unknown) => typeof value === "number" && Number.isFinite(value) && value > 0,
+  ],
+  ["measurements.peakQueuedBytes", (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0],
+  ["measurements.sourcePullCount", (value: unknown) => Number.isSafeInteger(value) && Number(value) > 0],
+  ["measurements.startingRssBytes", (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0],
+  ["measurements.peakRssBytes", (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0],
+  ["measurements.peakRssDeltaBytes", (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0],
+] as const;
+
+const validateStreamingArtifact = (value: unknown, label: "baseline" | "candidate"): void => {
+  if (valueAtBenchmarkPath(value, "benchmark.name") !== "streaming-backpressure") {
+    throw new Error(`${label}.benchmark.name must be streaming-backpressure.`);
+  }
+  if (valueAtBenchmarkPath(value, "benchmark.contractVersion") !== 2) {
+    throw new Error(`${label}.benchmark.contractVersion must be 2.`);
+  }
+  for (const [path, validate] of [...controlValidators, ...measurementValidators]) {
+    if (!validate(valueAtBenchmarkPath(value, path))) throw new Error(`${label}.${path} is invalid.`);
+  }
+  for (const path of ["measurements.peakQueuedBytes", "measurements.peakRssDeltaBytes"] as const) {
+    if (label === "baseline" && Number(valueAtBenchmarkPath(value, path)) <= 0) {
+      throw new Error(`${label}.${path} must be positive for ratio calculation.`);
+    }
+  }
 };
 
 const requiredEqualPaths = [
@@ -41,10 +94,11 @@ const requiredEqualPaths = [
   "workload.drainDelayMs",
 ] as const;
 
-export const compareStreamingBackpressureResults = (
-  baseline: BenchmarkEnvelope<StreamingWorkload, StreamingMeasurements>,
-  candidate: BenchmarkEnvelope<StreamingWorkload, StreamingMeasurements>,
-) => {
+export const compareStreamingBackpressureResults = (baselineValue: unknown, candidateValue: unknown) => {
+  validateStreamingArtifact(baselineValue, "baseline");
+  validateStreamingArtifact(candidateValue, "candidate");
+  const baseline = baselineValue as BenchmarkEnvelope<StreamingWorkload, StreamingMeasurements>;
+  const candidate = candidateValue as BenchmarkEnvelope<StreamingWorkload, StreamingMeasurements>;
   const controls = compareBenchmarkEnvelopes(baseline, candidate, {
     requiredEqualPaths,
   });
@@ -133,6 +187,7 @@ const main = async () => {
       baselineRevision: comparison.baselineRevision,
       candidateRevision: comparison.candidateRevision,
       controls: comparison.controls,
+      verifiedControls: comparison.verifiedControls,
     },
     measurements: {
       ratios: comparison.ratios,
