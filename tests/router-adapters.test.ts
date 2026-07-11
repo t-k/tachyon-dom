@@ -1191,9 +1191,19 @@ describe("server adapters", () => {
       new Request("https://example.test/"),
     );
     expect(await workers.text()).toBe(expected);
+    const legacyWorkers = await createWorkersHandler({ routes, htmlWhitespace: "condense" as never }).fetch(
+      new Request("https://example.test/"),
+    );
+    expect(await legacyWorkers.text()).toBe(expected);
+    const invalidWorkers = await createWorkersHandler({ routes, htmlWhitespace: "unknown" as never }).fetch(
+      new Request("https://example.test/"),
+    );
+    expect(invalidWorkers.status).toBe(500);
 
     const lambda = await createLambdaHandler({ routes, htmlWhitespace: "normalize-tags" })(lambdaEvent());
     expect(lambda.body).toBe(expected);
+    const legacyLambda = await createLambdaHandler({ routes, htmlWhitespace: "condense" as never })(lambdaEvent());
+    expect(legacyLambda.body).toBe(expected);
 
     const chunks: string[] = [];
     const request = Object.assign(Readable.from([]), { method: "GET", url: "/", headers: { host: "example.test" } });

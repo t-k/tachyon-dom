@@ -86,7 +86,8 @@ try {
   const runtimeFile = path.join(consumer, "trusted-html.mjs");
   await writeFile(
     runtimeFile,
-    `import { escapeToHtml, trustedHtmlChunk } from "tachyon-dom/router";
+    `import { defineApp } from "tachyon-dom/app";
+import { escapeToHtml, renderRoute, trustedHtmlChunk } from "tachyon-dom/router";
 import { sanitizeHtml } from "tachyon-dom/security";
 const escaped = trustedHtmlChunk(escapeToHtml("<img src=x onerror=alert(1)>"));
 if (escaped !== "&lt;img src=x onerror=alert(1)&gt;") throw new Error("Escaping helper was not usable from package exports.");
@@ -94,6 +95,24 @@ if (!trustedHtmlChunk(sanitizeHtml("<b>safe</b>")).includes("<b>safe</b>")) thro
 let rejected = false;
 try { trustedHtmlChunk({ __tachyonTrustedHtml: true, value: "<img>" }); } catch { rejected = true; }
 if (!rejected) throw new Error("Forged TrustedHtml was accepted.");
+const app = defineApp({
+  shell: ({ routeHtml }) => \`<main   id="app">\${routeHtml}</main>\`,
+  pages: [{ path: "/", fileName: "index.html", template: "<p>ok</p>", scope: {} }],
+});
+const current = app.renderDocument("/", { whitespace: "normalize-tags" });
+const legacy = app.renderDocument("/", { whitespace: "condense" });
+if (legacy !== current) throw new Error("Installed package did not map legacy condense at runtime.");
+let unknownRejected = false;
+try { app.renderDocument("/", { whitespace: "unknown" }); } catch (error) {
+  unknownRejected = /HTML whitespace policy/.test(String(error));
+}
+if (!unknownRejected) throw new Error("Installed package silently accepted an unknown whitespace policy.");
+const routes = [{ path: "/", render: () => "<main   id=app>ok</main>" }];
+const legacyRoute = await renderRoute(routes, "https://example.test/", { htmlWhitespace: "condense" });
+const currentRoute = await renderRoute(routes, "https://example.test/", { htmlWhitespace: "normalize-tags" });
+if (!legacyRoute.ok || !currentRoute.ok || legacyRoute.value.html !== currentRoute.value.html) {
+  throw new Error("Installed router did not preserve legacy runtime normalization.");
+}
 `,
   );
   await execFileAsync(process.execPath, [runtimeFile], { cwd: consumer });

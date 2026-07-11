@@ -1,7 +1,7 @@
 import { escapeHtml } from "./html-escape.js";
 import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
-import { applyHtmlWhitespace, type HtmlWhitespacePolicy } from "./html-whitespace.js";
+import { applyHtmlWhitespace, resolveHtmlWhitespacePolicy, type HtmlWhitespacePolicy } from "./html-whitespace.js";
 
 export type RouteParams = Record<string, string>;
 
@@ -1432,6 +1432,7 @@ const renderRouteStreamInternal = async (
   options: RouteExecutionOptions = {},
 ): Promise<Result<RouteStreamResult, RouteError>> => {
   const request = requestFor(input);
+  resolveHtmlWhitespacePolicy(options.htmlWhitespace ?? "preserve-tags");
   const streamingOptions = { ...options, htmlWhitespace: "preserve-tags" as const };
   streamingOptions.progressiveBody = true;
   const rendered = await renderRouteInternal(routes, request, streamingOptions);
