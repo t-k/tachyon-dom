@@ -83,7 +83,7 @@ Route-local template conventions are available through `pagesFromRouteFiles()`: 
 
 Use `tachyonDom({ templateWhitespace: "condense" })` when formatting newlines and indentation in directly imported `.td` templates should be reduced. Standard applications that compile raw route source must pass the same `templateWhitespace` value to `defineApp()` or `loadRouteApp()`. The compiler applies this opt-in policy to one shared template tree before client, buffered server, and streaming server generation. It preserves same-line spaces, non-ASCII whitespace, hydration markers, text-binding separators, RCDATA and raw-text-like elements including `title`, and inherited `xml:space="preserve"` content in SVG and MathML. A static `xml:space="default"` resets foreign-content preservation, and `foreignObject` returns to HTML whitespace rules. Formatting runs that contain line breaks become a single ASCII space, so applications whose CSS makes arbitrary whitespace significant should retain the default `"preserve"` policy.
 
-`normalizeHtmlTagWhitespace()` is a separate, parse5-validated helper that changes whitespace inside tag syntax only and copies every text node and comment byte-for-byte. The older `condenseHtmlWhitespace()`, `minifyHtml()`, `minify`, and `minifyHtml` names remain deprecated compatibility aliases. App `whitespace: "normalize-tags"`, Vite app `htmlWhitespace: "normalize-tags"`, and router `htmlWhitespace: "normalize-tags"` perform tag normalization only; they do not reduce inter-element indentation. `HtmlWhitespacePolicy` is deliberately distinct from compiler `TemplateWhitespacePolicy`. Direct legacy literals `"preserve"` and `"condense"` remain source-compatible, but widened `TemplateWhitespacePolicy` or `LegacyHtmlWhitespacePolicy` variables are rejected at tag-normalization boundaries; use an `HtmlWhitespacePolicy` variable instead. A route may provide a separate `stream` async iterable. Loaders and authoritative status and headers resolve before body iteration starts, and chunks are forwarded without collecting the completed body. Iteration failures terminate the body without injecting error HTML, and consumer cancellation closes the source iterator even if the body has not been pulled.
+`normalizeHtmlTagWhitespace()` is a separate, parse5-validated helper that changes whitespace inside tag syntax only and copies every text node and comment byte-for-byte. The older `condenseHtmlWhitespace()`, `minifyHtml()`, `minify`, and `minifyHtml` names remain deprecated compatibility aliases. App `whitespace: "normalize-tags"`, Vite app `htmlWhitespace: "normalize-tags"`, and router `htmlWhitespace: "normalize-tags"` perform tag normalization only; they do not reduce inter-element indentation. `HtmlWhitespacePolicy` is deliberately distinct from compiler `TemplateWhitespacePolicy`, and tag-normalization options accept only `"preserve-tags" | "normalize-tags"`. Migrate the removed legacy option literal `"preserve"` to `"preserve-tags"` and `"condense"` to `"normalize-tags"`; deprecated boolean and helper aliases remain available separately. A route may provide a separate `stream` async iterable. Loaders and authoritative status and headers resolve before body iteration starts, and chunks are forwarded without collecting the completed body. Iteration failures terminate the body without injecting error HTML, and consumer cancellation closes the source iterator even if the body has not been pulled.
 
 ## Recommended App Shape
 
@@ -222,6 +222,23 @@ The helper reads and compiles the template with Tachyon DOM diagnostics, then re
 ## Security Notes
 
 `sanitizeHtml(markup)` has a small built-in allowlist sanitizer for constrained, already-simple backend HTML. Do not rely on the default sanitizer for arbitrary untrusted HTML. For user-generated or third-party markup, pass a vetted adapter through `createHtmlSanitizer()`/`sanitizeHtml(..., { adapter })`, such as a DOMPurify-backed sanitizer in the target runtime.
+
+Progressive route `stream()` strings are trusted raw HTML. Node, Workers, and Lambda adapters never escape or sanitize chunks. Escape untrusted text explicitly:
+
+```ts
+import { escapeToHtml, trustedHtmlChunk, type RouteDefinition } from "tachyon-dom/router";
+
+const route: RouteDefinition = {
+  path: "/search",
+  loader: ({ url }) => url.searchParams.get("q") ?? "",
+  render: () => "",
+  stream: async function* ({ data }) {
+    yield `<p>${trustedHtmlChunk(escapeToHtml(data))}</p>`;
+  },
+};
+```
+
+`escapeToHtml()` is for HTML text content, not unquoted attributes, script/style source, URLs, or other parser contexts. For intentionally accepted markup, use a vetted sanitizer adapter and pass its factory-created `TrustedHtml` through `trustedHtmlChunk()`; forged structural objects are rejected.
 
 `tachyon-dom/server/html` is an escaping helper, not a sanitizer. Use `rawHtml()` only for trusted framework or application output. Sanitize user-generated HTML before it reaches `rawHtml()`.
 

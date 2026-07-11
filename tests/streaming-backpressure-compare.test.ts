@@ -88,4 +88,46 @@ describe("streaming backpressure comparison", () => {
       /candidate\.workload\.subject\.git\.available/,
     );
   });
+
+  it.each([
+    ["missing subject", undefined, "baseline.workload.subject"],
+    ["null subject", null, "baseline.workload.subject"],
+    ["null subject git", { root: "/repo/baseline", git: null }, "baseline.workload.subject.git"],
+  ])("rejects %s with a precise field instead of a TypeError", (_name, subject, expected) => {
+    const baseline = envelope({ revision: "baseline", queued: 1_000 }) as any;
+    const candidate = envelope({ revision: "candidate", queued: 100 });
+    baseline.workload.subject = subject;
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(expected);
+  });
+
+  it.each([
+    ["connections", "6"],
+    ["chunksPerConnection", 1.5],
+    ["chunkBytes", -1],
+    ["drainDelayMs", -1],
+  ])("rejects malformed decoded workload control %s", (field, value) => {
+    const baseline = envelope({ revision: "baseline", queued: 1_000 }) as any;
+    const candidate = envelope({ revision: "candidate", queued: 100 }) as any;
+    baseline.workload[field] = value;
+    candidate.workload[field] = value;
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
+      new RegExp(`baseline\\.workload\\.${field}`),
+    );
+  });
+
+  it.each(["completionTimeMs", "peakQueuedBytes", "peakRssDeltaBytes"])(
+    "rejects zero or non-finite ratio denominator %s",
+    (field) => {
+      const baseline = envelope({ revision: "baseline", queued: 1_000 }) as any;
+      const candidate = envelope({ revision: "candidate", queued: 100 }) as any;
+      baseline.measurements[field] = 0;
+      expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
+        new RegExp(`baseline\\.measurements\\.${field}`),
+      );
+      baseline.measurements[field] = Number.NaN;
+      expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
+        new RegExp(`baseline\\.measurements\\.${field}`),
+      );
+    },
+  );
 });

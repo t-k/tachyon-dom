@@ -1,12 +1,7 @@
 import { escapeHtml } from "./html-escape.js";
 import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
-import {
-  applyHtmlWhitespace,
-  type CompatibleHtmlWhitespacePolicy,
-  type HtmlWhitespacePolicy,
-  type HtmlWhitespacePolicyInput,
-} from "./html-whitespace.js";
+import { applyHtmlWhitespace, type HtmlWhitespacePolicy } from "./html-whitespace.js";
 
 export type RouteParams = Record<string, string>;
 
@@ -81,7 +76,12 @@ export type RouteDefinition<Data = unknown, ActionResult = unknown> = {
   fallback?: string;
   error?: (context: { request: Request; url: URL; error: unknown }) => string | Promise<string>;
   notFound?: (context: { request: Request; url: URL }) => string | Promise<string>;
-  /** Streams the deepest matched route after loaders and authoritative metadata resolve. */
+  /**
+   * Streams the deepest matched route after loaders and authoritative metadata resolve.
+   * Every string is trusted raw HTML: adapters do not escape or sanitize chunks. Use
+   * trustedHtmlChunk(escapeToHtml(value)) for untrusted text and a vetted sanitizer
+   * followed by trustedHtmlChunk() for intentionally accepted markup.
+   */
   stream?: (context: RouteContext<Data, ActionResult>) => AsyncIterable<string>;
   render: (context: RouteContext<Data, ActionResult>) => string | Promise<string>;
   children?: RouteDefinition[];
@@ -135,11 +135,10 @@ type RouteRenderOptionsBase = {
   env?: RouteEnvironment;
 };
 
-export type RouteRenderOptions<Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy> =
-  RouteRenderOptionsBase & {
-    /** Applied only after buffered rendering. Streaming chunks are always preserved. */
-    htmlWhitespace?: CompatibleHtmlWhitespacePolicy<Whitespace>;
-  };
+export type RouteRenderOptions = RouteRenderOptionsBase & {
+  /** Applied only after buffered rendering. Streaming chunks are always preserved. */
+  htmlWhitespace?: HtmlWhitespacePolicy;
+};
 
 export type RouteError = {
   message: string;
@@ -183,7 +182,7 @@ type RouteExecutionContext = RouteContext & { bindings?: unknown };
 type RouteExecutionOptions = Omit<RouteRenderOptionsBase, "csrf" | "middleware"> & {
   bindings?: unknown;
   progressiveBody?: boolean;
-  htmlWhitespace?: HtmlWhitespacePolicyInput;
+  htmlWhitespace?: HtmlWhitespacePolicy;
   csrf?: {
     verify: (context: {
       request: Request;
@@ -342,6 +341,14 @@ const trustedHtmlValue = (value: TrustedHtml | string): string => {
   }
   return value.value;
 };
+
+/**
+ * Converts a factory-created TrustedHtml value into a raw progressive response chunk.
+ * Route stream chunks are inserted as HTML without adapter escaping. Escape untrusted
+ * text with escapeToHtml(), or sanitize intentional markup with a vetted sanitizer,
+ * before calling this helper.
+ */
+export const trustedHtmlChunk = (value: TrustedHtml): string => trustedHtmlValue(value);
 
 export const html = (body: TrustedHtml, init: ResponseInit = {}): RouteResponse => {
   const headers = new Headers(init.headers);
@@ -1400,10 +1407,10 @@ const renderRouteInternal = async (
   }
 };
 
-export const renderRoute = async <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+export const renderRoute = async (
   routes: readonly RouteDefinition[],
   input: Request | URL | string,
-  options: RouteRenderOptions<Whitespace> = {},
+  options: RouteRenderOptions = {},
 ): Promise<Result<RouteRenderResult, RouteError>> => renderRouteInternal(routes, input, options);
 
 /** @internal */
@@ -1448,10 +1455,10 @@ const renderRouteStreamInternal = async (
   });
 };
 
-export const renderRouteStream = async <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+export const renderRouteStream = async (
   routes: readonly RouteDefinition[],
   input: Request | URL | string,
-  options: RouteRenderOptions<Whitespace> = {},
+  options: RouteRenderOptions = {},
 ): Promise<Result<RouteStreamResult, RouteError>> => renderRouteStreamInternal(routes, input, options);
 
 /** @internal */

@@ -53,6 +53,43 @@ const positiveInteger = (value: unknown): value is number => Number.isInteger(va
 const nonNegativeInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 0;
 const finiteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 
+const validateBrowserAndMeasurements = (value: unknown, prefix: string): string[] => {
+  const invalid: string[] = [];
+  const provenance = isRecord(value) && isRecord(value.provenance) ? value.provenance : {};
+  const browser = isRecord(provenance.browser) ? provenance.browser : {};
+  if (!nonEmptyString(browser.name)) invalid.push(`${prefix}.provenance.browser.name`);
+  if (!nonEmptyString(browser.version)) invalid.push(`${prefix}.provenance.browser.version`);
+  const measurements = isRecord(value) && isRecord(value.measurements) ? value.measurements : {};
+  const workload = isRecord(value) && isRecord(value.workload) ? value.workload : {};
+  const implementations = Array.isArray(workload.implementations) ? workload.implementations : [];
+  for (const [collectionName, metricName] of [
+    ["summaries", "trimmedMean"],
+    ["auxiliaryMetrics", "value"],
+  ] as const) {
+    const collection = measurements[collectionName];
+    if (!Array.isArray(collection) || collection.length === 0) {
+      invalid.push(`${prefix}.measurements.${collectionName}`);
+      continue;
+    }
+    for (const [index, entryValue] of collection.entries()) {
+      const entry = isRecord(entryValue) ? entryValue : {};
+      if (!nonEmptyString(entry.label)) invalid.push(`${prefix}.measurements.${collectionName}[${index}].label`);
+      if (!nonEmptyString(entry.implementation)) {
+        invalid.push(`${prefix}.measurements.${collectionName}[${index}].implementation`);
+      } else if (!implementations.includes(entry.implementation)) {
+        invalid.push(`${prefix}.measurements.${collectionName}[${index}].implementation`);
+      }
+      if (collectionName === "auxiliaryMetrics" && !nonEmptyString(entry.unit)) {
+        invalid.push(`${prefix}.measurements.${collectionName}[${index}].unit`);
+      }
+      if (!finiteNumber(entry[metricName]) || Number(entry[metricName]) < 0) {
+        invalid.push(`${prefix}.measurements.${collectionName}[${index}].${metricName}`);
+      }
+    }
+  }
+  return invalid;
+};
+
 const validateIdentity = (value: unknown, prefix: string): string[] => {
   const workload = isRecord(value) && isRecord(value.workload) ? value.workload : {};
   const baseline = workload.baseline;
@@ -91,6 +128,8 @@ export type LocalCompareValidation =
       verifiedControls: Pick<LocalCompareRun["workload"], "baseline" | "candidate"> & {
         runtime: LocalCompareRun["provenance"]["runtime"];
         host: LocalCompareRun["provenance"]["host"];
+        git: LocalCompareRun["provenance"]["git"];
+        browser: LocalCompareRun["provenance"]["browser"];
         dependencies: LocalCompareRun["provenance"]["dependencies"];
         workload: Omit<LocalCompareRun["workload"], "baseline" | "candidate">;
       };
@@ -108,6 +147,7 @@ export const validateLocalCompareRuns = (values: readonly unknown[]): LocalCompa
       invalidFields.push(`${prefix}.benchmark.name`);
     }
     invalidFields.push(...validateIdentity(value, prefix));
+    invalidFields.push(...validateBrowserAndMeasurements(value, prefix));
     if (index > 0) {
       const comparison = compareBenchmarkEnvelopes(values[0], value, { requiredEqualPaths });
       invalidFields.push(
@@ -126,6 +166,8 @@ export const validateLocalCompareRuns = (values: readonly unknown[]): LocalCompa
     verifiedControls: {
       baseline,
       candidate,
+      git: first.provenance.git,
+      browser: first.provenance.browser,
       runtime: first.provenance.runtime,
       host: first.provenance.host,
       dependencies: first.provenance.dependencies,

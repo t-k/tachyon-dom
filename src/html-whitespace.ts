@@ -1,11 +1,6 @@
 import { parse, parseFragment, type DefaultTreeAdapterMap } from "parse5";
 
 export type HtmlWhitespacePolicy = "preserve-tags" | "normalize-tags";
-/** @deprecated Use `HtmlWhitespacePolicy`. */
-export type LegacyHtmlWhitespacePolicy = "preserve" | "condense";
-export type HtmlWhitespacePolicyInput = HtmlWhitespacePolicy | LegacyHtmlWhitespacePolicy;
-export type CompatibleHtmlWhitespacePolicy<Value extends HtmlWhitespacePolicyInput> =
-  LegacyHtmlWhitespacePolicy extends Value ? never : Value;
 
 type SourceRange = { startOffset: number; endOffset: number };
 type LocatedNode = DefaultTreeAdapterMap["node"] & {
@@ -94,5 +89,5 @@ export const normalizeHtmlTagWhitespace = (html: string): string => {
 /** @deprecated Use `normalizeHtmlTagWhitespace()`. */
 export const condenseHtmlWhitespace = normalizeHtmlTagWhitespace;
 
-export const applyHtmlWhitespace = (html: string, policy: HtmlWhitespacePolicyInput): string =>
-  policy === "normalize-tags" || policy === "condense" ? normalizeHtmlTagWhitespace(html) : html;
+export const applyHtmlWhitespace = (html: string, policy: HtmlWhitespacePolicy): string =>
+  policy === "normalize-tags" ? normalizeHtmlTagWhitespace(html) : html;

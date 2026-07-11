@@ -13,11 +13,7 @@ import {
   type TachyonAppAssets,
   type TachyonAppDefinition,
 } from "./app.js";
-import type {
-  CompatibleHtmlWhitespacePolicy,
-  HtmlWhitespacePolicy,
-  HtmlWhitespacePolicyInput,
-} from "./html-whitespace.js";
+import type { HtmlWhitespacePolicy } from "./html-whitespace.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import type { TemplateWhitespacePolicy } from "./compiler/types.js";
@@ -58,22 +54,17 @@ export type TachyonDomRoutesViteOptions = {
   virtualId?: string;
 };
 
-export type TachyonAppViteOptions<Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy> = {
+export type TachyonAppViteOptions = {
   appScript?: string;
-  htmlWhitespace?: CompatibleHtmlWhitespacePolicy<Whitespace>;
+  htmlWhitespace?: HtmlWhitespacePolicy;
   /** @deprecated Use `htmlWhitespace` instead. */
   minifyHtml?: boolean;
 };
 
 const normalizedAppHtmlWhitespace = (
-  policy: HtmlWhitespacePolicyInput | undefined,
+  policy: HtmlWhitespacePolicy | undefined,
   minifyHtml: boolean | undefined,
-): HtmlWhitespacePolicy =>
-  policy === "condense"
-    ? "normalize-tags"
-    : policy === "preserve"
-      ? "preserve-tags"
-      : (policy ?? (minifyHtml === false ? "preserve-tags" : "normalize-tags"));
+): HtmlWhitespacePolicy => policy ?? (minifyHtml === false ? "preserve-tags" : "normalize-tags");
 
 export type TachyonRouteAppOptions = Omit<TachyonAppDefinition, "pages"> & {
   routesDir: string;
@@ -528,10 +519,7 @@ export const tachyonSsr = (options: TachyonSsrViteOptions): Plugin => ({
   },
 });
 
-export const tachyonApp = <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
-  app: TachyonApp,
-  options: TachyonAppViteOptions<Whitespace> = {},
-): Plugin => ({
+export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {}): Plugin => ({
   name: "tachyon-dom-app",
   configureServer(server) {
     server.middlewares.use((request, response, next) => {

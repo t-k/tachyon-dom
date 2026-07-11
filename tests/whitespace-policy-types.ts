@@ -1,5 +1,5 @@
-import { defineApp, renderAppDocument, type HtmlWhitespacePolicy, type LegacyHtmlWhitespacePolicy } from "../src/app";
-import { createLambdaHandler } from "../src/adapters/lambda";
+import { defineApp, renderAppDocument, type HtmlWhitespacePolicy } from "../src/app";
+import { createLambdaHandler, createLambdaStreamingHandler } from "../src/adapters/lambda";
 import { createNodeHandler } from "../src/adapters/node";
 import { createWorkersHandler } from "../src/adapters/workers";
 import type { TemplateWhitespacePolicy } from "../src/compiler";
@@ -11,28 +11,33 @@ const app = defineApp({
 });
 const routes: RouteDefinition[] = [{ path: "/", render: () => "ok" }];
 const htmlPolicy: HtmlWhitespacePolicy = Math.random() > 0.5 ? "preserve-tags" : "normalize-tags";
-const templatePolicy: TemplateWhitespacePolicy = Math.random() > 0.5 ? "preserve" : "condense";
-const legacyPolicy: LegacyHtmlWhitespacePolicy = templatePolicy;
+const literalTemplatePolicy: TemplateWhitespacePolicy = "condense";
+let mutableTemplatePolicy: TemplateWhitespacePolicy = "preserve";
+if (Math.random() > 0.5) mutableTemplatePolicy = "condense";
+const partialMixed: "condense" | "normalize-tags" = Math.random() > 0.5 ? "condense" : "normalize-tags";
 
-app.renderDocument("/", { whitespace: "preserve" });
-renderAppDocument(app, "/", { whitespace: "condense" });
-tachyonApp(app, { htmlWhitespace: "condense" });
-void renderRoute(routes, "/", { htmlWhitespace: "preserve" });
-createWorkersHandler({ routes, htmlWhitespace: "condense" });
-createNodeHandler({ routes, htmlWhitespace: htmlPolicy });
-createLambdaHandler({ routes, htmlWhitespace: "preserve" });
+app.renderDocument("/", { whitespace: "preserve-tags" });
+renderAppDocument(app, "/", { whitespace: "normalize-tags" });
+tachyonApp(app, { htmlWhitespace: htmlPolicy });
+void renderRoute(routes, "/", { htmlWhitespace: "preserve-tags" });
+createWorkersHandler({ routes, htmlWhitespace: htmlPolicy });
+createNodeHandler({ routes, htmlWhitespace: "normalize-tags" });
+createLambdaHandler({ routes, htmlWhitespace: htmlPolicy });
+createLambdaStreamingHandler({ routes, htmlWhitespace: "preserve-tags" });
 
-// @ts-expect-error Template text policies are not tag-normalization options.
-app.renderDocument("/", { whitespace: templatePolicy });
-// @ts-expect-error Template text policies are not tag-normalization options.
-renderAppDocument(app, "/", { whitespace: templatePolicy });
-// @ts-expect-error Template text policies are not tag-normalization options.
-tachyonApp(app, { htmlWhitespace: templatePolicy });
-// @ts-expect-error Template text policies are not tag-normalization options.
-void renderRoute(routes, "/", { htmlWhitespace: templatePolicy });
-// @ts-expect-error A widened legacy union is ambiguous; use a direct literal or HtmlWhitespacePolicy.
-createWorkersHandler({ routes, htmlWhitespace: legacyPolicy });
-// @ts-expect-error A widened legacy union is ambiguous; use a direct literal or HtmlWhitespacePolicy.
-createNodeHandler({ routes, htmlWhitespace: legacyPolicy });
-// @ts-expect-error A widened legacy union is ambiguous; use a direct literal or HtmlWhitespacePolicy.
-createLambdaHandler({ routes, htmlWhitespace: legacyPolicy });
+// @ts-expect-error Legacy literals are not tag-normalization policies.
+app.renderDocument("/", { whitespace: "condense" });
+// @ts-expect-error Legacy literals are not tag-normalization policies.
+renderAppDocument(app, "/", { whitespace: "preserve" });
+// @ts-expect-error Literal-narrowed template policies remain semantically distinct.
+tachyonApp(app, { htmlWhitespace: literalTemplatePolicy });
+// @ts-expect-error Control-flow-narrowed template policies remain semantically distinct.
+void renderRoute(routes, "/", { htmlWhitespace: mutableTemplatePolicy });
+// @ts-expect-error Partial mixed unions cannot cross the policy boundary.
+createWorkersHandler({ routes, htmlWhitespace: partialMixed });
+// @ts-expect-error Legacy literals are not accepted by Node adapters.
+createNodeHandler({ routes, htmlWhitespace: "condense" });
+// @ts-expect-error Literal-narrowed template policies are rejected by Lambda adapters.
+createLambdaHandler({ routes, htmlWhitespace: literalTemplatePolicy });
+// @ts-expect-error Legacy literals are rejected by Lambda streaming adapters.
+createLambdaStreamingHandler({ routes, htmlWhitespace: "preserve" });

@@ -65,11 +65,7 @@ describe("safe HTML whitespace policy", () => {
 
     const preserved = app.renderDocument("/", { whitespace: "preserve-tags" });
     const condensed = app.renderDocument("/", { whitespace: "normalize-tags" });
-    const legacyPreserved = app.renderDocument("/", { whitespace: "preserve" });
-    const legacyCondensed = app.renderDocument("/", { whitespace: "condense" });
     expect(condensed).toBe(app.renderDocument("/", { minify: true }));
-    expect(legacyPreserved).toBe(preserved);
-    expect(legacyCondensed).toBe(condensed);
     expect(condensed).not.toBe(preserved);
     expect(serialize(parse(condensed))).toBe(serialize(parse(preserved)));
   });

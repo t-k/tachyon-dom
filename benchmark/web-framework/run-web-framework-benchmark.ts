@@ -313,6 +313,71 @@ const measureStream = async (url: string): Promise<{ ttfb: number; complete: num
   }
 };
 
+type TachyonRouteStreamEvidence = {
+  cancellationObserved: boolean;
+  completedStreams: number;
+  emittedChunks: number;
+  startingRssBytes: number;
+  peakRssBytes: number;
+  peakRssDeltaBytes: number;
+  peakRssDeltaLimitBytes: number;
+  streamTtfbMs: number;
+  streamTtfbLimitMs: number;
+};
+
+const measureTachyonRouteStreamEvidence = async (
+  baseUrl: string,
+  streamTtfbMs: number,
+): Promise<TachyonRouteStreamEvidence> => {
+  await new Promise<void>((resolve, reject) => {
+    const request = http.get(`${baseUrl}/stream`, (response) => {
+      response.once("data", () => {
+        response.destroy();
+        request.destroy();
+        resolve();
+      });
+    });
+    request.on("error", (error) => {
+      if ((error as NodeJS.ErrnoException).code === "ECONNRESET") resolve();
+      else reject(error);
+    });
+    request.setTimeout(5_000, () => request.destroy(new Error("Timed out while cancelling the Tachyon route stream.")));
+  });
+  let diagnostics: Record<string, number> = {};
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    await settle(10);
+    const response = await fetch(`${baseUrl}/stream-diagnostics`, { signal: AbortSignal.timeout(5_000) });
+    diagnostics = JSON.parse(await response.text()) as Record<string, number>;
+    if ((diagnostics.cancelled ?? 0) > 0) break;
+  }
+  const startingRssBytes = diagnostics.startingRssBytes ?? 0;
+  const peakRssBytes = diagnostics.peakRssBytes ?? 0;
+  const peakRssDeltaBytes = Math.max(0, peakRssBytes - startingRssBytes);
+  const peakRssDeltaLimitBytes = 16 * 1024 * 1024;
+  const streamTtfbLimitMs = 1_000;
+  if ((diagnostics.cancelled ?? 0) < 1) throw new Error("Tachyon route stream cancellation did not reach the generator.");
+  if ((diagnostics.completed ?? 0) < 2 || (diagnostics.emittedChunks ?? 0) < 10) {
+    throw new Error("Tachyon route stream did not complete the measured multi-chunk requests.");
+  }
+  if (peakRssDeltaBytes > peakRssDeltaLimitBytes) {
+    throw new Error(`Tachyon route stream RSS delta ${peakRssDeltaBytes} exceeded ${peakRssDeltaLimitBytes}.`);
+  }
+  if (!Number.isFinite(streamTtfbMs) || streamTtfbMs < 0 || streamTtfbMs > streamTtfbLimitMs) {
+    throw new Error(`Tachyon route stream TTFB ${streamTtfbMs}ms exceeded ${streamTtfbLimitMs}ms.`);
+  }
+  return {
+    cancellationObserved: true,
+    completedStreams: diagnostics.completed ?? 0,
+    emittedChunks: diagnostics.emittedChunks ?? 0,
+    startingRssBytes,
+    peakRssBytes,
+    peakRssDeltaBytes,
+    peakRssDeltaLimitBytes,
+    streamTtfbMs,
+    streamTtfbLimitMs,
+  };
+};
+
 const collectClientBundleSnapshot = async (page: Page): Promise<ClientBundleSnapshot> =>
   await page.evaluate(`(() => {
     const resourcesByName = new Map();
@@ -438,6 +503,8 @@ const measureFramework = async (
   try {
     await validateFrameworkFixture(baseUrl, dynamicChallengeIds);
     const stream = await measureStream(`${baseUrl}/stream`);
+    const routeStreamEvidence =
+      framework.name === "tachyon-dom" ? await measureTachyonRouteStreamEvidence(baseUrl, stream.ttfb) : undefined;
     const staticResult = await runAutocannon(`${baseUrl}/`, options);
     const dynamicResult = await runAutocannon(`${baseUrl}/products/${dynamicChallengeIds[0]}`, options);
     await settle(options.smoke ? 50 : 150);
@@ -453,6 +520,7 @@ const measureFramework = async (
       streamCompleteMs: stream.complete,
       clientNavigationMs,
       clientBundleBytes,
+      ...(routeStreamEvidence ? { routeStreamEvidence } : {}),
     };
   } finally {
     await stopServer(child);
@@ -484,10 +552,14 @@ const run = async (): Promise<void> => {
   const ranking = scoreWebFrameworkMetrics(metrics);
   const table = formatWebFrameworkRanking(ranking);
   const outputPath = path.resolve(projectRoot, options.output ?? defaultOutputPath());
-  const dependencies = Object.fromEntries(await Promise.all(frameworks.map(async (framework) => [
-    framework.name,
-    await collectDependencyVersions(framework.cwd, framework.dependencies),
-  ])));
+  const dependencies = Object.fromEntries(
+    await Promise.all(
+      frameworks.map(async (framework) => [
+        framework.name,
+        await collectDependencyVersions(framework.cwd, framework.dependencies),
+      ]),
+    ),
+  );
   const durationSeconds = options.smoke ? 1 : 5;
   const connections = options.smoke ? 5 : 30;
   const provenance = await collectBenchmarkProvenance({
@@ -499,32 +571,38 @@ const run = async (): Promise<void> => {
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(
     outputPath,
-    `${JSON.stringify({
-      schemaVersion: 2,
-      benchmark: { name: "web-framework", contractVersion: WEB_FRAMEWORK_CONTRACT_VERSION },
-      provenance,
-      workload: {
-        smoke: options.smoke,
-        buildMode: "production",
-        durationSeconds,
-        connections,
-        dynamicChallengeIds,
-        streamMinimumChunkGapMs: 10,
-        frameworks: frameworks.map((framework) => ({
-          name: framework.name,
-          cwd: framework.cwd,
-          build: framework.build ?? null,
-          start: framework.start(0),
-          dependencies: dependencies[framework.name],
-        })),
+    `${JSON.stringify(
+      {
+        schemaVersion: 2,
+        benchmark: { name: "web-framework", contractVersion: WEB_FRAMEWORK_CONTRACT_VERSION },
+        provenance,
+        workload: {
+          smoke: options.smoke,
+          buildMode: "production",
+          durationSeconds,
+          connections,
+          dynamicChallengeIds,
+          streamMinimumChunkGapMs: 10,
+          streamImplementations: { "tachyon-dom": "tachyon-route-stream-node-adapter" },
+          frameworks: frameworks.map((framework) => ({
+            name: framework.name,
+            cwd: framework.cwd,
+            build: framework.build ?? null,
+            start: framework.start(0),
+            dependencies: dependencies[framework.name],
+          })),
+        },
+        measurements: {
+          legacyDynamicAndStreamRankings: "non-authoritative",
+          metrics,
+          ranking,
+          table,
+          tachyonRouteStreamEvidence: metrics.find((metric) => metric.framework === "tachyon-dom")?.routeStreamEvidence,
+        },
       },
-      measurements: {
-        legacyDynamicAndStreamRankings: "non-authoritative",
-        metrics,
-        ranking,
-        table,
-      },
-    }, null, 2)}\n`,
+      null,
+      2,
+    )}\n`,
   );
   console.log("");
   console.log(table);

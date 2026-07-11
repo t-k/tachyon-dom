@@ -8,6 +8,17 @@ export type WebFrameworkMetric = {
   streamCompleteMs: number;
   clientNavigationMs: number;
   clientBundleBytes: number;
+  routeStreamEvidence?: {
+    cancellationObserved: boolean;
+    completedStreams: number;
+    emittedChunks: number;
+    startingRssBytes: number;
+    peakRssBytes: number;
+    peakRssDeltaBytes: number;
+    peakRssDeltaLimitBytes: number;
+    streamTtfbMs: number;
+    streamTtfbLimitMs: number;
+  };
 };
 
 export type WebFrameworkRankingRow = WebFrameworkMetric & {

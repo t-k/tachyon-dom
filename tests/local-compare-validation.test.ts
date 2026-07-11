@@ -24,7 +24,16 @@ const run = () => ({
     candidate: "tachyon-dom",
     implementations: ["vanillajs-lite-keyed", "tachyon-dom"],
   },
-  measurements: { summaries: [], auxiliaryMetrics: [] },
+  measurements: {
+    summaries: [
+      { label: "render", implementation: "vanillajs-lite-keyed", trimmedMean: 1 },
+      { label: "render", implementation: "tachyon-dom", trimmedMean: 1 },
+    ],
+    auxiliaryMetrics: [
+      { label: "size", unit: "bytes", implementation: "vanillajs-lite-keyed", value: 1 },
+      { label: "size", unit: "bytes", implementation: "tachyon-dom", value: 1 },
+    ],
+  },
 });
 
 describe("local compare validation", () => {
@@ -35,11 +44,55 @@ describe("local compare validation", () => {
     expect(result.verifiedControls).toMatchObject({
       baseline: "vanillajs-lite-keyed",
       candidate: "tachyon-dom",
+      git: { commit: "a".repeat(40), dirty: false, workingTreeSha256: "b".repeat(64) },
+      browser: { name: "chromium", version: "140" },
       runtime: { node: "v24.0.0" },
       host: { cpuModel: "cpu", logicalCpuCount: 8 },
       dependencies: { vite: { version: "8.0.16" } },
       workload: { iterations: 5, warmup: 2 },
     });
+  });
+
+  it.each([
+    [
+      "browser version",
+      (value: ReturnType<typeof run>) => ((value.provenance.browser.version as unknown) = null),
+      "provenance.browser.version",
+    ],
+    [
+      "summaries shape",
+      (value: ReturnType<typeof run>) => ((value.measurements.summaries as unknown) = {}),
+      "measurements.summaries",
+    ],
+    [
+      "empty summaries",
+      (value: ReturnType<typeof run>) => value.measurements.summaries.splice(0),
+      "measurements.summaries",
+    ],
+    [
+      "unknown implementation",
+      (value: ReturnType<typeof run>) => (value.measurements.summaries[0]!.implementation = "unknown"),
+      "measurements.summaries[0].implementation",
+    ],
+    [
+      "summary metric",
+      (value: ReturnType<typeof run>) =>
+        ((value.measurements.summaries[0]!.trimmedMean as number) = Number.NaN),
+      "measurements.summaries[0].trimmedMean",
+    ],
+    [
+      "auxiliary metric",
+      (value: ReturnType<typeof run>) =>
+        ((value.measurements.auxiliaryMetrics[0]!.value as number) = Number.POSITIVE_INFINITY),
+      "measurements.auxiliaryMetrics[0].value",
+    ],
+  ])("rejects malformed decoded %s", (_label, mutate, invalidPath) => {
+    const value = run();
+    mutate(value);
+    const result = validateLocalCompareRuns([value]);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected invalid run");
+    expect(result.invalidFields).toContain(`runs[0].${invalidPath}`);
   });
 
   it.each([
