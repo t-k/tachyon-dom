@@ -100,12 +100,14 @@ export const prepareStreamingBenchmarkAdapter = async (
       },
     };
   } catch (error) {
+    let removeFailed = false;
     if (added) {
-      await git(identity.subjectRoot, ["worktree", "remove", "--force", snapshotRoot]).catch(async () => {
-        await git(identity.subjectRoot, ["worktree", "prune"]).catch(() => undefined);
+      await git(identity.subjectRoot, ["worktree", "remove", "--force", snapshotRoot]).catch(() => {
+        removeFailed = true;
       });
     }
     await rm(snapshotRoot, { recursive: true, force: true });
+    if (removeFailed) await git(identity.subjectRoot, ["worktree", "prune"]).catch(() => undefined);
     throw error;
   }
 };
