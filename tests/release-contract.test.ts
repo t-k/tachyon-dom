@@ -86,4 +86,50 @@ describe("initializer package artifacts", () => {
       await rm(rootDir, { recursive: true, force: true });
     }
   });
+
+  it("verifies both real package manifests and identical license bytes", async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), "tachyon-release-repository-"));
+    const createDir = path.join(rootDir, "packages", "create-tachyon-dom");
+    try {
+      await mkdir(path.join(rootDir, "dist"), { recursive: true });
+      await mkdir(path.join(createDir, "dist"), { recursive: true });
+      const license = "MIT License\n\nfixture text\n";
+      await writeFile(path.join(rootDir, "LICENSE"), license);
+      await writeFile(path.join(rootDir, "README.md"), "# root\n");
+      await writeFile(path.join(rootDir, "dist", "cli.js"), "#!/usr/bin/env node\n");
+      await writeFile(
+        path.join(rootDir, "package.json"),
+        `${JSON.stringify({
+          name: "tachyon-dom",
+          version: "1.2.3",
+          files: ["dist", "README.md", "LICENSE"],
+          bin: { "tachyon-dom": "./dist/cli.js" },
+        })}\n`,
+      );
+      await writeFile(path.join(createDir, "LICENSE"), license);
+      await writeFile(path.join(createDir, "README.md"), "# create\n");
+      await writeFile(path.join(createDir, "dist", "index.js"), "#!/usr/bin/env node\n");
+      await writeFile(
+        path.join(createDir, "package.json"),
+        `${JSON.stringify({
+          name: "create-tachyon-dom",
+          version: "1.2.3",
+          files: ["dist", "README.md", "LICENSE"],
+          bin: { "create-tachyon-dom": "./dist/index.js" },
+          dependencies: { "tachyon-dom": "1.2.3" },
+        })}\n`,
+      );
+
+      await expect(
+        (releaseContract as any).verifyReleaseRepository({ rootDir, tag: "v1.2.3" }),
+      ).resolves.toMatchObject({ ok: true, version: "1.2.3", npmTag: "latest" });
+
+      await writeFile(path.join(createDir, "LICENSE"), `${license}changed\n`);
+      await expect(
+        (releaseContract as any).verifyReleaseRepository({ rootDir, tag: "v1.2.3" }),
+      ).resolves.toEqual({ ok: false, error: expect.stringMatching(/LICENSE bytes/) });
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
 });

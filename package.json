@@ -220,6 +220,7 @@
     "check:exports": "publint --strict && attw --pack --no-emoji --profile esm-only",
     "check:size": "size-limit",
     "verify:package": "node scripts/verify-package-artifacts.mjs",
+    "verify:release": "node scripts/release-contract.mjs",
     "verify:starters": "node scripts/verify-generated-starters.mjs",
     "verify:whitespace-types": "pnpm build && node scripts/verify-whitespace-policy-types.mjs",
     "prepublishOnly": "pnpm build && pnpm verify:package && pnpm check:exports && pnpm check:size",
