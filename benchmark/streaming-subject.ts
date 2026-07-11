@@ -1,11 +1,27 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { chmod, copyFile, cp, lstat, mkdtemp, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  chmod,
+  copyFile,
+  cp,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
+const esbuildCli = require.resolve("esbuild/bin/esbuild");
 
 const git = async (root: string, args: readonly string[]): Promise<string> =>
   (await execFileAsync("git", args, { cwd: root, maxBuffer: 16 * 1024 * 1024 })).stdout.trim();
@@ -90,13 +106,13 @@ const hashPrivateDependencyTree = async (nodeModules: string): Promise<string> =
         }
         hash.update(`link\0${relative}\0${path.relative(canonicalNodeModules, resolved).split(path.sep).join("/")}\0`);
       } else if (metadata.isDirectory()) {
-        hash.update(`directory\0${relative}\0`);
+        hash.update(`directory\0${relative}\0${metadata.mode & 0o777n}\0`);
         await visit(absolute);
       } else if (metadata.isFile()) {
         if (metadata.nlink !== 1n) {
           throw new Error(`Prepared dependency file is not private to the snapshot: ${relative}`);
         }
-        hash.update(`file\0${relative}\0`);
+        hash.update(`file\0${relative}\0${metadata.mode & 0o777n}\0`);
         hash.update(await readFile(absolute));
         hash.update("\0");
         const after = await lstat(absolute, { bigint: true });
@@ -133,7 +149,9 @@ const setTreeWritable = async (root: string, writable: boolean): Promise<void> =
   await visit(root);
 };
 
-const prepareDependencies = async (snapshotRoot: string): Promise<StreamingBenchmarkDependencySnapshot> => {
+const prepareDependencies = async (
+  snapshotRoot: string,
+): Promise<Omit<StreamingBenchmarkDependencySnapshot, "treeSha256">> => {
   const lockfile = path.join(snapshotRoot, "pnpm-lock.yaml");
   const lockfileContent = await readFile(lockfile).catch(() => {
     throw new Error("Authoritative benchmark subjects must contain a pinned pnpm-lock.yaml.");
@@ -160,7 +178,6 @@ const prepareDependencies = async (snapshotRoot: string): Promise<StreamingBench
   const packageManagerVersion = (await execFileAsync("pnpm", ["--version"], { cwd: snapshotRoot })).stdout.trim();
   return {
     lockfileSha256: sha256(lockfileContent),
-    treeSha256: await hashPrivateDependencyTree(nodeModules),
     packageManager: `pnpm@${packageManagerVersion}`,
   };
 };
@@ -200,8 +217,13 @@ export const identifyStreamingBenchmarkAdapter = async (
 
 export type PreparedStreamingBenchmarkAdapter = StreamingBenchmarkAdapterIdentity & {
   executionModule: string;
+  executionBundle: {
+    sha256: string;
+    bundler: string;
+  };
   dependencySnapshot: StreamingBenchmarkDependencySnapshot;
   verify: () => Promise<void>;
+  importAdapter: <T = Record<string, unknown>>() => Promise<T>;
   cleanup: () => Promise<void>;
 };
 
@@ -216,8 +238,44 @@ export const prepareStreamingBenchmarkAdapter = async (
   try {
     await git(identity.subjectRoot, ["worktree", "add", "--detach", snapshotRoot, identity.commit]);
     added = true;
-    const dependencySnapshot = await prepareDependencies(snapshotRoot);
+    const dependencyBase = await prepareDependencies(snapshotRoot);
     const executionModule = path.join(snapshotRoot, ...identity.relativePath.split("/"));
+    await setTreeWritable(snapshotRoot, false);
+    const dependencySnapshot: StreamingBenchmarkDependencySnapshot = {
+      ...dependencyBase,
+      treeSha256: await hashPrivateDependencyTree(path.join(snapshotRoot, "node_modules")),
+    };
+    const bundleProcess = (await execFileAsync(
+      process.execPath,
+      [
+        esbuildCli,
+        executionModule,
+        "--bundle",
+        "--format=esm",
+        "--platform=node",
+        "--target=node24",
+        "--packages=bundle",
+        "--legal-comments=none",
+        "--log-level=warning",
+      ],
+      { cwd: snapshotRoot, encoding: null, maxBuffer: 64 * 1024 * 1024 },
+    )) as unknown as { stdout: Buffer; stderr: Buffer };
+    if (bundleProcess.stderr.length > 0) {
+      throw new Error(`The benchmark adapter bundler emitted diagnostics:\n${bundleProcess.stderr.toString("utf8")}`);
+    }
+    const bundleBytes = bundleProcess.stdout;
+    if (bundleBytes.length === 0) throw new Error("The benchmark adapter bundler did not produce an execution module.");
+    const bundlerVersion = (
+      (await execFileAsync(process.execPath, [esbuildCli, "--version"], {
+        cwd: snapshotRoot,
+        encoding: "utf8",
+      })) as { stdout: string }
+    ).stdout.trim();
+    const executionBundle = {
+      sha256: sha256(bundleBytes),
+      bundler: `esbuild@${bundlerVersion}`,
+    };
+    const executionUrl = `data:text/javascript;base64,${Buffer.from(bundleBytes).toString("base64")}#${executionBundle.sha256}`;
     const verify = async (): Promise<void> => {
       const [content, snapshotBlob, lockfileContent, treeSha256, trackedStatus] = await Promise.all([
         readFile(executionModule),
@@ -240,17 +298,22 @@ export const prepareStreamingBenchmarkAdapter = async (
       }
     };
     await verify();
-    await setTreeWritable(snapshotRoot, false);
-    await verify();
+    const importAdapter = async <T = Record<string, unknown>>(): Promise<T> => {
+      const loaded = (await import(executionUrl)) as T;
+      await verify();
+      return loaded;
+    };
     let cleaned = false;
     return {
       ...identity,
       executionModule,
+      executionBundle,
       dependencySnapshot,
       verify,
+      importAdapter,
       cleanup: async () => {
         if (cleaned) return;
-        await setTreeWritable(snapshotRoot, true);
+        await setTreeWritable(snapshotRoot, true).catch(() => undefined);
         try {
           await git(identity.subjectRoot, ["worktree", "remove", "--force", snapshotRoot]);
           cleaned = true;
@@ -280,5 +343,22 @@ export const prepareStreamingBenchmarkAdapter = async (
     await rm(snapshotRoot, { recursive: true, force: true });
     if (removeFailed) await git(identity.subjectRoot, ["worktree", "prune"]).catch(() => undefined);
     throw error;
+  }
+};
+
+export const writeVerifiedBenchmarkArtifact = async (
+  prepared: Pick<PreparedStreamingBenchmarkAdapter, "verify">,
+  output: string,
+  content: string,
+): Promise<void> => {
+  const outputDirectory = path.dirname(output);
+  const temporaryOutput = path.join(outputDirectory, `.${path.basename(output)}.${process.pid}.${randomUUID()}.tmp`);
+  await mkdir(outputDirectory, { recursive: true });
+  try {
+    await writeFile(temporaryOutput, content, { flag: "wx", mode: 0o600 });
+    await prepared.verify();
+    await rename(temporaryOutput, output);
+  } finally {
+    await rm(temporaryOutput, { force: true }).catch(() => undefined);
   }
 };

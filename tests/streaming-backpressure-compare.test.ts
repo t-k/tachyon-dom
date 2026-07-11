@@ -6,7 +6,7 @@ import type { BenchmarkEnvelope } from "../benchmark/provenance.js";
 const envelope = (options: { revision: string; queued: number; connections?: number; dirty?: boolean }) =>
   ({
     schemaVersion: 2,
-    benchmark: { name: "streaming-backpressure", contractVersion: 2 },
+    benchmark: { name: "streaming-backpressure", contractVersion: 3 },
     provenance: {
       capturedAt: "2026-07-10T00:00:00.000Z",
       command: { argv: ["benchmark"], display: "benchmark", cwd: "/repo" },
@@ -27,6 +27,10 @@ const envelope = (options: { revision: string; queued: number; connections?: num
         relativePath: "src/adapter.js",
         sha256: (options.revision === "baseline" ? "a" : "b").repeat(64),
         gitBlob: (options.revision === "baseline" ? "c" : "d").repeat(40),
+        executionBundle: {
+          sha256: (options.revision === "baseline" ? "1" : "2").repeat(64),
+          bundler: "esbuild@0.28.1",
+        },
         dependencySnapshot: {
           lockfileSha256: "e".repeat(64),
           treeSha256: "f".repeat(64),
@@ -95,6 +99,19 @@ describe("streaming backpressure comparison", () => {
     const candidate = envelope({ revision: "candidate", queued: 100 });
     candidate.workload.adapter.dependencySnapshot.treeSha256 = "0".repeat(64);
     expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(/dependencySnapshot/);
+  });
+
+  it("rejects missing or mismatched execution bundle provenance", () => {
+    const missing = envelope({ revision: "baseline", queued: 1_000 });
+    delete missing.workload.adapter.executionBundle;
+    expect(() =>
+      compareStreamingBackpressureResults(missing, envelope({ revision: "candidate", queued: 100 })),
+    ).toThrow(/executionBundle/);
+
+    const baseline = envelope({ revision: "baseline", queued: 1_000 });
+    const candidate = envelope({ revision: "candidate", queued: 100 });
+    candidate.workload.adapter.executionBundle.bundler = "esbuild@0.27.0";
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(/executionBundle\.bundler/);
   });
 
   it("rejects trailing data in the dependency package-manager identity", () => {

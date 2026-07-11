@@ -16,6 +16,10 @@ type StreamingWorkload = {
     relativePath: string;
     sha256: string;
     gitBlob: string;
+    executionBundle: {
+      sha256: string;
+      bundler: string;
+    };
     dependencySnapshot: {
       lockfileSha256: string;
       treeSha256: string;
@@ -70,6 +74,15 @@ const controlValidators = [
   ],
   ["workload.adapter.sha256", (value: unknown) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)],
   ["workload.adapter.gitBlob", (value: unknown) => typeof value === "string" && /^[a-f0-9]{40,64}$/.test(value)],
+  ["workload.adapter.executionBundle", (value: unknown) => typeof value === "object" && value !== null],
+  [
+    "workload.adapter.executionBundle.sha256",
+    (value: unknown) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value),
+  ],
+  [
+    "workload.adapter.executionBundle.bundler",
+    (value: unknown) => typeof value === "string" && /^esbuild@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value),
+  ],
   ["workload.adapter.dependencySnapshot", (value: unknown) => typeof value === "object" && value !== null],
   [
     "workload.adapter.dependencySnapshot.lockfileSha256",
@@ -108,8 +121,8 @@ const validateStreamingArtifact = (value: unknown, label: "baseline" | "candidat
   if (valueAtBenchmarkPath(value, "benchmark.name") !== "streaming-backpressure") {
     throw new Error(`${label}.benchmark.name must be streaming-backpressure.`);
   }
-  if (valueAtBenchmarkPath(value, "benchmark.contractVersion") !== 2) {
-    throw new Error(`${label}.benchmark.contractVersion must be 2.`);
+  if (valueAtBenchmarkPath(value, "benchmark.contractVersion") !== 3) {
+    throw new Error(`${label}.benchmark.contractVersion must be 3.`);
   }
   for (const [path, validate] of [...controlValidators, ...measurementValidators]) {
     if (!validate(valueAtBenchmarkPath(value, path))) throw new Error(`${label}.${path} is invalid.`);
@@ -160,6 +173,7 @@ const requiredEqualPaths = [
   "workload.chunkBytes",
   "workload.drainDelayMs",
   "workload.adapter.relativePath",
+  "workload.adapter.executionBundle.bundler",
   "workload.adapter.dependencySnapshot",
 ] as const;
 

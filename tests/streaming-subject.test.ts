@@ -1,12 +1,16 @@
 import { execFile } from "node:child_process";
-import { chmod, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
-import { identifyStreamingBenchmarkAdapter, prepareStreamingBenchmarkAdapter } from "../benchmark/streaming-subject.js";
+import {
+  identifyStreamingBenchmarkAdapter,
+  prepareStreamingBenchmarkAdapter,
+  writeVerifiedBenchmarkArtifact,
+} from "../benchmark/streaming-subject.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -136,9 +140,33 @@ describe("streaming benchmark adapter identity", () => {
       expect(dependencyMetadata.nlink).toBe(1);
       await expect(writeFile(preparedDependency, 'export const dependencyValue = "tampered";\n')).rejects.toThrow();
       await expect(prepared.verify()).resolves.toBeUndefined();
+      await expect(prepared.importAdapter<{ adapter: string }>()).resolves.toMatchObject({ adapter: "pinned" });
+      await chmod(preparedDependency, 0o555);
+      await expect(prepared.verify()).rejects.toThrow(/dependencies do not match/);
+      await chmod(preparedDependency, 0o444);
+      await expect(prepared.verify()).resolves.toBeUndefined();
       await chmod(preparedDependency, 0o644);
       await writeFile(preparedDependency, 'export const dependencyValue = "tampered";\n');
       await expect(prepared.verify()).rejects.toThrow(/dependencies do not match/);
+      await expect((prepared as any).importAdapter()).rejects.toThrow(/dependencies do not match/);
+    } finally {
+      await prepared.cleanup();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("binds execution to one hashed bundle and detects execution-relevant mode changes", async () => {
+    const fixture = await repositoryFixture();
+    const prepared = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+    try {
+      expect((prepared as any).executionBundle).toMatchObject({
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        bundler: expect.stringMatching(/^esbuild@/),
+      });
+      await expect((prepared as any).importAdapter()).resolves.toMatchObject({ adapter: true });
+      const preparedAdapter = prepared.executionModule;
+      await chmod(preparedAdapter, 0o755);
+      await expect(prepared.verify()).rejects.toThrow(/source tree|mode|snapshot/i);
     } finally {
       await prepared.cleanup();
       await rm(fixture.root, { recursive: true, force: true });
@@ -183,6 +211,26 @@ describe("streaming benchmark adapter identity", () => {
     } finally {
       await second.cleanup();
       await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not publish a final or temporary artifact when final snapshot verification fails", async () => {
+    const fixture = await repositoryFixture();
+    const outputDirectory = await mkdtemp(path.join(tmpdir(), "tachyon-verified-artifact-"));
+    const output = path.join(outputDirectory, "result.json");
+    const prepared = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+    try {
+      await chmod(prepared.executionModule, 0o644);
+      await writeFile(prepared.executionModule, "export const adapter = false;\n");
+      await expect(writeVerifiedBenchmarkArtifact(prepared, output, '{"result":true}\n')).rejects.toThrow(
+        /snapshot|source tree/,
+      );
+      await expect(access(output)).rejects.toThrow();
+      expect(await readdir(outputDirectory)).toEqual([]);
+    } finally {
+      await prepared.cleanup();
+      await rm(fixture.root, { recursive: true, force: true });
+      await rm(outputDirectory, { recursive: true, force: true });
     }
   });
 });

@@ -1,9 +1,7 @@
 import { createServer, get, type ServerResponse } from "node:http";
-import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { collectBenchmarkProvenance, collectDependencyVersions } from "./provenance.js";
-import { prepareStreamingBenchmarkAdapter } from "./streaming-subject.js";
+import { prepareStreamingBenchmarkAdapter, writeVerifiedBenchmarkArtifact } from "./streaming-subject.js";
 
 const numberArg = (name: string, fallback: number): number => {
   const index = process.argv.indexOf(name);
@@ -38,10 +36,9 @@ try {
   if (subject.git.available !== true || subject.git.commit !== adapterIdentity.commit || subject.git.dirty !== false) {
     throw new Error("Benchmark subject provenance changed after the adapter snapshot was pinned.");
   }
-  await adapterIdentity.verify();
-  const { writeNodeResponse } = (await import(pathToFileURL(adapterIdentity.executionModule).href)) as {
+  const { writeNodeResponse } = await adapterIdentity.importAdapter<{
     writeNodeResponse: (response: Response, destination: ServerResponse) => Promise<void>;
-  };
+  }>();
 
   let sourcePullCount = 0;
   let peakQueuedBytes = 0;
@@ -110,16 +107,17 @@ try {
   }
   const completionTimeMs = performance.now() - startedAt;
   peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
+  await adapterIdentity.verify();
 
   const argv = [process.execPath, ...process.argv.slice(1)];
   const provenance = await collectBenchmarkProvenance({
     cwd: projectRoot,
     argv,
-    dependencies: await collectDependencyVersions(projectRoot, ["tsx"]),
+    dependencies: await collectDependencyVersions(projectRoot, ["tsx", "esbuild"]),
   });
   const result = {
     schemaVersion: 2,
-    benchmark: { name: "streaming-backpressure", contractVersion: 2 },
+    benchmark: { name: "streaming-backpressure", contractVersion: 3 },
     provenance,
     workload: {
       label,
@@ -133,6 +131,7 @@ try {
         relativePath: adapterIdentity.relativePath,
         sha256: adapterIdentity.sha256,
         gitBlob: adapterIdentity.gitBlob,
+        executionBundle: adapterIdentity.executionBundle,
         dependencySnapshot: adapterIdentity.dependencySnapshot,
       },
       subject: { root: adapterIdentity.subjectRoot, git: subject.git },
@@ -146,8 +145,7 @@ try {
       peakRssDeltaBytes: Math.max(0, peakRssBytes - startingRssBytes),
     },
   };
-  await mkdir(path.dirname(output), { recursive: true });
-  await writeFile(output, `${JSON.stringify(result, null, 2)}\n`);
+  await writeVerifiedBenchmarkArtifact(adapterIdentity, output, `${JSON.stringify(result, null, 2)}\n`);
   console.log(JSON.stringify({ output, ...result }));
 } finally {
   await adapterIdentity.cleanup();
