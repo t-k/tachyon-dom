@@ -141,6 +141,27 @@ describe("benchmark provenance", () => {
     });
     expect(missingWorkload.invalidFields).toEqual(["baseline.workload.connections", "candidate.workload.connections"]);
 
+    const nullWorkloadBaseline = structuredClone(envelope()) as any;
+    const nullWorkloadCandidate = structuredClone(envelope()) as any;
+    nullWorkloadBaseline.workload.connections = null;
+    nullWorkloadCandidate.workload.connections = null;
+    const nullWorkload = compareBenchmarkEnvelopes(nullWorkloadBaseline, nullWorkloadCandidate, {
+      requiredEqualPaths: ["workload.connections"],
+    });
+    expect(nullWorkload.invalidFields).toEqual(["baseline.workload.connections", "candidate.workload.connections"]);
+
+    const unavailableDependencyBaseline = structuredClone(envelope()) as any;
+    const unavailableDependencyCandidate = structuredClone(envelope()) as any;
+    unavailableDependencyBaseline.provenance.dependencies.tsx = { version: null, reason: "not found" };
+    unavailableDependencyCandidate.provenance.dependencies.tsx = { version: null, reason: "not found" };
+    const unavailableDependency = compareBenchmarkEnvelopes(
+      unavailableDependencyBaseline,
+      unavailableDependencyCandidate,
+      { requiredEqualPaths: ["provenance.dependencies", "workload.connections"] },
+    );
+    expect(unavailableDependency.invalidFields).toContain("baseline.provenance.dependencies");
+    expect(unavailableDependency.invalidFields).toContain("candidate.provenance.dependencies");
+
     const wrongTypeBaseline = structuredClone(envelope()) as any;
     wrongTypeBaseline.provenance.host.logicalCpuCount = "8";
     const wrongType = compareBenchmarkEnvelopes(wrongTypeBaseline, envelope(), {
@@ -244,6 +265,25 @@ describe("benchmark provenance", () => {
       expect(result.provenance.command.argv).toContain("--connections");
       expect(result.measurements.completionTimeMs).toBeGreaterThan(0);
       expect(result.measurements.sourcePullCount).toBeGreaterThan(0);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("labels HTML minification as a same-checkout algorithm comparison", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "tachyon-html-benchmark-envelope-"));
+    const output = path.join(directory, "result.json");
+    try {
+      await execFileAsync(
+        "pnpm",
+        ["exec", "tsx", "benchmark/html-minification.ts", "--iterations", "1", "--output", output],
+        { cwd: process.cwd(), maxBuffer: 16 * 1024 * 1024 },
+      );
+      const result = JSON.parse(await readFile(output, "utf8")) as any;
+      expect(result.workload.algorithms).toEqual({ baseline: "legacyMinifyHtml", candidate: "minifyHtml" });
+      expect(result.workload).not.toHaveProperty("baselineRevision");
+      expect(result.workload).not.toHaveProperty("candidateRevision");
+      expect(result.provenance.dependencies.parse5.version).toMatch(/^7\./);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

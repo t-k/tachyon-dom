@@ -4,15 +4,7 @@
 //
 // Usage: pnpm exec tsx benchmark/local-compare/aggregate.ts results/AFTER-clean.json results/AFTER-2.json ...
 import { readFileSync } from "node:fs";
-import { compareBenchmarkEnvelopes } from "../provenance.js";
-import { validateBenchmarkEnvelope, valueAtBenchmarkPath } from "../provenance-validation.js";
-
-type Summary = { label: string; implementation: string; trimmedMean: number };
-type AuxiliaryMetric = { label: string; unit: string; implementation: string; value: number };
-type LocalCompareRun = {
-  workload: { candidate: string; implementations: string[] };
-  measurements: { summaries: Summary[]; auxiliaryMetrics: AuxiliaryMetric[] };
-};
+import { validateLocalCompareRuns, type LocalCompareRun } from "./validation.js";
 
 const files = process.argv.slice(2);
 if (files.length === 0) {
@@ -20,40 +12,13 @@ if (files.length === 0) {
   process.exit(1);
 }
 const runs = files.map((file): unknown => JSON.parse(readFileSync(file, "utf8")));
-const requiredEqualPaths = [
-  "benchmark.contractVersion",
-  "workload.iterations",
-  "workload.warmup",
-  "workload.serveMode",
-  "workload.operationStatistic",
-  "workload.trimFraction",
-  "workload.implementations",
-  "provenance.git.commit",
-  "provenance.git.dirty",
-  "provenance.git.workingTreeSha256",
-  "provenance.runtime",
-  "provenance.host",
-  "provenance.browser",
-  "provenance.dependencies",
-];
-for (const [index, run] of runs.entries()) {
-  const validation = validateBenchmarkEnvelope(run, requiredEqualPaths);
-  if (!validation.valid || valueAtBenchmarkPath(run, "benchmark.name") !== "local-compare") {
-    const details = validation.valid ? "benchmark.name" : validation.invalidFields.join(", ");
-    throw new Error(`Benchmark artifact ${files[index]} is incomplete or invalid at: ${details}.`);
-  }
+const validation = validateLocalCompareRuns(runs);
+if (!validation.ok) {
+  throw new Error(
+    `Benchmark artifacts are incomplete, non-authoritative, or incompatible at: ${validation.invalidFields.join(", ")}.`,
+  );
 }
-for (const [index, run] of runs.entries()) {
-  const comparison = compareBenchmarkEnvelopes(runs[0], run, { requiredEqualPaths });
-  if (!comparison.compatible) {
-    const details =
-      comparison.invalidFields.length > 0
-        ? comparison.invalidFields.join(", ")
-        : comparison.accidentalDifferences.map((difference) => difference.path).join(", ");
-    throw new Error(`Benchmark artifact ${files[index]} is not authoritative or compatible at: ${details}.`);
-  }
-}
-const validatedRuns = runs as LocalCompareRun[];
+const validatedRuns = validation.runs;
 const firstRun = validatedRuns[0];
 if (!firstRun) throw new Error("At least one benchmark artifact is required.");
 const candidate = firstRun.workload.candidate;
@@ -130,7 +95,9 @@ const report = (title: string, measurements: Map<string, Map<string, number[]>>,
   console.log(`\n  => ${candidate} 1st-or-tied(<0.5%): ${wins}/${total}`);
 };
 
-console.log(`Candidate: ${candidate}`);
+console.log(`Baseline: ${validation.verifiedControls.baseline}`);
+console.log(`Candidate: ${validation.verifiedControls.candidate}`);
 console.log(`Runs: ${files.join(", ")}`);
+console.log(`Verified controls: ${JSON.stringify(validation.verifiedControls)}`);
 report("Operations", operationMap, true);
 report("Auxiliary", auxiliaryMap, true);

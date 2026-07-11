@@ -3,7 +3,19 @@ import { readFile, writeFile } from "node:fs/promises";
 import { collectBenchmarkProvenance, compareBenchmarkEnvelopes, type BenchmarkEnvelope } from "./provenance.js";
 
 type StreamingWorkload = {
-  subject: { git: { commit: string | null; dirty: boolean | null } };
+  transport: string;
+  connections: number;
+  chunksPerConnection: number;
+  chunkBytes: number;
+  drainDelayMs: number;
+  subject: {
+    git: {
+      available: boolean;
+      commit: string | null;
+      dirty: boolean | null;
+      workingTreeSha256: string | null;
+    };
+  };
 };
 
 type StreamingMeasurements = {
@@ -39,8 +51,22 @@ export const compareStreamingBackpressureResults = (
   if (!controls.compatible || controls.legacyIncomplete) {
     const details = controls.legacyIncomplete
       ? "legacy or incomplete benchmark envelope"
-      : controls.accidentalDifferences.map(({ path }) => path).join(", ");
+      : [...controls.invalidFields, ...controls.accidentalDifferences.map(({ path }) => path)].join(", ");
     throw new Error(`Incompatible benchmark controls: ${details}`);
+  }
+  for (const [label, subject] of [
+    ["baseline", baseline.workload.subject],
+    ["candidate", candidate.workload.subject],
+  ] as const) {
+    if (subject.git.available !== true) {
+      throw new Error(`${label}.workload.subject.git.available must be true.`);
+    }
+    if (typeof subject.git.commit !== "string" || subject.git.commit.length === 0) {
+      throw new Error(`${label}.workload.subject.git.commit must be available.`);
+    }
+    if (typeof subject.git.workingTreeSha256 !== "string" || subject.git.workingTreeSha256.length === 0) {
+      throw new Error(`${label}.workload.subject.git.workingTreeSha256 must be available.`);
+    }
   }
   if (
     baseline.provenance.git.dirty !== false ||
@@ -57,6 +83,20 @@ export const compareStreamingBackpressureResults = (
     baselineRevision: baseline.workload.subject.git.commit,
     candidateRevision: candidate.workload.subject.git.commit,
     controls,
+    verifiedControls: {
+      baselineSubject: baseline.workload.subject.git,
+      candidateSubject: candidate.workload.subject.git,
+      runtime: baseline.provenance.runtime,
+      host: baseline.provenance.host,
+      dependencies: baseline.provenance.dependencies,
+      workload: {
+        transport: baseline.workload.transport,
+        connections: baseline.workload.connections,
+        chunksPerConnection: baseline.workload.chunksPerConnection,
+        chunkBytes: baseline.workload.chunkBytes,
+        drainDelayMs: baseline.workload.drainDelayMs,
+      },
+    },
     ratios: {
       completionTime: candidate.measurements.completionTimeMs / baseline.measurements.completionTimeMs,
       peakQueuedBytes: candidate.measurements.peakQueuedBytes / baseline.measurements.peakQueuedBytes,

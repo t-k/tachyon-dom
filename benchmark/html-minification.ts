@@ -68,6 +68,9 @@ const argument = (name: string): string | undefined => {
 
 const main = async () => {
   const iterations = Number.parseInt(argument("--iterations") ?? "5000", 10);
+  if (!Number.isInteger(iterations) || iterations <= 0) {
+    throw new Error("--iterations must be a positive integer.");
+  }
   const output = path.resolve(argument("--output") ?? "benchmark/html-minification-results/latest.json");
   const provenance = await collectBenchmarkProvenance({
     cwd: process.cwd(),
@@ -79,8 +82,7 @@ const main = async () => {
     benchmark: { name: "html-minification", contractVersion: 1 },
     provenance,
     workload: {
-      baselineRevision: argument("--baseline") ?? "4b24a62",
-      candidateRevision: provenance.git.commit,
+      algorithms: { baseline: "legacyMinifyHtml", candidate: "minifyHtml" },
       buildMode: "production",
       iterations,
       fixtures: Object.fromEntries(Object.entries(fixtures).map(([name, source]) => [name, size(source)])),

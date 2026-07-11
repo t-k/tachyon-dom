@@ -20,6 +20,11 @@ const validDependencies = (value: unknown): boolean =>
       (dependency.reason === undefined || typeof dependency.reason === "string"),
   );
 
+const validAvailableDependencies = (value: unknown): boolean =>
+  isRecord(value) &&
+  Object.keys(value).length > 0 &&
+  Object.values(value).every((dependency) => isRecord(dependency) && nonEmptyString(dependency.version));
+
 const validGitMetadata = (value: unknown): boolean => {
   if (!isRecord(value) || typeof value.available !== "boolean") return false;
   if (value.available) {
@@ -64,7 +69,12 @@ export const validateBenchmarkEnvelope = (
     .filter(([fieldPath, validate]) => !validate(valueAtBenchmarkPath(value, fieldPath)))
     .map(([fieldPath]) => fieldPath);
   for (const fieldPath of requiredValuePaths) {
-    if (valueAtBenchmarkPath(value, fieldPath) === undefined && !invalidFields.includes(fieldPath)) {
+    const requiredValue = valueAtBenchmarkPath(value, fieldPath);
+    const validRequiredValue =
+      fieldPath === "provenance.dependencies"
+        ? validAvailableDependencies(requiredValue)
+        : requiredValue !== undefined && requiredValue !== null;
+    if (!validRequiredValue && !invalidFields.includes(fieldPath)) {
       invalidFields.push(fieldPath);
     }
   }
