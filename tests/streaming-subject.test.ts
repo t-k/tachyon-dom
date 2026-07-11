@@ -1,15 +1,12 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
-import {
-  identifyStreamingBenchmarkAdapter,
-  prepareStreamingBenchmarkAdapter,
-} from "../benchmark/streaming-subject.js";
+import { identifyStreamingBenchmarkAdapter, prepareStreamingBenchmarkAdapter } from "../benchmark/streaming-subject.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -21,7 +18,10 @@ const repositoryFixture = async (): Promise<{ root: string; adapter: string }> =
   await execFileAsync("git", ["config", "user.name", "Benchmark Test"], { cwd: root });
   await mkdir(path.join(root, "src"));
   await writeFile(adapter, "export const adapter = true;\n");
-  await execFileAsync("git", ["add", "src/adapter.mjs"], { cwd: root });
+  await writeFile(path.join(root, "package.json"), '{"name":"benchmark-subject","private":true,"type":"module"}\n');
+  await writeFile(path.join(root, ".gitignore"), "node_modules/\n");
+  await execFileAsync("pnpm", ["install", "--ignore-scripts"], { cwd: root });
+  await execFileAsync("git", ["add", ".gitignore", "package.json", "pnpm-lock.yaml", "src/adapter.mjs"], { cwd: root });
   await execFileAsync("git", ["commit", "-m", "adapter"], { cwd: root });
   return { root, adapter };
 };
@@ -78,6 +78,110 @@ describe("streaming benchmark adapter identity", () => {
       expect(prepared.executionModule).not.toBe(fixture.adapter);
     } finally {
       await prepared.cleanup();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("executes private lockfile-derived dependency bytes after the subject installation changes", async () => {
+    const fixture = await repositoryFixture();
+    const dependencyRoot = path.join(fixture.root, "vendor/fixture-dependency");
+    await mkdir(dependencyRoot, { recursive: true });
+    await writeFile(
+      path.join(fixture.root, "package.json"),
+      `${JSON.stringify({
+        name: "benchmark-subject",
+        private: true,
+        type: "module",
+        dependencies: { "fixture-dependency": "file:vendor/fixture-dependency" },
+      })}\n`,
+    );
+    await writeFile(path.join(fixture.root, ".gitignore"), "node_modules/\n");
+    await writeFile(
+      path.join(dependencyRoot, "package.json"),
+      `${JSON.stringify({ name: "fixture-dependency", version: "1.0.0", type: "module", exports: "./index.js" })}\n`,
+    );
+    await writeFile(path.join(dependencyRoot, "index.js"), 'export const dependencyValue = "pinned";\n');
+    await writeFile(
+      fixture.adapter,
+      'import { dependencyValue } from "fixture-dependency"; export const adapter = dependencyValue;\n',
+    );
+    await execFileAsync("pnpm", ["install", "--ignore-scripts"], { cwd: fixture.root });
+    await execFileAsync("git", ["add", ".gitignore", "package.json", "pnpm-lock.yaml", "vendor", "src/adapter.mjs"], {
+      cwd: fixture.root,
+    });
+    await execFileAsync("git", ["commit", "-m", "add dependency"], { cwd: fixture.root });
+
+    const prepared = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+    try {
+      await writeFile(
+        path.join(fixture.root, "node_modules/fixture-dependency/index.js"),
+        'export const dependencyValue = "mutated";\n',
+      );
+      const executed = await execFileAsync(process.execPath, [
+        "--input-type=module",
+        "--eval",
+        `const value = await import(${JSON.stringify(pathToFileURL(prepared.executionModule).href)}); console.log(value.adapter);`,
+      ]);
+      expect(executed.stdout.trim()).toBe("pinned");
+      expect(prepared.dependencySnapshot).toMatchObject({
+        lockfileSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        treeSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+      });
+      const preparedDependency = path.join(
+        path.dirname(path.dirname(prepared.executionModule)),
+        "node_modules/fixture-dependency/index.js",
+      );
+      const dependencyMetadata = await lstat(preparedDependency);
+      expect(dependencyMetadata.isSymbolicLink()).toBe(false);
+      expect(dependencyMetadata.nlink).toBe(1);
+      await expect(writeFile(preparedDependency, 'export const dependencyValue = "tampered";\n')).rejects.toThrow();
+      await expect(prepared.verify()).resolves.toBeUndefined();
+      await chmod(preparedDependency, 0o644);
+      await writeFile(preparedDependency, 'export const dependencyValue = "tampered";\n');
+      await expect(prepared.verify()).rejects.toThrow(/dependencies do not match/);
+    } finally {
+      await prepared.cleanup();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a lockfile changed after the snapshot was sealed", async () => {
+    const fixture = await repositoryFixture();
+    const prepared = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+    try {
+      const preparedLockfile = path.join(path.dirname(path.dirname(prepared.executionModule)), "pnpm-lock.yaml");
+      await chmod(preparedLockfile, 0o644);
+      await writeFile(preparedLockfile, "tampered\n");
+      await expect(prepared.verify()).rejects.toThrow(/lockfile does not match/);
+    } finally {
+      await prepared.cleanup();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects an authoritative subject without a pinned lockfile", async () => {
+    const fixture = await repositoryFixture();
+    try {
+      await execFileAsync("git", ["rm", "pnpm-lock.yaml"], { cwd: fixture.root });
+      await execFileAsync("git", ["commit", "-m", "remove lockfile"], { cwd: fixture.root });
+      await expect(prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter)).rejects.toThrow(
+        /pinned pnpm-lock\.yaml/,
+      );
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("produces one dependency identity for repeated preparation of the same commit", async () => {
+    const fixture = await repositoryFixture();
+    const first = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+    const firstIdentity = first.dependencySnapshot;
+    await first.cleanup();
+    const second = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+    try {
+      expect(second.dependencySnapshot).toEqual(firstIdentity);
+    } finally {
+      await second.cleanup();
       await rm(fixture.root, { recursive: true, force: true });
     }
   });

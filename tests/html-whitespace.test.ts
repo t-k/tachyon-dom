@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parse, serialize } from "parse5";
+import { readFileSync } from "node:fs";
 
 import { condenseHtmlWhitespace, defineApp, minifyHtml, normalizeHtmlTagWhitespace } from "../src/app.js";
 import { applyHtmlWhitespace } from "../src/html-whitespace.js";
@@ -17,6 +18,26 @@ const bodySource = (html: string): string =>
   html.slice(html.indexOf("<body>") + "<body>".length, html.indexOf("</body>"));
 
 describe("safe HTML whitespace policy", () => {
+  it("documents direct migration errors and buffered generic 500 boundaries", () => {
+    const readme = readFileSync("README.md", "utf8");
+    const routing = readFileSync("docs/routing.md", "utf8");
+    for (const boundary of [
+      "App document rendering",
+      "Vite app plugin creation",
+      "Buffered router",
+      "Streaming router",
+      "Workers and Node buffered adapters",
+      "Lambda proxy buffered adapter",
+      "Workers, Node, and Lambda streaming adapters",
+    ]) {
+      expect(`${readme}\n${routing}`).toContain(boundary);
+    }
+    expect(readme).not.toContain(
+      "Unknown runtime values throw a migration error instead of silently selecting preserve behavior.",
+    );
+    expect(routing).toContain("trusted benchmark input");
+  });
+
   it("maps legacy runtime literals explicitly and rejects unknown policies", () => {
     const source = `<div   class="x"   >ok</div>`;
     expect(applyHtmlWhitespace(source, "condense" as never)).toBe(`<div class="x">ok</div>`);

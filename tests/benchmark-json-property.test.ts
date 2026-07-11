@@ -41,6 +41,11 @@ const envelope = (revision: string) => ({
       relativePath: "src/adapter.js",
       sha256: (revision === "baseline" ? "a" : "b").repeat(64),
       gitBlob: (revision === "baseline" ? "c" : "d").repeat(40),
+      dependencySnapshot: {
+        lockfileSha256: "e".repeat(64),
+        treeSha256: "f".repeat(64),
+        packageManager: "pnpm@10.32.1",
+      },
     },
     subject: {
       root: `/repo/${revision}`,
