@@ -1,6 +1,11 @@
+import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { verifyReleaseIdentity } from "../scripts/release-contract.mjs";
+import * as releaseContract from "../scripts/release-contract.mjs";
+
+const { verifyReleaseIdentity } = releaseContract;
 
 const packages = (version = "1.2.3", dependency = version) => ({
   rootPackage: { name: "tachyon-dom", version },
@@ -32,5 +37,53 @@ describe("npm release identity", () => {
     fixture.createPackage.dependencies["tachyon-dom"] =
       _label === "dependency range" ? `^${rootVersion}` : _label === "dependency mismatch" ? "1.2.2" : rootVersion;
     expect(verifyReleaseIdentity({ tag, ...fixture })).toEqual({ ok: false, error: expect.stringMatching(expected) });
+  });
+});
+
+describe("initializer package artifacts", () => {
+  it("inspects required files in the real npm dry-run manifest", async () => {
+    const packageDir = await mkdtemp(path.join(tmpdir(), "tachyon-create-pack-"));
+    try {
+      await mkdir(path.join(packageDir, "dist"));
+      await writeFile(path.join(packageDir, "dist", "index.js"), "#!/usr/bin/env node\n");
+      await writeFile(path.join(packageDir, "README.md"), "# fixture\n");
+      await writeFile(path.join(packageDir, "LICENSE"), "MIT fixture\n");
+      await writeFile(
+        path.join(packageDir, "package.json"),
+        `${JSON.stringify({
+          name: "create-tachyon-dom-fixture",
+          version: "1.2.3",
+          files: ["dist", "README.md", "LICENSE"],
+          bin: { "create-tachyon-dom-fixture": "./dist/index.js" },
+        })}\n`,
+      );
+
+      const requiredFiles = ["package.json", "README.md", "LICENSE", "dist/index.js"];
+      await expect(
+        (releaseContract as any).inspectPackageDryRun({ packageDir, requiredFiles }),
+      ).resolves.toMatchObject({ ok: true, files: expect.arrayContaining(requiredFiles) });
+
+      await unlink(path.join(packageDir, "LICENSE"));
+      await expect(
+        (releaseContract as any).inspectPackageDryRun({ packageDir, requiredFiles }),
+      ).resolves.toEqual({ ok: false, error: expect.stringMatching(/LICENSE/) });
+    } finally {
+      await rm(packageDir, { recursive: true, force: true });
+    }
+  });
+
+  it("copies the repository MIT license bytes into the initializer package", async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), "tachyon-license-root-"));
+    const packageDir = path.join(rootDir, "packages", "create-tachyon-dom");
+    try {
+      await mkdir(packageDir, { recursive: true });
+      const license = "MIT License\n\nfixture text\n";
+      await writeFile(path.join(rootDir, "LICENSE"), license);
+      const assets = await import("../scripts/copy-create-package-assets.mjs");
+      await assets.copyCreatePackageAssets({ rootDir, packageDir });
+      expect(await readFile(path.join(packageDir, "LICENSE"), "utf8")).toBe(license);
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
   });
 });

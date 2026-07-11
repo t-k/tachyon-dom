@@ -10,17 +10,18 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
-    "tachyon-dom": "^0.1.0"
+    "tachyon-dom": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.3",
     "typescript": "^7.0.2"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json && node ../../scripts/copy-create-package-assets.mjs"
   },
   "engines": {
     "node": ">=24"
