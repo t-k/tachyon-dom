@@ -316,6 +316,7 @@ describe("DX helpers", () => {
     expect(publisher).toMatch(
       /"publish",\s*entry\.filename,\s*"--provenance",\s*"--access",\s*"public",\s*"--tag",\s*stagingTagFor\(verified\.version\)/,
     );
+    expect(publisher).toContain("if (confirmed.integrity !== entry.integrity) throw error");
     expect(finalizer).toContain("await addDistTag(entry.name, verified.version, verified.npmTag)");
   });
 

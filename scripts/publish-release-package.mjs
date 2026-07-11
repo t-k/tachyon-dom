@@ -20,21 +20,29 @@ export const publishReleasePackage = async ({ artifactDir, tag, packageKey }) =>
   }
   const reverified = await verifyReleaseArtifacts({ artifactDir, tag });
   if (!reverified.ok) throw new Error(reverified.error);
-  const { stdout, stderr } = await execFile(
-    "npm",
-    [
-      "publish",
-      entry.filename,
-      "--provenance",
-      "--access",
-      "public",
-      "--tag",
-      stagingTagFor(verified.version),
-      "--registry",
-      npmRegistryUrl,
-    ],
-    { cwd: artifactDir, maxBuffer: 16 * 1024 * 1024 },
-  );
+  let output;
+  try {
+    output = await execFile(
+      "npm",
+      [
+        "publish",
+        entry.filename,
+        "--provenance",
+        "--access",
+        "public",
+        "--tag",
+        stagingTagFor(verified.version),
+        "--registry",
+        npmRegistryUrl,
+      ],
+      { cwd: artifactDir, maxBuffer: 16 * 1024 * 1024 },
+    );
+  } catch (error) {
+    const confirmed = await readRegistryState({ name: entry.name, version: verified.version });
+    if (confirmed.integrity !== entry.integrity) throw error;
+    return { action: "publish", package: entry.name, version: verified.version };
+  }
+  const { stdout, stderr } = output;
   if (stdout) process.stdout.write(stdout);
   if (stderr) process.stderr.write(stderr);
   return { action: "publish", package: entry.name, version: verified.version };

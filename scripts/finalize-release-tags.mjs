@@ -38,45 +38,18 @@ export const finalizeReleaseTags = async ({ artifactDir, tag }) => {
     }
   }
 
-  const changed = [];
-  try {
-    for (const key of ["root", "create"]) {
-      const plan = preflight.packages[key];
-      const entry = verified.manifest.packages[key];
-      const registry = await readRegistryState({ name: entry.name, version: verified.version });
-      const ownership = decideOwnedTagMutation({
-        currentVersion: registry.distTags[verified.npmTag],
-        expectedVersion: plan.previousTag,
-        nextVersion: verified.version,
-      });
-      if (!ownership.ok) throw new Error(`${entry.name}: ${ownership.error}`);
-      if (ownership.action === "noop") continue;
-      await addDistTag(entry.name, verified.version, verified.npmTag);
-      changed.push({ name: entry.name, previousTag: plan.previousTag });
-    }
-  } catch (error) {
-    const rollbackErrors = [];
-    for (const change of changed.reverse()) {
-      try {
-        const registry = await readRegistryState({ name: change.name, version: verified.version });
-        const ownership = decideOwnedTagMutation({
-          currentVersion: registry.distTags[verified.npmTag],
-          expectedVersion: verified.version,
-          nextVersion: change.previousTag,
-        });
-        if (!ownership.ok) throw new Error(`${change.name}: ${ownership.error}`);
-        if (ownership.action === "remove") await removeDistTag(change.name, verified.npmTag, verified.version);
-        else if (ownership.action === "update") await addDistTag(change.name, change.previousTag, verified.npmTag);
-      } catch (rollbackError) {
-        rollbackErrors.push(rollbackError instanceof Error ? rollbackError.message : String(rollbackError));
-      }
-    }
-    if (rollbackErrors.length > 0) {
-      throw new Error(
-        `${error instanceof Error ? error.message : String(error)} Rollback failed: ${rollbackErrors.join("; ")}`,
-      );
-    }
-    throw error;
+  for (const key of ["root", "create"]) {
+    const plan = preflight.packages[key];
+    const entry = verified.manifest.packages[key];
+    const registry = await readRegistryState({ name: entry.name, version: verified.version });
+    const ownership = decideOwnedTagMutation({
+      currentVersion: registry.distTags[verified.npmTag],
+      expectedVersion: plan.previousTag,
+      nextVersion: verified.version,
+    });
+    if (!ownership.ok) throw new Error(`${entry.name}: ${ownership.error}`);
+    if (ownership.action === "noop") continue;
+    await addDistTag(entry.name, verified.version, verified.npmTag);
   }
 
   const stagingTag = stagingTagFor(verified.version);
