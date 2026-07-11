@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -65,12 +65,35 @@ const packPackage = async ({ packageDir, artifactDir }) => {
   return manifests[0];
 };
 
+export const validateTarEntries = ({ entries, verboseLines }) => {
+  const files = [];
+  const seen = new Set();
+  for (const entry of entries) {
+    if (!entry.startsWith("package/")) throw new Error(`Tarball entry is outside package/: ${entry}.`);
+    const relative = entry.slice("package/".length);
+    if (relative === "") continue;
+    if (path.isAbsolute(relative) || relative.split("/").includes("..") || relative.includes("\\")) {
+      throw new Error(`Tarball entry path is unsafe: ${entry}.`);
+    }
+    if (seen.has(relative)) throw new Error(`Tarball contains duplicate entry: ${relative}.`);
+    seen.add(relative);
+    files.push(relative);
+  }
+  for (const line of verboseLines) {
+    if (line[0] !== "-" && line[0] !== "d") throw new Error("Tarball links and special entries are not allowed.");
+  }
+  return files;
+};
+
 const inspectTarball = async (tarball) => {
-  const { stdout: listing } = await execFile("tar", ["-tzf", tarball], { maxBuffer: 16 * 1024 * 1024 });
-  const files = listing
-    .split("\n")
-    .filter(Boolean)
-    .map((entry) => entry.replace(/^package\//, ""));
+  const [{ stdout: listing }, { stdout: verboseListing }] = await Promise.all([
+    execFile("tar", ["-tzf", tarball], { maxBuffer: 16 * 1024 * 1024 }),
+    execFile("tar", ["-tvzf", tarball], { maxBuffer: 16 * 1024 * 1024 }),
+  ]);
+  const files = validateTarEntries({
+    entries: listing.split("\n").filter(Boolean),
+    verboseLines: verboseListing.split("\n").filter(Boolean),
+  });
   const extract = async (file) =>
     (
       await execFile("tar", ["-xOzf", tarball, `package/${file}`], {
@@ -94,13 +117,22 @@ export const verifyReleaseArtifacts = async ({ artifactDir, tag }) => {
   const manifest = JSON.parse(await readFile(path.join(artifactDir, "release-manifest.json"), "utf8"));
   if (manifest.schemaVersion !== 1 || manifest.tag !== tag)
     return failure("Release artifact tag does not match this workflow run.");
+  const artifactRoot = await realpath(artifactDir);
   const inspected = {};
+  const expectedNames = { root: "tachyon-dom", create: "create-tachyon-dom" };
   for (const key of ["root", "create"]) {
     const entry = manifest.packages?.[key];
-    if (!entry || typeof entry.filename !== "string" || typeof entry.integrity !== "string") {
-      return failure(`Release manifest package ${key} is invalid.`);
+    if (!entry || entry.name !== expectedNames[key]) return failure(`Release manifest package ${key} name is invalid.`);
+    const expectedFilename = `${entry.name}-${manifest.version}.tgz`;
+    if (entry.filename !== expectedFilename || path.basename(entry.filename) !== entry.filename) {
+      return failure(`Release manifest package ${key} filename is invalid.`);
+    }
+    if (typeof entry.integrity !== "string" || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(entry.integrity)) {
+      return failure(`Release manifest package ${key} integrity is invalid.`);
     }
     const tarball = path.join(artifactDir, entry.filename);
+    if (path.dirname(await realpath(tarball)) !== artifactRoot)
+      return failure(`Release manifest package ${key} filename escapes the artifact directory.`);
     if ((await integrityFor(tarball)) !== entry.integrity)
       return failure(`Release tarball ${key} integrity does not match.`);
     const contents = await inspectTarball(tarball);
@@ -108,6 +140,9 @@ export const verifyReleaseArtifacts = async ({ artifactDir, tag }) => {
       if (!contents.files.includes(requiredFile)) return failure(`Release tarball ${key} is missing ${requiredFile}.`);
     }
     inspected[key] = { ...contents, tarball };
+  }
+  if (manifest.packages.root.filename === manifest.packages.create.filename) {
+    return failure("Release manifest package filenames must be distinct.");
   }
   const identity = verifyReleaseIdentity({
     tag,

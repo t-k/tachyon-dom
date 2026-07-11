@@ -3,39 +3,36 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { decidePublication, verifyReleaseArtifacts } from "./release-contract.mjs";
+import { npmRegistryUrl, readRegistryState } from "./npm-registry-state.mjs";
 
 const execFile = promisify(execFileCallback);
-
-const publishedIntegrityFor = async (name, version) => {
-  try {
-    const { stdout } = await execFile("npm", ["view", `${name}@${version}`, "dist.integrity", "--json"]);
-    const integrity = JSON.parse(stdout);
-    if (typeof integrity !== "string" || !integrity.startsWith("sha512-")) {
-      throw new Error(`The registry returned invalid integrity for ${name}@${version}.`);
-    }
-    return integrity;
-  } catch (error) {
-    const stderr = typeof error?.stderr === "string" ? error.stderr : "";
-    if (stderr.includes("E404") || stderr.includes("404 Not Found")) return null;
-    throw error;
-  }
-};
 
 export const publishReleasePackage = async ({ artifactDir, tag, packageKey }) => {
   const verified = await verifyReleaseArtifacts({ artifactDir, tag });
   if (!verified.ok) throw new Error(verified.error);
   if (packageKey !== "root" && packageKey !== "create") throw new Error("Package key must be root or create.");
   const entry = verified.manifest.packages[packageKey];
-  const publishedIntegrity = await publishedIntegrityFor(entry.name, verified.version);
-  const decision = decidePublication({ expectedIntegrity: entry.integrity, publishedIntegrity });
+  const registry = await readRegistryState({ name: entry.name, version: verified.version });
+  const decision = decidePublication({ expectedIntegrity: entry.integrity, publishedIntegrity: registry.integrity });
   if (!decision.ok) throw new Error(decision.error);
   if (decision.action === "skip") {
-    await execFile("npm", ["dist-tag", "add", `${entry.name}@${verified.version}`, verified.npmTag]);
     return { action: "skip", package: entry.name, version: verified.version };
   }
+  const reverified = await verifyReleaseArtifacts({ artifactDir, tag });
+  if (!reverified.ok) throw new Error(reverified.error);
   const { stdout, stderr } = await execFile(
     "npm",
-    ["publish", entry.filename, "--provenance", "--access", "public", "--tag", verified.npmTag],
+    [
+      "publish",
+      entry.filename,
+      "--provenance",
+      "--access",
+      "public",
+      "--tag",
+      "tachyon-staging",
+      "--registry",
+      npmRegistryUrl,
+    ],
     { cwd: artifactDir, maxBuffer: 16 * 1024 * 1024 },
   );
   if (stdout) process.stdout.write(stdout);

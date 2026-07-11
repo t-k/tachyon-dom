@@ -19,6 +19,8 @@ export const inspectPackageDryRun: (options: {
   requiredFiles: string[];
 }) => Promise<{ ok: true; files: string[] } | { ok: false; error: string }>;
 
+export const validateTarEntries: (options: { entries: string[]; verboseLines: string[] }) => string[];
+
 export type ReleaseArtifactResult =
   | {
       ok: true;

@@ -1,9 +1,12 @@
 import { appendFile, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import * as releaseContract from "../scripts/release-contract.mjs";
+import { decideDistTagTransition, readRegistryState } from "../scripts/npm-registry-state.mjs";
+import { preflightReleasePublication } from "../scripts/preflight-release-publication.mjs";
 
 const { verifyReleaseIdentity } = releaseContract;
 
@@ -41,6 +44,25 @@ describe("npm release identity", () => {
 });
 
 describe("initializer package artifacts", () => {
+  it("accepts regular contained tar entries", () => {
+    expect(
+      (releaseContract as any).validateTarEntries({
+        entries: ["package/LICENSE", "package/dist/index.js"],
+        verboseLines: ["-rw-r--r-- LICENSE", "-rwxr-xr-x dist/index.js"],
+      }),
+    ).toEqual(["LICENSE", "dist/index.js"]);
+  });
+
+  it.each([
+    ["outside package root", ["outside/file"], ["-rw-r--r-- file"]],
+    ["parent traversal", ["package/../escape"], ["-rw-r--r-- file"]],
+    ["duplicate path", ["package/file", "package/file"], ["-rw-r--r-- file", "-rw-r--r-- file"]],
+    ["symbolic link", ["package/link"], ["lrwxrwxrwx link -> target"]],
+    ["hard link", ["package/link"], ["hrw-r--r-- link to target"]],
+  ])("rejects unsafe tar entry: %s", (_label, entries, verboseLines) => {
+    expect(() => (releaseContract as any).validateTarEntries({ entries, verboseLines })).toThrow();
+  });
+
   it("inspects required files in the real npm dry-run manifest", async () => {
     const packageDir = await mkdtemp(path.join(tmpdir(), "tachyon-create-pack-"));
     try {
@@ -134,6 +156,64 @@ describe("initializer package artifacts", () => {
         npmTag: "latest",
       });
 
+      const manifestPath = path.join(artifactDir, "release-manifest.json");
+      const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+      const registryServer = createServer((request, response) => {
+        const name = decodeURIComponent(request.url?.slice(1) ?? "");
+        const entry = Object.values(manifest.packages).find((candidate: any) => candidate.name === name) as any;
+        response.setHeader("content-type", "application/json");
+        response.end(
+          JSON.stringify({
+            versions: { "1.2.3": { dist: { integrity: entry.integrity } } },
+            "dist-tags": { latest: "1.2.2" },
+          }),
+        );
+      });
+      await new Promise<void>((resolve, reject) => {
+        registryServer.once("error", reject);
+        registryServer.listen(0, "127.0.0.1", resolve);
+      });
+      const registryAddress = registryServer.address();
+      if (!registryAddress || typeof registryAddress === "string")
+        throw new Error("Registry fixture has no TCP address.");
+      try {
+        await expect(
+          preflightReleasePublication({
+            artifactDir,
+            tag: "v1.2.3",
+            registryUrl: `http://127.0.0.1:${registryAddress.port}`,
+          }),
+        ).resolves.toMatchObject({
+          version: "1.2.3",
+          packages: {
+            root: { publication: "skip", distTag: "update" },
+            create: { publication: "skip", distTag: "update" },
+          },
+        });
+      } finally {
+        await new Promise<void>((resolve, reject) =>
+          registryServer.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+
+      manifest.packages.root.filename = "../tachyon-dom-1.2.3.tgz";
+      await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+      await expect((releaseContract as any).verifyReleaseArtifacts({ artifactDir, tag: "v1.2.3" })).resolves.toEqual({
+        ok: false,
+        error: expect.stringMatching(/filename/),
+      });
+
+      manifest.packages.root.filename = "tachyon-dom-1.2.3.tgz";
+      manifest.packages.root.name = "attacker-package";
+      await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+      await expect((releaseContract as any).verifyReleaseArtifacts({ artifactDir, tag: "v1.2.3" })).resolves.toEqual({
+        ok: false,
+        error: expect.stringMatching(/name/),
+      });
+
+      manifest.packages.root.name = "tachyon-dom";
+      await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+
       await writeFile(path.join(createDir, "LICENSE"), `${license}changed\n`);
       await expect(
         (releaseContract as any).verifyReleaseArtifacts({ artifactDir, tag: "v1.2.3" }),
@@ -162,5 +242,67 @@ describe("retryable npm publication", () => {
     expect(
       (releaseContract as any).decidePublication({ expectedIntegrity: "sha512-a", publishedIntegrity: "sha512-b" }),
     ).toEqual({ ok: false, error: expect.stringMatching(/different integrity/) });
+  });
+
+  it.each([
+    [undefined, "1.2.3", "update"],
+    ["1.2.3", "1.2.3", "noop"],
+    ["1.2.2", "1.2.3", "update"],
+    ["1.2.3-beta.1", "1.2.3-beta.2", "update"],
+    ["1.2.3-beta.2", "1.2.3-beta.10", "update"],
+  ])("allows a safe dist-tag transition from %s to %s", (currentVersion, targetVersion, action) => {
+    expect(decideDistTagTransition({ currentVersion, targetVersion })).toEqual({ ok: true, action });
+  });
+
+  it("rejects a dist-tag rollback", () => {
+    expect(decideDistTagTransition({ currentVersion: "1.2.4", targetVersion: "1.2.3" })).toEqual({
+      ok: false,
+      error: expect.stringMatching(/rollback/),
+    });
+  });
+
+  it("distinguishes registry absence from authentication and rate-limit failures", async () => {
+    const server = createServer((request, response) => {
+      if (request.url === "/missing") {
+        response.writeHead(404).end("not found");
+        return;
+      }
+      if (request.url === "/unauthorized") {
+        response.writeHead(401).end("unauthorized");
+        return;
+      }
+      if (request.url === "/limited") {
+        response.writeHead(429).end("limited");
+        return;
+      }
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({
+          versions: { "1.2.3": { dist: { integrity: "sha512-current" } } },
+          "dist-tags": { latest: "1.2.2" },
+        }),
+      );
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Registry fixture has no TCP address.");
+    const registryUrl = `http://127.0.0.1:${address.port}`;
+    try {
+      await expect(readRegistryState({ registryUrl, name: "missing", version: "1.2.3" })).resolves.toEqual({
+        integrity: null,
+        distTags: {},
+      });
+      await expect(readRegistryState({ registryUrl, name: "package", version: "1.2.3" })).resolves.toEqual({
+        integrity: "sha512-current",
+        distTags: { latest: "1.2.2" },
+      });
+      await expect(readRegistryState({ registryUrl, name: "unauthorized", version: "1.2.3" })).rejects.toThrow(/401/);
+      await expect(readRegistryState({ registryUrl, name: "limited", version: "1.2.3" })).rejects.toThrow(/429/);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
   });
 });

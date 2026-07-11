@@ -290,6 +290,7 @@ describe("DX helpers", () => {
     const ci = await readFile(".github/workflows/ci.yml", "utf8");
     const release = await readFile(".github/workflows/release.yml", "utf8");
     const publisher = await readFile("scripts/publish-release-package.mjs", "utf8");
+    const finalizer = await readFile("scripts/finalize-release-tags.mjs", "utf8");
     const publicJsExportNames = Object.entries(packageJson.exports ?? {}).flatMap(([specifier, target]) => {
       if (!target.import) {
         return [];
@@ -313,8 +314,9 @@ describe("DX helpers", () => {
     expect(release).toContain("--package root");
     expect(release).toContain("--package create");
     expect(publisher).toMatch(
-      /\[\s*"publish",\s*entry\.filename,\s*"--provenance",\s*"--access",\s*"public",\s*"--tag",\s*verified\.npmTag\s*\]/,
+      /"publish",\s*entry\.filename,\s*"--provenance",\s*"--access",\s*"public",\s*"--tag",\s*"tachyon-staging"/,
     );
+    expect(finalizer).toContain("await addDistTag(entry.name, verified.version, verified.npmTag)");
   });
 
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
@@ -1515,16 +1517,20 @@ void chunks;
     const upload = workflow.indexOf("actions/upload-artifact@", dryRun);
     const publishJob = workflow.indexOf("publish:", upload);
     const artifactVerification = workflow.indexOf("--verify-artifacts", publishJob);
-    const rootPublish = workflow.indexOf("--package root", artifactVerification);
+    const preflight = workflow.indexOf("preflight-release-publication.mjs", artifactVerification);
+    const rootPublish = workflow.indexOf("--package root", preflight);
     const createPublish = workflow.indexOf("--package create", rootPublish + 1);
+    const finalize = workflow.indexOf("finalize-release-tags.mjs", createPublish);
 
     expect(preparation).toBeGreaterThan(-1);
     expect(dryRun).toBeGreaterThan(preparation);
     expect(upload).toBeGreaterThan(dryRun);
     expect(publishJob).toBeGreaterThan(upload);
     expect(artifactVerification).toBeGreaterThan(publishJob);
-    expect(rootPublish).toBeGreaterThan(artifactVerification);
+    expect(preflight).toBeGreaterThan(artifactVerification);
+    expect(rootPublish).toBeGreaterThan(preflight);
     expect(createPublish).toBeGreaterThan(rootPublish);
+    expect(finalize).toBeGreaterThan(createPublish);
     expect(workflow).toContain("permissions: {}\n");
     expect(workflow).toMatch(/publish:\n\s+needs: verify[\s\S]+permissions:\n\s+contents: read\n\s+id-token: write/);
     expect(workflow).toContain("NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}");

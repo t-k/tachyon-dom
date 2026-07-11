@@ -13,7 +13,10 @@
 ## File Structure
 
 - Create `scripts/release-contract.mjs`: parse release identity, pack immutable tarballs, verify their SHA-512 and contents, and dry-run exact tarballs.
-- Create `scripts/publish-release-package.mjs`: reverify an artifact, compare registry integrity, and publish or safely skip one package.
+- Create `scripts/npm-registry-state.mjs`: read structured public npm packuments and enforce forward-only SemVer dist-tag transitions.
+- Create `scripts/preflight-release-publication.mjs`: validate both registry states before mutation.
+- Create `scripts/publish-release-package.mjs`: reverify an artifact, compare registry integrity, and publish missing bytes under a staging tag or safely skip one package.
+- Create `scripts/finalize-release-tags.mjs`: verify both published integrities, apply final tags with compensating rollback, and remove staging tags.
 - Create `scripts/copy-create-package-assets.mjs`: copy the root `LICENSE` bytes into the initializer package before packing.
 - Create `tests/release-contract.test.ts`: exercise real temporary packages, immutable tarballs, integrity failures, dry runs, and retry decisions without registry writes.
 - Modify `packages/create-tachyon-dom/package.json`: include `LICENSE`, use the asset copier in its build, and bind `tachyon-dom` to the exact release version.
@@ -123,7 +126,7 @@ Run `pnpm exec vitest run tests/dx.test.ts`. Expected: the release workflow asse
 
 - [ ] **Step 3: Update the workflow**
 
-After the existing checks, build the initializer and create both tarballs with `pnpm prepare:release --tag "$GITHUB_REF_NAME" --output release-artifacts`. Dry-run those exact artifacts, upload them with pinned Actions, then use a separate publication job to download and reverify them. Run `publish-release-package.mjs` for root before create; it publishes a missing version, skips an identical version, and rejects conflicting integrity.
+After the existing checks, build the initializer and create both tarballs with `pnpm prepare:release --tag "$GITHUB_REF_NAME" --output release-artifacts`. Dry-run those exact artifacts, upload them with pinned Actions, then use a separate publication job to download and reverify them. Preflight root and create registry state together, run `publish-release-package.mjs` for root before create under the internal staging tag, then run `finalize-release-tags.mjs` to apply only equal or forward final tags with compensating rollback.
 
 ```yaml
 - run: node scripts/release-contract.mjs --verify-artifacts release-artifacts --tag "$GITHUB_REF_NAME"

@@ -22,7 +22,7 @@ The `create-tachyon-dom` tarball must contain its executable entry, README, pack
 
 An unprivileged verification job performs installation, build, tests and existing package checks, creates both release tarballs, verifies them, dry-runs those exact tarballs, and uploads them with their integrity manifest. A separate publication job has the OIDC permission and npm token, downloads the artifacts, reverifies their SHA-512 values and contents, then publishes the root tarball before the initializer tarball. All third-party Actions are pinned to full commit SHAs.
 
-Publishing the root package first ensures the initializer's exact dependency exists when the initializer becomes installable. Before each publication, the publisher queries the registry. A missing version is published, an existing version with identical integrity is safely skipped while its fixed dist-tag is restored, and an existing version with different integrity fails closed. A retry after partial publication can therefore continue to the initializer without ignoring unrelated registry errors.
+Publishing the root package first ensures the initializer's exact dependency exists when the initializer becomes installable. Before any registry mutation, a preflight reads structured packuments for both packages from the fixed public npm registry. HTTP 404 means an absent package; authentication, rate-limit, redirect, communication, and malformed-response failures stop the release. A missing version is published under the fixed internal `tachyon-staging` tag, an existing version with identical integrity is safely skipped, and an existing version with different integrity fails closed. After both versions exist with the expected integrity, a finalizer allows only equal or SemVer-forward `latest`/`next` transitions. It updates both tags and compensates the first update if the second fails, then removes staging tags. A retry after partial publication can therefore continue without rolling a public dist-tag backward or ignoring unrelated registry errors.
 
 ## Verification Design
 
@@ -36,10 +36,12 @@ Tests use temporary real package files, real `npm pack --json` tarballs, tar ext
 - Actual initializer tarball contents, including byte-equal MIT license text.
 - Source mutation after packing does not change the verified artifacts, while tarball mutation fails integrity validation.
 - Registry retry decisions for missing, identical, and conflicting versions.
+- Structured registry handling for 404, authentication, and rate-limit responses, plus SemVer-forward and rollback dist-tag decisions.
+- Manifest filename/name containment and unsafe tar-entry rejection.
 - Workflow ordering and privilege separation: validation and both dry runs precede artifact upload, the publication job reverifies after download, and root publish precedes initializer publish.
 
 The release verifier is a local script with no GitHub API dependency, so CI and maintainers can run the same checks. No registry publish is performed by tests.
 
 ## Security Boundary
 
-The workflow has no top-level permissions. The verification job has only `contents: read`; only the publication job receives `contents: read` and `id-token: write`, and the npm token is scoped to its two publication steps. Version, tarball content, and integrity validation fail closed before registry writes. The publisher uses argument arrays rather than a shell, selects only the fixed root/create manifest entries, and never derives commands, paths, or npm dist-tags from unvalidated tag text.
+The workflow has no top-level permissions. The verification job has only `contents: read`; only the publication job receives `contents: read` and `id-token: write`, and the npm token is scoped to its publication and finalization steps. Version, tarball content, integrity, registry state, and forward-only dist-tag validation fail closed before registry writes. The publisher uses argument arrays rather than a shell, selects only fixed root/create manifest names and contained canonical tarball filenames, and never derives commands, paths, registry endpoints, or npm dist-tags from unvalidated tag text.
