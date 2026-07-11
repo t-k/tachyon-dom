@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile, realpath } from "node:fs/promises";
+import { access, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -47,4 +48,50 @@ export const identifyStreamingBenchmarkAdapter = async (
     sha256: createHash("sha256").update(content).digest("hex"),
     gitBlob,
   };
+};
+
+export type PreparedStreamingBenchmarkAdapter = StreamingBenchmarkAdapterIdentity & {
+  executionModule: string;
+  cleanup: () => Promise<void>;
+};
+
+export const prepareStreamingBenchmarkAdapter = async (
+  subjectRoot: string,
+  adapterModule: string,
+): Promise<PreparedStreamingBenchmarkAdapter> => {
+  const identity = await identifyStreamingBenchmarkAdapter(subjectRoot, adapterModule);
+  const commit = await git(identity.subjectRoot, ["rev-parse", "HEAD"]);
+  const snapshotRoot = await mkdtemp(path.join(os.tmpdir(), "tachyon-benchmark-subject-"));
+  await rm(snapshotRoot, { recursive: true, force: true });
+  let added = false;
+  try {
+    await git(identity.subjectRoot, ["worktree", "add", "--detach", snapshotRoot, commit]);
+    added = true;
+    const sourceNodeModules = path.join(identity.subjectRoot, "node_modules");
+    try {
+      await access(sourceNodeModules);
+      await symlink(sourceNodeModules, path.join(snapshotRoot, "node_modules"), "dir");
+    } catch {
+      // The adapter may have no package dependencies, so node_modules is optional.
+    }
+    const executionModule = path.join(snapshotRoot, ...identity.relativePath.split("/"));
+    const content = await readFile(executionModule);
+    const sha256 = createHash("sha256").update(content).digest("hex");
+    let cleaned = false;
+    return {
+      ...identity,
+      sha256,
+      executionModule,
+      cleanup: async () => {
+        if (cleaned) return;
+        cleaned = true;
+        await git(identity.subjectRoot, ["worktree", "remove", "--force", snapshotRoot]).catch(() => undefined);
+        await rm(snapshotRoot, { recursive: true, force: true });
+      },
+    };
+  } catch (error) {
+    if (added) await git(identity.subjectRoot, ["worktree", "remove", "--force", snapshotRoot]).catch(() => undefined);
+    await rm(snapshotRoot, { recursive: true, force: true });
+    throw error;
+  }
 };

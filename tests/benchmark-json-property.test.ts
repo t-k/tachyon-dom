@@ -36,7 +36,12 @@ const envelope = (revision: string) => ({
     chunksPerConnection: 128,
     chunkBytes: 32768,
     drainDelayMs: 2,
-    adapterModule: `/repo/${revision}/adapter.js`,
+    adapterModule: `/repo/${revision}/src/adapter.js`,
+    adapter: {
+      relativePath: "src/adapter.js",
+      sha256: (revision === "baseline" ? "a" : "b").repeat(64),
+      gitBlob: (revision === "baseline" ? "c" : "d").repeat(40),
+    },
     subject: {
       root: `/repo/${revision}`,
       git: { available: true, commit: revision, dirty: false, workingTreeSha256: revision },

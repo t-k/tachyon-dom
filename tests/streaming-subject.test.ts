@@ -2,22 +2,26 @@ import { execFile } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
-import { identifyStreamingBenchmarkAdapter } from "../benchmark/streaming-subject.js";
+import {
+  identifyStreamingBenchmarkAdapter,
+  prepareStreamingBenchmarkAdapter,
+} from "../benchmark/streaming-subject.js";
 
 const execFileAsync = promisify(execFile);
 
 const repositoryFixture = async (): Promise<{ root: string; adapter: string }> => {
   const root = await mkdtemp(path.join(tmpdir(), "tachyon-stream-subject-"));
-  const adapter = path.join(root, "src/adapter.ts");
+  const adapter = path.join(root, "src/adapter.mjs");
   await execFileAsync("git", ["init"], { cwd: root });
   await execFileAsync("git", ["config", "user.email", "benchmark@example.test"], { cwd: root });
   await execFileAsync("git", ["config", "user.name", "Benchmark Test"], { cwd: root });
   await mkdir(path.join(root, "src"));
   await writeFile(adapter, "export const adapter = true;\n");
-  await execFileAsync("git", ["add", "src/adapter.ts"], { cwd: root });
+  await execFileAsync("git", ["add", "src/adapter.mjs"], { cwd: root });
   await execFileAsync("git", ["commit", "-m", "adapter"], { cwd: root });
   return { root, adapter };
 };
@@ -27,7 +31,7 @@ describe("streaming benchmark adapter identity", () => {
     const fixture = await repositoryFixture();
     try {
       await expect(identifyStreamingBenchmarkAdapter(fixture.root, fixture.adapter)).resolves.toMatchObject({
-        relativePath: "src/adapter.ts",
+        relativePath: "src/adapter.mjs",
         sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
         gitBlob: expect.stringMatching(/^[a-f0-9]{40,64}$/),
       });
@@ -57,6 +61,24 @@ describe("streaming benchmark adapter identity", () => {
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("executes an immutable commit snapshot even if the source path changes after validation", async () => {
+    const fixture = await repositoryFixture();
+    const prepared = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+    try {
+      await writeFile(fixture.adapter, "export const adapter = false;\n");
+      const executed = await execFileAsync(process.execPath, [
+        "--input-type=module",
+        "--eval",
+        `const value = await import(${JSON.stringify(pathToFileURL(prepared.executionModule).href)}); console.log(value.adapter);`,
+      ]);
+      expect(executed.stdout.trim()).toBe("true");
+      expect(prepared.executionModule).not.toBe(fixture.adapter);
+    } finally {
+      await prepared.cleanup();
+      await rm(fixture.root, { recursive: true, force: true });
     }
   });
 });

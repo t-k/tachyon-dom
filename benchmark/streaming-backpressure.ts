@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { collectBenchmarkProvenance, collectDependencyVersions } from "./provenance.js";
-import { identifyStreamingBenchmarkAdapter } from "./streaming-subject.js";
+import { prepareStreamingBenchmarkAdapter } from "./streaming-subject.js";
 
 const numberArg = (name: string, fallback: number): number => {
   const index = process.argv.indexOf(name);
@@ -24,13 +24,14 @@ const drainDelayMs = numberArg("--drain-delay-ms", 2);
 const label = stringArg("--label", "run");
 const subjectRoot = path.resolve(stringArg("--subject-root", projectRoot));
 const adapterModule = path.resolve(stringArg("--adapter-module", path.join(subjectRoot, "src/adapters/node.ts")));
-const adapterIdentity = await identifyStreamingBenchmarkAdapter(subjectRoot, adapterModule);
+const adapterIdentity = await prepareStreamingBenchmarkAdapter(subjectRoot, adapterModule);
 const stamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
 const output = stringArg(
   "--output",
   path.resolve("benchmark/streaming-backpressure-results", `${stamp}-${label}.json`),
 );
-const { writeNodeResponse } = await import(pathToFileURL(adapterIdentity.adapterModule).href) as {
+try {
+const { writeNodeResponse } = await import(pathToFileURL(adapterIdentity.executionModule).href) as {
   writeNodeResponse: (response: Response, destination: ServerResponse) => Promise<void>;
 };
 
@@ -137,3 +138,6 @@ const result = {
 await mkdir(path.dirname(output), { recursive: true });
 await writeFile(output, `${JSON.stringify(result, null, 2)}\n`);
 console.log(JSON.stringify({ output, ...result }));
+} finally {
+  await adapterIdentity.cleanup();
+}
