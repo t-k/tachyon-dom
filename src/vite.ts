@@ -12,8 +12,12 @@ import {
   type TachyonApp,
   type TachyonAppAssets,
   type TachyonAppDefinition,
-  type HtmlWhitespacePolicyInput,
 } from "./app.js";
+import type {
+  CompatibleHtmlWhitespacePolicy,
+  HtmlWhitespacePolicy,
+  HtmlWhitespacePolicyInput,
+} from "./html-whitespace.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import type { TemplateWhitespacePolicy } from "./compiler/types.js";
@@ -54,12 +58,22 @@ export type TachyonDomRoutesViteOptions = {
   virtualId?: string;
 };
 
-export type TachyonAppViteOptions = {
+export type TachyonAppViteOptions<Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy> = {
   appScript?: string;
-  htmlWhitespace?: HtmlWhitespacePolicyInput;
+  htmlWhitespace?: CompatibleHtmlWhitespacePolicy<Whitespace>;
   /** @deprecated Use `htmlWhitespace` instead. */
   minifyHtml?: boolean;
 };
+
+const normalizedAppHtmlWhitespace = (
+  policy: HtmlWhitespacePolicyInput | undefined,
+  minifyHtml: boolean | undefined,
+): HtmlWhitespacePolicy =>
+  policy === "condense"
+    ? "normalize-tags"
+    : policy === "preserve"
+      ? "preserve-tags"
+      : (policy ?? (minifyHtml === false ? "preserve-tags" : "normalize-tags"));
 
 export type TachyonRouteAppOptions = Omit<TachyonAppDefinition, "pages"> & {
   routesDir: string;
@@ -514,7 +528,10 @@ export const tachyonSsr = (options: TachyonSsrViteOptions): Plugin => ({
   },
 });
 
-export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {}): Plugin => ({
+export const tachyonApp = <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+  app: TachyonApp,
+  options: TachyonAppViteOptions<Whitespace> = {},
+): Plugin => ({
   name: "tachyon-dom-app",
   configureServer(server) {
     server.middlewares.use((request, response, next) => {
@@ -550,7 +567,7 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
         fileName: page.fileName,
         source: app.renderDocument(page.path, {
           assets,
-          whitespace: options.htmlWhitespace ?? (options.minifyHtml === false ? "preserve-tags" : "normalize-tags"),
+          whitespace: normalizedAppHtmlWhitespace(options.htmlWhitespace, options.minifyHtml),
         }),
         type: "asset",
       });

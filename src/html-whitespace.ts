@@ -4,6 +4,8 @@ export type HtmlWhitespacePolicy = "preserve-tags" | "normalize-tags";
 /** @deprecated Use `HtmlWhitespacePolicy`. */
 export type LegacyHtmlWhitespacePolicy = "preserve" | "condense";
 export type HtmlWhitespacePolicyInput = HtmlWhitespacePolicy | LegacyHtmlWhitespacePolicy;
+export type CompatibleHtmlWhitespacePolicy<Value extends HtmlWhitespacePolicyInput> =
+  LegacyHtmlWhitespacePolicy extends Value ? never : Value;
 
 type SourceRange = { startOffset: number; endOffset: number };
 type LocatedNode = DefaultTreeAdapterMap["node"] & {

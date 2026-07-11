@@ -4,7 +4,13 @@ import { escapeHtml } from "./html-escape.js";
 import type { ClientBinding, CompiledTemplate, TemplateWhitespacePolicy } from "./compiler/types.js";
 import { err, ok, type Result } from "./result.js";
 import type { TemplateScope, TypedTemplate } from "./typed.js";
-import { applyHtmlWhitespace, normalizeHtmlTagWhitespace, type HtmlWhitespacePolicyInput } from "./html-whitespace.js";
+import {
+  applyHtmlWhitespace,
+  normalizeHtmlTagWhitespace,
+  type CompatibleHtmlWhitespacePolicy,
+  type HtmlWhitespacePolicy,
+  type HtmlWhitespacePolicyInput,
+} from "./html-whitespace.js";
 
 export type { HtmlWhitespacePolicy, HtmlWhitespacePolicyInput, LegacyHtmlWhitespacePolicy } from "./html-whitespace.js";
 export { condenseHtmlWhitespace, normalizeHtmlTagWhitespace } from "./html-whitespace.js";
@@ -63,9 +69,9 @@ export type TachyonAppShellContext = {
   routeHtml: string;
 };
 
-export type TachyonAppDocumentOptions = {
+export type TachyonAppDocumentOptions<Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy> = {
   assets?: TachyonAppAssets;
-  whitespace?: HtmlWhitespacePolicyInput;
+  whitespace?: CompatibleHtmlWhitespacePolicy<Whitespace>;
   /** @deprecated Use `whitespace: "normalize-tags"` instead. */
   minify?: boolean;
 };
@@ -86,9 +92,17 @@ export type TachyonApp = {
   pageForPath: (path: string) => TachyonAppPage | undefined;
   renderRoute: (path: string) => string;
   renderShell: (path: string) => string;
-  renderDocument: (path: string, options?: TachyonAppDocumentOptions) => string;
-  renderResponse: (path: string, options?: TachyonAppDocumentOptions) => TachyonAppRenderResult;
-  entries: (options?: TachyonAppDocumentOptions) => TachyonAppHtmlEntry[];
+  renderDocument: <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+    path: string,
+    options?: TachyonAppDocumentOptions<Whitespace>,
+  ) => string;
+  renderResponse: <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+    path: string,
+    options?: TachyonAppDocumentOptions<Whitespace>,
+  ) => TachyonAppRenderResult;
+  entries: <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+    options?: TachyonAppDocumentOptions<Whitespace>,
+  ) => TachyonAppHtmlEntry[];
 };
 
 type ValidateTypedPageScopes<Pages extends readonly TachyonAppPage<any>[]> = {
@@ -184,13 +198,16 @@ const titleForPage = (app: TachyonAppDefinition, page: TachyonAppPage): string =
   return page.title ?? app.title ?? "Tachyon App";
 };
 
-export const renderAppDocument = (app: TachyonApp, path: string, options: TachyonAppDocumentOptions = {}): string =>
-  app.renderDocument(path, options);
-
-export const renderAppResponse = (
+export const renderAppDocument = <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
   app: TachyonApp,
   path: string,
-  options: TachyonAppDocumentOptions = {},
+  options: TachyonAppDocumentOptions<Whitespace> = {},
+): string => app.renderDocument(path, options);
+
+export const renderAppResponse = <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+  app: TachyonApp,
+  path: string,
+  options: TachyonAppDocumentOptions<Whitespace> = {},
 ): TachyonAppRenderResult => app.renderResponse(path, options);
 
 export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
@@ -247,10 +264,10 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     return (definition.shell ?? defaultShell)({ page, routeHtml });
   };
 
-  const documentFor = (
+  const documentFor = <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
     page: TachyonAppPage,
     routeHtml: string,
-    options: TachyonAppDocumentOptions,
+    options: TachyonAppDocumentOptions<Whitespace>,
     assetsOverride?: TachyonAppAssets,
   ): string => {
     const assets = assetsForPage(definition, page, options.assets ?? assetsOverride);
@@ -273,7 +290,10 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     return applyHtmlWhitespace(html, whitespace);
   };
 
-  const renderDocument = (path: string, options: TachyonAppDocumentOptions = {}): string => {
+  const renderDocument = <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+    path: string,
+    options: TachyonAppDocumentOptions<Whitespace> = {},
+  ): string => {
     const page = pageForPath(path);
     if (!page) {
       throw new Error(`No page found for ${path}.`);
@@ -281,7 +301,10 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     return documentFor(page, renderRoute(page.path), options);
   };
 
-  const renderResponse = (path: string, options: TachyonAppDocumentOptions = {}): TachyonAppRenderResult => {
+  const renderResponse = <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+    path: string,
+    options: TachyonAppDocumentOptions<Whitespace> = {},
+  ): TachyonAppRenderResult => {
     const page = pageForPath(path);
     if (page) {
       return { status: 200, html: renderDocument(page.path, options) };
@@ -304,7 +327,9 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     renderResponse,
     renderRoute,
     renderShell,
-    entries: (options = {}) =>
+    entries: <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+      options: TachyonAppDocumentOptions<Whitespace> = {},
+    ) =>
       pages.map((page) => ({
         fileName: page.fileName,
         path: page.path,

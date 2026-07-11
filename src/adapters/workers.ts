@@ -11,6 +11,7 @@ import {
   type RouteHooks,
   type RouteRenderOptions,
 } from "../router.js";
+import type { HtmlWhitespacePolicy, HtmlWhitespacePolicyInput } from "../html-whitespace.js";
 
 export type WorkersAssetsBinding = {
   fetch: (request: Request) => Response | Promise<Response>;
@@ -137,7 +138,10 @@ export type WorkersCsrfOptions<Env> = {
   verify: (context: { request: Request; url: URL; env: RouteEnvironment; bindings: Env }) => boolean | Promise<boolean>;
 };
 
-export type WorkersHandlerOptions<Env = Record<string, unknown>> = Omit<RouteRenderOptions, "csrf" | "middleware"> & {
+export type WorkersHandlerOptions<
+  Env = Record<string, unknown>,
+  Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy,
+> = Omit<RouteRenderOptions<Whitespace>, "csrf" | "middleware"> & {
   routes: readonly WorkersRouteDefinition<Env, any, any>[];
   middleware?: readonly WorkersRouteMiddleware<Env>[];
   csrf?: WorkersCsrfOptions<Env>;
@@ -148,14 +152,15 @@ export type WorkersHandlerOptions<Env = Record<string, unknown>> = Omit<RouteRen
   observability?: AdapterObservabilityHooks | undefined;
 };
 
-export type RouteAdapterHandlerOptions = RouteRenderOptions & {
-  routes: readonly RouteDefinition[];
-  securityHeaders?: Headers;
-  streaming?: boolean;
-  staticRoutes?: readonly StaticRouteDefinition[];
-  assets?: WorkersAssetOptions<Record<string, unknown>>;
-  observability?: AdapterObservabilityHooks | undefined;
-};
+export type RouteAdapterHandlerOptions<Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy> =
+  RouteRenderOptions<Whitespace> & {
+    routes: readonly RouteDefinition[];
+    securityHeaders?: Headers;
+    streaming?: boolean;
+    staticRoutes?: readonly StaticRouteDefinition[];
+    assets?: WorkersAssetOptions<Record<string, unknown>>;
+    observability?: AdapterObservabilityHooks | undefined;
+  };
 
 export type WorkersFetchHandlerOptions<Env = Record<string, unknown>> = {
   fetch: AdapterFetchHandler;
@@ -411,8 +416,8 @@ export const workersStreamFromChunks = (chunks: AsyncIterable<string>): Readable
   });
 };
 
-const responseFor = async <Env>(
-  options: WorkersHandlerOptions<Env>,
+const responseFor = async <Env, Whitespace extends HtmlWhitespacePolicyInput>(
+  options: WorkersHandlerOptions<Env, Whitespace>,
   request: Request,
   env: Env | undefined,
 ): Promise<Response> => {
@@ -515,15 +520,20 @@ type WorkersHandler<Env> = {
   fetch: (request: Request, ...args: [Env] extends [never] ? [env?: undefined] : [env: Env]) => Promise<Response>;
 };
 
-export function createWorkersHandler<Env = never>(options: WorkersHandlerOptions<Env>): WorkersHandler<Env>;
-export function createWorkersHandler(options: RouteAdapterHandlerOptions): {
+export function createWorkersHandler<
+  Env = never,
+  const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy,
+>(options: WorkersHandlerOptions<Env, Whitespace>): WorkersHandler<Env>;
+export function createWorkersHandler<const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+  options: RouteAdapterHandlerOptions<Whitespace>,
+): {
   fetch: (request: Request, env?: unknown) => Promise<Response>;
 };
-export function createWorkersHandler(options: WorkersHandlerOptions<unknown> | RouteAdapterHandlerOptions): {
+export function createWorkersHandler(options: WorkersHandlerOptions<unknown, any> | RouteAdapterHandlerOptions<any>): {
   fetch: (request: Request, env?: unknown) => Promise<Response>;
 } {
   return {
-    fetch: (request, env) => responseFor(options as WorkersHandlerOptions<unknown>, request, env),
+    fetch: (request, env) => responseFor(options as WorkersHandlerOptions<unknown, any>, request, env),
   };
 }
 

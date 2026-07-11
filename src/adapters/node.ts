@@ -11,13 +11,15 @@ import {
   type WorkersFetchHandlerOptions,
   type RouteAdapterHandlerOptions,
 } from "./workers.js";
+import type { HtmlWhitespacePolicy, HtmlWhitespacePolicyInput } from "../html-whitespace.js";
 
-export type NodeHandlerOptions = RouteAdapterHandlerOptions & {
-  staticAssets?: StaticAssetOptions;
-  origin?: string | ((request: IncomingMessage) => string);
-  trustedHosts?: readonly string[];
-  trustProxy?: boolean;
-};
+export type NodeHandlerOptions<Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy> =
+  RouteAdapterHandlerOptions<Whitespace> & {
+    staticAssets?: StaticAssetOptions;
+    origin?: string | ((request: IncomingMessage) => string);
+    trustedHosts?: readonly string[];
+    trustProxy?: boolean;
+  };
 
 export type NodeFetchHandlerOptions = Omit<WorkersFetchHandlerOptions, "fetch"> & {
   fetch: AdapterFetchHandler;
@@ -374,7 +376,9 @@ const nodeObservability = (
   observability ? { ...observability, adapter: observability.adapter ?? "node" } : undefined;
 
 export const createNodeHandler =
-  (options: NodeHandlerOptions) =>
+  <const Whitespace extends HtmlWhitespacePolicyInput = HtmlWhitespacePolicy>(
+    options: NodeHandlerOptions<Whitespace>,
+  ) =>
   async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const url = requestUrl(request, options);
     if (url instanceof Response) {
