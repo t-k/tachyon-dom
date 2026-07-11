@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { analyzeRatios, balancedOrder } from "../benchmark/shared/statistical-authority";
+import { createLocalRunPlan } from "../benchmark/local-compare/run-plan";
 
 describe("benchmark statistical authority", () => {
   it("classifies a stable one-percent-or-better win as meaningful", () => {
@@ -44,5 +45,20 @@ describe("benchmark statistical authority", () => {
     const input = ["a", "b", "c"];
     balancedOrder(input, 1, 9);
     expect(input).toEqual(["a", "b", "c"]);
+  });
+
+  it("creates reproducible local implementation and scenario orders", () => {
+    const implementations = ["a", "b", "c"];
+    const scenarios = ["one", "two", "three"];
+    expect(createLocalRunPlan(implementations, scenarios, { runId: "run-2", runIndex: 2, seed: 9 })).toEqual(
+      createLocalRunPlan(implementations, scenarios, { runId: "run-2", runIndex: 2, seed: 9 }),
+    );
+    expect(
+      new Set(
+        [0, 1, 2].map(
+          (runIndex) => createLocalRunPlan(implementations, scenarios, { runId: `run-${runIndex}`, runIndex, seed: 9 }).implementationOrder[0],
+        ),
+      ),
+    ).toEqual(new Set(implementations));
   });
 });

@@ -1,5 +1,6 @@
 import { cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import marko from "@marko/vite";
@@ -23,6 +24,7 @@ import {
   type ImplementationName,
   type ScenarioSummary,
 } from "./report";
+import { createLocalRunPlan, type LocalRunPlan } from "./run-plan";
 
 type CliOptions = {
   iterations: number;
@@ -36,6 +38,9 @@ type CliOptions = {
   traceImplementation?: ImplementationName;
   traceScenario?: string;
   traceOutput?: string;
+  seed: number;
+  runIndex: number;
+  runId: string;
 };
 
 type Implementation = {
@@ -173,6 +178,9 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
     // Production (bundled + minified) is the canonical mode: it reflects what
     // applications actually ship. Pass --serve-mode dev for fast local iteration.
     serveMode: "production",
+    seed: 1,
+    runIndex: 0,
+    runId: randomUUID(),
   };
 
   for (let index = 0; index < argv.length; index++) {
@@ -197,6 +205,16 @@ const parseArgs = (argv: readonly string[]): Result<CliOptions, string> => {
         return err(parsed.error);
       }
       options.warmup = parsed.value;
+    } else if (arg === "--seed" || arg === "--run-index") {
+      const value = argv[++index];
+      const parsed = value === undefined ? Number.NaN : Number(value);
+      if (!Number.isInteger(parsed) || parsed < 0) return err(`${arg} must be a non-negative integer.`);
+      if (arg === "--seed") options.seed = parsed;
+      else options.runIndex = parsed;
+    } else if (arg === "--run-id") {
+      const value = argv[++index];
+      if (!value) return err("--run-id requires a value.");
+      options.runId = value;
     } else if (arg === "--headful") {
       options.headful = true;
     } else if (arg === "--serve-mode") {
@@ -558,13 +576,14 @@ const measureImplementation = async (
   browser: Browser,
   baseUrl: string,
   implementation: Implementation,
+  measuredScenarios: readonly Scenario[],
   options: CliOptions,
 ): Promise<ScenarioSummary[]> => {
   const page = await browser.newPage();
   await installDeterministicRandom(page);
   const summaries: ScenarioSummary[] = [];
   try {
-    for (const scenario of scenarios) {
+    for (const scenario of measuredScenarios) {
       const values: number[] = [];
       const totalRuns = options.warmup + options.iterations;
       for (let run = 0; run < totalRuns; run++) {
@@ -702,6 +721,7 @@ const writeResults = async (
   operationTable: string,
   auxiliaryTable: string,
   directComparisonTable: string,
+  plan: LocalRunPlan,
 ): Promise<string> => {
   const outputPath = path.resolve(projectRoot, options.output ?? defaultOutputPath());
   await mkdir(path.dirname(outputPath), { recursive: true });
@@ -709,8 +729,8 @@ const writeResults = async (
     outputPath,
     `${JSON.stringify(
       {
-        schemaVersion: 2,
-        benchmark: { name: "local-compare", contractVersion: 2 },
+        schemaVersion: 3,
+        benchmark: { name: "local-compare", contractVersion: 3 },
         provenance: await collectBenchmarkProvenance({
           cwd: projectRoot,
           argv: [process.execPath, ...process.argv.slice(1)],
@@ -718,6 +738,11 @@ const writeResults = async (
           browser: { name: "chromium", version: browserVersion },
         }),
         workload: {
+        runId: plan.runId,
+        seed: plan.seed,
+        runIndex: plan.runIndex,
+        order: plan.implementationOrder,
+        scenarioOrder: plan.scenarioOrder,
         iterations: options.iterations,
         warmup: options.warmup,
         serveMode: options.serveMode,
@@ -753,10 +778,21 @@ const run = async (options: CliOptions): Promise<void> => {
     browser = await launchBrowser(options);
     const summaries: ScenarioSummary[] = [];
     const auxiliaryMetrics: AuxiliaryMetricSummary[] = [];
+    const plan = createLocalRunPlan(
+      implementations.map((implementation) => implementation.name),
+      scenarios.map((scenario) => scenario.id),
+      { runId: options.runId, runIndex: options.runIndex, seed: options.seed },
+    );
+    const measuredImplementations = plan.implementationOrder.map(
+      (name) => implementations.find((implementation) => implementation.name === name) as Implementation,
+    );
+    const measuredScenarios = plan.scenarioOrder.map(
+      (id) => scenarios.find((scenario) => scenario.id === id) as Scenario,
+    );
 
-    for (const implementation of implementations) {
+    for (const implementation of measuredImplementations) {
       console.log(`Measuring ${implementation.title}...`);
-      summaries.push(...(await measureImplementation(browser, baseUrl, implementation, options)));
+      summaries.push(...(await measureImplementation(browser, baseUrl, implementation, measuredScenarios, options)));
       auxiliaryMetrics.push(...(await measureAuxiliaryMetrics(browser, baseUrl, implementation)));
     }
 
@@ -778,6 +814,7 @@ const run = async (options: CliOptions): Promise<void> => {
       operationTable,
       auxiliaryTable,
       directComparisonTable,
+      plan,
     );
     console.log("");
     console.log(operationTable);
