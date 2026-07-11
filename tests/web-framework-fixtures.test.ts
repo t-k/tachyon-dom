@@ -17,7 +17,11 @@ describe("web framework benchmark fixtures", () => {
     expect(source).toContain("yield streamShell");
     expect(source).toContain("await delay(20)");
     expect(source).toContain("yield streamBody()");
-    expect(source).toContain("writeNodeResponse(renderToResponse(streamChunks()), response)");
+    expect(source).toContain('path: "/stream"');
+    expect(source).toContain("stream: streamChunks");
+    expect(source).toContain("streaming: true");
+    expect(source).not.toContain("writeNodeResponse(renderToResponse(streamChunks()), response)");
+    expect(source).not.toContain('pathname === "/stream"');
   });
 
   it("uses delayed production streaming primitives in every framework fixture", () => {
@@ -53,6 +57,7 @@ describe("web framework benchmark fixtures", () => {
     expect(source).not.toContain("runAutocannon(`${baseUrl}/products/42`");
     expect(source).toContain("measureStreamSemantics");
     expect(source).toContain('legacyDynamicAndStreamRankings: "non-authoritative"');
+    expect(source).toContain('"tachyon-dom": "tachyon-route-stream-node-adapter"');
   });
 
   it("uses request-time Tachyon routing for the dynamic benchmark scenario", () => {

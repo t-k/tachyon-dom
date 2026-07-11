@@ -484,10 +484,14 @@ const run = async (): Promise<void> => {
   const ranking = scoreWebFrameworkMetrics(metrics);
   const table = formatWebFrameworkRanking(ranking);
   const outputPath = path.resolve(projectRoot, options.output ?? defaultOutputPath());
-  const dependencies = Object.fromEntries(await Promise.all(frameworks.map(async (framework) => [
-    framework.name,
-    await collectDependencyVersions(framework.cwd, framework.dependencies),
-  ])));
+  const dependencies = Object.fromEntries(
+    await Promise.all(
+      frameworks.map(async (framework) => [
+        framework.name,
+        await collectDependencyVersions(framework.cwd, framework.dependencies),
+      ]),
+    ),
+  );
   const durationSeconds = options.smoke ? 1 : 5;
   const connections = options.smoke ? 5 : 30;
   const provenance = await collectBenchmarkProvenance({
@@ -499,32 +503,37 @@ const run = async (): Promise<void> => {
   await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(
     outputPath,
-    `${JSON.stringify({
-      schemaVersion: 2,
-      benchmark: { name: "web-framework", contractVersion: WEB_FRAMEWORK_CONTRACT_VERSION },
-      provenance,
-      workload: {
-        smoke: options.smoke,
-        buildMode: "production",
-        durationSeconds,
-        connections,
-        dynamicChallengeIds,
-        streamMinimumChunkGapMs: 10,
-        frameworks: frameworks.map((framework) => ({
-          name: framework.name,
-          cwd: framework.cwd,
-          build: framework.build ?? null,
-          start: framework.start(0),
-          dependencies: dependencies[framework.name],
-        })),
+    `${JSON.stringify(
+      {
+        schemaVersion: 2,
+        benchmark: { name: "web-framework", contractVersion: WEB_FRAMEWORK_CONTRACT_VERSION },
+        provenance,
+        workload: {
+          smoke: options.smoke,
+          buildMode: "production",
+          durationSeconds,
+          connections,
+          dynamicChallengeIds,
+          streamMinimumChunkGapMs: 10,
+          streamImplementations: { "tachyon-dom": "tachyon-route-stream-node-adapter" },
+          frameworks: frameworks.map((framework) => ({
+            name: framework.name,
+            cwd: framework.cwd,
+            build: framework.build ?? null,
+            start: framework.start(0),
+            dependencies: dependencies[framework.name],
+          })),
+        },
+        measurements: {
+          legacyDynamicAndStreamRankings: "non-authoritative",
+          metrics,
+          ranking,
+          table,
+        },
       },
-      measurements: {
-        legacyDynamicAndStreamRankings: "non-authoritative",
-        metrics,
-        ranking,
-        table,
-      },
-    }, null, 2)}\n`,
+      null,
+      2,
+    )}\n`,
   );
   console.log("");
   console.log(table);

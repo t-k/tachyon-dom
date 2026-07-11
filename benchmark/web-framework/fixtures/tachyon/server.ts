@@ -4,11 +4,9 @@ import { fileURLToPath } from "node:url";
 import {
   createNodeHandler,
   defineStaticRoute,
-  writeNodeResponse,
   type RouteDefinition,
   type StaticRouteDefinition,
 } from "../../../../src/adapters";
-import { renderToResponse } from "../../../../src/server/stream";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distRoot = path.resolve(__dirname, "../../../../dist");
@@ -140,6 +138,11 @@ const routes: RouteDefinition[] = [
     path: "/products/:id",
     render: ({ params }) => documentShell(productBody(params.id), "product"),
   },
+  {
+    path: "/stream",
+    render: () => "",
+    stream: streamChunks,
+  },
 ];
 const routeHandler = createNodeHandler({
   routes,
@@ -155,13 +158,7 @@ const routeHandler = createNodeHandler({
   ],
   notFound: () => "Not Found",
 });
-const server = createServer(async (request, response) => {
-  if (new URL(request.url ?? "/", "http://benchmark.local").pathname === "/stream") {
-    await writeNodeResponse(renderToResponse(streamChunks()), response);
-    return;
-  }
-  await routeHandler(request, response);
-});
+const server = createServer(routeHandler);
 
 server.listen(port, "127.0.0.1", () => {
   const address = server.address();
