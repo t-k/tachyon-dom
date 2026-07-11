@@ -6,10 +6,7 @@ import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
-import {
-  identifyStreamingBenchmarkAdapter,
-  prepareStreamingBenchmarkAdapter,
-} from "../benchmark/streaming-subject.js";
+import { identifyStreamingBenchmarkAdapter, prepareStreamingBenchmarkAdapter } from "../benchmark/streaming-subject.js";
 
 const execFileAsync = promisify(execFile);
 

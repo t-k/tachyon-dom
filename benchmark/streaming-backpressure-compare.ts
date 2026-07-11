@@ -89,10 +89,7 @@ const controlValidators = [
   ["workload.subject.git.available", (value: unknown) => value === true],
   ["workload.subject.git.commit", (value: unknown) => typeof value === "string" && value.length > 0],
   ["workload.subject.git.dirty", (value: unknown) => typeof value === "boolean"],
-  [
-    "workload.subject.git.workingTreeSha256",
-    (value: unknown) => typeof value === "string" && value.length > 0,
-  ],
+  ["workload.subject.git.workingTreeSha256", (value: unknown) => typeof value === "string" && value.length > 0],
 ] as const;
 
 const measurementValidators = [

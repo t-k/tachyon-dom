@@ -74,9 +74,7 @@ const hashPrivateDependencyTree = async (snapshotRoot: string, nodeModules: stri
         if (!isInside(canonicalSnapshotRoot, resolved)) {
           throw new Error(`Prepared dependency symlink escapes the private snapshot: ${relative}`);
         }
-        hash.update(
-          `link\0${relative}\0${path.relative(canonicalSnapshotRoot, resolved).split(path.sep).join("/")}\0`,
-        );
+        hash.update(`link\0${relative}\0${path.relative(canonicalSnapshotRoot, resolved).split(path.sep).join("/")}\0`);
       } else if (metadata.isDirectory()) {
         hash.update(`directory\0${relative}\0`);
         await visit(absolute);

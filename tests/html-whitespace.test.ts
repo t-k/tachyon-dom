@@ -32,7 +32,9 @@ describe("safe HTML whitespace policy", () => {
     ]) {
       expect(`${readme}\n${routing}`).toContain(boundary);
     }
-    expect(readme).not.toContain("Unknown runtime values throw a migration error instead of silently selecting preserve behavior.");
+    expect(readme).not.toContain(
+      "Unknown runtime values throw a migration error instead of silently selecting preserve behavior.",
+    );
     expect(routing).toContain("trusted benchmark input");
   });
 

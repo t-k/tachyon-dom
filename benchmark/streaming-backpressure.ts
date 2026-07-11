@@ -31,121 +31,123 @@ const output = stringArg(
   path.resolve("benchmark/streaming-backpressure-results", `${stamp}-${label}.json`),
 );
 try {
-const subject = await collectBenchmarkProvenance({ cwd: adapterIdentity.subjectRoot, argv: [process.execPath, ...process.argv.slice(1)] });
-if (
-  subject.git.available !== true ||
-  subject.git.commit !== adapterIdentity.commit ||
-  subject.git.dirty !== false
-) {
-  throw new Error("Benchmark subject provenance changed after the adapter snapshot was pinned.");
-}
-const { writeNodeResponse } = await import(pathToFileURL(adapterIdentity.executionModule).href) as {
-  writeNodeResponse: (response: Response, destination: ServerResponse) => Promise<void>;
-};
-
-let sourcePullCount = 0;
-let peakQueuedBytes = 0;
-let peakRssBytes = process.memoryUsage().rss;
-const startingRssBytes = peakRssBytes;
-const activeResponses = new Set<ServerResponse>();
-
-const server = createServer((request, response) => {
-  if (request.url !== "/stream") {
-    response.statusCode = 404;
-    response.end("Not Found");
-    return;
+  const subject = await collectBenchmarkProvenance({
+    cwd: adapterIdentity.subjectRoot,
+    argv: [process.execPath, ...process.argv.slice(1)],
+  });
+  if (subject.git.available !== true || subject.git.commit !== adapterIdentity.commit || subject.git.dirty !== false) {
+    throw new Error("Benchmark subject provenance changed after the adapter snapshot was pinned.");
   }
-  activeResponses.add(response);
-  response.once("close", () => activeResponses.delete(response));
-  let emitted = 0;
-  const body = new ReadableStream<Uint8Array>({
-    pull(controller) {
-      sourcePullCount += 1;
-      if (emitted >= chunksPerConnection) {
-        controller.close();
-        return;
-      }
-      emitted += 1;
-      controller.enqueue(new Uint8Array(chunkBytes));
-    },
-  }, { highWaterMark: 0 });
-  void writeNodeResponse(new Response(body), response).catch((error) => response.destroy(error));
-});
+  const { writeNodeResponse } = (await import(pathToFileURL(adapterIdentity.executionModule).href)) as {
+    writeNodeResponse: (response: Response, destination: ServerResponse) => Promise<void>;
+  };
 
-await new Promise<void>((resolve, reject) => {
-  server.once("error", reject);
-  server.listen(0, "127.0.0.1", resolve);
-});
-const address = server.address();
-if (!address || typeof address === "string") throw new Error("Backpressure benchmark server has no TCP address.");
+  let sourcePullCount = 0;
+  let peakQueuedBytes = 0;
+  let peakRssBytes = process.memoryUsage().rss;
+  const startingRssBytes = peakRssBytes;
+  const activeResponses = new Set<ServerResponse>();
 
-const sample = setInterval(() => {
-  peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
-  const queuedBytes = [...activeResponses].reduce((total, response) => total + response.writableLength, 0);
-  peakQueuedBytes = Math.max(peakQueuedBytes, queuedBytes);
-}, 1);
-
-const runConnection = async (): Promise<void> =>
-  await new Promise((resolve, reject) => {
-    const request = get(`http://127.0.0.1:${address.port}/stream`, (response) => {
-      response.on("data", () => {
-        response.pause();
-        setTimeout(() => response.resume(), drainDelayMs);
-      });
-      response.on("end", resolve);
-      response.on("error", reject);
-    });
-    request.on("error", reject);
+  const server = createServer((request, response) => {
+    if (request.url !== "/stream") {
+      response.statusCode = 404;
+      response.end("Not Found");
+      return;
+    }
+    activeResponses.add(response);
+    response.once("close", () => activeResponses.delete(response));
+    let emitted = 0;
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          sourcePullCount += 1;
+          if (emitted >= chunksPerConnection) {
+            controller.close();
+            return;
+          }
+          emitted += 1;
+          controller.enqueue(new Uint8Array(chunkBytes));
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    void writeNodeResponse(new Response(body), response).catch((error) => response.destroy(error));
   });
 
-const startedAt = performance.now();
-try {
-  await Promise.all(Array.from({ length: connections }, () => runConnection()));
-} finally {
-  clearInterval(sample);
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-}
-const completionTimeMs = performance.now() - startedAt;
-peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Backpressure benchmark server has no TCP address.");
 
-const argv = [process.execPath, ...process.argv.slice(1)];
-const provenance = await collectBenchmarkProvenance({
-  cwd: projectRoot,
-  argv,
-  dependencies: await collectDependencyVersions(projectRoot, ["tsx"]),
-});
-const result = {
-  schemaVersion: 2,
-  benchmark: { name: "streaming-backpressure", contractVersion: 2 },
-  provenance,
-  workload: {
-    label,
-    transport: "tcp",
-    connections,
-    chunksPerConnection,
-    chunkBytes,
-    drainDelayMs,
-    adapterModule: adapterIdentity.adapterModule,
-    adapter: {
-      relativePath: adapterIdentity.relativePath,
-      sha256: adapterIdentity.sha256,
-      gitBlob: adapterIdentity.gitBlob,
-      dependencySnapshot: adapterIdentity.dependencySnapshot,
+  const sample = setInterval(() => {
+    peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
+    const queuedBytes = [...activeResponses].reduce((total, response) => total + response.writableLength, 0);
+    peakQueuedBytes = Math.max(peakQueuedBytes, queuedBytes);
+  }, 1);
+
+  const runConnection = async (): Promise<void> =>
+    await new Promise((resolve, reject) => {
+      const request = get(`http://127.0.0.1:${address.port}/stream`, (response) => {
+        response.on("data", () => {
+          response.pause();
+          setTimeout(() => response.resume(), drainDelayMs);
+        });
+        response.on("end", resolve);
+        response.on("error", reject);
+      });
+      request.on("error", reject);
+    });
+
+  const startedAt = performance.now();
+  try {
+    await Promise.all(Array.from({ length: connections }, () => runConnection()));
+  } finally {
+    clearInterval(sample);
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+  const completionTimeMs = performance.now() - startedAt;
+  peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
+
+  const argv = [process.execPath, ...process.argv.slice(1)];
+  const provenance = await collectBenchmarkProvenance({
+    cwd: projectRoot,
+    argv,
+    dependencies: await collectDependencyVersions(projectRoot, ["tsx"]),
+  });
+  const result = {
+    schemaVersion: 2,
+    benchmark: { name: "streaming-backpressure", contractVersion: 2 },
+    provenance,
+    workload: {
+      label,
+      transport: "tcp",
+      connections,
+      chunksPerConnection,
+      chunkBytes,
+      drainDelayMs,
+      adapterModule: adapterIdentity.adapterModule,
+      adapter: {
+        relativePath: adapterIdentity.relativePath,
+        sha256: adapterIdentity.sha256,
+        gitBlob: adapterIdentity.gitBlob,
+        dependencySnapshot: adapterIdentity.dependencySnapshot,
+      },
+      subject: { root: adapterIdentity.subjectRoot, git: subject.git },
     },
-    subject: { root: adapterIdentity.subjectRoot, git: subject.git },
-  },
-  measurements: {
-    completionTimeMs,
-    peakQueuedBytes,
-    sourcePullCount,
-    startingRssBytes,
-    peakRssBytes,
-    peakRssDeltaBytes: Math.max(0, peakRssBytes - startingRssBytes),
-  },
-};
-await mkdir(path.dirname(output), { recursive: true });
-await writeFile(output, `${JSON.stringify(result, null, 2)}\n`);
-console.log(JSON.stringify({ output, ...result }));
+    measurements: {
+      completionTimeMs,
+      peakQueuedBytes,
+      sourcePullCount,
+      startingRssBytes,
+      peakRssBytes,
+      peakRssDeltaBytes: Math.max(0, peakRssBytes - startingRssBytes),
+    },
+  };
+  await mkdir(path.dirname(output), { recursive: true });
+  await writeFile(output, `${JSON.stringify(result, null, 2)}\n`);
+  console.log(JSON.stringify({ output, ...result }));
 } finally {
   await adapterIdentity.cleanup();
 }

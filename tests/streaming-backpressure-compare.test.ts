@@ -177,9 +177,7 @@ describe("streaming backpressure comparison", () => {
     const baseline = envelope({ revision: "baseline", queued: 1_000 }) as any;
     const candidate = envelope({ revision: "candidate", queued: 100 }) as any;
     baseline.workload.adapterModule = "/foreign/adapter.js";
-    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
-      /baseline\.workload\.adapterModule/,
-    );
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(/baseline\.workload\.adapterModule/);
     baseline.workload.adapterModule = "/repo/baseline/src/adapter.js";
     baseline.workload.adapter.sha256 = "not-a-digest";
     expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
