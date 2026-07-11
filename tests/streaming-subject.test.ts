@@ -127,8 +127,28 @@ describe("streaming benchmark adapter identity", () => {
         lockfileSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
         treeSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
       });
+      const preparedDependency = path.join(
+        path.dirname(path.dirname(prepared.executionModule)),
+        "node_modules/fixture-dependency/index.js",
+      );
+      await expect(writeFile(preparedDependency, 'export const dependencyValue = "tampered";\n')).rejects.toThrow();
+      await expect(prepared.verify()).resolves.toBeUndefined();
     } finally {
       await prepared.cleanup();
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("produces one dependency identity for repeated preparation of the same commit", async () => {
+    const fixture = await repositoryFixture();
+    const first = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+    const firstIdentity = first.dependencySnapshot;
+    await first.cleanup();
+    const second = await prepareStreamingBenchmarkAdapter(fixture.root, fixture.adapter);
+    try {
+      expect(second.dependencySnapshot).toEqual(firstIdentity);
+    } finally {
+      await second.cleanup();
       await rm(fixture.root, { recursive: true, force: true });
     }
   });

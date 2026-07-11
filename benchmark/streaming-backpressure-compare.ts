@@ -81,7 +81,7 @@ const controlValidators = [
   ],
   [
     "workload.adapter.dependencySnapshot.packageManager",
-    (value: unknown) => typeof value === "string" && /^pnpm@\d+\.\d+\.\d+/.test(value),
+    (value: unknown) => typeof value === "string" && /^pnpm@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value),
   ],
   ["workload.subject", (value: unknown) => typeof value === "object" && value !== null],
   ["workload.subject.root", (value: unknown) => typeof value === "string" && value.length > 0],

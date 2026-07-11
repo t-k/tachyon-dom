@@ -38,6 +38,7 @@ try {
   if (subject.git.available !== true || subject.git.commit !== adapterIdentity.commit || subject.git.dirty !== false) {
     throw new Error("Benchmark subject provenance changed after the adapter snapshot was pinned.");
   }
+  await adapterIdentity.verify();
   const { writeNodeResponse } = (await import(pathToFileURL(adapterIdentity.executionModule).href)) as {
     writeNodeResponse: (response: Response, destination: ServerResponse) => Promise<void>;
   };

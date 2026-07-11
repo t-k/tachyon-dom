@@ -97,6 +97,13 @@ describe("streaming backpressure comparison", () => {
     expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(/dependencySnapshot/);
   });
 
+  it("rejects trailing data in the dependency package-manager identity", () => {
+    const baseline = envelope({ revision: "baseline", queued: 1_000 });
+    const candidate = envelope({ revision: "candidate", queued: 100 });
+    baseline.workload.adapter.dependencySnapshot.packageManager = "pnpm@10.32.1-attacker/extra";
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(/packageManager/);
+  });
+
   it("rejects unavailable subject provenance with a precise field", () => {
     const baseline = envelope({ revision: "baseline", queued: 1_000 });
     const candidate = envelope({ revision: "candidate", queued: 100 });
