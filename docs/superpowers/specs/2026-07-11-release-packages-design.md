@@ -16,17 +16,17 @@ The verifier rejects malformed tags, prerelease tags unless the package versions
 
 ## Package Contents
 
-The `create-tachyon-dom` tarball must contain its executable entry, README, package metadata, and the repository MIT `LICENSE` text. The package build copies the root license into the package directory before packing. Package verification inspects the actual dry-run tarball manifest rather than relying only on the `files` declaration.
+The `create-tachyon-dom` tarball must contain its executable entry, README, package metadata, and the repository MIT `LICENSE` text. The package build copies the root license into the package directory before packing. The verifier creates both real tarballs once, records each SHA-512 integrity in a release manifest, reads required files and package metadata from those tarballs, and compares the packed LICENSE bytes. Dry runs and publication consume those exact tarball paths rather than rebuilding mutable package directories.
 
 ## Workflow
 
-The release job performs installation, build, tests and existing package checks, then runs the release-contract verifier with `GITHUB_REF_NAME`. A fixed `NPM_TAG` environment value maps stable tags to `latest` and prerelease tags to `next`. It performs `npm publish --dry-run` for both package directories before any external mutation. Once all checks pass, it publishes the root package first and `packages/create-tachyon-dom` second, both with provenance, public access, and the fixed dist-tag.
+An unprivileged verification job performs installation, build, tests and existing package checks, creates both release tarballs, verifies them, dry-runs those exact tarballs, and uploads them with their integrity manifest. A separate publication job has the OIDC permission and npm token, downloads the artifacts, reverifies their SHA-512 values and contents, then publishes the root tarball before the initializer tarball. All third-party Actions are pinned to full commit SHAs.
 
-Publishing the root package first ensures the initializer's exact dependency exists when the initializer becomes installable. A failure between publishes is visible and retryable; npm's immutability means the workflow must not silently rewrite versions or continue after an error.
+Publishing the root package first ensures the initializer's exact dependency exists when the initializer becomes installable. Before each publication, the publisher queries the registry. A missing version is published, an existing version with identical integrity is safely skipped while its fixed dist-tag is restored, and an existing version with different integrity fails closed. A retry after partial publication can therefore continue to the initializer without ignoring unrelated registry errors.
 
 ## Verification Design
 
-Tests use temporary real package files and real `npm pack --json --dry-run` output. Coverage includes:
+Tests use temporary real package files, real `npm pack --json` tarballs, tar extraction to standard output, and exact-tarball npm publication dry runs. Coverage includes:
 
 - Matching stable and prerelease tags.
 - Tag/root version mismatch.
@@ -34,10 +34,12 @@ Tests use temporary real package files and real `npm pack --json --dry-run` outp
 - Non-exact or mismatched initializer dependency.
 - Malformed tags and build metadata.
 - Actual initializer tarball contents, including byte-equal MIT license text.
-- Workflow ordering: validation and both dry runs precede root publish, and root publish precedes initializer publish.
+- Source mutation after packing does not change the verified artifacts, while tarball mutation fails integrity validation.
+- Registry retry decisions for missing, identical, and conflicting versions.
+- Workflow ordering and privilege separation: validation and both dry runs precede artifact upload, the publication job reverifies after download, and root publish precedes initializer publish.
 
 The release verifier is a local script with no GitHub API dependency, so CI and maintainers can run the same checks. No registry publish is performed by tests.
 
 ## Security Boundary
 
-The workflow keeps the existing minimal `contents: read` and `id-token: write` permissions. Version and artifact validation is fail closed and happens before registry writes. Publish commands use fixed repository directories and do not derive shell commands or filesystem paths from the tag value. The npm token remains scoped to publish steps through the existing environment mechanism.
+The workflow has no top-level permissions. The verification job has only `contents: read`; only the publication job receives `contents: read` and `id-token: write`, and the npm token is scoped to its two publication steps. Version, tarball content, and integrity validation fail closed before registry writes. The publisher uses argument arrays rather than a shell, selects only the fixed root/create manifest entries, and never derives commands, paths, or npm dist-tags from unvalidated tag text.

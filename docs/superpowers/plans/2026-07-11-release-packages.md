@@ -4,7 +4,7 @@
 
 **Goal:** Publish both documented npm packages from a version-locked tag and prove that the initializer tarball contains the MIT license and required executable artifacts before any registry write.
 
-**Architecture:** Add one repository-internal ESM release verifier that validates the tag/package/dependency version contract and inspects `npm pack --dry-run --json` manifests. Keep asset copying in a separate build helper, then make the release workflow run all builds, validations, and dry runs before publishing root first and initializer second.
+**Architecture:** Add a repository-internal ESM release verifier that validates tag/package/dependency identity, packs and hashes immutable tarballs, and reverifies their contents after artifact transfer. Keep asset copying in a separate build helper, split verification from the privileged publication job, and make publication idempotent by comparing registry integrity before publishing root and initializer tarballs.
 
 **Tech Stack:** Node.js ESM, TypeScript package builds, Vitest, npm pack/publish, pnpm, GitHub Actions.
 
@@ -12,12 +12,13 @@
 
 ## File Structure
 
-- Create `scripts/release-contract.mjs`: parse and validate the release identity, inspect npm dry-run manifests, expose a CLI used by GitHub Actions.
+- Create `scripts/release-contract.mjs`: parse release identity, pack immutable tarballs, verify their SHA-512 and contents, and dry-run exact tarballs.
+- Create `scripts/publish-release-package.mjs`: reverify an artifact, compare registry integrity, and publish or safely skip one package.
 - Create `scripts/copy-create-package-assets.mjs`: copy the root `LICENSE` bytes into the initializer package before packing.
-- Create `tests/release-contract.test.ts`: exercise real temporary package metadata and real npm dry-run manifests without registry writes.
+- Create `tests/release-contract.test.ts`: exercise real temporary packages, immutable tarballs, integrity failures, dry runs, and retry decisions without registry writes.
 - Modify `packages/create-tachyon-dom/package.json`: include `LICENSE`, use the asset copier in its build, and bind `tachyon-dom` to the exact release version.
 - Modify `package.json`: expose repository-level initializer build and release verification commands.
-- Modify `.github/workflows/release.yml`: validate and dry-run both packages before ordered publication.
+- Modify `.github/workflows/release.yml`: build and upload verified tarballs in an unprivileged job, then reverify and publish them in a minimal privileged job.
 - Modify `tests/dx.test.ts`: lock down workflow ordering and public package metadata.
 - Create `.coverage-ledger/release-packages/coverage-ledger.md`: map every release invariant to its test or workflow check.
 
@@ -114,7 +115,7 @@ git commit -m "fix: package initializer license and release artifacts"
 
 - [ ] **Step 1: Write failing workflow contract assertions**
 
-Read the workflow as text and locate commands by index. Assert that `pnpm verify:release --tag "$GITHUB_REF_NAME"`, both `npm publish --dry-run` commands, root publish, and initializer publish exist in that strict order. Assert the fixed `NPM_TAG` expression maps stable tags to `latest` and prerelease tags to `next`, and every dry-run and publish uses it. Assert the initializer package metadata uses an exact `tachyon-dom` dependency and includes `LICENSE`.
+Read the workflow as text and locate commands by index. Assert that immutable artifact preparation and exact-tarball dry runs precede upload, the publication job has the only OIDC permission, downloaded artifacts are reverified, and root publication precedes initializer publication. Assert the initializer package metadata uses an exact `tachyon-dom` dependency and includes `LICENSE`.
 
 - [ ] **Step 2: Verify RED**
 
@@ -122,15 +123,16 @@ Run `pnpm exec vitest run tests/dx.test.ts`. Expected: the release workflow asse
 
 - [ ] **Step 3: Update the workflow**
 
-After the existing checks, build the initializer, run the tests and `pnpm verify:release --tag "$GITHUB_REF_NAME"`, then dry-run root and initializer packages. Define `NPM_TAG` with the fixed GitHub expression `${{ contains(github.ref_name, '-') && 'next' || 'latest' }}` and use `--tag "$NPM_TAG"` for every dry-run and publish. Publish root before initializer:
+After the existing checks, build the initializer and create both tarballs with `pnpm prepare:release --tag "$GITHUB_REF_NAME" --output release-artifacts`. Dry-run those exact artifacts, upload them with pinned Actions, then use a separate publication job to download and reverify them. Run `publish-release-package.mjs` for root before create; it publishes a missing version, skips an identical version, and rejects conflicting integrity.
 
 ```yaml
-- run: npm publish --provenance --access public --tag latest
+- run: node scripts/release-contract.mjs --verify-artifacts release-artifacts --tag "$GITHUB_REF_NAME"
+
+- run: node scripts/publish-release-package.mjs --artifact-dir release-artifacts --tag "$GITHUB_REF_NAME" --package root
   env:
     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-- run: npm publish --provenance --access public
-  working-directory: packages/create-tachyon-dom
+- run: node scripts/publish-release-package.mjs --artifact-dir release-artifacts --tag "$GITHUB_REF_NAME" --package create
   env:
     NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```
@@ -141,7 +143,7 @@ Run `pnpm exec vitest run tests/dx.test.ts tests/release-contract.test.ts`. Expe
 
 - [ ] **Step 5: Update ledger and commit**
 
-Mark tag identity, package identity, dependency binding, license bytes, dry-run manifests, workflow preflight, and publish ordering as covered.
+Mark tag identity, package identity, dependency binding, license bytes, immutable tarball integrity, exact-artifact dry runs, retry decisions, privilege separation, and publish ordering as covered.
 
 ```bash
 git add .github/workflows/release.yml tests/dx.test.ts .coverage-ledger/release-packages/coverage-ledger.md
@@ -159,6 +161,9 @@ git commit -m "ci: publish both npm packages from validated tags"
 ```bash
 pnpm build
 pnpm build:create-package
+rm -rf release-artifacts
+pnpm prepare:release --tag v0.1.0 --output release-artifacts
+node scripts/release-contract.mjs --dry-run-artifacts release-artifacts --tag v0.1.0
 pnpm verify:release --tag v0.1.0
 pnpm exec vitest run tests/release-contract.test.ts tests/dx.test.ts
 ```

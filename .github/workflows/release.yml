@@ -5,24 +5,22 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: read
-  id-token: write
+permissions: {}
 
 jobs:
-  publish:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      NPM_TAG: ${{ contains(github.ref_name, '-') && 'next' || 'latest' }}
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
         with:
           run_install: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: pnpm
@@ -42,18 +40,43 @@ jobs:
 
       - run: pnpm check:size
 
-      - run: pnpm verify:release --tag "$GITHUB_REF_NAME"
+      - run: pnpm prepare:release --tag "$GITHUB_REF_NAME" --output release-artifacts
 
-      - run: npm publish --dry-run --provenance --access public --tag "$NPM_TAG"
+      - run: node scripts/release-contract.mjs --dry-run-artifacts release-artifacts --tag "$GITHUB_REF_NAME"
 
-      - run: npm publish --dry-run --provenance --access public --tag "$NPM_TAG"
-        working-directory: packages/create-tachyon-dom
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: npm-release-${{ github.ref_name }}
+          path: release-artifacts
+          if-no-files-found: error
+          retention-days: 1
 
-      - run: npm publish --provenance --access public --tag "$NPM_TAG"
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: npm-release-${{ github.ref_name }}
+          path: release-artifacts
+
+      - run: node scripts/release-contract.mjs --verify-artifacts release-artifacts --tag "$GITHUB_REF_NAME"
+
+      - run: node scripts/publish-release-package.mjs --artifact-dir release-artifacts --tag "$GITHUB_REF_NAME" --package root
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - run: npm publish --provenance --access public --tag "$NPM_TAG"
-        working-directory: packages/create-tachyon-dom
+      - run: node scripts/publish-release-package.mjs --artifact-dir release-artifacts --tag "$GITHUB_REF_NAME" --package create
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

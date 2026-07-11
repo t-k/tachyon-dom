@@ -19,10 +19,30 @@ export const inspectPackageDryRun: (options: {
   requiredFiles: string[];
 }) => Promise<{ ok: true; files: string[] } | { ok: false; error: string }>;
 
-export const verifyReleaseRepository: (options: {
+export type ReleaseArtifactResult =
+  | {
+      ok: true;
+      version: string;
+      npmTag: "latest" | "next";
+      manifest: any;
+      packages: any;
+    }
+  | { ok: false; error: string };
+
+export const prepareReleaseArtifacts: (options: {
   rootDir: string;
+  artifactDir: string;
   tag: unknown;
-}) => Promise<
-  | { ok: true; version: string; npmTag: "latest" | "next"; packages: { root: string[]; create: string[] } }
-  | { ok: false; error: string }
->;
+}) => Promise<ReleaseArtifactResult>;
+
+export const verifyReleaseArtifacts: (options: { artifactDir: string; tag: unknown }) => Promise<ReleaseArtifactResult>;
+
+export const decidePublication: (options: {
+  expectedIntegrity: string;
+  publishedIntegrity: string | null;
+}) => { ok: true; action: "publish" | "skip" } | { ok: false; error: string };
+
+export const dryRunReleaseArtifacts: (options: {
+  artifactDir: string;
+  tag: unknown;
+}) => Promise<{ ok: true; version: string; npmTag: "latest" | "next" } | { ok: false; error: string }>;

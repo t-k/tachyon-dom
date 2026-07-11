@@ -289,6 +289,7 @@ describe("DX helpers", () => {
     };
     const ci = await readFile(".github/workflows/ci.yml", "utf8");
     const release = await readFile(".github/workflows/release.yml", "utf8");
+    const publisher = await readFile("scripts/publish-release-package.mjs", "utf8");
     const publicJsExportNames = Object.entries(packageJson.exports ?? {}).flatMap(([specifier, target]) => {
       if (!target.import) {
         return [];
@@ -308,7 +309,12 @@ describe("DX helpers", () => {
     expect(ci).toContain("github.event_name == 'workflow_dispatch'");
     expect(ci).toContain("pnpm bench:local:smoke");
     expect(release).toContain("tags:");
-    expect(release).toContain("npm publish --provenance --access public");
+    expect(release).toContain("node scripts/publish-release-package.mjs --artifact-dir release-artifacts");
+    expect(release).toContain("--package root");
+    expect(release).toContain("--package create");
+    expect(publisher).toMatch(
+      /\[\s*"publish",\s*entry\.filename,\s*"--provenance",\s*"--access",\s*"public",\s*"--tag",\s*verified\.npmTag\s*\]/,
+    );
   });
 
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
@@ -1504,28 +1510,27 @@ void chunks;
     const createPackage = JSON.parse(
       await readFile(path.join(process.cwd(), "packages", "create-tachyon-dom", "package.json"), "utf8"),
     ) as { files?: string[]; dependencies?: Record<string, string> };
-    const validation = workflow.indexOf('pnpm verify:release --tag "$GITHUB_REF_NAME"');
-    const rootDryRun = workflow.indexOf("npm publish --dry-run --provenance --access public", validation);
-    const createDryRun = workflow.indexOf("npm publish --dry-run --provenance --access public", rootDryRun + 1);
-    const rootPublish = workflow.indexOf("npm publish --provenance --access public --tag", createDryRun);
-    const createPublish = workflow.indexOf("npm publish --provenance --access public --tag", rootPublish + 1);
+    const preparation = workflow.indexOf("pnpm prepare:release");
+    const dryRun = workflow.indexOf("--dry-run-artifacts", preparation);
+    const upload = workflow.indexOf("actions/upload-artifact@", dryRun);
+    const publishJob = workflow.indexOf("publish:", upload);
+    const artifactVerification = workflow.indexOf("--verify-artifacts", publishJob);
+    const rootPublish = workflow.indexOf("--package root", artifactVerification);
+    const createPublish = workflow.indexOf("--package create", rootPublish + 1);
 
-    expect(validation).toBeGreaterThan(-1);
-    expect(rootDryRun).toBeGreaterThan(validation);
-    expect(createDryRun).toBeGreaterThan(rootDryRun);
-    expect(rootPublish).toBeGreaterThan(createDryRun);
+    expect(preparation).toBeGreaterThan(-1);
+    expect(dryRun).toBeGreaterThan(preparation);
+    expect(upload).toBeGreaterThan(dryRun);
+    expect(publishJob).toBeGreaterThan(upload);
+    expect(artifactVerification).toBeGreaterThan(publishJob);
+    expect(rootPublish).toBeGreaterThan(artifactVerification);
     expect(createPublish).toBeGreaterThan(rootPublish);
-    expect(workflow).toContain("working-directory: packages/create-tachyon-dom");
-    expect(workflow.match(/working-directory: packages\/create-tachyon-dom/g)).toHaveLength(2);
-    expect(workflow).toMatch(
-      /npm publish --dry-run --provenance --access public --tag "\$NPM_TAG"\n\s+working-directory: packages\/create-tachyon-dom/,
-    );
-    expect(workflow).toMatch(
-      /npm publish --provenance --access public --tag "\$NPM_TAG"\n\s+working-directory: packages\/create-tachyon-dom/,
-    );
-    expect(workflow).toContain("contains(github.ref_name, '-')");
-    expect(workflow).toContain("'next' || 'latest'");
-    expect(workflow).toContain('--tag "$NPM_TAG"');
+    expect(workflow).toContain("permissions: {}\n");
+    expect(workflow).toMatch(/publish:\n\s+needs: verify[\s\S]+permissions:\n\s+contents: read\n\s+id-token: write/);
+    expect(workflow).toContain("NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}");
+    expect(workflow).toContain("34e114876b0b11c390a56381ad16ebd13914f8d5");
+    expect(workflow).toContain("ea165f8d65b6e75b540449e92b4886f43607fa02");
+    expect(workflow).toContain("d3f86a106a0bac45b974a628896c90dbdf5c8093");
     expect(createPackage.files).toContain("LICENSE");
     expect(createPackage.dependencies?.["tachyon-dom"]).toBe("0.1.0");
   });

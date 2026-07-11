@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -59,14 +59,15 @@ describe("initializer package artifacts", () => {
       );
 
       const requiredFiles = ["package.json", "README.md", "LICENSE", "dist/index.js"];
-      await expect(
-        (releaseContract as any).inspectPackageDryRun({ packageDir, requiredFiles }),
-      ).resolves.toMatchObject({ ok: true, files: expect.arrayContaining(requiredFiles) });
+      await expect((releaseContract as any).inspectPackageDryRun({ packageDir, requiredFiles })).resolves.toMatchObject(
+        { ok: true, files: expect.arrayContaining(requiredFiles) },
+      );
 
       await unlink(path.join(packageDir, "LICENSE"));
-      await expect(
-        (releaseContract as any).inspectPackageDryRun({ packageDir, requiredFiles }),
-      ).resolves.toEqual({ ok: false, error: expect.stringMatching(/LICENSE/) });
+      await expect((releaseContract as any).inspectPackageDryRun({ packageDir, requiredFiles })).resolves.toEqual({
+        ok: false,
+        error: expect.stringMatching(/LICENSE/),
+      });
     } finally {
       await rm(packageDir, { recursive: true, force: true });
     }
@@ -87,9 +88,10 @@ describe("initializer package artifacts", () => {
     }
   });
 
-  it("verifies both real package manifests and identical license bytes", async () => {
+  it("packs and reverifies immutable package bytes independently of the source tree", async () => {
     const rootDir = await mkdtemp(path.join(tmpdir(), "tachyon-release-repository-"));
     const createDir = path.join(rootDir, "packages", "create-tachyon-dom");
+    const artifactDir = path.join(rootDir, "release-artifacts");
     try {
       await mkdir(path.join(rootDir, "dist"), { recursive: true });
       await mkdir(path.join(createDir, "dist"), { recursive: true });
@@ -120,16 +122,45 @@ describe("initializer package artifacts", () => {
         })}\n`,
       );
 
-      await expect(
-        (releaseContract as any).verifyReleaseRepository({ rootDir, tag: "v1.2.3" }),
-      ).resolves.toMatchObject({ ok: true, version: "1.2.3", npmTag: "latest" });
+      const prepared = await (releaseContract as any).prepareReleaseArtifacts({
+        rootDir,
+        artifactDir,
+        tag: "v1.2.3",
+      });
+      expect(prepared).toMatchObject({ ok: true, version: "1.2.3", npmTag: "latest" });
+      await expect((releaseContract as any).dryRunReleaseArtifacts({ artifactDir, tag: "v1.2.3" })).resolves.toEqual({
+        ok: true,
+        version: "1.2.3",
+        npmTag: "latest",
+      });
 
       await writeFile(path.join(createDir, "LICENSE"), `${license}changed\n`);
       await expect(
-        (releaseContract as any).verifyReleaseRepository({ rootDir, tag: "v1.2.3" }),
-      ).resolves.toEqual({ ok: false, error: expect.stringMatching(/LICENSE bytes/) });
+        (releaseContract as any).verifyReleaseArtifacts({ artifactDir, tag: "v1.2.3" }),
+      ).resolves.toMatchObject({ ok: true, version: "1.2.3" });
+
+      const rootTarball = path.join(artifactDir, prepared.manifest.packages.root.filename);
+      await appendFile(rootTarball, "tampered");
+      await expect((releaseContract as any).verifyReleaseArtifacts({ artifactDir, tag: "v1.2.3" })).resolves.toEqual({
+        ok: false,
+        error: expect.stringMatching(/integrity/),
+      });
     } finally {
       await rm(rootDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("retryable npm publication", () => {
+  it("publishes missing versions, skips identical versions, and rejects conflicts", () => {
+    expect(
+      (releaseContract as any).decidePublication({ expectedIntegrity: "sha512-a", publishedIntegrity: null }),
+    ).toEqual({ ok: true, action: "publish" });
+    expect(
+      (releaseContract as any).decidePublication({ expectedIntegrity: "sha512-a", publishedIntegrity: "sha512-a" }),
+    ).toEqual({ ok: true, action: "skip" });
+    expect(
+      (releaseContract as any).decidePublication({ expectedIntegrity: "sha512-a", publishedIntegrity: "sha512-b" }),
+    ).toEqual({ ok: false, error: expect.stringMatching(/different integrity/) });
   });
 });
