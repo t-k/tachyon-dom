@@ -11,6 +11,7 @@ const protectedTextElements = new Set([
   "script",
   "style",
   "textarea",
+  "title",
   "xmp",
 ]);
 const asciiWhitespaceOnly = /^[\t\n\f\r ]+$/;
@@ -29,19 +30,53 @@ const condenseTextValue = (value: string): string =>
     )
     .join("");
 
-const transformNode = (node: TemplateNode, protectedContext: boolean): TemplateNode => {
+type WhitespaceContext = {
+  protectedHtmlText: boolean;
+  foreignContent: "html" | "svg" | "math";
+  xmlSpace: "default" | "preserve";
+};
+
+const childForeignContent = (
+  parent: WhitespaceContext["foreignContent"],
+  tagName: string,
+): WhitespaceContext["foreignContent"] => {
+  if (parent === "svg" && tagName === "foreignobject") return "html";
+  if (parent === "html" && tagName === "svg") return "svg";
+  if (parent === "html" && tagName === "math") return "math";
+  return parent;
+};
+
+const staticXmlSpace = (node: ElementNode): WhitespaceContext["xmlSpace"] | undefined => {
+  const attribute = node.attrs.find((candidate) => candidate.name === "xml:space");
+  return attribute?.value === "preserve" || attribute?.value === "default" ? attribute.value : undefined;
+};
+
+const transformNode = (node: TemplateNode, context: WhitespaceContext): TemplateNode => {
   if (node.type === "text") {
     const text: TextNode = { ...node };
-    if (!protectedContext) text.value = condenseTextValue(text.value);
+    if (!context.protectedHtmlText && context.xmlSpace !== "preserve") text.value = condenseTextValue(text.value);
     return text;
   }
-  const nextProtectedContext = protectedContext || protectedTextElements.has(node.tagName.toLowerCase());
+  const tagName = node.tagName.toLowerCase();
+  const foreignContent = childForeignContent(context.foreignContent, tagName);
+  const entersForeignContent = context.foreignContent === "html" && foreignContent !== "html";
+  const xmlSpace =
+    foreignContent === "html"
+      ? "default"
+      : (staticXmlSpace(node) ?? (entersForeignContent ? "default" : context.xmlSpace));
+  const nextContext: WhitespaceContext = {
+    protectedHtmlText: context.protectedHtmlText || protectedTextElements.has(tagName),
+    foreignContent,
+    xmlSpace,
+  };
   return {
     ...node,
     attrs: node.attrs.map((attribute) => ({ ...attribute })),
-    children: node.children.map((child) => transformNode(child, nextProtectedContext)),
+    children: node.children.map((child) => transformNode(child, nextContext)),
   } satisfies ElementNode;
 };
 
 export const applyTemplateWhitespace = (root: ElementNode, policy: TemplateWhitespacePolicy): ElementNode =>
-  policy === "condense" ? (transformNode(root, false) as ElementNode) : root;
+  policy === "condense"
+    ? (transformNode(root, { protectedHtmlText: false, foreignContent: "html", xmlSpace: "default" }) as ElementNode)
+    : root;

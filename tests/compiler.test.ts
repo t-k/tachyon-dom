@@ -105,18 +105,57 @@ describe("HTML-first compiler", () => {
     expect(html).toContain(`<style>line one\n    line two</style>`);
   });
 
-  it.each(["pre", "textarea", "script", "style", "xmp", "listing", "plaintext", "iframe", "noembed", "noframes"])(
-    "preserves whitespace in the %s context for every compiler target",
-    (tagName) => {
-      const source = `<${tagName}>line one\n    line two</${tagName}>`;
-      const result = compileTemplate(source, { whitespace: "condense" });
-      if (!result.ok) throw new Error(result.error.message);
+  it.each([
+    "pre",
+    "textarea",
+    "title",
+    "script",
+    "style",
+    "xmp",
+    "listing",
+    "plaintext",
+    "iframe",
+    "noembed",
+    "noframes",
+  ])("preserves whitespace in the %s context for every compiler target", (tagName) => {
+    const source = `<${tagName}>line one\n    line two</${tagName}>`;
+    const result = compileTemplate(source, { whitespace: "condense" });
+    if (!result.ok) throw new Error(result.error.message);
 
-      expect(renderServerTemplate(result.value, {})).toContain("line one\n    line two");
-      expect(result.value.client.templateHtml).toContain("line one\n    line two");
-      expect(generateServerStreamModule(result.value)).toContain("line one\\n    line two");
-    },
-  );
+    expect(renderServerTemplate(result.value, {})).toContain("line one\n    line two");
+    expect(result.value.client.templateHtml).toContain("line one\n    line two");
+    expect(generateServerStreamModule(result.value)).toContain("line one\\n    line two");
+  });
+
+  it.each([
+    ["svg", `<svg xml:space="preserve"><text>line one\n    line two</text></svg>`],
+    ["math", `<math xml:space="preserve"><mtext>line one\n    line two</mtext></math>`],
+  ])("inherits static xml:space in %s for every compiler target", (_namespace, source) => {
+    const result = compileTemplate(source, { whitespace: "condense" });
+    if (!result.ok) throw new Error(result.error.message);
+    expect(renderServerTemplate(result.value, {})).toContain("line one\n    line two");
+    expect(result.value.client.templateHtml).toContain("line one\n    line two");
+    expect(generateServerStreamModule(result.value)).toContain("line one\\n    line two");
+  });
+
+  it("resets static xml:space and HTML foreignObject boundaries", () => {
+    const source = `<svg xml:space="preserve"><text>keep\n  this</text><g xml:space="default"><text>fold\n  this</text><g xml:space="preserve"><text>keep\n  again</text></g></g><foreignObject><p>fold\n  html</p></foreignObject></svg>`;
+    const result = compileTemplate(source, { whitespace: "condense" });
+    if (!result.ok) throw new Error(result.error.message);
+    const html = renderServerTemplate(result.value, {});
+    expect(html).toContain("keep\n  this");
+    expect(html).toContain("fold this");
+    expect(html).toContain("keep\n  again");
+    expect(html).toContain("fold html");
+  });
+
+  it.each([`{policy}`, "PRESERVE", "unknown"])("ignores non-static xml:space value %s", (value) => {
+    const result = compileTemplate(`<svg xml:space=${value}><text>fold\n  this</text></svg>`, {
+      whitespace: "condense",
+    });
+    if (!result.ok) throw new Error(result.error.message);
+    expect(renderServerTemplate(result.value, { policy: "preserve" })).toContain("fold this");
+  });
 
   it("condenses newline-derived whitespace at fragment boundaries without deleting separators", () => {
     const source = `<main><ul><for each={rows} key={row}>
