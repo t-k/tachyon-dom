@@ -87,7 +87,17 @@ Use `tachyonDom({ templateWhitespace: "condense" })` when formatting newlines an
 
 ### HTML whitespace policy migration
 
-TypeScript consumers must replace the removed `LegacyHtmlWhitespacePolicy`, `HtmlWhitespacePolicyInput`, and `CompatibleHtmlWhitespacePolicy<T>` exports with `HtmlWhitespacePolicy`, remove the obsolete policy type parameter from app, Vite, router, Workers, Node, and Lambda option types, and use `"preserve-tags"` or `"normalize-tags"`. For example, migrate `WorkersHandlerOptions<Env, LegacyPolicy>` to `WorkersHandlerOptions<Env>` and `RouteRenderOptions<LegacyPolicy>` to `RouteRenderOptions`. Runtime compatibility remains for already-built JavaScript and JSON configuration: `"preserve"` maps to `"preserve-tags"`, and `"condense"` maps to `"normalize-tags"`. Unknown runtime values throw a migration error instead of silently selecting preserve behavior.
+TypeScript consumers must replace the removed `LegacyHtmlWhitespacePolicy`, `HtmlWhitespacePolicyInput`, and `CompatibleHtmlWhitespacePolicy<T>` exports with `HtmlWhitespacePolicy`, remove the obsolete policy type parameter from app, Vite, router, Workers, Node, and Lambda option types, and use `"preserve-tags"` or `"normalize-tags"`. For example, migrate `WorkersHandlerOptions<Env, LegacyPolicy>` to `WorkersHandlerOptions<Env>` and `RouteRenderOptions<LegacyPolicy>` to `RouteRenderOptions`. Runtime compatibility remains for already-built JavaScript and JSON configuration: `"preserve"` maps to `"preserve-tags"`, and `"condense"` maps to `"normalize-tags"`. Unknown values never silently select preserve behavior, but the observable error depends on the public boundary:
+
+| Public boundary | Unknown runtime policy outcome |
+|---|---|
+| App document rendering | Throws the migration error directly. |
+| Vite app plugin creation | Throws the migration error directly before a development server or build starts. |
+| Buffered router | Resolves to the generic internal-error document with status 500 because route rendering owns an error boundary. |
+| Streaming router | Rejects with the migration error before returning stream metadata or chunks. |
+| Workers and Node buffered adapters | Return the buffered router's generic 500 response. |
+| Lambda proxy buffered adapter | Returns the generic Lambda proxy response with status 500. |
+| Workers, Node, and Lambda streaming adapters | Reject before committing a response when `streaming: true` selects the streaming router. |
 
 ## Recommended App Shape
 
