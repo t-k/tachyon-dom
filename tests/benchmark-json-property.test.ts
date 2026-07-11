@@ -20,7 +20,7 @@ const invalidValues = [null, "1", -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY,
 
 const envelope = (revision: string) => ({
   schemaVersion: 2,
-  benchmark: { name: "streaming-backpressure", contractVersion: 3 },
+  benchmark: { name: "streaming-backpressure", contractVersion: 4 },
   provenance: {
     capturedAt: "2026-07-11T00:00:00.000Z",
     command: { argv: ["benchmark"], display: "benchmark", cwd: "/repo" },
