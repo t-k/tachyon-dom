@@ -13,6 +13,7 @@ const git = async (root: string, args: readonly string[]): Promise<string> =>
 export type StreamingBenchmarkAdapterIdentity = {
   subjectRoot: string;
   adapterModule: string;
+  commit: string;
   relativePath: string;
   sha256: string;
   gitBlob: string;
@@ -44,6 +45,7 @@ export const identifyStreamingBenchmarkAdapter = async (
   return {
     subjectRoot: canonicalRoot,
     adapterModule: canonicalAdapter,
+    commit,
     relativePath: relativePath.split(path.sep).join("/"),
     sha256: createHash("sha256").update(content).digest("hex"),
     gitBlob,
@@ -60,12 +62,11 @@ export const prepareStreamingBenchmarkAdapter = async (
   adapterModule: string,
 ): Promise<PreparedStreamingBenchmarkAdapter> => {
   const identity = await identifyStreamingBenchmarkAdapter(subjectRoot, adapterModule);
-  const commit = await git(identity.subjectRoot, ["rev-parse", "HEAD"]);
   const snapshotRoot = await mkdtemp(path.join(os.tmpdir(), "tachyon-benchmark-subject-"));
   await rm(snapshotRoot, { recursive: true, force: true });
   let added = false;
   try {
-    await git(identity.subjectRoot, ["worktree", "add", "--detach", snapshotRoot, commit]);
+    await git(identity.subjectRoot, ["worktree", "add", "--detach", snapshotRoot, identity.commit]);
     added = true;
     const sourceNodeModules = path.join(identity.subjectRoot, "node_modules");
     try {
@@ -77,6 +78,10 @@ export const prepareStreamingBenchmarkAdapter = async (
     const executionModule = path.join(snapshotRoot, ...identity.relativePath.split("/"));
     const content = await readFile(executionModule);
     const sha256 = createHash("sha256").update(content).digest("hex");
+    const snapshotBlob = await git(snapshotRoot, ["hash-object", executionModule]);
+    if (sha256 !== identity.sha256 || snapshotBlob !== identity.gitBlob) {
+      throw new Error("Prepared benchmark snapshot does not match the pinned adapter identity.");
+    }
     let cleaned = false;
     return {
       ...identity,
@@ -85,12 +90,21 @@ export const prepareStreamingBenchmarkAdapter = async (
       cleanup: async () => {
         if (cleaned) return;
         cleaned = true;
-        await git(identity.subjectRoot, ["worktree", "remove", "--force", snapshotRoot]).catch(() => undefined);
-        await rm(snapshotRoot, { recursive: true, force: true });
+        try {
+          await git(identity.subjectRoot, ["worktree", "remove", "--force", snapshotRoot]);
+        } catch (error) {
+          await rm(snapshotRoot, { recursive: true, force: true });
+          await git(identity.subjectRoot, ["worktree", "prune"]);
+          throw error;
+        }
       },
     };
   } catch (error) {
-    if (added) await git(identity.subjectRoot, ["worktree", "remove", "--force", snapshotRoot]).catch(() => undefined);
+    if (added) {
+      await git(identity.subjectRoot, ["worktree", "remove", "--force", snapshotRoot]).catch(async () => {
+        await git(identity.subjectRoot, ["worktree", "prune"]).catch(() => undefined);
+      });
+    }
     await rm(snapshotRoot, { recursive: true, force: true });
     throw error;
   }

@@ -31,6 +31,14 @@ const output = stringArg(
   path.resolve("benchmark/streaming-backpressure-results", `${stamp}-${label}.json`),
 );
 try {
+const subject = await collectBenchmarkProvenance({ cwd: adapterIdentity.subjectRoot, argv: [process.execPath, ...process.argv.slice(1)] });
+if (
+  subject.git.available !== true ||
+  subject.git.commit !== adapterIdentity.commit ||
+  subject.git.dirty !== false
+) {
+  throw new Error("Benchmark subject provenance changed after the adapter snapshot was pinned.");
+}
 const { writeNodeResponse } = await import(pathToFileURL(adapterIdentity.executionModule).href) as {
   writeNodeResponse: (response: Response, destination: ServerResponse) => Promise<void>;
 };
@@ -106,7 +114,6 @@ const provenance = await collectBenchmarkProvenance({
   argv,
   dependencies: await collectDependencyVersions(projectRoot, ["tsx"]),
 });
-const subject = await collectBenchmarkProvenance({ cwd: adapterIdentity.subjectRoot, argv });
 const result = {
   schemaVersion: 2,
   benchmark: { name: "streaming-backpressure", contractVersion: 2 },
