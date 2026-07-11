@@ -546,6 +546,127 @@ describe("server adapters", () => {
     expect(iterator.return).toHaveBeenCalledOnce();
   });
 
+  it("matches one-shot UTF-8 encoding at every application string chunk boundary", async () => {
+    const corpus = ["ASCII", "雪", "e\u0301", "🙂", "🙂🙂", "A🙂B", "👩‍💻", "\ud83dX", "X\ude42", "\ud83d"];
+    for (const value of corpus) {
+      for (let split = 0; split <= value.length; split += 1) {
+        const chunks = (async function* () {
+          yield value.slice(0, split);
+          yield value.slice(split);
+        })();
+        const actual = new Uint8Array(await new Response(workersStreamFromChunks(chunks)).arrayBuffer());
+        expect(Array.from(actual), `${JSON.stringify(value)} split=${split}`).toEqual(
+          Array.from(new TextEncoder().encode(value)),
+        );
+      }
+    }
+  });
+
+  it("does not flush a pending high surrogate after cancellation or source failure", async () => {
+    let resolveSecond!: (value: IteratorResult<string>) => void;
+    const second = new Promise<IteratorResult<string>>((resolve) => {
+      resolveSecond = resolve;
+    });
+    const iterator = {
+      next: vi
+        .fn<() => Promise<IteratorResult<string>>>()
+        .mockResolvedValueOnce({ done: false, value: "\ud83d" })
+        .mockReturnValueOnce(second),
+      return: vi.fn(async () => ({ done: true as const, value: undefined })),
+    };
+    const reader = workersStreamFromChunks({ [Symbol.asyncIterator]: () => iterator }).getReader();
+    const reading = reader.read();
+    await vi.waitFor(() => expect(iterator.next).toHaveBeenCalledTimes(2));
+    const cancelling = reader.cancel("disconnect");
+    resolveSecond({ done: true, value: undefined });
+    await expect(cancelling).resolves.toBeUndefined();
+    await expect(reading).resolves.toEqual({ done: true, value: undefined });
+    expect(iterator.return).toHaveBeenCalledOnce();
+
+    const failing = workersStreamFromChunks(
+      (async function* () {
+        yield "\ud83d";
+        throw new Error("source failed");
+      })(),
+    ).getReader();
+    await expect(failing.read()).rejects.toThrow("source failed");
+  });
+
+  it("preserves a split surrogate pair through Workers, Node, Lambda proxy, and Lambda streaming", async () => {
+    const expected = "A🙂B";
+    const routes: RouteDefinition[] = [
+      {
+        path: "/unicode",
+        render: () => "",
+        stream: async function* () {
+          yield "A\ud83d";
+          yield "\ude42B";
+        },
+      },
+    ];
+
+    const workers = await createWorkersHandler({ routes, streaming: true }).fetch(
+      new Request("https://example.test/unicode"),
+    );
+    expect(await workers.text()).toBe(expected);
+
+    const nodeBytes: Uint8Array[] = [];
+    const nodeRequest = Object.assign(Readable.from([]), {
+      method: "GET",
+      url: "/unicode",
+      headers: { host: "example.test" },
+    });
+    const nodeResponse = Object.assign(new EventEmitter(), {
+      statusCode: 200,
+      writableEnded: false,
+      setHeader: vi.fn(),
+      flushHeaders: vi.fn(),
+      write: (chunk: Uint8Array) => {
+        nodeBytes.push(Buffer.from(chunk));
+        return true;
+      },
+      end: () => {
+        nodeResponse.writableEnded = true;
+      },
+    });
+    await createNodeHandler({ routes, streaming: true })(nodeRequest as never, nodeResponse as never);
+    expect(Buffer.concat(nodeBytes).toString("utf8")).toBe(expected);
+
+    const lambdaProxy = await createLambdaHandler({ routes, streaming: true })(
+      lambdaEvent({
+        rawPath: "/unicode",
+        requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/unicode" } },
+      }),
+    );
+    expect(lambdaProxy.body).toBe(expected);
+
+    const lambdaBytes: Uint8Array[] = [];
+    const responseStream = new Writable({
+      write(chunk, _encoding, callback) {
+        lambdaBytes.push(Buffer.from(chunk));
+        callback();
+      },
+    });
+    const runtime = {
+      streamifyResponse: vi.fn((handler) => handler),
+      HttpResponseStream: { from: vi.fn((stream: Writable) => stream) },
+    };
+    const lambdaStreaming = createLambdaStreamingHandler({ routes, streaming: true }, runtime) as (
+      event: ReturnType<typeof lambdaEvent>,
+      stream: Writable,
+      context: unknown,
+    ) => Promise<void>;
+    await lambdaStreaming(
+      lambdaEvent({
+        rawPath: "/unicode",
+        requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/unicode" } },
+      }),
+      responseStream,
+      {},
+    );
+    expect(Buffer.concat(lambdaBytes).toString("utf8")).toBe(expected);
+  });
+
   it("preserves multiple Set-Cookie headers in Node fetch responses", async () => {
     const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
       method: string;
