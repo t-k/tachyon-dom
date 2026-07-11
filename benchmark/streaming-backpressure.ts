@@ -118,7 +118,7 @@ try {
   });
   const result = {
     schemaVersion: 2,
-    benchmark: { name: "streaming-backpressure", contractVersion: 3 },
+    benchmark: { name: "streaming-backpressure", contractVersion: 4 },
     provenance,
     workload: {
       label,

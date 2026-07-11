@@ -121,8 +121,8 @@ const validateStreamingArtifact = (value: unknown, label: "baseline" | "candidat
   if (valueAtBenchmarkPath(value, "benchmark.name") !== "streaming-backpressure") {
     throw new Error(`${label}.benchmark.name must be streaming-backpressure.`);
   }
-  if (valueAtBenchmarkPath(value, "benchmark.contractVersion") !== 3) {
-    throw new Error(`${label}.benchmark.contractVersion must be 3.`);
+  if (valueAtBenchmarkPath(value, "benchmark.contractVersion") !== 4) {
+    throw new Error(`${label}.benchmark.contractVersion must be 4; earlier contracts are non-authoritative.`);
   }
   for (const [path, validate] of [...controlValidators, ...measurementValidators]) {
     if (!validate(valueAtBenchmarkPath(value, path))) throw new Error(`${label}.${path} is invalid.`);
