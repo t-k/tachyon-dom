@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { collectBenchmarkProvenance, collectDependencyVersions } from "./provenance.js";
+import { identifyStreamingBenchmarkAdapter } from "./streaming-subject.js";
 
 const numberArg = (name: string, fallback: number): number => {
   const index = process.argv.indexOf(name);
@@ -23,12 +24,13 @@ const drainDelayMs = numberArg("--drain-delay-ms", 2);
 const label = stringArg("--label", "run");
 const subjectRoot = path.resolve(stringArg("--subject-root", projectRoot));
 const adapterModule = path.resolve(stringArg("--adapter-module", path.join(subjectRoot, "src/adapters/node.ts")));
+const adapterIdentity = await identifyStreamingBenchmarkAdapter(subjectRoot, adapterModule);
 const stamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
 const output = stringArg(
   "--output",
   path.resolve("benchmark/streaming-backpressure-results", `${stamp}-${label}.json`),
 );
-const { writeNodeResponse } = await import(pathToFileURL(adapterModule).href) as {
+const { writeNodeResponse } = await import(pathToFileURL(adapterIdentity.adapterModule).href) as {
   writeNodeResponse: (response: Response, destination: ServerResponse) => Promise<void>;
 };
 
@@ -103,7 +105,7 @@ const provenance = await collectBenchmarkProvenance({
   argv,
   dependencies: await collectDependencyVersions(projectRoot, ["tsx"]),
 });
-const subject = await collectBenchmarkProvenance({ cwd: subjectRoot, argv });
+const subject = await collectBenchmarkProvenance({ cwd: adapterIdentity.subjectRoot, argv });
 const result = {
   schemaVersion: 2,
   benchmark: { name: "streaming-backpressure", contractVersion: 2 },
@@ -115,8 +117,13 @@ const result = {
     chunksPerConnection,
     chunkBytes,
     drainDelayMs,
-    adapterModule,
-    subject: { root: subjectRoot, git: subject.git },
+    adapterModule: adapterIdentity.adapterModule,
+    adapter: {
+      relativePath: adapterIdentity.relativePath,
+      sha256: adapterIdentity.sha256,
+      gitBlob: adapterIdentity.gitBlob,
+    },
+    subject: { root: adapterIdentity.subjectRoot, git: subject.git },
   },
   measurements: {
     completionTimeMs,

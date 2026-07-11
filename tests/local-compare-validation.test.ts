@@ -137,6 +137,33 @@ describe("local compare validation", () => {
   });
 
   it.each([
+    ["scenario label drift", "summaries", "createRows"],
+    ["auxiliary label drift", "auxiliaryMetrics", "startup"],
+  ] as const)("rejects %s across runs", (_label, collectionName, id) => {
+    const baseline = run();
+    const candidate = run();
+    for (const entry of candidate.measurements[collectionName]) {
+      if (entry.id === id) (entry.label as string) = `${entry.label} changed`;
+    }
+    const result = validateLocalCompareRuns([baseline, candidate]);
+    expect(result).toEqual(expect.objectContaining({ ok: false }));
+    if (result.ok) throw new Error("Expected invalid runs");
+    expect(result.invalidFields).toContain(`runs[1].measurements.${collectionName}`);
+  });
+
+  it("rejects display-label collisions between stable scenario ids", () => {
+    const value = run();
+    const createRowsLabel = value.measurements.summaries.find((entry) => entry.id === "createRows")!.label;
+    for (const entry of value.measurements.summaries) {
+      if (entry.id === "replaceAllRows") entry.label = createRowsLabel;
+    }
+    const result = validateLocalCompareRuns([value]);
+    expect(result).toEqual(expect.objectContaining({ ok: false }));
+    if (result.ok) throw new Error("Expected invalid run");
+    expect(result.invalidFields).toContain("runs[0].measurements.summaries");
+  });
+
+  it.each([
     [
       "browser version",
       (value: ReturnType<typeof run>) => ((value.provenance.browser.version as unknown) = null),

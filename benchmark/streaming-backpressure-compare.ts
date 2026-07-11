@@ -1,4 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 import { collectBenchmarkProvenance, compareBenchmarkEnvelopes, type BenchmarkEnvelope } from "./provenance.js";
 import { valueAtBenchmarkPath } from "./provenance-validation.js";
@@ -11,6 +12,11 @@ type StreamingWorkload = {
   chunkBytes: number;
   drainDelayMs: number;
   adapterModule: string;
+  adapter: {
+    relativePath: string;
+    sha256: string;
+    gitBlob: string;
+  };
   subject: {
     root: string;
     git: {
@@ -51,6 +57,14 @@ const controlValidators = [
     (value: unknown) => Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 60_000,
   ],
   ["workload.adapterModule", (value: unknown) => typeof value === "string" && value.length > 0],
+  ["workload.adapter", (value: unknown) => typeof value === "object" && value !== null],
+  [
+    "workload.adapter.relativePath",
+    (value: unknown) =>
+      typeof value === "string" && value.length > 0 && !path.isAbsolute(value) && !value.split(/[\\/]/).includes(".."),
+  ],
+  ["workload.adapter.sha256", (value: unknown) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)],
+  ["workload.adapter.gitBlob", (value: unknown) => typeof value === "string" && /^[a-f0-9]{40,64}$/.test(value)],
   ["workload.subject", (value: unknown) => typeof value === "object" && value !== null],
   ["workload.subject.root", (value: unknown) => typeof value === "string" && value.length > 0],
   ["workload.subject.git", (value: unknown) => typeof value === "object" && value !== null],
@@ -85,9 +99,22 @@ const validateStreamingArtifact = (value: unknown, label: "baseline" | "candidat
   for (const [path, validate] of [...controlValidators, ...measurementValidators]) {
     if (!validate(valueAtBenchmarkPath(value, path))) throw new Error(`${label}.${path} is invalid.`);
   }
+  const subjectRoot = String(valueAtBenchmarkPath(value, "workload.subject.root"));
+  const adapterModule = String(valueAtBenchmarkPath(value, "workload.adapterModule"));
+  const relativeAdapter = String(valueAtBenchmarkPath(value, "workload.adapter.relativePath"));
+  if (path.resolve(subjectRoot, relativeAdapter) !== path.resolve(adapterModule)) {
+    throw new Error(`${label}.workload.adapterModule must match the subject-relative adapter path.`);
+  }
   const startingRssBytes = Number(valueAtBenchmarkPath(value, "measurements.startingRssBytes"));
   const peakRssBytes = Number(valueAtBenchmarkPath(value, "measurements.peakRssBytes"));
   const peakRssDeltaBytes = Number(valueAtBenchmarkPath(value, "measurements.peakRssDeltaBytes"));
+  const connections = Number(valueAtBenchmarkPath(value, "workload.connections"));
+  const chunksPerConnection = Number(valueAtBenchmarkPath(value, "workload.chunksPerConnection"));
+  const sourcePullCount = Number(valueAtBenchmarkPath(value, "measurements.sourcePullCount"));
+  const expectedSourcePullCount = connections * (chunksPerConnection + 1);
+  if (!Number.isSafeInteger(expectedSourcePullCount) || sourcePullCount !== expectedSourcePullCount) {
+    throw new Error(`${label}.measurements.sourcePullCount must match the completed workload.`);
+  }
   if (startingRssBytes <= 0) throw new Error(`${label}.measurements.startingRssBytes must be positive.`);
   if (peakRssBytes <= 0 || peakRssBytes < startingRssBytes) {
     throw new Error(`${label}.measurements.peakRssBytes must be positive and not below starting RSS.`);
@@ -117,6 +144,7 @@ const requiredEqualPaths = [
   "workload.chunksPerConnection",
   "workload.chunkBytes",
   "workload.drainDelayMs",
+  "workload.adapter.relativePath",
 ] as const;
 
 export const compareStreamingBackpressureResults = (baselineValue: unknown, candidateValue: unknown) => {
@@ -165,6 +193,8 @@ export const compareStreamingBackpressureResults = (baselineValue: unknown, cand
     verifiedControls: {
       baselineSubject: baseline.workload.subject.git,
       candidateSubject: candidate.workload.subject.git,
+      baselineAdapter: baseline.workload.adapter,
+      candidateAdapter: candidate.workload.adapter,
       runtime: baseline.provenance.runtime,
       host: baseline.provenance.host,
       dependencies: baseline.provenance.dependencies,

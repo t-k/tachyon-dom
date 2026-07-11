@@ -22,7 +22,12 @@ const envelope = (options: { revision: string; queued: number; connections?: num
       chunksPerConnection: 128,
       chunkBytes: 32768,
       drainDelayMs: 2,
-      adapterModule: `/repo/${options.revision}/adapter.js`,
+      adapterModule: `/repo/${options.revision}/src/adapter.js`,
+      adapter: {
+        relativePath: "src/adapter.js",
+        sha256: (options.revision === "baseline" ? "a" : "b").repeat(64),
+        gitBlob: (options.revision === "baseline" ? "c" : "d").repeat(40),
+      },
       subject: {
         root: `/repo/${options.revision}`,
         git: {
@@ -36,7 +41,7 @@ const envelope = (options: { revision: string; queued: number; connections?: num
     measurements: {
       completionTimeMs: 400,
       peakQueuedBytes: options.queued,
-      sourcePullCount: 774,
+      sourcePullCount: (options.connections ?? 6) * 129,
       startingRssBytes: 10,
       peakRssBytes: 20,
       peakRssDeltaBytes: 10,
@@ -60,6 +65,8 @@ describe("streaming backpressure comparison", () => {
       runtime: { node: "v24" },
       host: { cpuModel: "cpu" },
       workload: { connections: 6, chunksPerConnection: 128 },
+      baselineAdapter: { relativePath: "src/adapter.js", sha256: "a".repeat(64) },
+      candidateAdapter: { relativePath: "src/adapter.js", sha256: "b".repeat(64) },
     });
   });
 
@@ -151,6 +158,37 @@ describe("streaming backpressure comparison", () => {
     candidate.measurements.peakRssDeltaBytes = 9;
     expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
       /candidate\.measurements\.peakRssDeltaBytes/,
+    );
+  });
+
+  it("rejects adapter identities detached from the reported subject", () => {
+    const baseline = envelope({ revision: "baseline", queued: 1_000 }) as any;
+    const candidate = envelope({ revision: "candidate", queued: 100 }) as any;
+    baseline.workload.adapterModule = "/foreign/adapter.js";
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
+      /baseline\.workload\.adapterModule/,
+    );
+    baseline.workload.adapterModule = "/repo/baseline/src/adapter.js";
+    baseline.workload.adapter.sha256 = "not-a-digest";
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
+      /baseline\.workload\.adapter\.sha256/,
+    );
+  });
+
+  it("rejects impossible completed-run source pull counts", () => {
+    const baseline = envelope({ revision: "baseline", queued: 1_000 }) as any;
+    const candidate = envelope({ revision: "candidate", queued: 100 }) as any;
+    baseline.workload.connections = candidate.workload.connections = 2;
+    baseline.workload.chunksPerConnection = candidate.workload.chunksPerConnection = 4;
+    baseline.measurements.sourcePullCount = candidate.measurements.sourcePullCount = 1;
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
+      /baseline\.measurements\.sourcePullCount/,
+    );
+
+    baseline.measurements.sourcePullCount = 10;
+    candidate.measurements.sourcePullCount = 9;
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
+      /candidate\.measurements\.sourcePullCount/,
     );
   });
 });
