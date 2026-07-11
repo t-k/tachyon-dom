@@ -12,7 +12,7 @@ A `vX.Y.Z` tag is authoritative only when all of the following values equal `X.Y
 - The `create-tachyon-dom` package version.
 - The exact version requested by `create-tachyon-dom` for its `tachyon-dom` dependency.
 
-The verifier rejects malformed tags, prerelease tags unless the package versions contain the same prerelease identifier, build metadata, missing package metadata, and version ranges that are not an exact release-to-release binding. Validation runs before either publish command.
+The verifier rejects malformed tags, prerelease tags unless the package versions contain the same prerelease identifier, build metadata, missing package metadata, and version ranges that are not an exact release-to-release binding. Stable versions publish with the npm `latest` dist-tag. Prerelease versions publish with the fixed npm `next` dist-tag so they cannot replace `latest`; release-controlled tag text is never reused as an npm dist-tag. Validation runs before either publish command.
 
 ## Package Contents
 
