@@ -83,6 +83,7 @@ describe("benchmark decoded JSON bounded properties", () => {
     const baseline = envelope("baseline");
     const candidate = envelope("candidate");
     candidate.measurements.peakQueuedBytes = 0;
+    candidate.measurements.peakRssBytes = candidate.measurements.startingRssBytes;
     candidate.measurements.peakRssDeltaBytes = 0;
     const comparison = compareStreamingBackpressureResults(baseline, candidate);
     expect(Object.values(comparison.ratios).every(Number.isFinite)).toBe(true);

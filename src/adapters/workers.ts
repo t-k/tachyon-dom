@@ -396,14 +396,29 @@ const responseForAsset = async <Env>(
 export const workersStreamFromChunks = (chunks: AsyncIterable<string>): ReadableStream<Uint8Array> => {
   const iterator = chunks[Symbol.asyncIterator]();
   const encoder = new TextEncoder();
+  let pendingHighSurrogate = "";
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
-      const next = await iterator.next();
-      if (next.done) {
-        controller.close();
-        return;
+      while (true) {
+        const next = await iterator.next();
+        if (next.done) {
+          if (pendingHighSurrogate) controller.enqueue(encoder.encode(pendingHighSurrogate));
+          pendingHighSurrogate = "";
+          controller.close();
+          return;
+        }
+        let value = `${pendingHighSurrogate}${next.value}`;
+        pendingHighSurrogate = "";
+        const finalCodeUnit = value.charCodeAt(value.length - 1);
+        if (finalCodeUnit >= 0xd800 && finalCodeUnit <= 0xdbff) {
+          pendingHighSurrogate = value.slice(-1);
+          value = value.slice(0, -1);
+        }
+        if (value.length > 0) {
+          controller.enqueue(encoder.encode(value));
+          return;
+        }
       }
-      controller.enqueue(encoder.encode(next.value));
     },
     async cancel() {
       await iterator.return?.();

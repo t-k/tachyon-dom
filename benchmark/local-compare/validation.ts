@@ -1,8 +1,8 @@
 import { compareBenchmarkEnvelopes } from "../provenance.js";
 import { validateBenchmarkEnvelope, valueAtBenchmarkPath } from "../provenance-validation.js";
 
-export type Summary = { label: string; implementation: string; trimmedMean: number };
-export type AuxiliaryMetric = { label: string; unit: string; implementation: string; value: number };
+export type Summary = { id: string; label: string; implementation: string; trimmedMean: number };
+export type AuxiliaryMetric = { id: string; label: string; unit: string; implementation: string; value: number };
 
 export type LocalCompareRun = {
   schemaVersion: 2;
@@ -52,6 +52,28 @@ const nonEmptyString = (value: unknown): value is string => typeof value === "st
 const positiveInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) > 0;
 const nonNegativeInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 0;
 const finiteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+const requiredScenarioIds = new Set([
+  "createRows",
+  "replaceAllRows",
+  "partialUpdate",
+  "selectRow",
+  "swapRows",
+  "removeRow",
+  "createManyRows",
+  "appendRows",
+  "clearRows",
+]);
+const requiredAuxiliaryUnits = new Map([
+  ["startup", "ms"],
+  ["readyHeap", "mb"],
+  ["runHeap", "mb"],
+  ["runClearHeap", "mb"],
+  ["readyDomNodes", "count"],
+  ["runDomNodes", "count"],
+  ["runClearDomNodes", "count"],
+  ["localSourceSize", "kib"],
+  ["entrySourceSize", "kib"],
+]);
 
 const validateBrowserAndMeasurements = (value: unknown, prefix: string): string[] => {
   const invalid: string[] = [];
@@ -73,6 +95,7 @@ const validateBrowserAndMeasurements = (value: unknown, prefix: string): string[
     }
     for (const [index, entryValue] of collection.entries()) {
       const entry = isRecord(entryValue) ? entryValue : {};
+      if (!nonEmptyString(entry.id)) invalid.push(`${prefix}.measurements.${collectionName}[${index}].id`);
       if (!nonEmptyString(entry.label)) invalid.push(`${prefix}.measurements.${collectionName}[${index}].label`);
       if (!nonEmptyString(entry.implementation)) {
         invalid.push(`${prefix}.measurements.${collectionName}[${index}].implementation`);
@@ -85,6 +108,38 @@ const validateBrowserAndMeasurements = (value: unknown, prefix: string): string[
       if (!finiteNumber(entry[metricName]) || Number(entry[metricName]) < 0) {
         invalid.push(`${prefix}.measurements.${collectionName}[${index}].${metricName}`);
       }
+    }
+    const byId = new Map<string, Array<Record<string, unknown>>>();
+    for (const entryValue of collection) {
+      if (!isRecord(entryValue) || !nonEmptyString(entryValue.id)) continue;
+      const entries = byId.get(entryValue.id) ?? [];
+      entries.push(entryValue);
+      byId.set(entryValue.id, entries);
+    }
+    for (const entries of byId.values()) {
+      const labels = new Set(entries.map((entry) => entry.label));
+      const units = collectionName === "auxiliaryMetrics" ? new Set(entries.map((entry) => entry.unit)) : new Set([""]);
+      const hasExactlyOnePerImplementation = implementations.every(
+        (implementation) => entries.filter((entry) => entry.implementation === implementation).length === 1,
+      );
+      if (
+        entries.length !== implementations.length ||
+        !hasExactlyOnePerImplementation ||
+        labels.size !== 1 ||
+        units.size !== 1
+      ) {
+        invalid.push(`${prefix}.measurements.${collectionName}`);
+      }
+    }
+    const requiredIds = collectionName === "summaries" ? requiredScenarioIds : new Set(requiredAuxiliaryUnits.keys());
+    if (byId.size !== requiredIds.size || [...requiredIds].some((id) => !byId.has(id))) {
+      invalid.push(`${prefix}.measurements.${collectionName}`);
+    }
+    if (
+      collectionName === "auxiliaryMetrics" &&
+      [...requiredAuxiliaryUnits].some(([id, unit]) => byId.get(id)?.some((entry) => entry.unit !== unit))
+    ) {
+      invalid.push(`${prefix}.measurements.auxiliaryMetrics`);
     }
   }
   return invalid;
@@ -115,9 +170,13 @@ const validateIdentity = (value: unknown, prefix: string): string[] => {
   }
   if (!positiveInteger(workload.iterations)) invalid.push(`${prefix}.workload.iterations`);
   if (!nonNegativeInteger(workload.warmup)) invalid.push(`${prefix}.workload.warmup`);
-  if (!nonEmptyString(workload.serveMode)) invalid.push(`${prefix}.workload.serveMode`);
-  if (!nonEmptyString(workload.operationStatistic)) invalid.push(`${prefix}.workload.operationStatistic`);
-  if (!finiteNumber(workload.trimFraction)) invalid.push(`${prefix}.workload.trimFraction`);
+  if (workload.serveMode !== "dev" && workload.serveMode !== "production") {
+    invalid.push(`${prefix}.workload.serveMode`);
+  }
+  if (workload.operationStatistic !== "trimmedMean") invalid.push(`${prefix}.workload.operationStatistic`);
+  if (!finiteNumber(workload.trimFraction) || Number(workload.trimFraction) < 0 || Number(workload.trimFraction) >= 0.5) {
+    invalid.push(`${prefix}.workload.trimFraction`);
+  }
   return invalid;
 };
 

@@ -2,6 +2,14 @@ import { parse, parseFragment, type DefaultTreeAdapterMap } from "parse5";
 
 export type HtmlWhitespacePolicy = "preserve-tags" | "normalize-tags";
 
+export const resolveHtmlWhitespacePolicy = (policy: unknown): HtmlWhitespacePolicy => {
+  if (policy === "preserve-tags" || policy === "preserve") return "preserve-tags";
+  if (policy === "normalize-tags" || policy === "condense") return "normalize-tags";
+  throw new TypeError(
+    `Unsupported HTML whitespace policy ${JSON.stringify(policy)}. For migration, use "preserve-tags" or "normalize-tags".`,
+  );
+};
+
 type SourceRange = { startOffset: number; endOffset: number };
 type LocatedNode = DefaultTreeAdapterMap["node"] & {
   childNodes?: LocatedNode[];
@@ -90,4 +98,4 @@ export const normalizeHtmlTagWhitespace = (html: string): string => {
 export const condenseHtmlWhitespace = normalizeHtmlTagWhitespace;
 
 export const applyHtmlWhitespace = (html: string, policy: HtmlWhitespacePolicy): string =>
-  policy === "normalize-tags" ? normalizeHtmlTagWhitespace(html) : html;
+  resolveHtmlWhitespacePolicy(policy) === "normalize-tags" ? normalizeHtmlTagWhitespace(html) : html;

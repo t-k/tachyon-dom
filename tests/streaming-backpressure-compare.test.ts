@@ -130,4 +130,27 @@ describe("streaming backpressure comparison", () => {
       );
     },
   );
+
+  it.each([
+    ["zero starting RSS", { startingRssBytes: 0, peakRssBytes: 20, peakRssDeltaBytes: 20 }, "startingRssBytes"],
+    ["zero peak RSS", { startingRssBytes: 10, peakRssBytes: 0, peakRssDeltaBytes: 0 }, "peakRssBytes"],
+    ["peak below start", { startingRssBytes: 20, peakRssBytes: 10, peakRssDeltaBytes: 0 }, "peakRssBytes"],
+    ["inconsistent delta", { startingRssBytes: 10, peakRssBytes: 20, peakRssDeltaBytes: 9 }, "peakRssDeltaBytes"],
+  ])("rejects %s", (_label, measurements, invalidField) => {
+    const baseline = envelope({ revision: "baseline", queued: 1_000 }) as any;
+    const candidate = envelope({ revision: "candidate", queued: 100 }) as any;
+    Object.assign(baseline.measurements, measurements);
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
+      new RegExp(`baseline\\.measurements\\.${invalidField}`),
+    );
+  });
+
+  it("validates candidate RSS relationships independently", () => {
+    const baseline = envelope({ revision: "baseline", queued: 1_000 }) as any;
+    const candidate = envelope({ revision: "candidate", queued: 100 }) as any;
+    candidate.measurements.peakRssDeltaBytes = 9;
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
+      /candidate\.measurements\.peakRssDeltaBytes/,
+    );
+  });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parse, serialize } from "parse5";
 
 import { condenseHtmlWhitespace, defineApp, minifyHtml, normalizeHtmlTagWhitespace } from "../src/app.js";
+import { applyHtmlWhitespace } from "../src/html-whitespace.js";
 import { renderRoute, renderRouteStream } from "../src/router.js";
 
 const meaningfulBody = `<main id="app">
@@ -16,6 +17,15 @@ const bodySource = (html: string): string =>
   html.slice(html.indexOf("<body>") + "<body>".length, html.indexOf("</body>"));
 
 describe("safe HTML whitespace policy", () => {
+  it("maps legacy runtime literals explicitly and rejects unknown policies", () => {
+    const source = `<div   class="x"   >ok</div>`;
+    expect(applyHtmlWhitespace(source, "condense" as never)).toBe(`<div class="x">ok</div>`);
+    expect(applyHtmlWhitespace(source, "preserve" as never)).toBe(source);
+    for (const policy of ["typo", "", null]) {
+      expect(() => applyHtmlWhitespace(source, policy as never)).toThrow(/HTML whitespace policy.*migration/i);
+    }
+  });
+
   it("keeps deprecated minify names as tag-normalization aliases", () => {
     const source = `<ul   class="items"   >\n    <li>one</li>\n    <li>two</li>\n</ul>`;
     const expected = `<ul class="items">\n    <li>one</li>\n    <li>two</li>\n</ul>`;
@@ -68,6 +78,8 @@ describe("safe HTML whitespace policy", () => {
     expect(condensed).toBe(app.renderDocument("/", { minify: true }));
     expect(condensed).not.toBe(preserved);
     expect(serialize(parse(condensed))).toBe(serialize(parse(preserved)));
+    expect(app.renderDocument("/", { whitespace: "condense" as never })).toBe(condensed);
+    expect(() => app.renderDocument("/", { whitespace: "typo" as never })).toThrow(/HTML whitespace policy/);
   });
 
   it("opts buffered routes into the same policy and leaves streaming chunks untouched", async () => {
@@ -84,6 +96,10 @@ describe("safe HTML whitespace policy", () => {
     if (!buffered.ok) return;
     expect(buffered.value.html).toContain("\n  <head>");
     expect(buffered.value.html).toContain("<!---->Ada<!---->");
+    const legacyBuffered = await renderRoute(routes, "https://example.test/", {
+      htmlWhitespace: "condense" as never,
+    });
+    expect(legacyBuffered).toEqual(buffered);
 
     const streamed = await renderRouteStream(routes, "https://example.test/", { htmlWhitespace: "normalize-tags" });
     expect(streamed.ok).toBe(true);
@@ -93,6 +109,10 @@ describe("safe HTML whitespace policy", () => {
     expect(chunks).toHaveLength(1);
     expect(chunks[0]).not.toContain("<p>  Loading  </p>");
     expect(chunks.join("")).toContain("\n  <head>");
+
+    await expect(
+      renderRouteStream(routes, "https://example.test/", { htmlWhitespace: "typo" as never }),
+    ).rejects.toThrow(/HTML whitespace policy/);
   });
 
   it("preserves comments, foreign content, quoted values, and malformed input", () => {
