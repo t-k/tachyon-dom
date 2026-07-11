@@ -18,8 +18,33 @@ import {
   summarizeScenario,
   trimmedMean,
 } from "../benchmark/local-compare/report";
+import { buildAuthoritativeScenarioRows } from "../benchmark/local-compare/aggregate-report";
 
 describe("local compare report", () => {
+  it("reports a confidence-bounded stable scenario win from independent runs", () => {
+    const runs = Array.from({ length: 5 }, () => ({
+      workload: { candidate: "tachyon-dom", implementations: ["competitor", "tachyon-dom"] },
+      measurements: {
+        summaries: [
+          { id: "createRows", label: "create rows", implementation: "competitor", trimmedMean: 10 },
+          { id: "createRows", label: "create rows", implementation: "tachyon-dom", trimmedMean: 9.8 },
+        ],
+      },
+    }));
+
+    expect(buildAuthoritativeScenarioRows(runs, { seed: 7, resamples: 1_000 })).toEqual([
+      {
+        id: "createRows",
+        label: "create rows",
+        status: "meaningful-win",
+        medianRatio: 0.98,
+        oneSided95UpperBound: 0.98,
+        independentRunCount: 5,
+        sampleCountPerRun: 1,
+      },
+    ]);
+  });
+
   it("summarizes values with mean and median", () => {
     expect(mean([1, 2, 9])).toBe(4);
     expect(median([9, 1, 2])).toBe(2);

@@ -4,7 +4,8 @@
 //
 // Usage: pnpm exec tsx benchmark/local-compare/aggregate.ts results/AFTER-clean.json results/AFTER-2.json ...
 import { readFileSync } from "node:fs";
-import { validateLocalCompareRuns, type LocalCompareRun } from "./validation.js";
+import { buildAuthoritativeScenarioRows, formatAuthoritativeScenarioRows } from "./aggregate-report.js";
+import { validateAuthoritativeLocalCompareRuns, type LocalCompareRun } from "./validation.js";
 
 const files = process.argv.slice(2);
 if (files.length === 0) {
@@ -12,7 +13,7 @@ if (files.length === 0) {
   process.exit(1);
 }
 const runs = files.map((file): unknown => JSON.parse(readFileSync(file, "utf8")));
-const validation = validateLocalCompareRuns(runs);
+const validation = validateAuthoritativeLocalCompareRuns(runs);
 if (!validation.ok) {
   throw new Error(
     `Benchmark artifacts are incomplete, non-authoritative, or incompatible at: ${validation.invalidFields.join(", ")}.`,
@@ -104,5 +105,7 @@ console.log(`Baseline: ${validation.verifiedControls.baseline}`);
 console.log(`Candidate: ${validation.verifiedControls.candidate}`);
 console.log(`Runs: ${files.join(", ")}`);
 console.log(`Verified controls: ${JSON.stringify(validation.verifiedControls)}`);
+console.log("\n## Authoritative operation confidence\n");
+console.log(formatAuthoritativeScenarioRows(buildAuthoritativeScenarioRows(validatedRuns, { seed: 20260712, resamples: 10_000 })));
 report("Operations", operationMap, true);
 report("Auxiliary", auxiliaryMap, true);

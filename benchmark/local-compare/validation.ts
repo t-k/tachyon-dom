@@ -1,7 +1,13 @@
 import { compareBenchmarkEnvelopes } from "../provenance.js";
 import { validateBenchmarkEnvelope, valueAtBenchmarkPath } from "../provenance-validation.js";
 
-export type Summary = { id: string; label: string; implementation: string; trimmedMean: number };
+export type Summary = {
+  id: string;
+  label: string;
+  implementation: string;
+  trimmedMean: number;
+  values?: readonly number[];
+};
 export type AuxiliaryMetric = { id: string; label: string; unit: string; implementation: string; value: number };
 
 export type LocalCompareRun = {
