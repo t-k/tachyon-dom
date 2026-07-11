@@ -1,5 +1,8 @@
 import { balancedOrder } from "../shared/statistical-authority.js";
 
+export const LOCAL_COMPARE_ENVELOPE_SCHEMA_VERSION = 2 as const;
+export const LOCAL_COMPARE_CONTRACT_VERSION = 3 as const;
+
 export type LocalRunPlan = {
   runId: string;
   runIndex: number;

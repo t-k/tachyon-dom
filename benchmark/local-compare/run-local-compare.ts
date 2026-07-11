@@ -24,7 +24,12 @@ import {
   type ImplementationName,
   type ScenarioSummary,
 } from "./report";
-import { createLocalRunPlan, type LocalRunPlan } from "./run-plan";
+import {
+  createLocalRunPlan,
+  LOCAL_COMPARE_CONTRACT_VERSION,
+  LOCAL_COMPARE_ENVELOPE_SCHEMA_VERSION,
+  type LocalRunPlan,
+} from "./run-plan";
 
 type CliOptions = {
   iterations: number;
@@ -729,8 +734,8 @@ const writeResults = async (
     outputPath,
     `${JSON.stringify(
       {
-        schemaVersion: 3,
-        benchmark: { name: "local-compare", contractVersion: 3 },
+        schemaVersion: LOCAL_COMPARE_ENVELOPE_SCHEMA_VERSION,
+        benchmark: { name: "local-compare", contractVersion: LOCAL_COMPARE_CONTRACT_VERSION },
         provenance: await collectBenchmarkProvenance({
           cwd: projectRoot,
           argv: [process.execPath, ...process.argv.slice(1)],

@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { analyzeRatios, balancedOrder } from "../benchmark/shared/statistical-authority";
-import { createLocalRunPlan } from "../benchmark/local-compare/run-plan";
+import {
+  createLocalRunPlan,
+  LOCAL_COMPARE_CONTRACT_VERSION,
+  LOCAL_COMPARE_ENVELOPE_SCHEMA_VERSION,
+} from "../benchmark/local-compare/run-plan";
 import { createWebRunPlan } from "../benchmark/web-framework/workload";
 
 describe("benchmark statistical authority", () => {
+  it("keeps the shared envelope schema separate from the local benchmark contract", () => {
+    expect(LOCAL_COMPARE_ENVELOPE_SCHEMA_VERSION).toBe(2);
+    expect(LOCAL_COMPARE_CONTRACT_VERSION).toBe(3);
+  });
+
   it("classifies a stable one-percent-or-better win as meaningful", () => {
     expect(analyzeRatios([0.98, 0.98, 0.98, 0.98, 0.98], { seed: 7, resamples: 10_000 })).toEqual({
       status: "meaningful-win",
