@@ -4,12 +4,15 @@ import { collectBenchmarkProvenance, compareBenchmarkEnvelopes, type BenchmarkEn
 import { valueAtBenchmarkPath } from "./provenance-validation.js";
 
 type StreamingWorkload = {
+  label: string;
   transport: string;
   connections: number;
   chunksPerConnection: number;
   chunkBytes: number;
   drainDelayMs: number;
+  adapterModule: string;
   subject: {
+    root: string;
     git: {
       available: boolean;
       commit: string | null;
@@ -29,6 +32,7 @@ type StreamingMeasurements = {
 };
 
 const controlValidators = [
+  ["workload.label", (value: unknown) => typeof value === "string" && value.length > 0],
   ["workload.transport", (value: unknown) => value === "tcp"],
   [
     "workload.connections",
@@ -45,6 +49,17 @@ const controlValidators = [
   [
     "workload.drainDelayMs",
     (value: unknown) => Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 60_000,
+  ],
+  ["workload.adapterModule", (value: unknown) => typeof value === "string" && value.length > 0],
+  ["workload.subject", (value: unknown) => typeof value === "object" && value !== null],
+  ["workload.subject.root", (value: unknown) => typeof value === "string" && value.length > 0],
+  ["workload.subject.git", (value: unknown) => typeof value === "object" && value !== null],
+  ["workload.subject.git.available", (value: unknown) => value === true],
+  ["workload.subject.git.commit", (value: unknown) => typeof value === "string" && value.length > 0],
+  ["workload.subject.git.dirty", (value: unknown) => typeof value === "boolean"],
+  [
+    "workload.subject.git.workingTreeSha256",
+    (value: unknown) => typeof value === "string" && value.length > 0,
   ],
 ] as const;
 

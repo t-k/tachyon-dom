@@ -16,7 +16,8 @@ describe("web framework benchmark fixtures", () => {
 
     expect(source).toContain("yield streamShell");
     expect(source).toContain("await delay(20)");
-    expect(source).toContain("yield streamBody()");
+    expect(source).toContain("yield streamSection(index, index === 4)");
+    expect(source).toContain("streamDiagnostics.cancelled += 1");
     expect(source).toContain('path: "/stream"');
     expect(source).toContain("stream: streamChunks");
     expect(source).toContain("streaming: true");
@@ -58,6 +59,8 @@ describe("web framework benchmark fixtures", () => {
     expect(source).toContain("measureStreamSemantics");
     expect(source).toContain('legacyDynamicAndStreamRankings: "non-authoritative"');
     expect(source).toContain('"tachyon-dom": "tachyon-route-stream-node-adapter"');
+    expect(source).toContain("measureTachyonRouteStreamEvidence");
+    expect(source).toContain("peakRssDeltaLimitBytes");
   });
 
   it("uses request-time Tachyon routing for the dynamic benchmark scenario", () => {

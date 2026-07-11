@@ -90,6 +90,17 @@ describe("streaming backpressure comparison", () => {
   });
 
   it.each([
+    ["missing subject", undefined, "baseline.workload.subject"],
+    ["null subject", null, "baseline.workload.subject"],
+    ["null subject git", { root: "/repo/baseline", git: null }, "baseline.workload.subject.git"],
+  ])("rejects %s with a precise field instead of a TypeError", (_name, subject, expected) => {
+    const baseline = envelope({ revision: "baseline", queued: 1_000 }) as any;
+    const candidate = envelope({ revision: "candidate", queued: 100 });
+    baseline.workload.subject = subject;
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(expected);
+  });
+
+  it.each([
     ["connections", "6"],
     ["chunksPerConnection", 1.5],
     ["chunkBytes", -1],

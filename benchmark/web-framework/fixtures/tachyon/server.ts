@@ -35,13 +35,37 @@ const ordersBody = () => `<h1>Dashboard</h1><h2 data-route="orders">Orders</h2><
 const ordersNavBody = () => `<h1>Dashboard</h1><h2 data-route="orders">Orders</h2>`;
 
 const streamShell = `<main id="app" data-route="stream"><h1>Stream</h1><p data-stream="shell">Shell</p>`;
-const streamBody = () =>
-  `<section data-stream="done"><h2>Deferred payload</h2><ul>${items("stream")}</ul></section></main>`;
+const streamSection = (index: number, done: boolean) =>
+  `<section${done ? ` data-stream="done"` : ""}><h2>Deferred payload ${index}</h2><ul>${items(`stream-${index}`)}</ul></section>${done ? "</main>" : ""}`;
 const delay = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const streamDiagnostics = {
+  started: 0,
+  completed: 0,
+  cancelled: 0,
+  startingRssBytes: 0,
+  peakRssBytes: 0,
+  emittedChunks: 0,
+};
 const streamChunks = async function* () {
-  yield streamShell;
-  await delay(20);
-  yield streamBody();
+  streamDiagnostics.started += 1;
+  const startingRssBytes = process.memoryUsage().rss;
+  if (streamDiagnostics.startingRssBytes === 0) streamDiagnostics.startingRssBytes = startingRssBytes;
+  streamDiagnostics.peakRssBytes = Math.max(streamDiagnostics.peakRssBytes, startingRssBytes);
+  let completed = false;
+  try {
+    yield streamShell;
+    streamDiagnostics.emittedChunks += 1;
+    for (let index = 1; index <= 4; index += 1) {
+      await delay(20);
+      streamDiagnostics.peakRssBytes = Math.max(streamDiagnostics.peakRssBytes, process.memoryUsage().rss);
+      yield streamSection(index, index === 4);
+      streamDiagnostics.emittedChunks += 1;
+    }
+    completed = true;
+    streamDiagnostics.completed += 1;
+  } finally {
+    if (!completed) streamDiagnostics.cancelled += 1;
+  }
 };
 
 const interactiveBody = () => `<h1>Interactive</h1><h2>Counter</h2>
@@ -142,6 +166,10 @@ const routes: RouteDefinition[] = [
     path: "/stream",
     render: () => "",
     stream: streamChunks,
+  },
+  {
+    path: "/stream-diagnostics",
+    render: () => JSON.stringify(streamDiagnostics),
   },
 ];
 const routeHandler = createNodeHandler({
