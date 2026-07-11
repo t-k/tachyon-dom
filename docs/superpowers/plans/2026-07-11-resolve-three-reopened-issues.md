@@ -13,6 +13,7 @@
 ### Task 1: Create the coverage ledger and generated HTML matrix
 
 **Files:**
+
 - Create: `.coverage-ledger/three-reopened-issues/coverage-ledger.md`
 - Create: `.coverage-ledger/three-reopened-issues/html-whitespace.pict`
 - Create: `.coverage-ledger/three-reopened-issues/html-whitespace-cases.tsv`
@@ -56,6 +57,7 @@ git commit -m "test: model reopened issue coverage"
 ### Task 2: Reject incomplete benchmark provenance
 
 **Files:**
+
 - Modify: `tests/benchmark-provenance.test.ts`
 - Modify: `benchmark/provenance-validation.ts`
 - Modify: `benchmark/provenance.ts`
@@ -83,9 +85,7 @@ export type BenchmarkRequiredField = {
 export const availableDependencies = (value: unknown): boolean =>
   isRecord(value) &&
   Object.keys(value).length > 0 &&
-  Object.values(value).every(
-    (dependency) => isRecord(dependency) && nonEmptyString(dependency.version),
-  );
+  Object.values(value).every((dependency) => isRecord(dependency) && nonEmptyString(dependency.version));
 ```
 
 - [ ] **Step 4: Verify GREEN and existing compatibility**
@@ -104,6 +104,7 @@ git commit -m "fix: reject unavailable benchmark provenance"
 ### Task 3: Validate benchmark identities and report verified controls
 
 **Files:**
+
 - Create: `benchmark/local-compare/validation.ts`
 - Create: `tests/local-compare-validation.test.ts`
 - Modify: `benchmark/local-compare/aggregate.ts`
@@ -144,6 +145,7 @@ git commit -m "fix: verify benchmark identities and controls"
 ### Task 4: Preserve semantic compiler whitespace
 
 **Files:**
+
 - Modify: `tests/compiler-whitespace.test.ts`
 - Create: `tests/compiler-whitespace-property.test.ts`
 - Modify: `src/compiler/whitespace.ts`
@@ -196,6 +198,7 @@ git commit -m "fix: preserve semantic template whitespace"
 ### Task 5: Add metadata-first progressive route bodies
 
 **Files:**
+
 - Modify: `src/router.ts`
 - Modify: `src/adapters/workers.ts`
 - Modify: `tests/router-advanced.test.ts`
@@ -204,7 +207,7 @@ git commit -m "fix: preserve semantic template whitespace"
 
 - [ ] **Step 1: Write failing progressive-stream regressions**
 
-Define a route with buffered `render` plus a `stream` async generator that yields `"first"`, waits on a test-controlled promise, then yields `"second"`. Assert `renderRouteStream()` resolves authoritative status and headers after prefetching only the first iterator result, the first chunk is observable before the second is released, and `renderRoute()` still uses buffered `render`. Add `HEAD`, redirect, middleware/loader response, 404, CSRF rejection, and loader-error coverage proving the stream callback is not started. Add synchronous callback throw, throw before first yield, throw after first yield, and consumer cancellation tests.
+Define a route with buffered `render` plus a `stream` async generator that yields `"first"`, waits on a test-controlled promise, then yields `"second"`. Assert `renderRouteStream()` resolves authoritative status and headers before starting body iteration, the first chunk is observable before the second is released, and `renderRoute()` still uses buffered `render`. Add `HEAD`, redirect, middleware/loader response, 404, CSRF rejection, and loader-error coverage proving the stream callback is not started. Add synchronous callback throw, throw before first yield, throw after first yield, pulled cancellation, and unpulled cancellation tests.
 
 - [ ] **Step 2: Verify RED**
 
@@ -230,7 +233,7 @@ Also add `stream` to `RouteModule`, forward it from `routeFromModule()`, and add
 
 - [ ] **Step 4: Forward chunks without buffering**
 
-Invoke the callback and prefetch exactly one iterator result before returning the prepared metadata. A synchronous callback failure or failure before the first yield is handled by the existing error boundary and may produce an authoritative 500. Expose the prefetched result followed by the remaining iterator as `chunks`; do not collect or concatenate the rest. For `HEAD` and non-success route outcomes, return an empty async iterable without invoking the callback. After the first yielded chunk, let iteration errors reject without appending error HTML or exception text and call `iterator.return()` on consumer cancellation. Verify adapter cancellation reaches the generator `finally` block exactly once and does not begin the second chunk's work.
+Invoke the callback after metadata preparation but do not call `next()` until the consumer pulls `chunks`. A synchronous callback failure is handled by the existing error boundary and may produce an authoritative 500. For `HEAD` and non-success route outcomes, return an empty async iterable without invoking the callback. Let iteration errors reject without appending error HTML or exception text. Own the underlying iterator explicitly so `return()` propagates exactly once for both pulled and unpulled cancellation and does not begin the next chunk's work.
 
 - [ ] **Step 5: Verify GREEN and metadata regressions**
 
@@ -248,6 +251,7 @@ git commit -m "feat: stream route bodies after metadata commit"
 ### Task 6: Enforce the whitespace policy type boundary
 
 **Files:**
+
 - Modify: `src/html-whitespace.ts`
 - Modify: `src/app.ts`
 - Modify: `src/vite.ts`
@@ -297,6 +301,7 @@ git commit -m "fix: separate template and tag whitespace types"
 ### Task 7: Run security review and focused integration verification
 
 **Files:**
+
 - Create: `docs.local/logs/2026-07-11/2026-07-11-004-three-reopened-issues.md` in the repository root, not the worktree
 - Modify: `.coverage-ledger/three-reopened-issues/coverage-ledger.md`
 
@@ -330,6 +335,7 @@ git commit -m "docs: record reopened issue coverage"
 ### Task 8: Complete full verification and close local issues
 
 **Files:**
+
 - Move locally: `docs.local/issues/open/2026-07-10-benchmark-result-provenance.md`
 - Move locally: `docs.local/issues/open/2026-07-10-safe-html-minification.md`
 - Move locally: `docs.local/issues/open/2026-07-11-standard-app-template-whitespace-policy-not-applied.md`

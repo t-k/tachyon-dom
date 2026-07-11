@@ -1080,6 +1080,37 @@ const applyHeaders = (headers: Headers, extra: HeadersInit): void => {
   });
 };
 
+const ownAsyncIterable = (source: AsyncIterable<string>): AsyncIterable<string> => {
+  const sourceIterator = source[Symbol.asyncIterator]();
+  let finished = false;
+  let returned = false;
+  const close = async (): Promise<void> => {
+    if (finished || returned) return;
+    returned = true;
+    await sourceIterator.return?.();
+    finished = true;
+  };
+  const iterator: AsyncIterableIterator<string> = {
+    [Symbol.asyncIterator]: () => iterator,
+    next: async () => {
+      if (finished) return { done: true, value: undefined };
+      try {
+        const next = await sourceIterator.next();
+        if (next.done) finished = true;
+        return next;
+      } catch (error) {
+        await close();
+        throw error;
+      }
+    },
+    return: async () => {
+      await close();
+      return { done: true, value: undefined };
+    },
+  };
+  return iterator;
+};
+
 const nearestNotFoundBoundary = (
   routes: readonly RouteDefinition[],
   pathname: string,
@@ -1326,21 +1357,7 @@ const renderRouteInternal = async (
     }
     let responseChunks: AsyncIterable<string> | undefined;
     if (progressive) {
-      const iterator = progressive(deepestContext)[Symbol.asyncIterator]();
-      const first = await iterator.next();
-      responseChunks = (async function* () {
-        let completed = first.done === true;
-        try {
-          if (!first.done) yield first.value;
-          while (!completed) {
-            const next = await iterator.next();
-            completed = next.done === true;
-            if (!next.done) yield next.value;
-          }
-        } finally {
-          if (!completed) await iterator.return?.();
-        }
-      })();
+      responseChunks = ownAsyncIterable(progressive(deepestContext));
     }
     return ok({
       status: 200,

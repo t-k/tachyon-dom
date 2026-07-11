@@ -308,9 +308,10 @@ describe("advanced router features", () => {
     const result = await renderRouteStream(routes, "https://example.com/progressive");
     if (!result.ok) throw new Error(result.error.message);
     expect(result.value.headers.get("x-route")).toBe("ready");
-    expect(streamCalls).toBe(1);
+    expect(streamCalls).toBe(0);
     const iterator = result.value.chunks[Symbol.asyncIterator]();
     await expect(iterator.next()).resolves.toEqual({ done: false, value: "<h1>Ada</h1>" });
+    expect(streamCalls).toBe(1);
     const pendingSecond = iterator.next();
     await expect(Promise.race([pendingSecond.then(() => "settled"), Promise.resolve("pending")])).resolves.toBe(
       "pending",
@@ -323,7 +324,7 @@ describe("advanced router features", () => {
     expect(streamCalls).toBe(1);
   });
 
-  it("turns pre-first-chunk failures into authoritative errors without appending post-commit failures", async () => {
+  it("fails body iteration without appending pre-first or post-first error content", async () => {
     const before = await renderRouteStream(
       [
         {
@@ -341,11 +342,9 @@ describe("advanced router features", () => {
       "https://example.com/before",
     );
     if (!before.ok) throw new Error(before.error.message);
-    expect(before.value.status).toBe(500);
-    const beforeChunks: string[] = [];
-    for await (const chunk of before.value.chunks) beforeChunks.push(chunk);
-    expect(beforeChunks.join("")).toBe("<h1>Internal Server Error</h1>");
-    expect(beforeChunks.join("")).not.toContain("before-secret");
+    expect(before.value.status).toBe(200);
+    const beforeIterator = before.value.chunks[Symbol.asyncIterator]();
+    await expect(beforeIterator.next()).rejects.toThrow("before-secret");
 
     const after = await renderRouteStream(
       [
@@ -393,6 +392,38 @@ describe("advanced router features", () => {
     await iterator.return?.();
     expect(cleaned).toBe(1);
     expect(secondStarted).toBe(false);
+  });
+
+  it("returns an unpulled progressive iterator on cancellation", async () => {
+    let nextCalls = 0;
+    let returnCalls = 0;
+    const result = await renderRouteStream(
+      [
+        {
+          path: "/unpulled-cancel",
+          render: () => "buffered",
+          stream: () => ({
+            [Symbol.asyncIterator]: () => ({
+              next: async () => {
+                nextCalls += 1;
+                return { done: false as const, value: "first" };
+              },
+              return: async () => {
+                returnCalls += 1;
+                return { done: true as const, value: undefined };
+              },
+            }),
+          }),
+        },
+      ],
+      "https://example.com/unpulled-cancel",
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    expect(nextCalls).toBe(0);
+    const iterator = result.value.chunks[Symbol.asyncIterator]();
+    await iterator.return?.();
+    expect(nextCalls).toBe(0);
+    expect(returnCalls).toBe(1);
   });
 
   it("forwards route-module streams and never starts them for HEAD", async () => {
