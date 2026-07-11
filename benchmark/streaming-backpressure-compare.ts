@@ -85,6 +85,16 @@ const validateStreamingArtifact = (value: unknown, label: "baseline" | "candidat
   for (const [path, validate] of [...controlValidators, ...measurementValidators]) {
     if (!validate(valueAtBenchmarkPath(value, path))) throw new Error(`${label}.${path} is invalid.`);
   }
+  const startingRssBytes = Number(valueAtBenchmarkPath(value, "measurements.startingRssBytes"));
+  const peakRssBytes = Number(valueAtBenchmarkPath(value, "measurements.peakRssBytes"));
+  const peakRssDeltaBytes = Number(valueAtBenchmarkPath(value, "measurements.peakRssDeltaBytes"));
+  if (startingRssBytes <= 0) throw new Error(`${label}.measurements.startingRssBytes must be positive.`);
+  if (peakRssBytes <= 0 || peakRssBytes < startingRssBytes) {
+    throw new Error(`${label}.measurements.peakRssBytes must be positive and not below starting RSS.`);
+  }
+  if (peakRssDeltaBytes !== peakRssBytes - startingRssBytes) {
+    throw new Error(`${label}.measurements.peakRssDeltaBytes must equal peak RSS minus starting RSS.`);
+  }
   for (const path of ["measurements.peakQueuedBytes", "measurements.peakRssDeltaBytes"] as const) {
     if (label === "baseline" && Number(valueAtBenchmarkPath(value, path)) <= 0) {
       throw new Error(`${label}.${path} must be positive for ratio calculation.`);

@@ -26,12 +26,12 @@ const run = () => ({
   },
   measurements: {
     summaries: [
-      { label: "render", implementation: "vanillajs-lite-keyed", trimmedMean: 1 },
-      { label: "render", implementation: "tachyon-dom", trimmedMean: 1 },
+      { id: "render", label: "render", implementation: "vanillajs-lite-keyed", trimmedMean: 1 },
+      { id: "render", label: "render", implementation: "tachyon-dom", trimmedMean: 1 },
     ],
     auxiliaryMetrics: [
-      { label: "size", unit: "bytes", implementation: "vanillajs-lite-keyed", value: 1 },
-      { label: "size", unit: "bytes", implementation: "tachyon-dom", value: 1 },
+      { id: "size", label: "size", unit: "kib", implementation: "vanillajs-lite-keyed", value: 1 },
+      { id: "size", label: "size", unit: "kib", implementation: "tachyon-dom", value: 1 },
     ],
   },
 });
@@ -51,6 +51,48 @@ describe("local compare validation", () => {
       dependencies: { vite: { version: "8.0.16" } },
       workload: { iterations: 5, warmup: 2 },
     });
+  });
+
+  it.each([-0.1, 0.5, 2, Number.NaN, Number.POSITIVE_INFINITY])(
+    "rejects out-of-domain trimFraction %s",
+    (trimFraction) => {
+      const value = run();
+      value.workload.trimFraction = trimFraction;
+      const result = validateLocalCompareRuns([value]);
+      expect(result).toEqual(expect.objectContaining({ ok: false }));
+      if (result.ok) throw new Error("Expected invalid run");
+      expect(result.invalidFields).toContain("runs[0].workload.trimFraction");
+    },
+  );
+
+  it.each([
+    ["serveMode", "preview"],
+    ["operationStatistic", "median"],
+  ] as const)("rejects unknown workload enum %s=%s", (field, invalidValue) => {
+    const value = run();
+    value.workload[field] = invalidValue;
+    const result = validateLocalCompareRuns([value]);
+    expect(result).toEqual(expect.objectContaining({ ok: false }));
+    if (result.ok) throw new Error("Expected invalid run");
+    expect(result.invalidFields).toContain(`runs[0].workload.${field}`);
+  });
+
+  it.each([
+    ["missing summary implementation", "summaries", (entries: any[]) => entries.pop()],
+    ["duplicate summary implementation", "summaries", (entries: any[]) => entries.push({ ...entries[0] })],
+    ["missing auxiliary implementation", "auxiliaryMetrics", (entries: any[]) => entries.pop()],
+    [
+      "duplicate auxiliary implementation",
+      "auxiliaryMetrics",
+      (entries: any[]) => entries.push({ ...entries[0] }),
+    ],
+  ])("rejects %s for each metric id", (_label, collectionName, mutate) => {
+    const value = run();
+    mutate(value.measurements[collectionName as "summaries" | "auxiliaryMetrics"]);
+    const result = validateLocalCompareRuns([value]);
+    expect(result).toEqual(expect.objectContaining({ ok: false }));
+    if (result.ok) throw new Error("Expected invalid run");
+    expect(result.invalidFields).toContain(`runs[0].measurements.${collectionName}`);
   });
 
   it.each([
