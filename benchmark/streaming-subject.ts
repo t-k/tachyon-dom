@@ -1,6 +1,19 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { chmod, copyFile, cp, lstat, mkdtemp, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  chmod,
+  copyFile,
+  cp,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -300,7 +313,7 @@ export const prepareStreamingBenchmarkAdapter = async (
       importAdapter,
       cleanup: async () => {
         if (cleaned) return;
-        await setTreeWritable(snapshotRoot, true);
+        await setTreeWritable(snapshotRoot, true).catch(() => undefined);
         try {
           await git(identity.subjectRoot, ["worktree", "remove", "--force", snapshotRoot]);
           cleaned = true;
@@ -330,5 +343,22 @@ export const prepareStreamingBenchmarkAdapter = async (
     await rm(snapshotRoot, { recursive: true, force: true });
     if (removeFailed) await git(identity.subjectRoot, ["worktree", "prune"]).catch(() => undefined);
     throw error;
+  }
+};
+
+export const writeVerifiedBenchmarkArtifact = async (
+  prepared: Pick<PreparedStreamingBenchmarkAdapter, "verify">,
+  output: string,
+  content: string,
+): Promise<void> => {
+  const outputDirectory = path.dirname(output);
+  const temporaryOutput = path.join(outputDirectory, `.${path.basename(output)}.${process.pid}.${randomUUID()}.tmp`);
+  await mkdir(outputDirectory, { recursive: true });
+  try {
+    await writeFile(temporaryOutput, content, { flag: "wx", mode: 0o600 });
+    await prepared.verify();
+    await rename(temporaryOutput, output);
+  } finally {
+    await rm(temporaryOutput, { force: true }).catch(() => undefined);
   }
 };

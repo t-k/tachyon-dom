@@ -1,8 +1,7 @@
 import { createServer, get, type ServerResponse } from "node:http";
-import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { collectBenchmarkProvenance, collectDependencyVersions } from "./provenance.js";
-import { prepareStreamingBenchmarkAdapter } from "./streaming-subject.js";
+import { prepareStreamingBenchmarkAdapter, writeVerifiedBenchmarkArtifact } from "./streaming-subject.js";
 
 const numberArg = (name: string, fallback: number): number => {
   const index = process.argv.indexOf(name);
@@ -146,8 +145,7 @@ try {
       peakRssDeltaBytes: Math.max(0, peakRssBytes - startingRssBytes),
     },
   };
-  await mkdir(path.dirname(output), { recursive: true });
-  await writeFile(output, `${JSON.stringify(result, null, 2)}\n`);
+  await writeVerifiedBenchmarkArtifact(adapterIdentity, output, `${JSON.stringify(result, null, 2)}\n`);
   console.log(JSON.stringify({ output, ...result }));
 } finally {
   await adapterIdentity.cleanup();
