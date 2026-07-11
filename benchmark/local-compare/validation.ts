@@ -180,6 +180,18 @@ const validateIdentity = (value: unknown, prefix: string): string[] => {
   return invalid;
 };
 
+const measurementMetadata = (value: unknown, collectionName: "summaries" | "auxiliaryMetrics") => {
+  const collection = valueAtBenchmarkPath(value, `measurements.${collectionName}`);
+  if (!Array.isArray(collection)) return new Map<string, string>();
+  return new Map(
+    collection.flatMap((entryValue) => {
+      if (!isRecord(entryValue) || !nonEmptyString(entryValue.id) || !nonEmptyString(entryValue.label)) return [];
+      const unit = collectionName === "auxiliaryMetrics" && nonEmptyString(entryValue.unit) ? entryValue.unit : "";
+      return [[entryValue.id, `${entryValue.label}\0${unit}`] as const];
+    }),
+  );
+};
+
 export type LocalCompareValidation =
   | {
       ok: true;
@@ -207,6 +219,21 @@ export const validateLocalCompareRuns = (values: readonly unknown[]): LocalCompa
     }
     invalidFields.push(...validateIdentity(value, prefix));
     invalidFields.push(...validateBrowserAndMeasurements(value, prefix));
+    for (const collectionName of ["summaries", "auxiliaryMetrics"] as const) {
+      const metadata = measurementMetadata(value, collectionName);
+      if (new Set(metadata.values()).size !== metadata.size) {
+        invalidFields.push(`${prefix}.measurements.${collectionName}`);
+      }
+      if (index > 0) {
+        const baselineMetadata = measurementMetadata(values[0], collectionName);
+        if (
+          metadata.size !== baselineMetadata.size ||
+          [...baselineMetadata].some(([id, description]) => metadata.get(id) !== description)
+        ) {
+          invalidFields.push(`${prefix}.measurements.${collectionName}`);
+        }
+      }
+    }
     if (index > 0) {
       const comparison = compareBenchmarkEnvelopes(values[0], value, { requiredEqualPaths });
       invalidFields.push(

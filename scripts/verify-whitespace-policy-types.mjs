@@ -89,6 +89,7 @@ try {
     `import { defineApp } from "tachyon-dom/app";
 import { escapeToHtml, renderRoute, trustedHtmlChunk } from "tachyon-dom/router";
 import { sanitizeHtml } from "tachyon-dom/security";
+import { tachyonApp } from "tachyon-dom/vite";
 const escaped = trustedHtmlChunk(escapeToHtml("<img src=x onerror=alert(1)>"));
 if (escaped !== "&lt;img src=x onerror=alert(1)&gt;") throw new Error("Escaping helper was not usable from package exports.");
 if (!trustedHtmlChunk(sanitizeHtml("<b>safe</b>")).includes("<b>safe</b>")) throw new Error("Sanitized TrustedHtml was not accepted.");
@@ -113,6 +114,33 @@ const currentRoute = await renderRoute(routes, "https://example.test/", { htmlWh
 if (!legacyRoute.ok || !currentRoute.ok || legacyRoute.value.html !== currentRoute.value.html) {
   throw new Error("Installed router did not preserve legacy runtime normalization.");
 }
+const invokeViteHooks = (options) => {
+  const plugin = tachyonApp(app, options);
+  let middleware;
+  plugin.configureServer({ middlewares: { use: (value) => { middleware = value; } } });
+  let development = "";
+  middleware(
+    { url: "/" },
+    { statusCode: 0, setHeader() {}, end(value) { development = value; } },
+    () => {},
+  );
+  let production = "";
+  plugin.generateBundle.call(
+    { emitFile(asset) { if (asset.fileName === "index.html") production = asset.source; } },
+    {},
+    { "main.js": { type: "chunk", isEntry: true, fileName: "main.js" } },
+  );
+  return { development, production };
+};
+const installedLegacyVite = invokeViteHooks({ htmlWhitespace: "condense" });
+if (installedLegacyVite.development.includes('<main   id="app">') || installedLegacyVite.production.includes('<main   id="app">')) {
+  throw new Error("Installed Vite hooks did not share legacy runtime normalization.");
+}
+let invalidViteRejected = false;
+try { tachyonApp(app, { htmlWhitespace: "unknown" }); } catch (error) {
+  invalidViteRejected = /HTML whitespace policy/.test(String(error));
+}
+if (!invalidViteRejected) throw new Error("Installed Vite plugin did not reject an unknown policy during creation.");
 `,
   );
   await execFileAsync(process.execPath, [runtimeFile], { cwd: consumer });

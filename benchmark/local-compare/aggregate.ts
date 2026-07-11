@@ -51,18 +51,23 @@ const collect = (extract: (run: LocalCompareRun) => Measurement[]): Map<string, 
 
 const operationMap = collect((run) =>
   run.measurements.summaries.map((summary) => ({
-    key: summary.label,
+    key: summary.id,
     implementation: summary.implementation,
     value: summary.trimmedMean,
   })),
 );
 const auxiliaryMap = collect((run) =>
   run.measurements.auxiliaryMetrics.map((metric) => ({
-    key: `${metric.label}|${metric.unit}`,
+    key: metric.id,
     implementation: metric.implementation,
     value: metric.value,
   })),
 );
+
+const labels = new Map([
+  ...firstRun.measurements.summaries.map((summary) => [summary.id, summary.label] as const),
+  ...firstRun.measurements.auxiliaryMetrics.map((metric) => [metric.id, metric.label] as const),
+]);
 
 const report = (title: string, measurements: Map<string, Map<string, number[]>>, lowerIsBetter = true): void => {
   console.log(`\n## ${title} (median of ${validatedRuns.length} runs)\n`);
@@ -85,7 +90,7 @@ const report = (title: string, measurements: Map<string, Map<string, number[]>>,
     total += 1;
     const isWin = rank === 1 || Math.abs(ratio - 1) < 0.005;
     if (isWin) wins += 1;
-    const label = key.split("|")[0] as string;
+    const label = labels.get(key) ?? key;
     const flag = rank === 1 ? "1st" : `#${rank}`;
     const tie = rank !== 1 && Math.abs(ratio - 1) < 0.02 ? " (~tie)" : "";
     console.log(
