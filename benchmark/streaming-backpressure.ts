@@ -107,6 +107,7 @@ try {
   }
   const completionTimeMs = performance.now() - startedAt;
   peakRssBytes = Math.max(peakRssBytes, process.memoryUsage().rss);
+  adapterIdentity.releaseExecutionBoundary();
   await adapterIdentity.verify();
 
   const argv = [process.execPath, ...process.argv.slice(1)];
