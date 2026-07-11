@@ -16,6 +16,11 @@ type StreamingWorkload = {
     relativePath: string;
     sha256: string;
     gitBlob: string;
+    dependencySnapshot: {
+      lockfileSha256: string;
+      treeSha256: string;
+      packageManager: string;
+    };
   };
   subject: {
     root: string;
@@ -65,6 +70,19 @@ const controlValidators = [
   ],
   ["workload.adapter.sha256", (value: unknown) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)],
   ["workload.adapter.gitBlob", (value: unknown) => typeof value === "string" && /^[a-f0-9]{40,64}$/.test(value)],
+  ["workload.adapter.dependencySnapshot", (value: unknown) => typeof value === "object" && value !== null],
+  [
+    "workload.adapter.dependencySnapshot.lockfileSha256",
+    (value: unknown) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value),
+  ],
+  [
+    "workload.adapter.dependencySnapshot.treeSha256",
+    (value: unknown) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value),
+  ],
+  [
+    "workload.adapter.dependencySnapshot.packageManager",
+    (value: unknown) => typeof value === "string" && /^pnpm@\d+\.\d+\.\d+/.test(value),
+  ],
   ["workload.subject", (value: unknown) => typeof value === "object" && value !== null],
   ["workload.subject.root", (value: unknown) => typeof value === "string" && value.length > 0],
   ["workload.subject.git", (value: unknown) => typeof value === "object" && value !== null],
@@ -145,6 +163,7 @@ const requiredEqualPaths = [
   "workload.chunkBytes",
   "workload.drainDelayMs",
   "workload.adapter.relativePath",
+  "workload.adapter.dependencySnapshot",
 ] as const;
 
 export const compareStreamingBackpressureResults = (baselineValue: unknown, candidateValue: unknown) => {

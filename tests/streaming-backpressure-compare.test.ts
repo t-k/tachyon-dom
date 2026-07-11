@@ -27,6 +27,11 @@ const envelope = (options: { revision: string; queued: number; connections?: num
         relativePath: "src/adapter.js",
         sha256: (options.revision === "baseline" ? "a" : "b").repeat(64),
         gitBlob: (options.revision === "baseline" ? "c" : "d").repeat(40),
+        dependencySnapshot: {
+          lockfileSha256: "e".repeat(64),
+          treeSha256: "f".repeat(64),
+          packageManager: "pnpm@10.32.1",
+        },
       },
       subject: {
         root: `/repo/${options.revision}`,
@@ -83,6 +88,13 @@ describe("streaming backpressure comparison", () => {
         envelope({ revision: "candidate", queued: 100, dirty: true }),
       ),
     ).toThrow(/clean working trees/);
+  });
+
+  it("rejects dependency snapshot identity mismatches", () => {
+    const baseline = envelope({ revision: "baseline", queued: 1_000 });
+    const candidate = envelope({ revision: "candidate", queued: 100 });
+    candidate.workload.adapter.dependencySnapshot.treeSha256 = "0".repeat(64);
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(/dependencySnapshot/);
   });
 
   it("rejects unavailable subject provenance with a precise field", () => {

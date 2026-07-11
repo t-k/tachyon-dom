@@ -130,6 +130,7 @@ const result = {
       relativePath: adapterIdentity.relativePath,
       sha256: adapterIdentity.sha256,
       gitBlob: adapterIdentity.gitBlob,
+      dependencySnapshot: adapterIdentity.dependencySnapshot,
     },
     subject: { root: adapterIdentity.subjectRoot, git: subject.git },
   },
