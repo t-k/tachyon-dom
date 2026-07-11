@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -53,6 +53,24 @@ describe("benchmark provenance", () => {
     } finally {
       await rm(repository, { recursive: true, force: true });
       await rm(nonRepository, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed instead of following untracked symlinks while hashing provenance", async () => {
+    const repository = await mkdtemp(path.join(tmpdir(), "tachyon-provenance-symlink-"));
+    const external = await mkdtemp(path.join(tmpdir(), "tachyon-provenance-external-"));
+    try {
+      await commitFixture(repository);
+      const secret = path.join(external, "secret.txt");
+      await writeFile(secret, "must-not-be-read\n");
+      await symlink(secret, path.join(repository, "untracked-link"));
+      const provenance = await collectBenchmarkProvenance({ cwd: repository, argv: ["benchmark"] });
+      expect(provenance.git.available).toBe(false);
+      expect(provenance.git.reason).toContain("untracked-link");
+      expect(provenance.git.reason).toContain("regular file");
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+      await rm(external, { recursive: true, force: true });
     }
   });
 

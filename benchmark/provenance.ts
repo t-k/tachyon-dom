@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +8,8 @@ import { promisify, isDeepStrictEqual } from "node:util";
 import { validateBenchmarkEnvelope, valueAtBenchmarkPath } from "./provenance-validation.js";
 
 const execFileAsync = promisify(execFile);
+const MAX_UNTRACKED_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_UNTRACKED_TOTAL_BYTES = 64 * 1024 * 1024;
 
 export type BenchmarkDependency = {
   version: string | null;
@@ -51,12 +53,23 @@ const workingTreeHash = async (cwd: string, commit: string): Promise<string> => 
     git(cwd, ["ls-files", "--others", "--exclude-standard", "-z"]),
   ]);
   const hash = createHash("sha256").update(commit).update("\0").update(status).update("\0").update(diff);
+  let totalBytes = 0;
   for (const relativeFile of untracked.split("\0").filter(Boolean).sort()) {
+    const absoluteFile = path.join(cwd, relativeFile);
+    const metadata = await lstat(absoluteFile);
+    if (!metadata.isFile()) throw new Error(`Untracked provenance path ${relativeFile} must be a regular file.`);
+    if (metadata.size > MAX_UNTRACKED_FILE_BYTES) {
+      throw new Error(`Untracked provenance file ${relativeFile} exceeds ${MAX_UNTRACKED_FILE_BYTES} bytes.`);
+    }
+    totalBytes += metadata.size;
+    if (totalBytes > MAX_UNTRACKED_TOTAL_BYTES) {
+      throw new Error(`Untracked provenance files exceed ${MAX_UNTRACKED_TOTAL_BYTES} bytes in total.`);
+    }
     hash
       .update("\0")
       .update(relativeFile)
       .update("\0")
-      .update(await readFile(path.join(cwd, relativeFile)));
+      .update(await readFile(absoluteFile));
   }
   return hash.digest("hex");
 };

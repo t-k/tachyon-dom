@@ -60,12 +60,14 @@ const validateBrowserAndMeasurements = (value: unknown, prefix: string): string[
   if (!nonEmptyString(browser.name)) invalid.push(`${prefix}.provenance.browser.name`);
   if (!nonEmptyString(browser.version)) invalid.push(`${prefix}.provenance.browser.version`);
   const measurements = isRecord(value) && isRecord(value.measurements) ? value.measurements : {};
+  const workload = isRecord(value) && isRecord(value.workload) ? value.workload : {};
+  const implementations = Array.isArray(workload.implementations) ? workload.implementations : [];
   for (const [collectionName, metricName] of [
     ["summaries", "trimmedMean"],
     ["auxiliaryMetrics", "value"],
   ] as const) {
     const collection = measurements[collectionName];
-    if (!Array.isArray(collection)) {
+    if (!Array.isArray(collection) || collection.length === 0) {
       invalid.push(`${prefix}.measurements.${collectionName}`);
       continue;
     }
@@ -73,6 +75,8 @@ const validateBrowserAndMeasurements = (value: unknown, prefix: string): string[
       const entry = isRecord(entryValue) ? entryValue : {};
       if (!nonEmptyString(entry.label)) invalid.push(`${prefix}.measurements.${collectionName}[${index}].label`);
       if (!nonEmptyString(entry.implementation)) {
+        invalid.push(`${prefix}.measurements.${collectionName}[${index}].implementation`);
+      } else if (!implementations.includes(entry.implementation)) {
         invalid.push(`${prefix}.measurements.${collectionName}[${index}].implementation`);
       }
       if (collectionName === "auxiliaryMetrics" && !nonEmptyString(entry.unit)) {

@@ -24,7 +24,16 @@ const run = () => ({
     candidate: "tachyon-dom",
     implementations: ["vanillajs-lite-keyed", "tachyon-dom"],
   },
-  measurements: { summaries: [], auxiliaryMetrics: [] },
+  measurements: {
+    summaries: [
+      { label: "render", implementation: "vanillajs-lite-keyed", trimmedMean: 1 },
+      { label: "render", implementation: "tachyon-dom", trimmedMean: 1 },
+    ],
+    auxiliaryMetrics: [
+      { label: "size", unit: "bytes", implementation: "vanillajs-lite-keyed", value: 1 },
+      { label: "size", unit: "bytes", implementation: "tachyon-dom", value: 1 },
+    ],
+  },
 });
 
 describe("local compare validation", () => {
@@ -56,24 +65,25 @@ describe("local compare validation", () => {
       "measurements.summaries",
     ],
     [
+      "empty summaries",
+      (value: ReturnType<typeof run>) => value.measurements.summaries.splice(0),
+      "measurements.summaries",
+    ],
+    [
+      "unknown implementation",
+      (value: ReturnType<typeof run>) => (value.measurements.summaries[0]!.implementation = "unknown"),
+      "measurements.summaries[0].implementation",
+    ],
+    [
       "summary metric",
       (value: ReturnType<typeof run>) =>
-        (value.measurements.summaries as Array<Record<string, unknown>>).push({
-          label: "render",
-          implementation: "tachyon-dom",
-          trimmedMean: Number.NaN,
-        }),
+        ((value.measurements.summaries[0]!.trimmedMean as number) = Number.NaN),
       "measurements.summaries[0].trimmedMean",
     ],
     [
       "auxiliary metric",
       (value: ReturnType<typeof run>) =>
-        (value.measurements.auxiliaryMetrics as Array<Record<string, unknown>>).push({
-          label: "size",
-          unit: "bytes",
-          implementation: "tachyon-dom",
-          value: Number.POSITIVE_INFINITY,
-        }),
+        ((value.measurements.auxiliaryMetrics[0]!.value as number) = Number.POSITIVE_INFINITY),
       "measurements.auxiliaryMetrics[0].value",
     ],
   ])("rejects malformed decoded %s", (_label, mutate, invalidPath) => {
