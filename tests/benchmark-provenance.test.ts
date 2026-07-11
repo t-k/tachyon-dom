@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -250,7 +250,15 @@ describe("benchmark provenance", () => {
   it("writes a provenance envelope from the real TCP backpressure harness", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "tachyon-backpressure-envelope-"));
     const output = path.join(directory, "result.json");
+    const subject = path.join(process.cwd(), ".worktrees", `.benchmark-test-${path.basename(directory)}`);
     try {
+      await execFileAsync("git", ["worktree", "add", "--detach", subject, "HEAD"], { cwd: process.cwd() });
+      await mkdir(path.join(subject, "node_modules"));
+      await symlink(
+        await realpath(path.join(process.cwd(), "node_modules/parse5")),
+        path.join(subject, "node_modules/parse5"),
+        "dir",
+      );
       await execFileAsync(
         "pnpm",
         [
@@ -267,6 +275,10 @@ describe("benchmark provenance", () => {
           "1",
           "--label",
           "test",
+          "--subject-root",
+          subject,
+          "--adapter-module",
+          path.join(subject, "src/adapters/node.ts"),
           "--output",
           output,
         ],
@@ -284,6 +296,9 @@ describe("benchmark provenance", () => {
       expect(result.measurements.completionTimeMs).toBeGreaterThan(0);
       expect(result.measurements.sourcePullCount).toBeGreaterThan(0);
     } finally {
+      await execFileAsync("git", ["worktree", "remove", "--force", subject], { cwd: process.cwd() }).catch(
+        () => undefined,
+      );
       await rm(directory, { recursive: true, force: true });
     }
   }, 30_000);
