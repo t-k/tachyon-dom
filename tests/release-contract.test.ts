@@ -53,14 +53,17 @@ describe("npm release identity", () => {
     expect(verifyReleaseIdentity({ tag, ...fixture })).toEqual({ ok: false, error: expect.stringMatching(expected) });
   });
 
-  it.each(["rootPackage", "createPackage"])("rejects release identity without %s repository metadata", (key) => {
-    const fixture = packages();
-    delete fixture[key].repository;
-    expect(verifyReleaseIdentity({ tag: "v1.2.3", ...fixture })).toEqual({
-      ok: false,
-      error: expect.stringMatching(/repository metadata/),
-    });
-  });
+  it.each(["rootPackage", "createPackage"] as const)(
+    "rejects release identity without %s repository metadata",
+    (key) => {
+      const fixture = packages();
+      delete (fixture[key] as { repository?: unknown }).repository;
+      expect(verifyReleaseIdentity({ tag: "v1.2.3", ...fixture })).toEqual({
+        ok: false,
+        error: expect.stringMatching(/repository metadata/),
+      });
+    },
+  );
 
   it("rejects release identity with repository metadata for another repository", () => {
     const fixture = packages();
