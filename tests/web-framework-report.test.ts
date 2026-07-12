@@ -1,7 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { formatWebFrameworkRanking, scoreWebFrameworkMetrics } from "../benchmark/web-framework/report";
+import {
+  analyzeWebStreamRuns,
+  formatWebFrameworkRanking,
+  scoreWebFrameworkMetrics,
+} from "../benchmark/web-framework/report";
 
 describe("web framework benchmark report", () => {
+  it("analyzes stream completion ratios across independent contract-v4 runs", () => {
+    const runs = Array.from({ length: 5 }, (_, runIndex) => ({
+      benchmark: { contractVersion: 4 },
+      provenance: { git: { dirty: false } },
+      workload: { runId: `run-${runIndex}`, frameworkOrder: runIndex % 2 ? ["other", "tachyon-dom"] : ["tachyon-dom", "other"] },
+      measurements: {
+        metrics: [
+          { framework: "tachyon-dom", streamCompleteMs: 19.8, streamWarmups: 5, streamSamples: Array(20).fill({}) },
+          { framework: "other", streamCompleteMs: 20, streamWarmups: 5, streamSamples: Array(20).fill({}) },
+        ],
+      },
+    }));
+    expect(analyzeWebStreamRuns(runs, { seed: 7, resamples: 1_000 })).toMatchObject({
+      ok: true,
+      analysis: { status: "meaningful-win", independentRunCount: 5 },
+    });
+  });
+
   it("ranks frameworks by normalized throughput and latency geomean", () => {
     const rows = scoreWebFrameworkMetrics([
       {

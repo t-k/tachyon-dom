@@ -32,6 +32,61 @@ export type WebFrameworkRankingRow = WebFrameworkMetric & {
   rank: number;
 };
 
+type WebStreamRun = {
+  benchmark: { contractVersion: number };
+  provenance: { git: { dirty: boolean } };
+  workload: { runId: string; frameworkOrder: readonly string[] };
+  measurements: {
+    metrics: readonly Pick<
+      WebFrameworkMetric,
+      "framework" | "streamCompleteMs" | "streamWarmups" | "streamSamples"
+    >[];
+  };
+};
+
+export type WebStreamAuthority =
+  | { ok: true; ratios: number[]; analysis: RatioAnalysis }
+  | { ok: false; reasons: string[] };
+
+export const analyzeWebStreamRuns = (
+  runs: readonly WebStreamRun[],
+  options: { seed: number; resamples: number },
+): WebStreamAuthority => {
+  const reasons: string[] = [];
+  if (runs.length < 5) reasons.push("at least five fresh-process runs are required");
+  if (new Set(runs.map((run) => run.workload.runId)).size !== runs.length) reasons.push("run IDs must be unique");
+  for (const run of runs) {
+    if (run.benchmark.contractVersion !== 4) reasons.push(`${run.workload.runId}: contract version`);
+    if (run.provenance.git.dirty) reasons.push(`${run.workload.runId}: dirty tree`);
+    for (const metric of run.measurements.metrics) {
+      if (metric.streamWarmups < 5) reasons.push(`${run.workload.runId}: ${metric.framework} warmups`);
+      if (metric.streamSamples.length < 20) reasons.push(`${run.workload.runId}: ${metric.framework} samples`);
+    }
+  }
+  const frameworks = runs[0]?.workload.frameworkOrder ?? [];
+  for (const framework of frameworks) {
+    const counts = Array(frameworks.length).fill(0) as number[];
+    for (const run of runs) {
+      const position = run.workload.frameworkOrder.indexOf(framework);
+      if (position < 0) reasons.push(`${run.workload.runId}: framework order`);
+      else counts[position] = (counts[position] ?? 0) + 1;
+    }
+    if (Math.max(...counts) - Math.min(...counts) > 1) reasons.push(`${framework}: unbalanced positions`);
+  }
+  if (reasons.length > 0) return { ok: false, reasons: [...new Set(reasons)] };
+  const ratios = runs.map((run) => {
+    const candidate = run.measurements.metrics.find((metric) => metric.framework === "tachyon-dom");
+    const best = Math.min(
+      ...run.measurements.metrics
+        .filter((metric) => metric.framework !== "tachyon-dom")
+        .map((metric) => metric.streamCompleteMs),
+    );
+    if (!candidate || !Number.isFinite(best)) throw new Error("Every run requires Tachyon and a comparison framework");
+    return candidate.streamCompleteMs / best;
+  });
+  return { ok: true, ratios, analysis: analyzeRatios(ratios, options) };
+};
+
 const finitePositive = (value: number): boolean => Number.isFinite(value) && value > 0;
 
 const finiteNonNegative = (value: number): boolean => Number.isFinite(value) && value >= 0;
@@ -99,3 +154,4 @@ export const formatWebFrameworkRanking = (rows: readonly WebFrameworkRankingRow[
   }
   return lines.join("\n");
 };
+import { analyzeRatios, type RatioAnalysis } from "../shared/statistical-authority.js";
