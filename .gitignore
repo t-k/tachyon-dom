@@ -20,4 +20,6 @@ benchmark/web-framework/fixtures/*/node_modules/
 benchmark/web-framework/fixtures/*/src/routeTree.gen.ts
 examples/*/dist/
 examples/**/*.td.d.ts
+.agents/skills/td-open-issue-flow/
+.coverage-ledger/
 editors/*/target/
