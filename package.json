@@ -205,6 +205,7 @@
     "bench:html-minification": "tsx benchmark/html-minification.ts",
     "bench:local:stable": "tsx benchmark/local-compare/run-local-compare.ts --iterations 30 --warmup 5",
     "bench:local:trace": "tsx benchmark/local-compare/run-local-compare.ts --serve-mode dev --iterations 1 --warmup 1 --trace-implementation tachyon-dom --trace-scenario partialUpdate",
+    "bench:summary": "tsx benchmark/summary/cli.ts",
     "bench:web-framework": "tsx benchmark/web-framework/run-web-framework-benchmark.ts",
     "bench:web-framework:smoke": "tsx benchmark/web-framework/run-web-framework-benchmark.ts --smoke",
     "example:router": "tsx examples/router.ts",

@@ -1,4 +1,8 @@
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parseSummaryArgs, runSummaryCli } from "../benchmark/summary/cli";
 import { formatBenchmarkSummary } from "../benchmark/summary/markdown";
 import { rankMetric } from "../benchmark/summary/ranking";
 
@@ -155,5 +159,37 @@ describe("benchmark Summary markdown", () => {
     expect(markdown).toContain("Node v24.0.0");
     expect(markdown).toContain("linux");
     expect(markdown).toContain("Example CPU");
+  });
+});
+
+describe("benchmark Summary CLI", () => {
+  it("allスイートの入力パスを解析する", () => {
+    expect(
+      parseSummaryArgs(["--suite", "all", "--web", "web.json", "--local", "local.json", "--output", "summary.md"]),
+    ).toEqual({
+      suite: "all",
+      webPath: "web.json",
+      localPath: "local.json",
+      outputPath: "summary.md",
+    });
+  });
+
+  it("不明なスイートと必須パスの欠落を拒否する", () => {
+    expect(() => parseSummaryArgs(["--suite", "unknown"])).toThrow("Unknown suite");
+    expect(() => parseSummaryArgs(["--suite", "all", "--web", "web.json", "--output", "summary.md"])).toThrow(
+      "--local is required",
+    );
+    expect(() => parseSummaryArgs(["--suite", "web-framework", "--web", "web.json"])).toThrow("--output is required");
+  });
+
+  it("JSONを読み込んでSummaryファイルを作成する", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "tachyon-summary-"));
+    const webPath = join(directory, "web.json");
+    const outputPath = join(directory, "nested", "summary.md");
+    await writeFile(webPath, JSON.stringify(webFixture));
+
+    await runSummaryCli(["--suite", "web-framework", "--web", webPath, "--output", outputPath]);
+
+    expect(await readFile(outputPath, "utf8")).toContain("## Web Framework総合ランキング");
   });
 });
