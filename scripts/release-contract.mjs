@@ -213,7 +213,6 @@ export const dryRunReleaseArtifacts = async ({ artifactDir, tag }) => {
         verified.manifest.packages[key].filename,
         "--dry-run",
         "--ignore-scripts",
-        "--provenance",
         "--access",
         "public",
         "--tag",

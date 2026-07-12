@@ -27,7 +27,6 @@ export const publishReleasePackage = async ({ artifactDir, tag, packageKey }) =>
       [
         "publish",
         entry.filename,
-        "--provenance",
         "--access",
         "public",
         "--tag",

@@ -10,7 +10,7 @@ Releases are published from GitHub Actions, not from a local workstation.
 The `Release` workflow installs with the lockfile, builds the package, verifies packaged files, runs `publint`, runs `attw --pack --no-emoji`, checks the per-subpath size budgets, and publishes with:
 
 ```sh
-npm publish --provenance --access public
+npm publish --access public
 ```
 
-The workflow requires an `NPM_TOKEN` repository secret with publish access for the package.
+The workflow requires an `NPM_TOKEN` repository secret with publish access for the package. Because this source repository is private, the workflow intentionally does not request npm provenance; npm rejects provenance bundles from private source repositories.
