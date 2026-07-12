@@ -1,12 +1,17 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 
-export const WEB_FRAMEWORK_CONTRACT_VERSION = 3;
+export const WEB_FRAMEWORK_CONTRACT_VERSION = 4;
 
 export type StreamTiming = {
   ttfb: number;
   complete: number;
   chunkArrivalMs: readonly number[];
+};
+
+export type StreamDistribution = {
+  warmups: number;
+  samples: readonly StreamTiming[];
 };
 
 const hasStreamMarker = (html: string, value: "shell" | "done"): boolean =>
@@ -85,3 +90,24 @@ export const measureStreamSemantics = async (
     request.on("error", reject);
     request.setTimeout(10_000, () => request.destroy(new Error(`Timed out while measuring ${url}`)));
   });
+
+export const measureStreamDistribution = async (
+  url: string,
+  options: { warmups: number; samples: number; minimumChunkGapMs?: number },
+): Promise<StreamDistribution> => {
+  if (!Number.isInteger(options.warmups) || options.warmups < 0) throw new Error("warmups must be a non-negative integer");
+  if (!Number.isInteger(options.samples) || options.samples < 1) throw new Error("samples must be a positive integer");
+  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  try {
+    for (let index = 0; index < options.warmups; index += 1) {
+      await measureStreamSemantics(url, agent, options.minimumChunkGapMs);
+    }
+    const samples: StreamTiming[] = [];
+    for (let index = 0; index < options.samples; index += 1) {
+      samples.push(await measureStreamSemantics(url, agent, options.minimumChunkGapMs));
+    }
+    return { warmups: options.warmups, samples };
+  } finally {
+    agent.destroy();
+  }
+};

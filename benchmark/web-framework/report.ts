@@ -6,6 +6,12 @@ export type WebFrameworkMetric = {
   dynamicLatencyP95Ms: number;
   streamTtfbMs: number;
   streamCompleteMs: number;
+  streamWarmups: number;
+  streamSamples: readonly {
+    ttfb: number;
+    complete: number;
+    chunkArrivalMs: readonly number[];
+  }[];
   clientNavigationMs: number;
   clientBundleBytes: number;
   routeStreamEvidence?: {
@@ -24,6 +30,118 @@ export type WebFrameworkMetric = {
 export type WebFrameworkRankingRow = WebFrameworkMetric & {
   score: number;
   rank: number;
+};
+
+type WebStreamRun = {
+  benchmark: { contractVersion: number };
+  provenance: {
+    git: { commit: string; dirty: boolean; workingTreeSha256: string };
+    runtime: unknown;
+    host: unknown;
+    browser: unknown;
+    dependencies: unknown;
+  };
+  workload: {
+    runId: string;
+    frameworkOrder: readonly string[];
+    smoke: boolean;
+    buildMode: string;
+    durationSeconds: number;
+    connections: number;
+    streamMinimumChunkGapMs: number;
+    frameworks: unknown;
+  };
+  measurements: {
+    metrics: readonly Pick<
+      WebFrameworkMetric,
+      "framework" | "streamCompleteMs" | "streamWarmups" | "streamSamples"
+    >[];
+  };
+};
+
+export type WebStreamAuthority =
+  | { ok: true; ratios: number[]; analysis: RatioAnalysis }
+  | { ok: false; reasons: string[] };
+
+export const analyzeWebStreamRuns = (
+  runs: readonly WebStreamRun[],
+  options: { seed: number; resamples: number },
+): WebStreamAuthority => {
+  const reasons: string[] = [];
+  if (runs.length < 5) reasons.push("at least five fresh-process runs are required");
+  if (new Set(runs.map((run) => run.workload.runId)).size !== runs.length) reasons.push("run IDs must be unique");
+  const compatibilityFor = (run: WebStreamRun): string =>
+    JSON.stringify({
+      git: {
+        commit: run.provenance.git.commit,
+        workingTreeSha256: run.provenance.git.workingTreeSha256,
+      },
+      runtime: run.provenance.runtime,
+      host: run.provenance.host,
+      browser: run.provenance.browser,
+      dependencies: run.provenance.dependencies,
+      workload: {
+        smoke: run.workload.smoke,
+        buildMode: run.workload.buildMode,
+        durationSeconds: run.workload.durationSeconds,
+        connections: run.workload.connections,
+        streamMinimumChunkGapMs: run.workload.streamMinimumChunkGapMs,
+        frameworks: run.workload.frameworks,
+      },
+    });
+  const expectedCompatibility = runs[0] ? compatibilityFor(runs[0]) : "";
+  for (const run of runs) {
+    if (run.benchmark.contractVersion !== 4) reasons.push(`${run.workload.runId}: contract version`);
+    if (run.provenance.git.dirty) reasons.push(`${run.workload.runId}: dirty tree`);
+    if (compatibilityFor(run) !== expectedCompatibility) reasons.push(`${run.workload.runId}: incompatible controls`);
+    for (const metric of run.measurements.metrics) {
+      if (metric.streamWarmups < 5) reasons.push(`${run.workload.runId}: ${metric.framework} warmups`);
+      if (metric.streamSamples.length < 20) reasons.push(`${run.workload.runId}: ${metric.framework} samples`);
+      if (!Number.isFinite(metric.streamCompleteMs) || metric.streamCompleteMs <= 0) {
+        reasons.push(`${run.workload.runId}: ${metric.framework} stream complete`);
+      }
+      for (const sample of metric.streamSamples) {
+        const arrivals = sample.chunkArrivalMs;
+        const chronological = arrivals.every((arrival, index) => index === 0 || arrival >= (arrivals[index - 1] ?? 0));
+        const gap = (arrivals.at(-1) ?? 0) - (arrivals[0] ?? 0);
+        if (
+          !Number.isFinite(sample.ttfb) ||
+          !Number.isFinite(sample.complete) ||
+          sample.ttfb < 0 ||
+          sample.complete < sample.ttfb ||
+          arrivals.length < 2 ||
+          !arrivals.every((arrival) => Number.isFinite(arrival) && arrival >= 0) ||
+          !chronological ||
+          gap < run.workload.streamMinimumChunkGapMs
+        ) {
+          reasons.push(`${run.workload.runId}: ${metric.framework} invalid stream sample`);
+          break;
+        }
+      }
+    }
+  }
+  const frameworks = runs[0]?.workload.frameworkOrder ?? [];
+  for (const framework of frameworks) {
+    const counts = Array(frameworks.length).fill(0) as number[];
+    for (const run of runs) {
+      const position = run.workload.frameworkOrder.indexOf(framework);
+      if (position < 0) reasons.push(`${run.workload.runId}: framework order`);
+      else counts[position] = (counts[position] ?? 0) + 1;
+    }
+    if (Math.max(...counts) - Math.min(...counts) > 1) reasons.push(`${framework}: unbalanced positions`);
+  }
+  if (reasons.length > 0) return { ok: false, reasons: [...new Set(reasons)] };
+  const ratios = runs.map((run) => {
+    const candidate = run.measurements.metrics.find((metric) => metric.framework === "tachyon-dom");
+    const best = Math.min(
+      ...run.measurements.metrics
+        .filter((metric) => metric.framework !== "tachyon-dom")
+        .map((metric) => metric.streamCompleteMs),
+    );
+    if (!candidate || !Number.isFinite(best)) throw new Error("Every run requires Tachyon and a comparison framework");
+    return candidate.streamCompleteMs / best;
+  });
+  return { ok: true, ratios, analysis: analyzeRatios(ratios, options) };
 };
 
 const finitePositive = (value: number): boolean => Number.isFinite(value) && value > 0;
@@ -93,3 +211,4 @@ export const formatWebFrameworkRanking = (rows: readonly WebFrameworkRankingRow[
   }
   return lines.join("\n");
 };
+import { analyzeRatios, type RatioAnalysis } from "../shared/statistical-authority.js";

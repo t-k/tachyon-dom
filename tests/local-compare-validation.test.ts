@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { validateLocalCompareRuns } from "../benchmark/local-compare/validation.js";
+import {
+  validateAuthoritativeLocalCompareRuns,
+  validateLocalCompareRuns,
+} from "../benchmark/local-compare/validation.js";
 
 const scenarioIds = [
   "createRows",
@@ -58,7 +61,45 @@ const run = () => ({
   },
 });
 
+const authoritativeRuns = () =>
+  Array.from({ length: 6 }, (_, index) => {
+    const value = run();
+    value.benchmark.contractVersion = 3;
+    value.workload.iterations = 30;
+    value.workload.warmup = 5;
+    return {
+      ...value,
+      workload: {
+        ...value.workload,
+        runId: `run-${index}`,
+        seed: 17,
+        order: index % 2 === 0 ? [...implementationNames] : [...implementationNames].reverse(),
+        scenarioOrder: [...scenarioIds.slice(index % scenarioIds.length), ...scenarioIds.slice(0, index % scenarioIds.length)],
+      },
+      measurements: {
+        ...value.measurements,
+        summaries: value.measurements.summaries.map((summary) => ({ ...summary, values: Array(30).fill(1) })),
+      },
+    };
+  });
+
 describe("local compare validation", () => {
+  it("accepts balanced contract-v3 fresh-process runs as authoritative", () => {
+    expect(validateAuthoritativeLocalCompareRuns(authoritativeRuns())).toEqual(expect.objectContaining({ ok: true }));
+  });
+
+  it.each([
+    ["historical contract", (runs: ReturnType<typeof authoritativeRuns>) => (runs[0]!.benchmark.contractVersion = 2)],
+    ["too few runs", (runs: ReturnType<typeof authoritativeRuns>) => runs.splice(4)],
+    ["duplicate run id", (runs: ReturnType<typeof authoritativeRuns>) => (runs[1]!.workload.runId = "run-0")],
+    ["too few measured samples", (runs: ReturnType<typeof authoritativeRuns>) => runs[0]!.measurements.summaries[0]!.values.pop()],
+    ["fixed implementation order", (runs: ReturnType<typeof authoritativeRuns>) => runs.forEach((item) => (item.workload.order = [...implementationNames]))],
+  ])("rejects %s as non-authoritative", (_label, mutate) => {
+    const runs = authoritativeRuns();
+    mutate(runs);
+    expect(validateAuthoritativeLocalCompareRuns(runs)).toEqual(expect.objectContaining({ ok: false }));
+  });
+
   it("returns machine-readable verified controls for authoritative runs", () => {
     const result = validateLocalCompareRuns([run(), run()]);
     expect(result.ok).toBe(true);
