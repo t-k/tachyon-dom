@@ -114,7 +114,7 @@ export const analyzeWebStreamRuns = (
     });
   const expectedCompatibility = runs[0] ? compatibilityFor(runs[0]) : "";
   for (const run of runs) {
-    if (run.benchmark.contractVersion !== 4) reasons.push(`${run.workload.runId}: contract version`);
+    if (run.benchmark.contractVersion !== 5) reasons.push(`${run.workload.runId}: contract version`);
     if (run.provenance.git.dirty) reasons.push(`${run.workload.runId}: dirty tree`);
     if (compatibilityFor(run) !== expectedCompatibility) reasons.push(`${run.workload.runId}: incompatible controls`);
     for (const metric of run.measurements.metrics) {

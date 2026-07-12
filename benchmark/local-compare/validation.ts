@@ -296,7 +296,7 @@ export const validateAuthoritativeLocalCompareRuns = (values: readonly unknown[]
     } else {
       invalidFields.push(`${prefix}.manifest.processIdentity`);
     }
-    if (valueAtBenchmarkPath(value, "benchmark.contractVersion") !== 3) {
+    if (valueAtBenchmarkPath(value, "benchmark.contractVersion") !== 4) {
       invalidFields.push(`${prefix}.benchmark.contractVersion`);
     }
     const runId = valueAtBenchmarkPath(value, "workload.runId");

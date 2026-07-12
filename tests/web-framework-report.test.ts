@@ -16,7 +16,7 @@ describe("web framework benchmark report", () => {
     }));
     const frameworks = ["tachyon-dom", "other"];
     const unsignedRuns = Array.from({ length: 8 }, (_, runIndex) => ({
-      benchmark: { contractVersion: 4 },
+      benchmark: { contractVersion: 5 },
       provenance: {
         git: { commit: "commit", dirty: false, workingTreeSha256: "tree" },
         runtime: { node: "v24", platform: "linux", arch: "x64", osRelease: "test" },

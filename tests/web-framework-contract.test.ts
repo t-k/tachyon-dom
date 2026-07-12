@@ -25,7 +25,7 @@ afterEach(async () => {
 
 describe("web framework benchmark contract", () => {
   it("versions and retains every repeated stream sample", async () => {
-    expect(WEB_FRAMEWORK_CONTRACT_VERSION).toBe(4);
+    expect(WEB_FRAMEWORK_CONTRACT_VERSION).toBe(5);
     const valid = await serve((_request, response) => {
       response.write('<main data-stream="shell">Shell');
       setTimeout(() => response.end('<section data-stream="done">Done</section></main>'), 12);

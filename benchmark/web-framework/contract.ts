@@ -1,7 +1,7 @@
 import http from "node:http";
 import { randomUUID } from "node:crypto";
 
-export const WEB_FRAMEWORK_CONTRACT_VERSION = 4;
+export const WEB_FRAMEWORK_CONTRACT_VERSION = 5;
 
 export type StreamTiming = {
   ttfb: number;

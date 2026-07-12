@@ -74,7 +74,7 @@ const run = () => ({
 const authoritativeRuns = () =>
   Array.from({ length: 7 }, (_, index) => {
     const value = run();
-    value.benchmark.contractVersion = 3;
+    value.benchmark.contractVersion = 4;
     value.workload.iterations = 30;
     value.workload.warmup = 5;
     const plan = createLocalRunPlan(implementationNames, scenarioIds, {

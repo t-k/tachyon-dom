@@ -28,7 +28,7 @@ describe("benchmark statistical authority", () => {
 
   it("keeps the shared envelope schema separate from the local benchmark contract", () => {
     expect(LOCAL_COMPARE_ENVELOPE_SCHEMA_VERSION).toBe(2);
-    expect(LOCAL_COMPARE_CONTRACT_VERSION).toBe(3);
+    expect(LOCAL_COMPARE_CONTRACT_VERSION).toBe(4);
   });
 
   it("classifies a stable one-percent-or-better win as meaningful", () => {
