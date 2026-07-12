@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeRatios, balancedOrder } from "../benchmark/shared/statistical-authority";
+import { analyzeRatios, balancedOrder, median, trimmedMean } from "../benchmark/shared/statistical-authority";
 import {
   createLocalRunPlan,
   LOCAL_COMPARE_CONTRACT_VERSION,
@@ -8,6 +8,18 @@ import {
 import { createWebRunPlan } from "../benchmark/web-framework/workload";
 
 describe("benchmark statistical authority", () => {
+  it("derives deterministic statistics from raw samples", () => {
+    expect(median([40, 20, 30])).toBe(30);
+    expect(median([10, 2, 4, 8])).toBe(6);
+    expect(trimmedMean([10, 10, 11, 12, 200], 0.2)).toBe(11);
+  });
+
+  it("rejects invalid raw statistic inputs", () => {
+    expect(() => median([])).toThrow("non-empty");
+    expect(() => median([1, Number.NaN])).toThrow("finite");
+    expect(() => trimmedMean([1, 2], 0.5)).toThrow("trim fraction");
+  });
+
   it("keeps the shared envelope schema separate from the local benchmark contract", () => {
     expect(LOCAL_COMPARE_ENVELOPE_SCHEMA_VERSION).toBe(2);
     expect(LOCAL_COMPARE_CONTRACT_VERSION).toBe(3);

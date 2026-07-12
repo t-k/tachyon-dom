@@ -18,12 +18,29 @@ const createRandom = (seed: number): (() => number) => {
   };
 };
 
-const median = (values: readonly number[]): number => {
+const validateRawValues = (values: readonly number[]): void => {
+  if (values.length === 0) throw new Error("raw samples must be non-empty");
+  if (values.some((value) => !Number.isFinite(value))) throw new Error("raw samples must be finite");
+};
+
+export const median = (values: readonly number[]): number => {
+  validateRawValues(values);
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1
     ? (sorted[middle] as number)
     : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
+};
+
+export const trimmedMean = (values: readonly number[], trimFraction: number): number => {
+  validateRawValues(values);
+  if (!Number.isFinite(trimFraction) || trimFraction < 0 || trimFraction >= 0.5) {
+    throw new Error("trim fraction must be finite and in [0, 0.5)");
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const trimCount = Math.floor(sorted.length * trimFraction);
+  const retained = sorted.slice(trimCount, sorted.length - trimCount);
+  return retained.reduce((total, value) => total + value, 0) / retained.length;
 };
 
 const percentile = (values: readonly number[], fraction: number): number => {
