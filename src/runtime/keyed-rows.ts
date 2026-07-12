@@ -61,6 +61,10 @@ export type KeyedRows<T> = {
   rowAt: (index: number) => HTMLTableRowElement | undefined;
 };
 
+type MoveBeforeTableSection = HTMLTableSectionElement & {
+  moveBefore?: (node: Node, child: Node | null) => void;
+};
+
 const defaultChunks = 50;
 
 const positiveInteger = (name: string, value: number): void => {
@@ -200,15 +204,33 @@ export const createKeyedRows = <T>(options: KeyedRowsOptions<T>): KeyedRows<T> =
         ? (activeElement as HTMLElement)
         : undefined;
     const nextA = rowA.nextSibling;
+    const move = (row: HTMLTableRowElement, before: Node | null): boolean => {
+      const movable = tbody as MoveBeforeTableSection;
+      if (typeof movable.moveBefore === "function") {
+        try {
+          movable.moveBefore(row, before);
+          return true;
+        } catch (error) {
+          if (!(error instanceof DOMException && error.name === "HierarchyRequestError")) {
+            throw error;
+          }
+        }
+      }
+      tbody.insertBefore(row, before);
+      return false;
+    };
     if (nextA === rowB) {
-      tbody.insertBefore(rowB, rowA);
-      restoreFocus?.focus({ preventScroll: true });
+      if (!move(rowB, rowA)) restoreFocus?.focus({ preventScroll: true });
       return;
     }
     const nextB = rowB.nextSibling;
-    tbody.insertBefore(rowB, nextA);
-    tbody.insertBefore(rowA, nextB);
-    restoreFocus?.focus({ preventScroll: true });
+    if (nextB === rowA) {
+      if (!move(rowA, rowB)) restoreFocus?.focus({ preventScroll: true });
+      return;
+    }
+    const nativeA = move(rowB, nextA);
+    const nativeB = move(rowA, nextB);
+    if (!nativeA || !nativeB) restoreFocus?.focus({ preventScroll: true });
   };
 
   const clear = (): void => {
