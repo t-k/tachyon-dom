@@ -181,8 +181,12 @@ const parseLocalCompareResult = (value: unknown): LocalResult => {
 };
 
 export const escapeMarkdownCell = (value: string): string =>
-  value
-    .replace(/[\u0000-\u001f\u007f]/g, " ")
+  [...value]
+    .map((character) => {
+      const codePoint = character.codePointAt(0) as number;
+      return codePoint < 0x20 || codePoint === 0x7f ? " " : character;
+    })
+    .join("")
     .replaceAll("|", "\\|")
     .trim();
 
