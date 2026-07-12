@@ -279,7 +279,9 @@ describe("DX helpers", () => {
     expect(runtimeDocs).toContain("defineTemplate()");
     expect(runtimeDocs).toContain("readEnv()");
     expect(releasingDocs).toContain("npm publish --access public");
-    expect(releasingDocs).not.toContain("npm publish --provenance");
+    expect(releasingDocs).toContain("Trusted Publisher");
+    expect(releasingDocs).toContain("automatically generates provenance");
+    expect(releasingDocs).not.toContain("source repository is private");
   });
 
   it("runs package export/type and size gates in CI and release workflows", async () => {
@@ -315,7 +317,7 @@ describe("DX helpers", () => {
     expect(release).toContain("node scripts/publish-release-package.mjs --artifact-dir release-artifacts");
     expect(release).toContain("--package root");
     expect(release).toContain("--package create");
-    expect(release).not.toContain("id-token: write");
+    expect(release).toContain("id-token: write");
     expect(releaseContract).not.toContain('"--provenance"');
     expect(publisher).toMatch(
       /"publish",\s*entry\.filename,\s*"--access",\s*"public",\s*"--tag",\s*stagingTagFor\(verified\.version\)/,
@@ -1539,8 +1541,14 @@ void chunks;
     expect(workflow).toContain("permissions: {}\n");
     expect(workflow).toContain("group: tachyon-dom-npm-release");
     expect(workflow).toContain("cancel-in-progress: false");
-    expect(workflow).toMatch(/publish:\n\s+needs: verify[\s\S]+permissions:\n\s+contents: read\n\s+steps:/);
+    expect(workflow).toMatch(
+      /publish:\n\s+needs: verify[\s\S]+permissions:\n\s+contents: read\n\s+id-token: write\n\s+steps:/,
+    );
     expect(workflow).toContain("NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}");
+    const finalizerSection = workflow.slice(finalize);
+    const publishSection = workflow.slice(publishJob, finalize);
+    expect(publishSection).not.toContain("NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}");
+    expect(finalizerSection).toContain("NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}");
     expect(workflow).toContain("34e114876b0b11c390a56381ad16ebd13914f8d5");
     expect(workflow).toContain("ea165f8d65b6e75b540449e92b4886f43607fa02");
     expect(workflow).toContain("d3f86a106a0bac45b974a628896c90dbdf5c8093");

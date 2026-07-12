@@ -63,6 +63,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -81,12 +82,8 @@ jobs:
       - run: node scripts/preflight-release-publication.mjs --artifact-dir release-artifacts --tag "$GITHUB_REF_NAME"
 
       - run: node scripts/publish-release-package.mjs --artifact-dir release-artifacts --tag "$GITHUB_REF_NAME" --package root
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - run: node scripts/publish-release-package.mjs --artifact-dir release-artifacts --tag "$GITHUB_REF_NAME" --package create
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - run: node scripts/finalize-release-tags.mjs --artifact-dir release-artifacts --tag "$GITHUB_REF_NAME"
         env:

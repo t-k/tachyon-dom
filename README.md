@@ -318,7 +318,7 @@ The local benchmark prints row-operation timings plus auxiliary metrics for star
 
 `pnpm check:exports` runs `publint --strict` and `attw --pack --no-emoji` against the package exports and declaration files. `pnpm check:size` runs per-subpath size budgets for the root entry, selected runtime helpers including `runtime/signal`, `runtime/list`, `runtime/error-boundary`, the client router, `i18n`, and the server HTML helper. CI runs both gates after `pnpm build` and `pnpm verify:package`.
 
-Version tags matching `v*` publish through GitHub Actions with `npm publish --access public` after the same build, package, exports, and size checks pass. npm provenance is intentionally omitted because this source repository is private.
+Version tags matching `v*` publish through GitHub Actions with npm Trusted Publishing and `npm publish --access public` after the same build, package, exports, and size checks pass. Because both the repository and packages are public, npm automatically generates provenance for these OIDC publishes. Configure the same Trusted Publisher (`t-k/tachyon-dom`, `release.yml`) for both npm packages. The workflow keeps `NPM_TOKEN` only for final npm dist-tag operations.
 
 ## Example
 
