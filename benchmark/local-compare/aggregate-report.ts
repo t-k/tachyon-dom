@@ -1,4 +1,4 @@
-import { analyzeRatios, type AuthorityStatus } from "../shared/statistical-authority.js";
+import { analyzeRatios, trimmedMean, type AuthorityStatus } from "../shared/statistical-authority.js";
 
 type AggregateSummary = {
   id: string;
@@ -9,7 +9,7 @@ type AggregateSummary = {
 };
 
 type AggregateRun = {
-  workload: { candidate: string; implementations: readonly string[] };
+  workload: { candidate: string; implementations: readonly string[]; trimFraction: number };
   measurements: { summaries: readonly AggregateSummary[] };
 };
 
@@ -41,9 +41,13 @@ export const buildAuthoritativeScenarioRows = (
       const competitors = run.measurements.summaries.filter(
         (summary) => summary.id === candidateSummary.id && summary.implementation !== candidate,
       );
-      const best = Math.min(...competitors.map((summary) => summary.trimmedMean));
-      if (!runCandidate || !Number.isFinite(best)) throw new Error(`Incomplete scenario ${candidateSummary.id}`);
-      return stableNumber(runCandidate.trimmedMean / best);
+      if (!runCandidate?.values || competitors.some((summary) => !summary.values)) {
+        throw new Error(`Incomplete raw samples for scenario ${candidateSummary.id}`);
+      }
+      const best = Math.min(
+        ...competitors.map((summary) => trimmedMean(summary.values as readonly number[], run.workload.trimFraction)),
+      );
+      return stableNumber(trimmedMean(runCandidate.values, run.workload.trimFraction) / best);
     });
     const analysis = analyzeRatios(ratios, options);
     return {

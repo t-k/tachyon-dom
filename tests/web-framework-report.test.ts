@@ -39,8 +39,18 @@ describe("web framework benchmark report", () => {
       },
     }));
     expect(analyzeWebStreamRuns(runs, { seed: 7, resamples: 1_000 })).toMatchObject({
+      ok: false,
+      reasons: expect.arrayContaining([expect.stringContaining("stream summary mismatch")]),
+    });
+
+    const consistent = structuredClone(runs);
+    for (const run of consistent) {
+      for (const metric of run.measurements.metrics) metric.streamCompleteMs = 21;
+    }
+    expect(analyzeWebStreamRuns(consistent, { seed: 7, resamples: 1_000 })).toMatchObject({
       ok: true,
-      analysis: { status: "meaningful-win", independentRunCount: 5 },
+      ratios: [1, 1, 1, 1, 1],
+      analysis: { status: "tie-or-loss", independentRunCount: 5 },
     });
 
     const incompatible = structuredClone(runs);

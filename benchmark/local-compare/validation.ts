@@ -1,5 +1,6 @@
 import { compareBenchmarkEnvelopes } from "../provenance.js";
 import { validateBenchmarkEnvelope, valueAtBenchmarkPath } from "../provenance-validation.js";
+import { trimmedMean } from "../shared/statistical-authority.js";
 
 export type Summary = {
   id: string;
@@ -58,6 +59,9 @@ const nonEmptyString = (value: unknown): value is string => typeof value === "st
 const positiveInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) > 0;
 const nonNegativeInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 0;
 const finiteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+const nearlyEqual = (left: number, right: number): boolean =>
+  Math.abs(left - right) <= Math.max(1e-9, 1e-9 * Math.max(Math.abs(left), Math.abs(right)));
 const requiredScenarioIds = new Set([
   "createRows",
   "replaceAllRows",
@@ -328,12 +332,24 @@ export const validateAuthoritativeLocalCompareRuns = (values: readonly unknown[]
     if (Array.isArray(summaries)) {
       for (const [summaryIndex, summaryValue] of summaries.entries()) {
         const summary = isRecord(summaryValue) ? summaryValue : {};
+        const samplesValid =
+          Array.isArray(summary.values) &&
+          summary.values.length >= 30 &&
+          summary.values.every((sample) => finiteNumber(sample) && sample >= 0);
         if (
-          !Array.isArray(summary.values) ||
-          summary.values.length < 30 ||
-          !summary.values.every((sample) => finiteNumber(sample) && sample >= 0)
+          !samplesValid
         ) {
           invalidFields.push(`${prefix}.measurements.summaries[${summaryIndex}].values`);
+        } else {
+          const stored = summary.trimmedMean;
+          const trimFraction = valueAtBenchmarkPath(value, "workload.trimFraction");
+          if (
+            !finiteNumber(stored) ||
+            !finiteNumber(trimFraction) ||
+            !nearlyEqual(stored, trimmedMean(summary.values as number[], trimFraction))
+          ) {
+            invalidFields.push(`${prefix}.measurements.summaries[${summaryIndex}].trimmedMean`);
+          }
         }
       }
     }

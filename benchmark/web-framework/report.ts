@@ -1,3 +1,5 @@
+import { analyzeRatios, median, type RatioAnalysis } from "../shared/statistical-authority.js";
+
 export type WebFrameworkMetric = {
   framework: string;
   staticRequestsPerSecond: number;
@@ -118,6 +120,12 @@ export const analyzeWebStreamRuns = (
           break;
         }
       }
+      if (
+        metric.streamSamples.length > 0 &&
+        Math.abs(metric.streamCompleteMs - median(metric.streamSamples.map((sample) => sample.complete))) > 1e-9
+      ) {
+        reasons.push(`${run.workload.runId}: ${metric.framework} stream summary mismatch`);
+      }
     }
   }
   const frameworks = runs[0]?.workload.frameworkOrder ?? [];
@@ -136,10 +144,10 @@ export const analyzeWebStreamRuns = (
     const best = Math.min(
       ...run.measurements.metrics
         .filter((metric) => metric.framework !== "tachyon-dom")
-        .map((metric) => metric.streamCompleteMs),
+        .map((metric) => median(metric.streamSamples.map((sample) => sample.complete))),
     );
     if (!candidate || !Number.isFinite(best)) throw new Error("Every run requires Tachyon and a comparison framework");
-    return candidate.streamCompleteMs / best;
+    return median(candidate.streamSamples.map((sample) => sample.complete)) / best;
   });
   return { ok: true, ratios, analysis: analyzeRatios(ratios, options) };
 };
@@ -211,4 +219,3 @@ export const formatWebFrameworkRanking = (rows: readonly WebFrameworkRankingRow[
   }
   return lines.join("\n");
 };
-import { analyzeRatios, type RatioAnalysis } from "../shared/statistical-authority.js";

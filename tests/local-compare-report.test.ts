@@ -23,11 +23,11 @@ import { buildAuthoritativeScenarioRows } from "../benchmark/local-compare/aggre
 describe("local compare report", () => {
   it("reports a confidence-bounded stable scenario win from independent runs", () => {
     const runs = Array.from({ length: 5 }, () => ({
-      workload: { candidate: "tachyon-dom", implementations: ["competitor", "tachyon-dom"] },
+      workload: { candidate: "tachyon-dom", implementations: ["competitor", "tachyon-dom"], trimFraction: 0.2 },
       measurements: {
         summaries: [
-          { id: "createRows", label: "create rows", implementation: "competitor", trimmedMean: 10 },
-          { id: "createRows", label: "create rows", implementation: "tachyon-dom", trimmedMean: 9.8 },
+          { id: "createRows", label: "create rows", implementation: "competitor", trimmedMean: 10, values: Array(30).fill(10) },
+          { id: "createRows", label: "create rows", implementation: "tachyon-dom", trimmedMean: 9.8, values: Array(30).fill(9.8) },
         ],
       },
     }));
@@ -40,9 +40,26 @@ describe("local compare report", () => {
         medianRatio: 0.98,
         oneSided95UpperBound: 0.98,
         independentRunCount: 5,
-        sampleCountPerRun: 1,
+        sampleCountPerRun: 30,
       },
     ]);
+  });
+
+  it("derives authority ratios from raw values instead of forged summaries", () => {
+    const runs = Array.from({ length: 5 }, () => ({
+      workload: { candidate: "tachyon-dom", implementations: ["competitor", "tachyon-dom"], trimFraction: 0.2 },
+      measurements: {
+        summaries: [
+          { id: "createRows", label: "create rows", implementation: "competitor", trimmedMean: 20, values: Array(30).fill(20) },
+          { id: "createRows", label: "create rows", implementation: "tachyon-dom", trimmedMean: 9, values: Array(30).fill(21) },
+        ],
+      },
+    }));
+
+    expect(buildAuthoritativeScenarioRows(runs, { seed: 7, resamples: 1_000 })[0]).toMatchObject({
+      medianRatio: 1.05,
+      status: "tie-or-loss",
+    });
   });
 
   it("summarizes values with mean and median", () => {

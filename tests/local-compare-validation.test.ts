@@ -88,6 +88,15 @@ describe("local compare validation", () => {
     expect(validateAuthoritativeLocalCompareRuns(authoritativeRuns())).toEqual(expect.objectContaining({ ok: true }));
   });
 
+  it("rejects a stored trimmed mean that contradicts raw values", () => {
+    const runs = authoritativeRuns();
+    runs[0]!.measurements.summaries[0]!.trimmedMean = 0.5;
+    const result = validateAuthoritativeLocalCompareRuns(runs);
+    expect(result).toEqual(expect.objectContaining({ ok: false }));
+    if (result.ok) throw new Error("Expected invalid run");
+    expect(result.invalidFields).toContain("runs[0].measurements.summaries[0].trimmedMean");
+  });
+
   it.each([
     ["historical contract", (runs: ReturnType<typeof authoritativeRuns>) => (runs[0]!.benchmark.contractVersion = 2)],
     ["too few runs", (runs: ReturnType<typeof authoritativeRuns>) => runs.splice(4)],
