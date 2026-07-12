@@ -74,6 +74,20 @@ export type WebStreamAuthority =
   | { ok: true; ratios: number[]; analysis: RatioAnalysis }
   | { ok: false; reasons: string[] };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const configuredFrameworkNames = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.flatMap((framework) => {
+        if (typeof framework === "string" && framework.length > 0) return [framework];
+        if (isRecord(framework) && typeof framework.name === "string" && framework.name.length > 0) {
+          return [framework.name];
+        }
+        return [];
+      })
+    : [];
+
 export const analyzeWebStreamRuns = (
   runs: readonly WebStreamRun[],
   options: { seed: number; resamples: number },
@@ -83,6 +97,10 @@ export const analyzeWebStreamRuns = (
   if (new Set(runs.map((run) => run.workload.runId)).size !== runs.length) reasons.push("run IDs must be unique");
   if (new Set(runs.map((run) => run.workload.runIndex)).size !== runs.length) reasons.push("run indexes must be unique");
   if (new Set(runs.map((run) => run.workload.seed)).size !== 1) reasons.push("authority seed must be identical");
+  const frameworks = configuredFrameworkNames(runs[0]?.workload.frameworks);
+  if (frameworks.length < 2 || new Set(frameworks).size !== frameworks.length) {
+    reasons.push("configured framework list is invalid");
+  }
   const processIdentities = runs.map((run, index) => {
     if (!verifyArtifactManifest(run)) reasons.push(`${run.workload.runId}: invalid artifact manifest`);
     const manifest = (run as unknown as { manifest?: { pid?: unknown; processStartedAt?: unknown } }).manifest;
@@ -115,8 +133,47 @@ export const analyzeWebStreamRuns = (
   const expectedCompatibility = runs[0] ? compatibilityFor(runs[0]) : "";
   for (const run of runs) {
     if (run.benchmark.contractVersion !== 5) reasons.push(`${run.workload.runId}: contract version`);
-    if (run.provenance.git.dirty) reasons.push(`${run.workload.runId}: dirty tree`);
+    if (
+      run.provenance.git.dirty !== false ||
+      typeof run.provenance.git.commit !== "string" ||
+      run.provenance.git.commit.length === 0 ||
+      typeof run.provenance.git.workingTreeSha256 !== "string" ||
+      run.provenance.git.workingTreeSha256.length === 0 ||
+      !isRecord(run.provenance.runtime) ||
+      !isRecord(run.provenance.host) ||
+      !isRecord(run.provenance.browser) ||
+      !isRecord(run.provenance.dependencies) ||
+      typeof run.workload.runId !== "string" ||
+      run.workload.runId.length === 0 ||
+      !Number.isInteger(run.workload.runIndex) ||
+      run.workload.runIndex < 0 ||
+      !Number.isInteger(run.workload.seed) ||
+      typeof run.workload.smoke !== "boolean" ||
+      typeof run.workload.buildMode !== "string" ||
+      run.workload.buildMode.length === 0 ||
+      !Number.isFinite(run.workload.durationSeconds) ||
+      run.workload.durationSeconds <= 0 ||
+      !Number.isInteger(run.workload.connections) ||
+      run.workload.connections <= 0 ||
+      !Number.isFinite(run.workload.streamMinimumChunkGapMs) ||
+      run.workload.streamMinimumChunkGapMs < 0
+    ) {
+      reasons.push(`${run.workload.runId}: missing or invalid required controls`);
+    }
+    if (run.provenance.git.dirty !== false) reasons.push(`${run.workload.runId}: dirty tree`);
     if (compatibilityFor(run) !== expectedCompatibility) reasons.push(`${run.workload.runId}: incompatible controls`);
+    const runFrameworks = configuredFrameworkNames(run.workload.frameworks);
+    if (JSON.stringify(runFrameworks) !== JSON.stringify(frameworks)) {
+      reasons.push(`${run.workload.runId}: configured frameworks mismatch`);
+    }
+    const metricNames = run.measurements.metrics.map((metric) => metric.framework);
+    if (
+      metricNames.length !== frameworks.length ||
+      new Set(metricNames).size !== metricNames.length ||
+      frameworks.some((framework) => !metricNames.includes(framework))
+    ) {
+      reasons.push(`${run.workload.runId}: metrics must contain every configured framework exactly once`);
+    }
     for (const metric of run.measurements.metrics) {
       if (metric.streamWarmups < 5) reasons.push(`${run.workload.runId}: ${metric.framework} warmups`);
       if (metric.streamSamples.length < 20) reasons.push(`${run.workload.runId}: ${metric.framework} samples`);
@@ -149,17 +206,6 @@ export const analyzeWebStreamRuns = (
       }
     }
   }
-  const configuredFrameworks = runs[0]?.workload.frameworks;
-  const frameworks = Array.isArray(configuredFrameworks)
-    ? configuredFrameworks.flatMap((framework) => {
-        if (typeof framework === "string") return [framework];
-        if (typeof framework === "object" && framework !== null && "name" in framework && typeof framework.name === "string") {
-          return [framework.name];
-        }
-        return [];
-      })
-    : [];
-  if (frameworks.length === 0) reasons.push("configured framework list is invalid");
   if (!validateCompletePositionCycles(runs.map((run) => run.workload.frameworkOrder), frameworks)) {
     reasons.push("framework orders must contain complete position cycles");
   }

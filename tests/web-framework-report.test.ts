@@ -79,6 +79,24 @@ describe("web framework benchmark report", () => {
     const invalidSamples = structuredClone(runs);
     invalidSamples[2]!.measurements.metrics[0]!.streamSamples[0]!.chunkArrivalMs = [1, 5];
     expect(analyzeWebStreamRuns(invalidSamples, { seed: 7, resamples: 1_000 })).toMatchObject({ ok: false });
+
+    const missingDirtyValues = structuredClone(consistentValues);
+    for (const run of missingDirtyValues) delete (run.provenance.git as { dirty?: boolean }).dirty;
+    expect(analyzeWebStreamRuns(signRuns(missingDirtyValues), { seed: 7, resamples: 1_000 })).toMatchObject({
+      ok: false,
+    });
+
+    const missingMetricValues = structuredClone(consistentValues);
+    for (const run of missingMetricValues) run.measurements.metrics.pop();
+    expect(analyzeWebStreamRuns(signRuns(missingMetricValues), { seed: 7, resamples: 1_000 })).toMatchObject({
+      ok: false,
+    });
+
+    const duplicateMetricValues = structuredClone(consistentValues);
+    for (const run of duplicateMetricValues) run.measurements.metrics.push(structuredClone(run.measurements.metrics[0]!));
+    expect(analyzeWebStreamRuns(signRuns(duplicateMetricValues), { seed: 7, resamples: 1_000 })).toMatchObject({
+      ok: false,
+    });
   });
 
   it("ranks frameworks by normalized throughput and latency geomean", () => {
