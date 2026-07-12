@@ -5,6 +5,7 @@ import {
   scoreWebFrameworkMetrics,
 } from "../benchmark/web-framework/report";
 import { createWebRunPlan } from "../benchmark/web-framework/workload";
+import { attachArtifactManifest } from "../benchmark/shared/artifact-manifest";
 
 describe("web framework benchmark report", () => {
   it("analyzes stream completion ratios across independent contract-v4 runs", () => {
@@ -14,7 +15,7 @@ describe("web framework benchmark report", () => {
       chunkArrivalMs: [1, 21],
     }));
     const frameworks = ["tachyon-dom", "other"];
-    const runs = Array.from({ length: 8 }, (_, runIndex) => ({
+    const unsignedRuns = Array.from({ length: 8 }, (_, runIndex) => ({
       benchmark: { contractVersion: 4 },
       provenance: {
         git: { commit: "commit", dirty: false, workingTreeSha256: "tree" },
@@ -42,15 +43,24 @@ describe("web framework benchmark report", () => {
         ],
       },
     }));
+    const signRuns = <T extends Record<string, unknown>>(values: T[]) =>
+      values.map((value, index) =>
+        attachArtifactManifest(value, {
+          pid: 2_000 + index,
+          processStartedAt: new Date(index * 1_000).toISOString(),
+        }),
+      );
+    const runs = signRuns(unsignedRuns);
     expect(analyzeWebStreamRuns(runs, { seed: 7, resamples: 1_000 })).toMatchObject({
       ok: false,
       reasons: expect.arrayContaining([expect.stringContaining("stream summary mismatch")]),
     });
 
-    const consistent = structuredClone(runs);
-    for (const run of consistent) {
+    const consistentValues = structuredClone(unsignedRuns);
+    for (const run of consistentValues) {
       for (const metric of run.measurements.metrics) metric.streamCompleteMs = 21;
     }
+    const consistent = signRuns(consistentValues);
     expect(analyzeWebStreamRuns(consistent, { seed: 7, resamples: 1_000 })).toMatchObject({
       ok: true,
       ratios: [1, 1, 1, 1, 1, 1, 1, 1],

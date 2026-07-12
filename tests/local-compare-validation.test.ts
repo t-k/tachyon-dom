@@ -5,6 +5,7 @@ import {
   validateLocalCompareRuns,
 } from "../benchmark/local-compare/validation.js";
 import { createLocalRunPlan } from "../benchmark/local-compare/run-plan.js";
+import { attachArtifactManifest } from "../benchmark/shared/artifact-manifest.js";
 
 const scenarioIds = [
   "createRows",
@@ -81,7 +82,7 @@ const authoritativeRuns = () =>
       runIndex: index,
       seed: 17,
     });
-    return {
+    return attachArtifactManifest({
       ...value,
       workload: {
         ...value.workload,
@@ -95,7 +96,7 @@ const authoritativeRuns = () =>
         ...value.measurements,
         summaries: value.measurements.summaries.map((summary) => ({ ...summary, values: Array(30).fill(1) })),
       },
-    };
+    }, { pid: 1_000 + index, processStartedAt: new Date(index * 1_000).toISOString() });
   });
 
 describe("local compare validation", () => {

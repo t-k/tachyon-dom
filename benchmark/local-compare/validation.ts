@@ -2,6 +2,7 @@ import { compareBenchmarkEnvelopes } from "../provenance.js";
 import { validateBenchmarkEnvelope, valueAtBenchmarkPath } from "../provenance-validation.js";
 import { trimmedMean, validateCompletePositionCycles } from "../shared/statistical-authority.js";
 import { createLocalRunPlan } from "./run-plan.js";
+import { verifyArtifactManifest } from "../shared/artifact-manifest.js";
 
 export type Summary = {
   id: string;
@@ -280,12 +281,21 @@ export const validateAuthoritativeLocalCompareRuns = (values: readonly unknown[]
   const invalidFields: string[] = [];
   if (values.length < 5) invalidFields.push("runs");
   const runIds: string[] = [];
+  const processIdentities: string[] = [];
   const runIndices: number[] = [];
   const seeds: number[] = [];
   const implementationOrders: string[][] = [];
   const scenarioOrders: string[][] = [];
   for (const [index, value] of values.entries()) {
     const prefix = `runs[${index}]`;
+    if (!verifyArtifactManifest(value)) invalidFields.push(`${prefix}.manifest.sha256`);
+    const pid = valueAtBenchmarkPath(value, "manifest.pid");
+    const processStartedAt = valueAtBenchmarkPath(value, "manifest.processStartedAt");
+    if (Number.isInteger(pid) && nonEmptyString(processStartedAt)) {
+      processIdentities.push(`${pid}:${processStartedAt}`);
+    } else {
+      invalidFields.push(`${prefix}.manifest.processIdentity`);
+    }
     if (valueAtBenchmarkPath(value, "benchmark.contractVersion") !== 3) {
       invalidFields.push(`${prefix}.benchmark.contractVersion`);
     }
@@ -336,6 +346,7 @@ export const validateAuthoritativeLocalCompareRuns = (values: readonly unknown[]
     }
   }
   if (new Set(runIds).size !== runIds.length) invalidFields.push("runs.workload.runId");
+  if (new Set(processIdentities).size !== processIdentities.length) invalidFields.push("runs.manifest.processIdentity");
   if (values.length < 7) invalidFields.push("runs");
   if (new Set(runIndices).size !== runIndices.length) invalidFields.push("runs.workload.runIndex");
   if (new Set(seeds).size !== 1) invalidFields.push("runs.workload.seed");

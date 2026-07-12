@@ -5,6 +5,7 @@ import {
   type RatioAnalysis,
 } from "../shared/statistical-authority.js";
 import { createWebRunPlan } from "./workload.js";
+import { verifyArtifactManifest } from "../shared/artifact-manifest.js";
 
 export type WebFrameworkMetric = {
   framework: string;
@@ -82,6 +83,16 @@ export const analyzeWebStreamRuns = (
   if (new Set(runs.map((run) => run.workload.runId)).size !== runs.length) reasons.push("run IDs must be unique");
   if (new Set(runs.map((run) => run.workload.runIndex)).size !== runs.length) reasons.push("run indexes must be unique");
   if (new Set(runs.map((run) => run.workload.seed)).size !== 1) reasons.push("authority seed must be identical");
+  const processIdentities = runs.map((run, index) => {
+    if (!verifyArtifactManifest(run)) reasons.push(`${run.workload.runId}: invalid artifact manifest`);
+    const manifest = (run as unknown as { manifest?: { pid?: unknown; processStartedAt?: unknown } }).manifest;
+    if (!Number.isInteger(manifest?.pid) || typeof manifest?.processStartedAt !== "string") {
+      reasons.push(`${run.workload.runId}: invalid process identity`);
+      return `invalid-${index}`;
+    }
+    return `${manifest.pid}:${manifest.processStartedAt}`;
+  });
+  if (new Set(processIdentities).size !== processIdentities.length) reasons.push("process identities must be unique");
   const compatibilityFor = (run: WebStreamRun): string =>
     JSON.stringify({
       git: {
