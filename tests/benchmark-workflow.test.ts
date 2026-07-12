@@ -16,9 +16,10 @@ describe("benchmark GitHub Actions workflow", () => {
   it("選択したベンチマークを実行してSummaryへ追記する", async () => {
     const workflow = await readFile(".github/workflows/benchmarks.yml", "utf8");
 
-    expect(workflow).toContain("pnpm bench:web-framework -- --output");
-    expect(workflow).toContain("pnpm bench:local:stable -- --output");
-    expect(workflow).toContain('pnpm bench:summary -- "${summary_args[@]}"');
+    expect(workflow).toContain("pnpm bench:web-framework --output");
+    expect(workflow).toContain("pnpm bench:local:stable --output");
+    expect(workflow).toContain('pnpm bench:summary "${summary_args[@]}"');
+    expect(workflow).not.toContain("pnpm bench:web-framework -- --output");
     expect(workflow).toContain('cat "$RESULT_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"');
     expect(workflow).toContain("playwright install --with-deps chromium");
   });

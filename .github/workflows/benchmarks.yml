@@ -54,11 +54,11 @@ jobs:
 
       - name: Run Web Framework benchmark
         if: ${{ inputs.suite == 'all' || inputs.suite == 'web-framework' }}
-        run: pnpm bench:web-framework -- --output "$RESULT_DIR/web-framework.json"
+        run: pnpm bench:web-framework --output "$RESULT_DIR/web-framework.json"
 
       - name: Run js-framework-benchmark comparison
         if: ${{ inputs.suite == 'all' || inputs.suite == 'js-framework' }}
-        run: pnpm bench:local:stable -- --output "$RESULT_DIR/js-framework.json"
+        run: pnpm bench:local:stable --output "$RESULT_DIR/js-framework.json"
 
       - name: Write benchmark summary
         shell: bash
@@ -70,7 +70,7 @@ jobs:
           if [ "${{ inputs.suite }}" = "all" ] || [ "${{ inputs.suite }}" = "js-framework" ]; then
             summary_args+=(--local "$RESULT_DIR/js-framework.json")
           fi
-          pnpm bench:summary -- "${summary_args[@]}"
+          pnpm bench:summary "${summary_args[@]}"
           cat "$RESULT_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload benchmark results
