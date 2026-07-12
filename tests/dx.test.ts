@@ -240,6 +240,15 @@ describe("DX helpers", () => {
     expect(packageJson.keywords).toEqual(["compiler", "runtime", "ssr", "templates", "ui"]);
     expect(packageJson.engines?.node).toBe(">=24");
     expect(packageJson.publishConfig).toEqual({ access: "public" });
+
+    const createPackageJson = JSON.parse(
+      await readFile("packages/create-tachyon-dom/package.json", "utf8"),
+    ) as { repository?: { type?: string; url?: string }; publishConfig?: { access?: string } };
+    expect(createPackageJson.repository).toEqual({
+      type: "git",
+      url: "git+https://github.com/t-k/tachyon-dom.git",
+    });
+    expect(createPackageJson.publishConfig).toEqual({ access: "public" });
   });
 
   it("keeps example build output outside the published dist directory", async () => {

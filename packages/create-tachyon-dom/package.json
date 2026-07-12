@@ -4,6 +4,10 @@
   "private": false,
   "description": "Create a Tachyon DOM starter app.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/t-k/tachyon-dom.git"
+  },
   "type": "module",
   "bin": {
     "create-tachyon-dom": "./dist/index.js"

@@ -10,7 +10,15 @@ const execFile = promisify(execFileCallback);
 const releaseTagPattern =
   /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?$/;
 
+const expectedRepository = {
+  type: "git",
+  url: "git+https://github.com/t-k/tachyon-dom.git",
+};
+
 const failure = (error) => ({ ok: false, error });
+
+const hasExpectedRepository = (packageJson) =>
+  packageJson?.repository?.type === expectedRepository.type && packageJson.repository.url === expectedRepository.url;
 
 export const verifyReleaseIdentity = ({ tag, rootPackage, createPackage }) => {
   if (typeof tag !== "string" || !releaseTagPattern.test(tag)) {
@@ -25,6 +33,9 @@ export const verifyReleaseIdentity = ({ tag, rootPackage, createPackage }) => {
   }
   if (createPackage.dependencies?.["tachyon-dom"] !== version) {
     return failure(`The create-tachyon-dom tachyon-dom dependency must equal ${version} exactly.`);
+  }
+  if (!hasExpectedRepository(rootPackage) || !hasExpectedRepository(createPackage)) {
+    return failure("Both release packages must declare repository metadata for t-k/tachyon-dom.");
   }
   return { ok: true, version, npmTag: version.includes("-") ? "next" : "latest" };
 };
