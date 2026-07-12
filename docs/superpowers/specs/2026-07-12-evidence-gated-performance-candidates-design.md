@@ -48,7 +48,7 @@ Use `ParentNode.moveBefore()` only when the concrete `tbody` exposes a callable 
 
 The native path performs atomic state-preserving moves. The fallback retains the existing focus restoration behavior because traditional re-insertion can reset focus, iframe state, animation state, and selection state. A native call that throws `HierarchyRequestError` falls back to `insertBefore()`, matching the existing `runtime/list.ts` policy. Other exceptions propagate.
 
-The swap algorithm must handle forward adjacent, reverse adjacent, distant, same-index, and out-of-range cases without self-insertion. Native and fallback paths preserve row identity, order, selection class, input value, delegated listeners, active element, text selection range, and the expected blur/focus event counts. The fallback prevents focus restoration from changing the scroll position. On the native path, a focused moved element must remain visible; the user agent may adjust an ancestor's scroll position to keep that element visible. When no moved element is focused, the native path preserves the scroll position.
+The swap algorithm must handle forward adjacent, reverse adjacent, distant, same-index, and out-of-range cases without self-insertion. Native and fallback paths preserve row identity, order, selection class, input value, delegated listeners, active element, text selection range, scroll position, and blur/focus event counts.
 
 Adopt this candidate when either:
 

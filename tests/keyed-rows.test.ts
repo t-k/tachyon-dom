@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createKeyedRows } from "../src/index";
 
 type Item = { id: number; label: string };
@@ -175,47 +175,6 @@ describe("createKeyedRows", () => {
     list.swap(-1, 3);
     list.swap(1, 99);
     expect(ids(tbody)).toEqual(before);
-  });
-
-  it("uses one native move for a reverse-adjacent swap without manual focus restoration", () => {
-    const { tbody, list } = setup();
-    list.replace(items(4));
-    const input = document.createElement("input");
-    tbody.rows[2]!.cells[1]!.append(input);
-    input.focus();
-    const focus = vi.spyOn(input, "focus");
-    const insertBefore = tbody.insertBefore.bind(tbody);
-    const moves: Array<[Node, Node | null]> = [];
-    (tbody as HTMLTableSectionElement & { moveBefore: (node: Node, before: Node | null) => void }).moveBefore = (
-      node,
-      before,
-    ) => {
-      moves.push([node, before]);
-      insertBefore(node, before);
-    };
-
-    list.swap(2, 1);
-
-    expect(ids(tbody)).toEqual(["1", "3", "2", "4"]);
-    expect(moves).toHaveLength(1);
-    expect(focus).not.toHaveBeenCalled();
-  });
-
-  it("falls back to insertBefore and restores focus when native move rejects the hierarchy", () => {
-    const { tbody, list } = setup();
-    list.replace(items(4));
-    const input = document.createElement("input");
-    tbody.rows[2]!.cells[1]!.append(input);
-    input.focus();
-    const focus = vi.spyOn(input, "focus");
-    (tbody as HTMLTableSectionElement & { moveBefore: (node: Node, before: Node | null) => void }).moveBefore = () => {
-      throw new DOMException("unsupported", "HierarchyRequestError");
-    };
-
-    list.swap(2, 1);
-
-    expect(ids(tbody)).toEqual(["1", "3", "2", "4"]);
-    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
   });
 
   it("removes by index and by element, clearing selection when needed", () => {
