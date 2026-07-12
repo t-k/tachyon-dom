@@ -1,0 +1,84 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Benchmark suite to run
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - web-framework
+          - js-framework
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          package-manager-cache: false
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Prepare output directory
+        shell: bash
+        run: |
+          result_dir="$RUNNER_TEMP/tachyon-dom-benchmarks-${{ github.run_id }}"
+          mkdir -p "$result_dir"
+          echo "RESULT_DIR=$result_dir" >> "$GITHUB_ENV"
+
+      - name: Run Web Framework benchmark
+        if: ${{ inputs.suite == 'all' || inputs.suite == 'web-framework' }}
+        run: pnpm bench:web-framework -- --output "$RESULT_DIR/web-framework.json"
+
+      - name: Run js-framework-benchmark comparison
+        if: ${{ inputs.suite == 'all' || inputs.suite == 'js-framework' }}
+        run: pnpm bench:local:stable -- --output "$RESULT_DIR/js-framework.json"
+
+      - name: Write benchmark summary
+        shell: bash
+        run: |
+          summary_args=(--suite "${{ inputs.suite }}" --output "$RESULT_DIR/summary.md")
+          if [ "${{ inputs.suite }}" = "all" ] || [ "${{ inputs.suite }}" = "web-framework" ]; then
+            summary_args+=(--web "$RESULT_DIR/web-framework.json")
+          fi
+          if [ "${{ inputs.suite }}" = "all" ] || [ "${{ inputs.suite }}" = "js-framework" ]; then
+            summary_args+=(--local "$RESULT_DIR/js-framework.json")
+          fi
+          pnpm bench:summary -- "${summary_args[@]}"
+          cat "$RESULT_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}-${{ inputs.suite }}
+          path: |
+            ${{ env.RESULT_DIR }}
+            benchmark/web-framework/results/logs
+          if-no-files-found: warn
