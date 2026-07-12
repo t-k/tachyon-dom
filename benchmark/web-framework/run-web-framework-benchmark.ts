@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
 import { chromium, type Browser, type Page } from "playwright";
 import { collectBenchmarkProvenance, collectDependencyVersions } from "../provenance";
+import { attachArtifactManifest } from "../shared/artifact-manifest";
 import { formatWebFrameworkRanking, scoreWebFrameworkMetrics, type WebFrameworkMetric } from "./report";
 import {
   createDynamicChallengeIds,
@@ -612,44 +613,47 @@ const run = async (): Promise<void> => {
     browser: { name: "chromium", version: browserVersion },
   });
   await mkdir(path.dirname(outputPath), { recursive: true });
+  const artifact = attachArtifactManifest(
+    {
+      schemaVersion: 2,
+      benchmark: { name: "web-framework", contractVersion: WEB_FRAMEWORK_CONTRACT_VERSION },
+      provenance,
+      workload: {
+        runId: plan.runId,
+        runIndex: plan.runIndex,
+        seed: plan.seed,
+        frameworkOrder: plan.frameworkOrder,
+        smoke: options.smoke,
+        buildMode: "production",
+        durationSeconds,
+        connections,
+        dynamicChallengeIds,
+        streamMinimumChunkGapMs: 10,
+        streamImplementations: { "tachyon-dom": "tachyon-route-stream-node-adapter" },
+        frameworks: frameworks.map((framework) => ({
+          name: framework.name,
+          cwd: framework.cwd,
+          build: framework.build ?? null,
+          start: framework.start(0),
+          dependencies: dependencies[framework.name],
+        })),
+      },
+      measurements: {
+        legacyDynamicAndStreamRankings: "non-authoritative",
+        metrics,
+        ranking,
+        table,
+        tachyonRouteStreamEvidence: metrics.find((metric) => metric.framework === "tachyon-dom")?.routeStreamEvidence,
+      },
+    },
+    {
+      pid: process.pid,
+      processStartedAt: new Date(Date.now() - process.uptime() * 1_000).toISOString(),
+    },
+  );
   await writeFile(
     outputPath,
-    `${JSON.stringify(
-      {
-        schemaVersion: 2,
-        benchmark: { name: "web-framework", contractVersion: WEB_FRAMEWORK_CONTRACT_VERSION },
-        provenance,
-        workload: {
-          runId: plan.runId,
-          runIndex: plan.runIndex,
-          seed: plan.seed,
-          frameworkOrder: plan.frameworkOrder,
-          smoke: options.smoke,
-          buildMode: "production",
-          durationSeconds,
-          connections,
-          dynamicChallengeIds,
-          streamMinimumChunkGapMs: 10,
-          streamImplementations: { "tachyon-dom": "tachyon-route-stream-node-adapter" },
-          frameworks: frameworks.map((framework) => ({
-            name: framework.name,
-            cwd: framework.cwd,
-            build: framework.build ?? null,
-            start: framework.start(0),
-            dependencies: dependencies[framework.name],
-          })),
-        },
-        measurements: {
-          legacyDynamicAndStreamRankings: "non-authoritative",
-          metrics,
-          ranking,
-          table,
-          tachyonRouteStreamEvidence: metrics.find((metric) => metric.framework === "tachyon-dom")?.routeStreamEvidence,
-        },
-      },
-      null,
-      2,
-    )}\n`,
+    `${JSON.stringify(artifact, null, 2)}\n`,
   );
   console.log("");
   console.log(table);

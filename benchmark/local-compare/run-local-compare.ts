@@ -9,6 +9,7 @@ import solid from "vite-plugin-solid";
 import { build, createServer, preview, type PreviewServer, type ViteDevServer } from "vite";
 import { err, ok, type Result } from "../../src/result";
 import { collectBenchmarkProvenance, collectDependencyVersions } from "../provenance";
+import { attachArtifactManifest } from "../shared/artifact-manifest";
 import {
   buildAuxiliaryMetricMatrix,
   buildScenarioMatrix,
@@ -730,19 +731,17 @@ const writeResults = async (
 ): Promise<string> => {
   const outputPath = path.resolve(projectRoot, options.output ?? defaultOutputPath());
   await mkdir(path.dirname(outputPath), { recursive: true });
-  await writeFile(
-    outputPath,
-    `${JSON.stringify(
-      {
-        schemaVersion: LOCAL_COMPARE_ENVELOPE_SCHEMA_VERSION,
-        benchmark: { name: "local-compare", contractVersion: LOCAL_COMPARE_CONTRACT_VERSION },
-        provenance: await collectBenchmarkProvenance({
-          cwd: projectRoot,
-          argv: [process.execPath, ...process.argv.slice(1)],
-          dependencies: await collectDependencyVersions(projectRoot, ["playwright", "vite", "marko", "solid-js"]),
-          browser: { name: "chromium", version: browserVersion },
-        }),
-        workload: {
+  const artifact = attachArtifactManifest(
+    {
+      schemaVersion: LOCAL_COMPARE_ENVELOPE_SCHEMA_VERSION,
+      benchmark: { name: "local-compare", contractVersion: LOCAL_COMPARE_CONTRACT_VERSION },
+      provenance: await collectBenchmarkProvenance({
+        cwd: projectRoot,
+        argv: [process.execPath, ...process.argv.slice(1)],
+        dependencies: await collectDependencyVersions(projectRoot, ["playwright", "vite", "marko", "solid-js"]),
+        browser: { name: "chromium", version: browserVersion },
+      }),
+      workload: {
         runId: plan.runId,
         seed: plan.seed,
         runIndex: plan.runIndex,
@@ -756,8 +755,8 @@ const writeResults = async (
         baseline: "vanillajs-lite-keyed",
         candidate: "tachyon-dom",
         implementations: implementations.map((implementation) => implementation.name),
-        },
-        measurements: {
+      },
+      measurements: {
         summaries,
         auxiliaryMetrics,
         tables: {
@@ -765,11 +764,16 @@ const writeResults = async (
           auxiliary: auxiliaryTable,
           directComparisons: directComparisonTable,
         },
-        },
       },
-      null,
-      2,
-    )}\n`,
+    },
+    {
+      pid: process.pid,
+      processStartedAt: new Date(Date.now() - process.uptime() * 1_000).toISOString(),
+    },
+  );
+  await writeFile(
+    outputPath,
+    `${JSON.stringify(artifact, null, 2)}\n`,
   );
   return outputPath;
 };

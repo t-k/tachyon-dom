@@ -4,6 +4,8 @@ import {
   validateAuthoritativeLocalCompareRuns,
   validateLocalCompareRuns,
 } from "../benchmark/local-compare/validation.js";
+import { createLocalRunPlan } from "../benchmark/local-compare/run-plan.js";
+import { attachArtifactManifest } from "../benchmark/shared/artifact-manifest.js";
 
 const scenarioIds = [
   "createRows",
@@ -27,7 +29,15 @@ const auxiliaryMetricDefinitions = [
   ["localSourceSize", "kib"],
   ["entrySourceSize", "kib"],
 ] as const;
-const implementationNames = ["vanillajs-lite-keyed", "tachyon-dom"] as const;
+const implementationNames = [
+  "vanillajs-lite-keyed",
+  "vanillajs-3-keyed",
+  "vanillajs-keyed",
+  "solid-keyed",
+  "marko-keyed",
+  "mreact-keyed",
+  "tachyon-dom",
+] as const;
 
 const run = () => ({
   schemaVersion: 2,
@@ -62,30 +72,45 @@ const run = () => ({
 });
 
 const authoritativeRuns = () =>
-  Array.from({ length: 6 }, (_, index) => {
+  Array.from({ length: 7 }, (_, index) => {
     const value = run();
-    value.benchmark.contractVersion = 3;
+    value.benchmark.contractVersion = 4;
     value.workload.iterations = 30;
     value.workload.warmup = 5;
-    return {
+    const plan = createLocalRunPlan(implementationNames, scenarioIds, {
+      runId: `run-${index}`,
+      runIndex: index,
+      seed: 17,
+    });
+    return attachArtifactManifest({
       ...value,
       workload: {
         ...value.workload,
         runId: `run-${index}`,
+        runIndex: index,
         seed: 17,
-        order: index % 2 === 0 ? [...implementationNames] : [...implementationNames].reverse(),
-        scenarioOrder: [...scenarioIds.slice(index % scenarioIds.length), ...scenarioIds.slice(0, index % scenarioIds.length)],
+        order: plan.implementationOrder,
+        scenarioOrder: plan.scenarioOrder,
       },
       measurements: {
         ...value.measurements,
         summaries: value.measurements.summaries.map((summary) => ({ ...summary, values: Array(30).fill(1) })),
       },
-    };
+    }, { pid: 1_000 + index, processStartedAt: new Date(index * 1_000).toISOString() });
   });
 
 describe("local compare validation", () => {
   it("accepts balanced contract-v3 fresh-process runs as authoritative", () => {
     expect(validateAuthoritativeLocalCompareRuns(authoritativeRuns())).toEqual(expect.objectContaining({ ok: true }));
+  });
+
+  it("rejects a stored trimmed mean that contradicts raw values", () => {
+    const runs = authoritativeRuns();
+    runs[0]!.measurements.summaries[0]!.trimmedMean = 0.5;
+    const result = validateAuthoritativeLocalCompareRuns(runs);
+    expect(result).toEqual(expect.objectContaining({ ok: false }));
+    if (result.ok) throw new Error("Expected invalid run");
+    expect(result.invalidFields).toContain("runs[0].measurements.summaries[0].trimmedMean");
   });
 
   it.each([

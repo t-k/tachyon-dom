@@ -1,3 +1,12 @@
+import {
+  analyzeRatios,
+  median,
+  validateCompletePositionCycles,
+  type RatioAnalysis,
+} from "../shared/statistical-authority.js";
+import { createWebRunPlan } from "./workload.js";
+import { verifyArtifactManifest } from "../shared/artifact-manifest.js";
+
 export type WebFrameworkMetric = {
   framework: string;
   staticRequestsPerSecond: number;
@@ -43,6 +52,8 @@ type WebStreamRun = {
   };
   workload: {
     runId: string;
+    runIndex: number;
+    seed: number;
     frameworkOrder: readonly string[];
     smoke: boolean;
     buildMode: string;
@@ -63,13 +74,43 @@ export type WebStreamAuthority =
   | { ok: true; ratios: number[]; analysis: RatioAnalysis }
   | { ok: false; reasons: string[] };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const configuredFrameworkNames = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.flatMap((framework) => {
+        if (typeof framework === "string" && framework.length > 0) return [framework];
+        if (isRecord(framework) && typeof framework.name === "string" && framework.name.length > 0) {
+          return [framework.name];
+        }
+        return [];
+      })
+    : [];
+
 export const analyzeWebStreamRuns = (
   runs: readonly WebStreamRun[],
   options: { seed: number; resamples: number },
 ): WebStreamAuthority => {
   const reasons: string[] = [];
-  if (runs.length < 5) reasons.push("at least five fresh-process runs are required");
+  if (runs.length < 7) reasons.push("at least seven fresh-process runs are required");
   if (new Set(runs.map((run) => run.workload.runId)).size !== runs.length) reasons.push("run IDs must be unique");
+  if (new Set(runs.map((run) => run.workload.runIndex)).size !== runs.length) reasons.push("run indexes must be unique");
+  if (new Set(runs.map((run) => run.workload.seed)).size !== 1) reasons.push("authority seed must be identical");
+  const frameworks = configuredFrameworkNames(runs[0]?.workload.frameworks);
+  if (frameworks.length < 2 || new Set(frameworks).size !== frameworks.length) {
+    reasons.push("configured framework list is invalid");
+  }
+  const processIdentities = runs.map((run, index) => {
+    if (!verifyArtifactManifest(run)) reasons.push(`${run.workload.runId}: invalid artifact manifest`);
+    const manifest = (run as unknown as { manifest?: { pid?: unknown; processStartedAt?: unknown } }).manifest;
+    if (!Number.isInteger(manifest?.pid) || typeof manifest?.processStartedAt !== "string") {
+      reasons.push(`${run.workload.runId}: invalid process identity`);
+      return `invalid-${index}`;
+    }
+    return `${manifest.pid}:${manifest.processStartedAt}`;
+  });
+  if (new Set(processIdentities).size !== processIdentities.length) reasons.push("process identities must be unique");
   const compatibilityFor = (run: WebStreamRun): string =>
     JSON.stringify({
       git: {
@@ -91,9 +132,48 @@ export const analyzeWebStreamRuns = (
     });
   const expectedCompatibility = runs[0] ? compatibilityFor(runs[0]) : "";
   for (const run of runs) {
-    if (run.benchmark.contractVersion !== 4) reasons.push(`${run.workload.runId}: contract version`);
-    if (run.provenance.git.dirty) reasons.push(`${run.workload.runId}: dirty tree`);
+    if (run.benchmark.contractVersion !== 5) reasons.push(`${run.workload.runId}: contract version`);
+    if (
+      run.provenance.git.dirty !== false ||
+      typeof run.provenance.git.commit !== "string" ||
+      run.provenance.git.commit.length === 0 ||
+      typeof run.provenance.git.workingTreeSha256 !== "string" ||
+      run.provenance.git.workingTreeSha256.length === 0 ||
+      !isRecord(run.provenance.runtime) ||
+      !isRecord(run.provenance.host) ||
+      !isRecord(run.provenance.browser) ||
+      !isRecord(run.provenance.dependencies) ||
+      typeof run.workload.runId !== "string" ||
+      run.workload.runId.length === 0 ||
+      !Number.isInteger(run.workload.runIndex) ||
+      run.workload.runIndex < 0 ||
+      !Number.isInteger(run.workload.seed) ||
+      typeof run.workload.smoke !== "boolean" ||
+      typeof run.workload.buildMode !== "string" ||
+      run.workload.buildMode.length === 0 ||
+      !Number.isFinite(run.workload.durationSeconds) ||
+      run.workload.durationSeconds <= 0 ||
+      !Number.isInteger(run.workload.connections) ||
+      run.workload.connections <= 0 ||
+      !Number.isFinite(run.workload.streamMinimumChunkGapMs) ||
+      run.workload.streamMinimumChunkGapMs < 0
+    ) {
+      reasons.push(`${run.workload.runId}: missing or invalid required controls`);
+    }
+    if (run.provenance.git.dirty !== false) reasons.push(`${run.workload.runId}: dirty tree`);
     if (compatibilityFor(run) !== expectedCompatibility) reasons.push(`${run.workload.runId}: incompatible controls`);
+    const runFrameworks = configuredFrameworkNames(run.workload.frameworks);
+    if (JSON.stringify(runFrameworks) !== JSON.stringify(frameworks)) {
+      reasons.push(`${run.workload.runId}: configured frameworks mismatch`);
+    }
+    const metricNames = run.measurements.metrics.map((metric) => metric.framework);
+    if (
+      metricNames.length !== frameworks.length ||
+      new Set(metricNames).size !== metricNames.length ||
+      frameworks.some((framework) => !metricNames.includes(framework))
+    ) {
+      reasons.push(`${run.workload.runId}: metrics must contain every configured framework exactly once`);
+    }
     for (const metric of run.measurements.metrics) {
       if (metric.streamWarmups < 5) reasons.push(`${run.workload.runId}: ${metric.framework} warmups`);
       if (metric.streamSamples.length < 20) reasons.push(`${run.workload.runId}: ${metric.framework} samples`);
@@ -118,17 +198,26 @@ export const analyzeWebStreamRuns = (
           break;
         }
       }
+      if (
+        metric.streamSamples.length > 0 &&
+        Math.abs(metric.streamCompleteMs - median(metric.streamSamples.map((sample) => sample.complete))) > 1e-9
+      ) {
+        reasons.push(`${run.workload.runId}: ${metric.framework} stream summary mismatch`);
+      }
     }
   }
-  const frameworks = runs[0]?.workload.frameworkOrder ?? [];
-  for (const framework of frameworks) {
-    const counts = Array(frameworks.length).fill(0) as number[];
-    for (const run of runs) {
-      const position = run.workload.frameworkOrder.indexOf(framework);
-      if (position < 0) reasons.push(`${run.workload.runId}: framework order`);
-      else counts[position] = (counts[position] ?? 0) + 1;
+  if (!validateCompletePositionCycles(runs.map((run) => run.workload.frameworkOrder), frameworks)) {
+    reasons.push("framework orders must contain complete position cycles");
+  }
+  for (const run of runs) {
+    const expected = createWebRunPlan(frameworks, {
+      runId: run.workload.runId,
+      runIndex: run.workload.runIndex,
+      seed: run.workload.seed,
+    }).frameworkOrder;
+    if (JSON.stringify(run.workload.frameworkOrder) !== JSON.stringify(expected)) {
+      reasons.push(`${run.workload.runId}: framework order does not match seed and run index`);
     }
-    if (Math.max(...counts) - Math.min(...counts) > 1) reasons.push(`${framework}: unbalanced positions`);
   }
   if (reasons.length > 0) return { ok: false, reasons: [...new Set(reasons)] };
   const ratios = runs.map((run) => {
@@ -136,10 +225,10 @@ export const analyzeWebStreamRuns = (
     const best = Math.min(
       ...run.measurements.metrics
         .filter((metric) => metric.framework !== "tachyon-dom")
-        .map((metric) => metric.streamCompleteMs),
+        .map((metric) => median(metric.streamSamples.map((sample) => sample.complete))),
     );
     if (!candidate || !Number.isFinite(best)) throw new Error("Every run requires Tachyon and a comparison framework");
-    return candidate.streamCompleteMs / best;
+    return median(candidate.streamSamples.map((sample) => sample.complete)) / best;
   });
   return { ok: true, ratios, analysis: analyzeRatios(ratios, options) };
 };
@@ -211,4 +300,3 @@ export const formatWebFrameworkRanking = (rows: readonly WebFrameworkRankingRow[
   }
   return lines.join("\n");
 };
-import { analyzeRatios, type RatioAnalysis } from "../shared/statistical-authority.js";

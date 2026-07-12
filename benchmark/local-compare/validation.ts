@@ -1,5 +1,8 @@
 import { compareBenchmarkEnvelopes } from "../provenance.js";
 import { validateBenchmarkEnvelope, valueAtBenchmarkPath } from "../provenance-validation.js";
+import { trimmedMean, validateCompletePositionCycles } from "../shared/statistical-authority.js";
+import { createLocalRunPlan } from "./run-plan.js";
+import { verifyArtifactManifest } from "../shared/artifact-manifest.js";
 
 export type Summary = {
   id: string;
@@ -58,6 +61,9 @@ const nonEmptyString = (value: unknown): value is string => typeof value === "st
 const positiveInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) > 0;
 const nonNegativeInteger = (value: unknown): value is number => Number.isInteger(value) && Number(value) >= 0;
 const finiteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+const nearlyEqual = (left: number, right: number): boolean =>
+  Math.abs(left - right) <= Math.max(1e-9, 1e-9 * Math.max(Math.abs(left), Math.abs(right)));
 const requiredScenarioIds = new Set([
   "createRows",
   "replaceAllRows",
@@ -268,32 +274,6 @@ export const validateLocalCompareRuns = (values: readonly unknown[]): LocalCompa
   };
 };
 
-const validateBalancedPositions = (
-  orders: readonly (readonly string[])[],
-  expectedItems: readonly string[],
-  field: string,
-): string[] => {
-  if (
-    orders.some(
-      (order) =>
-        order.length !== expectedItems.length ||
-        new Set(order).size !== expectedItems.length ||
-        expectedItems.some((item) => !order.includes(item)),
-    )
-  ) {
-    return [field];
-  }
-  for (const item of expectedItems) {
-    const counts = Array(expectedItems.length).fill(0) as number[];
-    for (const order of orders) {
-      const position = order.indexOf(item);
-      counts[position] = (counts[position] ?? 0) + 1;
-    }
-    if (Math.max(...counts) - Math.min(...counts) > 1) return [field];
-  }
-  return [];
-};
-
 export const validateAuthoritativeLocalCompareRuns = (values: readonly unknown[]): LocalCompareValidation => {
   const base = validateLocalCompareRuns(values);
   if (!base.ok) return base;
@@ -301,19 +281,34 @@ export const validateAuthoritativeLocalCompareRuns = (values: readonly unknown[]
   const invalidFields: string[] = [];
   if (values.length < 5) invalidFields.push("runs");
   const runIds: string[] = [];
+  const processIdentities: string[] = [];
+  const runIndices: number[] = [];
+  const seeds: number[] = [];
   const implementationOrders: string[][] = [];
   const scenarioOrders: string[][] = [];
   for (const [index, value] of values.entries()) {
     const prefix = `runs[${index}]`;
-    if (valueAtBenchmarkPath(value, "benchmark.contractVersion") !== 3) {
+    if (!verifyArtifactManifest(value)) invalidFields.push(`${prefix}.manifest.sha256`);
+    const pid = valueAtBenchmarkPath(value, "manifest.pid");
+    const processStartedAt = valueAtBenchmarkPath(value, "manifest.processStartedAt");
+    if (Number.isInteger(pid) && nonEmptyString(processStartedAt)) {
+      processIdentities.push(`${pid}:${processStartedAt}`);
+    } else {
+      invalidFields.push(`${prefix}.manifest.processIdentity`);
+    }
+    if (valueAtBenchmarkPath(value, "benchmark.contractVersion") !== 4) {
       invalidFields.push(`${prefix}.benchmark.contractVersion`);
     }
     const runId = valueAtBenchmarkPath(value, "workload.runId");
     if (!nonEmptyString(runId)) invalidFields.push(`${prefix}.workload.runId`);
     else runIds.push(runId);
-    if (!Number.isInteger(valueAtBenchmarkPath(value, "workload.seed"))) {
+    const seed = valueAtBenchmarkPath(value, "workload.seed");
+    if (!Number.isInteger(seed)) {
       invalidFields.push(`${prefix}.workload.seed`);
-    }
+    } else seeds.push(Number(seed));
+    const runIndex = valueAtBenchmarkPath(value, "workload.runIndex");
+    if (!nonNegativeInteger(runIndex)) invalidFields.push(`${prefix}.workload.runIndex`);
+    else runIndices.push(runIndex);
     if (Number(valueAtBenchmarkPath(value, "workload.iterations")) < 30) {
       invalidFields.push(`${prefix}.workload.iterations`);
     }
@@ -328,20 +323,60 @@ export const validateAuthoritativeLocalCompareRuns = (values: readonly unknown[]
     if (Array.isArray(summaries)) {
       for (const [summaryIndex, summaryValue] of summaries.entries()) {
         const summary = isRecord(summaryValue) ? summaryValue : {};
+        const samplesValid =
+          Array.isArray(summary.values) &&
+          summary.values.length >= 30 &&
+          summary.values.every((sample) => finiteNumber(sample) && sample >= 0);
         if (
-          !Array.isArray(summary.values) ||
-          summary.values.length < 30 ||
-          !summary.values.every((sample) => finiteNumber(sample) && sample >= 0)
+          !samplesValid
         ) {
           invalidFields.push(`${prefix}.measurements.summaries[${summaryIndex}].values`);
+        } else {
+          const stored = summary.trimmedMean;
+          const trimFraction = valueAtBenchmarkPath(value, "workload.trimFraction");
+          if (
+            !finiteNumber(stored) ||
+            !finiteNumber(trimFraction) ||
+            !nearlyEqual(stored, trimmedMean(summary.values as number[], trimFraction))
+          ) {
+            invalidFields.push(`${prefix}.measurements.summaries[${summaryIndex}].trimmedMean`);
+          }
         }
       }
     }
   }
   if (new Set(runIds).size !== runIds.length) invalidFields.push("runs.workload.runId");
-  invalidFields.push(
-    ...validateBalancedPositions(implementationOrders, base.verifiedControls.workload.implementations, "runs.workload.order"),
-    ...validateBalancedPositions(scenarioOrders, [...requiredScenarioIds], "runs.workload.scenarioOrder"),
-  );
+  if (new Set(processIdentities).size !== processIdentities.length) invalidFields.push("runs.manifest.processIdentity");
+  if (values.length < 7) invalidFields.push("runs");
+  if (new Set(runIndices).size !== runIndices.length) invalidFields.push("runs.workload.runIndex");
+  if (new Set(seeds).size !== 1) invalidFields.push("runs.workload.seed");
+  const implementations = base.verifiedControls.workload.implementations;
+  const scenarios = [...requiredScenarioIds];
+  if (!validateCompletePositionCycles(implementationOrders, implementations)) {
+    invalidFields.push("runs.workload.order");
+  }
+  for (const [index, runIndex] of runIndices.entries()) {
+    const expected = createLocalRunPlan(implementations, scenarios, {
+      runId: runIds[index] ?? "invalid",
+      runIndex,
+      seed: seeds[index] ?? 0,
+    });
+    if (JSON.stringify(implementationOrders[index]) !== JSON.stringify(expected.implementationOrder)) {
+      invalidFields.push(`runs[${index}].workload.order`);
+    }
+    if (JSON.stringify(scenarioOrders[index]) !== JSON.stringify(expected.scenarioOrder)) {
+      invalidFields.push(`runs[${index}].workload.scenarioOrder`);
+    }
+  }
+  for (const scenario of scenarios) {
+    const positions = scenarioOrders.map((order) => order.indexOf(scenario));
+    const early = positions.filter((position) => position >= 0 && position < 4).length;
+    const late = positions.filter((position) => position > 4).length;
+    const mean = positions.reduce((total, position) => total + position, 0) / positions.length;
+    if (positions.some((position) => position < 0) || Math.abs(early - late) > 1 || Math.abs(mean - 4) > 1) {
+      invalidFields.push("runs.workload.scenarioOrder");
+      break;
+    }
+  }
   return invalidFields.length > 0 ? { ok: false, invalidFields: [...new Set(invalidFields)] } : base;
 };
