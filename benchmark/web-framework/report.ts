@@ -149,7 +149,17 @@ export const analyzeWebStreamRuns = (
       }
     }
   }
-  const frameworks = runs[0]?.workload.frameworkOrder ?? [];
+  const configuredFrameworks = runs[0]?.workload.frameworks;
+  const frameworks = Array.isArray(configuredFrameworks)
+    ? configuredFrameworks.flatMap((framework) => {
+        if (typeof framework === "string") return [framework];
+        if (typeof framework === "object" && framework !== null && "name" in framework && typeof framework.name === "string") {
+          return [framework.name];
+        }
+        return [];
+      })
+    : [];
+  if (frameworks.length === 0) reasons.push("configured framework list is invalid");
   if (!validateCompletePositionCycles(runs.map((run) => run.workload.frameworkOrder), frameworks)) {
     reasons.push("framework orders must contain complete position cycles");
   }

@@ -14,8 +14,8 @@ describe("web framework benchmark report", () => {
       complete: 21,
       chunkArrivalMs: [1, 21],
     }));
-    const frameworks = ["tachyon-dom", "other"];
-    const unsignedRuns = Array.from({ length: 8 }, (_, runIndex) => ({
+    const frameworks = ["tachyon-dom", "one", "two", "three", "four", "five"];
+    const unsignedRuns = Array.from({ length: 12 }, (_, runIndex) => ({
       benchmark: { contractVersion: 5 },
       provenance: {
         git: { commit: "commit", dirty: false, workingTreeSha256: "tree" },
@@ -34,12 +34,17 @@ describe("web framework benchmark report", () => {
         durationSeconds: 5,
         connections: 30,
         streamMinimumChunkGapMs: 10,
-        frameworks,
+        frameworks: frameworks.map((name) => ({ name })),
       },
       measurements: {
         metrics: [
           { framework: "tachyon-dom", streamCompleteMs: 19.8, streamWarmups: 5, streamSamples: samples },
-          { framework: "other", streamCompleteMs: 20, streamWarmups: 5, streamSamples: samples },
+          ...frameworks.slice(1).map((framework) => ({
+            framework,
+            streamCompleteMs: 20,
+            streamWarmups: 5,
+            streamSamples: samples,
+          })),
         ],
       },
     }));
@@ -63,8 +68,8 @@ describe("web framework benchmark report", () => {
     const consistent = signRuns(consistentValues);
     expect(analyzeWebStreamRuns(consistent, { seed: 7, resamples: 1_000 })).toMatchObject({
       ok: true,
-      ratios: [1, 1, 1, 1, 1, 1, 1, 1],
-      analysis: { status: "tie-or-loss", independentRunCount: 8 },
+      ratios: Array(12).fill(1),
+      analysis: { status: "tie-or-loss", independentRunCount: 12 },
     });
 
     const incompatible = structuredClone(runs);
