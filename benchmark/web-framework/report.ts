@@ -34,8 +34,23 @@ export type WebFrameworkRankingRow = WebFrameworkMetric & {
 
 type WebStreamRun = {
   benchmark: { contractVersion: number };
-  provenance: { git: { dirty: boolean } };
-  workload: { runId: string; frameworkOrder: readonly string[] };
+  provenance: {
+    git: { commit: string; dirty: boolean; workingTreeSha256: string };
+    runtime: unknown;
+    host: unknown;
+    browser: unknown;
+    dependencies: unknown;
+  };
+  workload: {
+    runId: string;
+    frameworkOrder: readonly string[];
+    smoke: boolean;
+    buildMode: string;
+    durationSeconds: number;
+    connections: number;
+    streamMinimumChunkGapMs: number;
+    frameworks: unknown;
+  };
   measurements: {
     metrics: readonly Pick<
       WebFrameworkMetric,
@@ -55,12 +70,54 @@ export const analyzeWebStreamRuns = (
   const reasons: string[] = [];
   if (runs.length < 5) reasons.push("at least five fresh-process runs are required");
   if (new Set(runs.map((run) => run.workload.runId)).size !== runs.length) reasons.push("run IDs must be unique");
+  const compatibilityFor = (run: WebStreamRun): string =>
+    JSON.stringify({
+      git: {
+        commit: run.provenance.git.commit,
+        workingTreeSha256: run.provenance.git.workingTreeSha256,
+      },
+      runtime: run.provenance.runtime,
+      host: run.provenance.host,
+      browser: run.provenance.browser,
+      dependencies: run.provenance.dependencies,
+      workload: {
+        smoke: run.workload.smoke,
+        buildMode: run.workload.buildMode,
+        durationSeconds: run.workload.durationSeconds,
+        connections: run.workload.connections,
+        streamMinimumChunkGapMs: run.workload.streamMinimumChunkGapMs,
+        frameworks: run.workload.frameworks,
+      },
+    });
+  const expectedCompatibility = runs[0] ? compatibilityFor(runs[0]) : "";
   for (const run of runs) {
     if (run.benchmark.contractVersion !== 4) reasons.push(`${run.workload.runId}: contract version`);
     if (run.provenance.git.dirty) reasons.push(`${run.workload.runId}: dirty tree`);
+    if (compatibilityFor(run) !== expectedCompatibility) reasons.push(`${run.workload.runId}: incompatible controls`);
     for (const metric of run.measurements.metrics) {
       if (metric.streamWarmups < 5) reasons.push(`${run.workload.runId}: ${metric.framework} warmups`);
       if (metric.streamSamples.length < 20) reasons.push(`${run.workload.runId}: ${metric.framework} samples`);
+      if (!Number.isFinite(metric.streamCompleteMs) || metric.streamCompleteMs <= 0) {
+        reasons.push(`${run.workload.runId}: ${metric.framework} stream complete`);
+      }
+      for (const sample of metric.streamSamples) {
+        const arrivals = sample.chunkArrivalMs;
+        const chronological = arrivals.every((arrival, index) => index === 0 || arrival >= (arrivals[index - 1] ?? 0));
+        const gap = (arrivals.at(-1) ?? 0) - (arrivals[0] ?? 0);
+        if (
+          !Number.isFinite(sample.ttfb) ||
+          !Number.isFinite(sample.complete) ||
+          sample.ttfb < 0 ||
+          sample.complete < sample.ttfb ||
+          arrivals.length < 2 ||
+          !arrivals.every((arrival) => Number.isFinite(arrival) && arrival >= 0) ||
+          !chronological ||
+          gap < run.workload.streamMinimumChunkGapMs
+        ) {
+          reasons.push(`${run.workload.runId}: ${metric.framework} invalid stream sample`);
+          break;
+        }
+      }
     }
   }
   const frameworks = runs[0]?.workload.frameworkOrder ?? [];
