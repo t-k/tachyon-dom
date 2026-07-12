@@ -160,6 +160,39 @@ describe("benchmark Summary markdown", () => {
     expect(markdown).toContain("linux");
     expect(markdown).toContain("Example CPU");
   });
+
+  it("Web Framework総合スコアの完全同値を同順位にする", () => {
+    const tied = structuredClone(webFixture);
+    tied.measurements.ranking[1]!.score = tied.measurements.ranking[0]!.score;
+
+    const markdown = formatBenchmarkSummary({ suite: "web-framework", webFramework: tied });
+
+    expect(markdown).toContain("| 1 | fast\\|framework | 1.000x |");
+    expect(markdown).toContain("| 1 | slow | 1.000x |");
+  });
+
+  it("Web Framework総合ランキングの重複と欠落を拒否する", () => {
+    const malformed = structuredClone(webFixture);
+    malformed.measurements.ranking[1]!.framework = malformed.measurements.ranking[0]!.framework;
+
+    expect(() => formatBenchmarkSummary({ suite: "web-framework", webFramework: malformed })).toThrow(
+      "Invalid web-framework benchmark result",
+    );
+  });
+
+  it("ローカル比較の未宣言実装と指標メタデータ不一致を拒否する", () => {
+    const extraImplementation = structuredClone(localFixture);
+    extraImplementation.measurements.summaries.push(summary("createRows", "create rows", "extra", 1));
+    expect(() => formatBenchmarkSummary({ suite: "js-framework", localCompare: extraImplementation })).toThrow(
+      "Invalid local-compare benchmark result",
+    );
+
+    const inconsistentMetadata = structuredClone(localFixture);
+    inconsistentMetadata.measurements.auxiliaryMetrics[2]!.unit = "kib";
+    expect(() => formatBenchmarkSummary({ suite: "js-framework", localCompare: inconsistentMetadata })).toThrow(
+      "Invalid local-compare benchmark result",
+    );
+  });
 });
 
 describe("benchmark Summary CLI", () => {

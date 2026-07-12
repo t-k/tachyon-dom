@@ -121,8 +121,16 @@ const parseWebFrameworkResult = (value: unknown): WebResult => {
       score: requiredNumber(row.score, message),
     };
   });
-  if (new Set(metrics.map((metric) => metric.framework)).size !== metrics.length) throw new Error(message);
-  if (ranking.some((row) => !metrics.some((metric) => metric.framework === row.framework))) throw new Error(message);
+  const metricNames = metrics.map((metric) => metric.framework);
+  const rankingNames = ranking.map((row) => row.framework);
+  if (
+    new Set(metricNames).size !== metrics.length ||
+    new Set(rankingNames).size !== ranking.length ||
+    metricNames.some((name) => !rankingNames.includes(name)) ||
+    rankingNames.some((name) => !metricNames.includes(name))
+  ) {
+    throw new Error(message);
+  }
   return { provenance: parseProvenance(root.provenance, message), metrics, ranking };
 };
 
@@ -164,6 +172,13 @@ const parseLocalCompareResult = (value: unknown): LocalResult => {
   const auxiliaryIds = [...new Set(auxiliaryMetrics.map((row) => row.id))];
   if (
     scenarioIds.length === 0 ||
+    summaries.some((row) => !implementations.includes(row.implementation)) ||
+    auxiliaryMetrics.some((row) => !implementations.includes(row.implementation)) ||
+    scenarioIds.some((id) => new Set(summaries.filter((row) => row.id === id).map((row) => row.label)).size !== 1) ||
+    auxiliaryIds.some((id) => {
+      const rows = auxiliaryMetrics.filter((row) => row.id === id);
+      return new Set(rows.map((row) => row.label)).size !== 1 || new Set(rows.map((row) => row.unit)).size !== 1;
+    }) ||
     implementations.some((implementation) =>
       scenarioIds.some(
         (id) => summaries.filter((row) => row.implementation === implementation && row.id === id).length !== 1,
@@ -259,12 +274,16 @@ const webDefinitions: readonly {
 ];
 
 const formatWebFrameworkSummary = (result: WebResult): string => {
+  const overallRanking = rankMetric(
+    result.ranking.map((row) => ({ name: row.framework, value: row.score })),
+    "lower",
+  );
   const overall = [
     "## Web Framework総合ランキング",
     "",
     "| 順位 | Framework | Score |",
     "|---:|---|---:|",
-    ...result.ranking.map((row) => `| ${row.rank} | ${escapeMarkdownCell(row.framework)} | ${row.score.toFixed(3)}x |`),
+    ...overallRanking.map((row) => `| ${row.rank} | ${escapeMarkdownCell(row.name)} | ${row.value.toFixed(3)}x |`),
   ].join("\n");
   const metrics = webDefinitions.map((definition) => {
     const ranked = rankMetric(
