@@ -63,6 +63,25 @@ export const balancedOrder = <T>(items: readonly T[], runIndex: number, seed: nu
   return [...base.slice(offset), ...base.slice(0, offset)];
 };
 
+export const validateCompletePositionCycles = <T>(orders: readonly (readonly T[])[], items: readonly T[]): boolean => {
+  if (items.length === 0 || orders.length < items.length || orders.length % items.length !== 0) return false;
+  if (
+    orders.some(
+      (order) => order.length !== items.length || new Set(order).size !== items.length || items.some((item) => !order.includes(item)),
+    )
+  ) {
+    return false;
+  }
+  for (let cycleStart = 0; cycleStart < orders.length; cycleStart += items.length) {
+    const cycle = orders.slice(cycleStart, cycleStart + items.length);
+    for (const item of items) {
+      const positions = cycle.map((order) => order.indexOf(item));
+      if (new Set(positions).size !== items.length) return false;
+    }
+  }
+  return true;
+};
+
 export const analyzeRatios = (
   ratios: readonly number[],
   options: { seed: number; resamples: number },

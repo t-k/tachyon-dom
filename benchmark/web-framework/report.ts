@@ -1,4 +1,10 @@
-import { analyzeRatios, median, type RatioAnalysis } from "../shared/statistical-authority.js";
+import {
+  analyzeRatios,
+  median,
+  validateCompletePositionCycles,
+  type RatioAnalysis,
+} from "../shared/statistical-authority.js";
+import { createWebRunPlan } from "./workload.js";
 
 export type WebFrameworkMetric = {
   framework: string;
@@ -45,6 +51,8 @@ type WebStreamRun = {
   };
   workload: {
     runId: string;
+    runIndex: number;
+    seed: number;
     frameworkOrder: readonly string[];
     smoke: boolean;
     buildMode: string;
@@ -70,8 +78,10 @@ export const analyzeWebStreamRuns = (
   options: { seed: number; resamples: number },
 ): WebStreamAuthority => {
   const reasons: string[] = [];
-  if (runs.length < 5) reasons.push("at least five fresh-process runs are required");
+  if (runs.length < 7) reasons.push("at least seven fresh-process runs are required");
   if (new Set(runs.map((run) => run.workload.runId)).size !== runs.length) reasons.push("run IDs must be unique");
+  if (new Set(runs.map((run) => run.workload.runIndex)).size !== runs.length) reasons.push("run indexes must be unique");
+  if (new Set(runs.map((run) => run.workload.seed)).size !== 1) reasons.push("authority seed must be identical");
   const compatibilityFor = (run: WebStreamRun): string =>
     JSON.stringify({
       git: {
@@ -129,14 +139,18 @@ export const analyzeWebStreamRuns = (
     }
   }
   const frameworks = runs[0]?.workload.frameworkOrder ?? [];
-  for (const framework of frameworks) {
-    const counts = Array(frameworks.length).fill(0) as number[];
-    for (const run of runs) {
-      const position = run.workload.frameworkOrder.indexOf(framework);
-      if (position < 0) reasons.push(`${run.workload.runId}: framework order`);
-      else counts[position] = (counts[position] ?? 0) + 1;
+  if (!validateCompletePositionCycles(runs.map((run) => run.workload.frameworkOrder), frameworks)) {
+    reasons.push("framework orders must contain complete position cycles");
+  }
+  for (const run of runs) {
+    const expected = createWebRunPlan(frameworks, {
+      runId: run.workload.runId,
+      runIndex: run.workload.runIndex,
+      seed: run.workload.seed,
+    }).frameworkOrder;
+    if (JSON.stringify(run.workload.frameworkOrder) !== JSON.stringify(expected)) {
+      reasons.push(`${run.workload.runId}: framework order does not match seed and run index`);
     }
-    if (Math.max(...counts) - Math.min(...counts) > 1) reasons.push(`${framework}: unbalanced positions`);
   }
   if (reasons.length > 0) return { ok: false, reasons: [...new Set(reasons)] };
   const ratios = runs.map((run) => {

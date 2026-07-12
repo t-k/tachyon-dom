@@ -18,5 +18,9 @@ export const createLocalRunPlan = (
 ): LocalRunPlan => ({
   ...identity,
   implementationOrder: balancedOrder(implementations, identity.runIndex, identity.seed),
-  scenarioOrder: balancedOrder(scenarios, identity.runIndex, identity.seed ^ 0x9e3779b9),
+  scenarioOrder: balancedOrder(
+    scenarios,
+    identity.runIndex * Math.floor(scenarios.length / 2),
+    identity.seed ^ 0x9e3779b9,
+  ),
 });

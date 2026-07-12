@@ -4,6 +4,7 @@ import {
   validateAuthoritativeLocalCompareRuns,
   validateLocalCompareRuns,
 } from "../benchmark/local-compare/validation.js";
+import { createLocalRunPlan } from "../benchmark/local-compare/run-plan.js";
 
 const scenarioIds = [
   "createRows",
@@ -27,7 +28,15 @@ const auxiliaryMetricDefinitions = [
   ["localSourceSize", "kib"],
   ["entrySourceSize", "kib"],
 ] as const;
-const implementationNames = ["vanillajs-lite-keyed", "tachyon-dom"] as const;
+const implementationNames = [
+  "vanillajs-lite-keyed",
+  "vanillajs-3-keyed",
+  "vanillajs-keyed",
+  "solid-keyed",
+  "marko-keyed",
+  "mreact-keyed",
+  "tachyon-dom",
+] as const;
 
 const run = () => ({
   schemaVersion: 2,
@@ -62,19 +71,25 @@ const run = () => ({
 });
 
 const authoritativeRuns = () =>
-  Array.from({ length: 6 }, (_, index) => {
+  Array.from({ length: 7 }, (_, index) => {
     const value = run();
     value.benchmark.contractVersion = 3;
     value.workload.iterations = 30;
     value.workload.warmup = 5;
+    const plan = createLocalRunPlan(implementationNames, scenarioIds, {
+      runId: `run-${index}`,
+      runIndex: index,
+      seed: 17,
+    });
     return {
       ...value,
       workload: {
         ...value.workload,
         runId: `run-${index}`,
+        runIndex: index,
         seed: 17,
-        order: index % 2 === 0 ? [...implementationNames] : [...implementationNames].reverse(),
-        scenarioOrder: [...scenarioIds.slice(index % scenarioIds.length), ...scenarioIds.slice(0, index % scenarioIds.length)],
+        order: plan.implementationOrder,
+        scenarioOrder: plan.scenarioOrder,
       },
       measurements: {
         ...value.measurements,

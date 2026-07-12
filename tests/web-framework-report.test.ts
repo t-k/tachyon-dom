@@ -4,6 +4,7 @@ import {
   formatWebFrameworkRanking,
   scoreWebFrameworkMetrics,
 } from "../benchmark/web-framework/report";
+import { createWebRunPlan } from "../benchmark/web-framework/workload";
 
 describe("web framework benchmark report", () => {
   it("analyzes stream completion ratios across independent contract-v4 runs", () => {
@@ -12,7 +13,8 @@ describe("web framework benchmark report", () => {
       complete: 21,
       chunkArrivalMs: [1, 21],
     }));
-    const runs = Array.from({ length: 5 }, (_, runIndex) => ({
+    const frameworks = ["tachyon-dom", "other"];
+    const runs = Array.from({ length: 8 }, (_, runIndex) => ({
       benchmark: { contractVersion: 4 },
       provenance: {
         git: { commit: "commit", dirty: false, workingTreeSha256: "tree" },
@@ -23,13 +25,15 @@ describe("web framework benchmark report", () => {
       },
       workload: {
         runId: `run-${runIndex}`,
-        frameworkOrder: runIndex % 2 ? ["other", "tachyon-dom"] : ["tachyon-dom", "other"],
+        runIndex,
+        seed: 11,
+        frameworkOrder: createWebRunPlan(frameworks, { runId: `run-${runIndex}`, runIndex, seed: 11 }).frameworkOrder,
         smoke: false,
         buildMode: "production",
         durationSeconds: 5,
         connections: 30,
         streamMinimumChunkGapMs: 10,
-        frameworks: ["tachyon-dom", "other"],
+        frameworks,
       },
       measurements: {
         metrics: [
@@ -49,8 +53,8 @@ describe("web framework benchmark report", () => {
     }
     expect(analyzeWebStreamRuns(consistent, { seed: 7, resamples: 1_000 })).toMatchObject({
       ok: true,
-      ratios: [1, 1, 1, 1, 1],
-      analysis: { status: "tie-or-loss", independentRunCount: 5 },
+      ratios: [1, 1, 1, 1, 1, 1, 1, 1],
+      analysis: { status: "tie-or-loss", independentRunCount: 8 },
     });
 
     const incompatible = structuredClone(runs);

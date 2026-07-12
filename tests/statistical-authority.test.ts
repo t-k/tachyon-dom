@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { analyzeRatios, balancedOrder, median, trimmedMean } from "../benchmark/shared/statistical-authority";
+import {
+  analyzeRatios,
+  balancedOrder,
+  median,
+  trimmedMean,
+  validateCompletePositionCycles,
+} from "../benchmark/shared/statistical-authority";
 import {
   createLocalRunPlan,
   LOCAL_COMPARE_CONTRACT_VERSION,
@@ -69,6 +75,15 @@ describe("benchmark statistical authority", () => {
     expect(input).toEqual(["a", "b", "c"]);
   });
 
+  it("accepts only complete position cycles", () => {
+    const items = ["a", "b", "c"];
+    const complete = items.map((_, runIndex) => balancedOrder(items, runIndex, 9));
+    expect(validateCompletePositionCycles(complete, items)).toBe(true);
+    expect(validateCompletePositionCycles(complete.slice(0, 2), items)).toBe(false);
+    expect(validateCompletePositionCycles([...complete, complete[0]!], items)).toBe(false);
+    expect(validateCompletePositionCycles(complete.map(() => [...items]), items)).toBe(false);
+  });
+
   it("creates reproducible local implementation and scenario orders", () => {
     const implementations = ["a", "b", "c"];
     const scenarios = ["one", "two", "three"];
@@ -82,6 +97,22 @@ describe("benchmark statistical authority", () => {
         ),
       ),
     ).toEqual(new Set(implementations));
+  });
+
+  it("balances nine scenarios across the early and late halves of seven runs", () => {
+    const implementations = ["a", "b", "c", "d", "e", "f", "g"];
+    const scenarios = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+    const orders = implementations.map((_, runIndex) =>
+      createLocalRunPlan(implementations, scenarios, { runId: `run-${runIndex}`, runIndex, seed: 9 }).scenarioOrder,
+    );
+    for (const scenario of scenarios) {
+      const positions = orders.map((order) => order.indexOf(scenario));
+      const early = positions.filter((position) => position < 4).length;
+      const late = positions.filter((position) => position > 4).length;
+      const meanPosition = positions.reduce((total, position) => total + position, 0) / positions.length;
+      expect(Math.abs(early - late)).toBeLessThanOrEqual(1);
+      expect(Math.abs(meanPosition - 4)).toBeLessThanOrEqual(1);
+    }
   });
 
   it("balances web framework positions across fresh runs", () => {
