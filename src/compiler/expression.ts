@@ -11,6 +11,7 @@ export type ExpressionParseOptions = {
 export type ExpressionNode =
   | { type: "identifier"; path: string[] }
   | { type: "literal"; value: string | number | boolean | null }
+  | { type: "regex"; pattern: string; flags: string }
   | { type: "array"; items: ExpressionNode[] }
   | { type: "object"; entries: Array<{ key: string; value: ExpressionNode }> }
   | { type: "unary"; operator: "!" | "-"; argument: ExpressionNode }
@@ -401,7 +402,7 @@ const validateExpressionNode = (node: ExpressionNode): Result<ExpressionNode, Co
     }
     return ok(node);
   }
-  if (node.type === "literal") {
+  if (node.type === "literal" || node.type === "regex") {
     return ok(node);
   }
   if (node.type === "array") {
@@ -538,6 +539,10 @@ const loadOxcParser = (): OxcParserModule | undefined => {
 
 const oxcExpressionToNode = (node: OxcExpression): Result<ExpressionNode, CompilerError> => {
   if (node.type === "Literal") {
+    const regex = "regex" in node ? node.regex : undefined;
+    if (regex) {
+      return ok({ type: "regex", pattern: regex.pattern, flags: regex.flags });
+    }
     if (
       typeof node.value === "string" ||
       typeof node.value === "number" ||
@@ -749,6 +754,9 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
   if (node.type === "literal") {
     return node.value;
   }
+  if (node.type === "regex") {
+    return new RegExp(node.pattern, node.flags);
+  }
   if (node.type === "array") {
     return node.items.map((item) => evaluateExpressionNode(item, scope));
   }
@@ -914,6 +922,9 @@ export const expressionNodeToJs = (
   }
   if (node.type === "literal") {
     return JSON.stringify(node.value);
+  }
+  if (node.type === "regex") {
+    return `new RegExp(${JSON.stringify(node.pattern)}, ${JSON.stringify(node.flags)})`;
   }
   if (node.type === "array") {
     return `[${node.items.map((item) => expressionNodeToJs(item, locals, scopeName)).join(", ")}]`;

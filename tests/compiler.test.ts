@@ -386,6 +386,23 @@ describe("HTML-first compiler", () => {
     ).toBe(`<section data-count="3" title="Status: Ready"><p>none</p></section>`);
   });
 
+  it.each([
+    ['<div title={format(`a}b`)}></div>', 'format(`a}b`)'],
+    ["<div title={value /* } */}></div>", "value /* } */"],
+    ["<div title={/}/.test(value)}></div>", "/}/.test(value)"],
+  ])("keeps JavaScript lexical braces inside an attribute expression: %s", (source, expression) => {
+    const result = compileTemplate(source);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.client.bindings).toContainEqual({
+      kind: "attr",
+      path: [],
+      name: "title",
+      expression,
+    });
+  });
+
   it("extracts attr, style, ref, and form model bindings from client markup", () => {
     const result = compileTemplate(
       `<section data-count={count + 1} style:width={size + "px"} ref={refs.panel}><input bind:value={user.name}></input><label><input bind:checked={user.active}></input>{user.name}</label></section>`,

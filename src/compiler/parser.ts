@@ -63,32 +63,110 @@ const readQuotedValue = (parser: Parser): Result<string, CompilerError> => {
 
 const readBracedValue = (parser: Parser): Result<string, CompilerError> => {
   let depth = 0;
-  let quote: string | undefined;
+  let mode: "code" | "single" | "double" | "template" | "line-comment" | "block-comment" | "regex" =
+    "code";
+  let escaped = false;
+  let regexCharacterClass = false;
+  let canStartRegex = true;
+  const templateExpressionDepths: number[] = [];
   const start = parser.offset;
   while (parser.offset < parser.source.length) {
     const char = parser.source[parser.offset] as string;
-    const previous = parser.source[parser.offset - 1];
-    if (quote) {
-      if (char === quote && previous !== "\\") {
-        quote = undefined;
-      }
+    const next = parser.source[parser.offset + 1];
+    if (mode === "line-comment") {
+      if (char === "\n" || char === "\r") mode = "code";
       parser.offset++;
       continue;
     }
-    if (char === `"` || char === `'`) {
-      quote = char;
+    if (mode === "block-comment") {
+      if (char === "*" && next === "/") {
+        mode = "code";
+        parser.offset += 2;
+      } else {
+        parser.offset++;
+      }
+      continue;
+    }
+    if (mode === "single" || mode === "double") {
+      if (!escaped && char === (mode === "single" ? "'" : '"')) mode = "code";
+      escaped = !escaped && char === "\\";
+      parser.offset++;
+      continue;
+    }
+    if (mode === "regex") {
+      if (!escaped) {
+        if (char === "[") regexCharacterClass = true;
+        if (char === "]") regexCharacterClass = false;
+        if (char === "/" && !regexCharacterClass) {
+          mode = "code";
+          canStartRegex = false;
+        }
+      }
+      escaped = !escaped && char === "\\";
+      parser.offset++;
+      continue;
+    }
+    if (mode === "template") {
+      if (!escaped && char === "`" ) {
+        mode = "code";
+        canStartRegex = false;
+        parser.offset++;
+        continue;
+      }
+      if (!escaped && char === "$" && next === "{") {
+        depth++;
+        templateExpressionDepths.push(depth);
+        mode = "code";
+        canStartRegex = true;
+        parser.offset += 2;
+        continue;
+      }
+      escaped = !escaped && char === "\\";
+      parser.offset++;
+      continue;
+    }
+    if (char === "/" && next === "/") {
+      mode = "line-comment";
+      parser.offset += 2;
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      mode = "block-comment";
+      parser.offset += 2;
+      continue;
+    }
+    if (char === "/" && canStartRegex) {
+      mode = "regex";
+      escaped = false;
+      regexCharacterClass = false;
+      parser.offset++;
+      continue;
+    }
+    if (char === `"` || char === `'` || char === "`") {
+      mode = char === `"` ? "double" : char === `'` ? "single" : "template";
+      escaped = false;
       parser.offset++;
       continue;
     }
     if (char === "{") {
       depth++;
+      canStartRegex = true;
     } else if (char === "}") {
       depth--;
       parser.offset++;
+      if (templateExpressionDepths.at(-1) === depth + 1) {
+        templateExpressionDepths.pop();
+        mode = "template";
+        escaped = false;
+        continue;
+      }
       if (depth === 0) {
         return ok(parser.source.slice(start, parser.offset));
       }
+      canStartRegex = false;
       continue;
+    } else if (!isWhitespace(char)) {
+      canStartRegex = "([,:;!?=+-*%&|^~<>".includes(char);
     }
     parser.offset++;
   }
