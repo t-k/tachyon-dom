@@ -1,5 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { batch, catchError, createMemo, createResource, createSignal, effect, read, untrack } from "../src/runtime/signal";
+import {
+  batch,
+  catchError,
+  createMemo,
+  createResource,
+  createRoot,
+  createSignal,
+  effect,
+  onCleanup,
+  read,
+  untrack,
+} from "../src/runtime/signal";
 
 const arrayFrom = Array.from;
 
@@ -8,6 +19,47 @@ afterEach(() => {
 });
 
 describe("signal runtime", () => {
+  it("disposes root-owned effects and memos with cleanup callbacks in reverse order", () => {
+    const count = createSignal(1);
+    const seen: number[] = [];
+    const cleanups: string[] = [];
+    const dispose = createRoot((disposeRoot) => {
+      onCleanup(() => cleanups.push("first"));
+      const doubled = createMemo(() => count() * 2);
+      effect(() => seen.push(doubled()));
+      onCleanup(() => cleanups.push("second"));
+      return disposeRoot;
+    });
+
+    count.set(2);
+    dispose();
+    dispose();
+    count.set(3);
+
+    expect(seen).toEqual([2, 4]);
+    expect(cleanups).toEqual(["second", "first"]);
+  });
+
+  it("aborts root-owned resources and detaches their source tracking", async () => {
+    const key = createSignal("first");
+    const calls: string[] = [];
+    let requestSignal: AbortSignal | undefined;
+    const dispose = createRoot((disposeRoot) => {
+      createResource(key, (value, context) => {
+        calls.push(value);
+        requestSignal = context.signal;
+        return new Promise<string>(() => undefined);
+      });
+      return disposeRoot;
+    });
+
+    await Promise.resolve();
+    dispose();
+    key.set("ignored");
+
+    expect(requestSignal?.aborted).toBe(true);
+    expect(calls).toEqual(["first"]);
+  });
   it("re-runs effects only while they are active", () => {
     const count = createSignal(1);
     const seen: number[] = [];

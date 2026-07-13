@@ -491,6 +491,22 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`return () => {`);
   });
 
+  it("owns default scope reactivity and DOM cleanups with one generated root", () => {
+    const result = compileTemplate(`<button on:click={increment}>{count}</button>`);
+    if (!result.ok) throw new Error(result.error.message);
+
+    const code = generateClientModule(result.value, { reactive: true, defaultScopeName: "createScope" });
+
+    expect(code).toContain(
+      `import { createRoot as __tachyonCreateRoot, effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
+    );
+    expect(code).toContain(`export const bind = (root, inputScope = {}) => __tachyonCreateRoot((__tachyonDisposeRoot) => {`);
+    expect(code.indexOf(`const scope = __tachyonCreateScope(inputScope);`)).toBeGreaterThan(
+      code.indexOf(`__tachyonCreateRoot((__tachyonDisposeRoot) => {`),
+    );
+    expect(code).toContain(`__tachyonDisposeRoot();`);
+  });
+
   it("keeps nested client control-flow bindings instead of dropping them", () => {
     const result = compileTemplate(
       `<section><if test={visible}><ul><for each={groups} key={group.id}><li>{group.name}<ul><for each={group.items} key={item.id}><li>{item.label}</li></for></ul></li></for></ul><if test={showNote}><p>{note}</p></if></if></section>`,

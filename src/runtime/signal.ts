@@ -9,13 +9,48 @@ type EffectRunner = {
   run: () => void;
 };
 
+type Owner = {
+  disposed: boolean;
+  cleanups: Array<() => void>;
+};
+
 const signalBrand = Symbol("tachyon.signal");
 
 let activeEffect: EffectRunner | undefined;
+let currentOwner: Owner | undefined;
 let batchDepth = 0;
 let flushing = false;
 const pendingComputedEffects = new Set<EffectRunner>();
 const pendingEffects = new Set<EffectRunner>();
+
+export const onCleanup = (cleanup: () => void): void => {
+  if (currentOwner && !currentOwner.disposed) {
+    currentOwner.cleanups.push(cleanup);
+  }
+};
+
+export const createRoot = <T>(fn: (dispose: () => void) => T): T => {
+  const parent = currentOwner;
+  const owner: Owner = { disposed: false, cleanups: [] };
+  const dispose = (): void => {
+    if (owner.disposed) return;
+    owner.disposed = true;
+    for (let index = owner.cleanups.length - 1; index >= 0; index--) {
+      owner.cleanups[index]?.();
+    }
+    owner.cleanups.length = 0;
+  };
+  if (parent && !parent.disposed) parent.cleanups.push(dispose);
+  currentOwner = owner;
+  try {
+    return fn(dispose);
+  } catch (error) {
+    dispose();
+    throw error;
+  } finally {
+    currentOwner = parent;
+  }
+};
 
 export type Accessor<T> = (() => T) & {
   readonly [signalBrand]: true;
@@ -215,7 +250,9 @@ const createEffect = (fn: () => void, computed: boolean): (() => void) => {
   };
   parent?.children.add(runner);
   runner.run();
-  return () => disposeRunner(runner);
+  const dispose = (): void => disposeRunner(runner);
+  onCleanup(dispose);
+  return dispose;
 };
 
 export const effect = (fn: () => void): (() => void) => createEffect(fn, false);
@@ -308,7 +345,7 @@ export const createResource = <Source, T>(
   } else {
     void run();
   }
-  return {
+  const resource: Resource<T> = {
     data,
     error,
     loading,
@@ -325,4 +362,6 @@ export const createResource = <Source, T>(
       loading.set(false);
     },
   };
+  onCleanup(resource.dispose);
+  return resource;
 };

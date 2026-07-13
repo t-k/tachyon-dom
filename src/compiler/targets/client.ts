@@ -302,6 +302,7 @@ const scopeName = (usesStore: boolean): string => (usesStore ? "state" : "scope"
 const runtimeNames = {
   bindControl: "__tachyonBindControl",
   createStore: "__tachyonCreateStore",
+  createRoot: "__tachyonCreateRoot",
   delegate: "__tachyonDelegate",
   effect: "__tachyonEffect",
   elementAt: "__tachyonElementAt",
@@ -401,9 +402,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         : `import { mountConditional as ${runtimeNames.mountConditional} } from "tachyon-dom/runtime/conditional";`,
     );
   }
-  if (needsSignal) {
+  if (needsSignal || hasDefaultScope) {
     lines.push(
-      `import { effect as ${runtimeNames.effect}, read as ${runtimeNames.read} } from "tachyon-dom/runtime/signal";`,
+      `import { ${hasDefaultScope ? `createRoot as ${runtimeNames.createRoot}, ` : ""}${needsSignal ? `effect as ${runtimeNames.effect}, read as ${runtimeNames.read}` : ""} } from "tachyon-dom/runtime/signal";`,
     );
   }
   if (needsStore) {
@@ -423,7 +424,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`};`);
   }
   lines.push(
-    hasDefaultScope ? `export const bind = (root, inputScope = {}) => {` : `export const bind = (root, scope) => {`,
+    hasDefaultScope
+      ? `export const bind = (root, inputScope = {}) => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`
+      : `export const bind = (root, scope) => {`,
   );
   if (hasDefaultScope) {
     lines.push(`  const scope = __tachyonCreateScope(inputScope);`);
@@ -434,7 +437,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       .join(", ");
     lines.push(`  const state = ${runtimeNames.createStore}({ ...scope, ${fields} });`);
   }
-  if (reactive || needsEvent || needsModel) {
+  if (reactive || needsEvent || needsModel || hasDefaultScope) {
     lines.push(`  const cleanups = [];`);
   }
   let listIndex = 0;
@@ -525,12 +528,13 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       lines.push(emitConditionalBinding(binding, reactive, sourceName, conditionalIndex++, targetName));
     }
   }
-  if (reactive || needsEvent || needsModel) {
+  if (reactive || needsEvent || needsModel || hasDefaultScope) {
     lines.push(`  return () => {`);
     lines.push(`    for (const cleanup of cleanups) cleanup();`);
+    if (hasDefaultScope) lines.push(`    __tachyonDisposeRoot();`);
     lines.push(`  };`);
   }
-  lines.push(`};`);
+  lines.push(hasDefaultScope ? `});` : `};`);
   const code = `${lines.join("\n")}\n`;
   const nextCache = cachedByOptions ?? new Map<string, string>();
   nextCache.set(cacheKey, code);
