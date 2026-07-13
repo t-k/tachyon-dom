@@ -20,7 +20,7 @@ The README will target approximately 150 to 200 lines and use this order:
 2. A short “Why Tachyon DOM?” section describing static template extraction, direct DOM updates, shared targets, and modular browser-safe runtime imports.
 3. A roughly 20-line counter and keyed-list template example using supported `.td` syntax.
 4. A short generated-code excerpt demonstrating cached DOM targets, fine-grained effects, and keyed-list mounting. The excerpt will be clearly labeled as abbreviated output rather than presented as byte-for-byte compiler output.
-5. Measured browser-entry bundle size, its exact measurement command, and the dependency-graph guarantee enforced by CI.
+5. Measured browser sizes for both the minimal reactive entry and the complete counter/keyed-list quick example, with exact measurement commands and dependency-graph guarantees enforced by CI.
 6. A reproducible benchmark summary backed by a committed result artifact. It will state the environment and comparison scope, link directly to the artifact, and include the exact reproduction command. It will avoid unsupported “fastest” or universal performance claims.
 7. Installation and the shortest supported starter command.
 8. A documentation index linking to syntax, runtime, routing, app/Vite, adapters, security, whitespace migration, testing, benchmarks, and release documentation.
@@ -46,7 +46,8 @@ If existing detailed documents already cover a passage, the README will link to 
 
 Bundle and benchmark claims must be reproducible from repository commands and committed artifacts.
 
-- Browser size will come from `pnpm check:browser-entry`. The README test will ensure the documented command and current measured output remain represented. The CI contract continues to reject compiler, server, TypeScript, parse5, and language-server dependencies from the root `createSignal` consumer graph.
+- The minimal reactive-entry size will come from `pnpm check:browser-entry`. The README test will ensure the documented command and current measured output remain represented. The CI contract continues to reject compiler, server, TypeScript, parse5, and language-server dependencies from the root `createSignal` consumer graph.
+- A second reproducible check will compile and bundle the exact counter/keyed-list quick example shown in the README. It will report minified bytes and Brotli bytes for the complete generated client module and fail if compiler, server, TypeScript, parse5, or language-server dependencies enter the browser graph. README tests will bind the displayed numbers to this script’s checked output rather than to a hand-calculated estimate.
 - The benchmark table will be derived from one named committed JSON result that satisfies the repository’s benchmark authority rules. The README will identify the benchmark mode, runtime, iteration count, compared implementations, and result date.
 - README prose will distinguish the specialized keyed-list benchmark from broader framework and SSR/streaming comparisons.
 - Numeric claims will not be copied from transient terminal output without a committed source artifact.
@@ -64,7 +65,7 @@ Documentation tests will verify:
 - the positioning statement appears near the top;
 - the quick example contains both counter and keyed-list behavior and uses supported syntax;
 - the generated-code excerpt names the actual modular runtime helpers used by current output;
-- the browser bundle command and current measured size are present;
+- the minimal reactive-entry and complete quick-example bundle commands and current measured sizes are present;
 - the benchmark claim links to an existing committed artifact and names its reproduction command;
 - every documentation link resolves to an existing file or section;
 - detailed whitespace migration and router capability content no longer lives in the root README;
