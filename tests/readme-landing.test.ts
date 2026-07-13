@@ -44,12 +44,22 @@ describe("README landing page", () => {
       "docs/migrations/whitespace.md",
       "benchmark/README.md",
       "docs/releasing.md",
+      "CHANGELOG.md",
     ];
 
     for (const destination of destinations) {
       expect(readme).toContain(`(${destination})`);
       await expect(access(path.join(root, destination))).resolves.toBeUndefined();
     }
+  });
+
+  it("links the current release changelog", async () => {
+    const readme = await read("README.md");
+    const changelog = await read("CHANGELOG.md");
+
+    expect(readme).toContain("[Changelog](CHANGELOG.md)");
+    expect(changelog).toContain("## [0.1.1] - 2026-07-13");
+    expect(changelog).toContain("[0.1.1]: https://github.com/t-k/tachyon-dom/compare/v0.1.0...v0.1.1");
   });
 
   it("keeps reference and migration detail out of the landing page", async () => {

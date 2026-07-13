@@ -142,6 +142,7 @@ This boundary keeps TypeScript, parse5, language-server, app, and server graphs 
 - [Whitespace migration](docs/migrations/whitespace.md): compiler versus document policies, legacy mappings, and boundary outcomes.
 - [Benchmarks](benchmark/README.md): provenance, contracts, reproduction, and interpretation.
 - [Releasing](docs/releasing.md): package verification, Trusted Publishing, and release commands.
+- [Changelog](CHANGELOG.md): release history, breaking changes, fixes, and security notes.
 
 ## Security
 
