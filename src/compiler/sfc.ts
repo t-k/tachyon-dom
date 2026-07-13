@@ -40,20 +40,20 @@ export type TransformedSfcScript = {
 const scriptOpenPattern = /<script\b([^>]*)>/gi;
 const autoImports: Record<string, string> = {
   batch: "tachyon-dom",
-  compileTachyonSfc: "tachyon-dom",
-  createClientRouter: "tachyon-dom",
+  compileTachyonSfc: "tachyon-dom/compiler",
+  createClientRouter: "tachyon-dom/runtime/router",
   createMemo: "tachyon-dom",
   createSignal: "tachyon-dom",
   createStore: "tachyon-dom",
   effect: "tachyon-dom",
   enhanceForm: "tachyon-dom",
   err: "tachyon-dom",
-  generateClientModule: "tachyon-dom",
-  generateServerStreamModule: "tachyon-dom",
+  generateClientModule: "tachyon-dom/compiler",
+  generateServerStreamModule: "tachyon-dom/compiler",
   ok: "tachyon-dom",
   readTextStreamChunks: "tachyon-dom",
-  renderServerTemplate: "tachyon-dom",
-  renderToReadableStream: "tachyon-dom",
+  renderServerTemplate: "tachyon-dom/compiler",
+  renderToReadableStream: "tachyon-dom/server/stream",
   validateFormData: "tachyon-dom",
 };
 const autoImportPattern = new RegExp(

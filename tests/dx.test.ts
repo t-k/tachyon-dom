@@ -339,9 +339,12 @@ describe("DX helpers", () => {
 
   it("keeps the package root browser-safe and the request-scoped SSR example escaped", async () => {
     const indexSource = await readFile("src/index.ts", "utf8");
+    const sfcSource = await readFile("src/compiler/sfc.ts", "utf8");
     const readme = await readFile("README.md", "utf8");
 
     expect(indexSource).not.toMatch(/\.\/app\.js|\.\/compiler\/|\.\/server\//);
+    expect(sfcSource).toContain('compileTachyonSfc: "tachyon-dom/compiler"');
+    expect(sfcSource).toContain('renderToReadableStream: "tachyon-dom/server/stream"');
     expect(readme).toContain('import { attr, html } from "tachyon-dom/server/html";');
     expect(readme).toContain("const body = html`");
     expect(readme).toContain('${attr("src", clientScript ?? "")}');

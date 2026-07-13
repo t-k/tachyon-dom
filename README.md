@@ -169,9 +169,28 @@ Only keys marked `public: true` are exposed under `result.value.publicEnv`. By d
 
 ## Runtime APIs
 
-The root entry exports the small reactive runtime: `createSignal()`, `createMemo()`, `effect()`, `batch()`, `untrack()`, `createResource()`, and `catchError()`. Use `createResource(source, loader)` for signal-driven async data with `data`, `error`, `loading`, and `refetch` accessors. Source changes abort superseded loads; the loader receives an `AbortSignal`, and `resource.dispose()` detaches tracking and aborts in-flight work. Use `untrack(fn)` to read signals without subscribing the active effect, and use `catchError(fn, onError)` when an effect should recover and keep tracking after a thrown error.
+The root entry exports browser-safe reactive and runtime APIs, including `createSignal()`, `createMemo()`, `effect()`, `batch()`, `untrack()`, `createResource()`, `createRoot()`, `onCleanup()`, and `catchError()`. Compiler, app, router, server, and Vite APIs live under their documented subpath entries so importing a signal does not pull their dependency graphs into browser tooling.
 
-`createErrorBoundary()` is available from the root entry and `tachyon-dom/runtime/error-boundary` for DOM-mounted fallback UI around client enhancements. `createI18n()` and `localeMiddleware()` are available from the root entry and `tachyon-dom/i18n` for dictionary lookup, interpolation, and request locale selection.
+Use `createResource(source, loader)` for signal-driven async data with `data`, `error`, `loading`, and `refetch` accessors. Source changes abort superseded loads; the loader receives an `AbortSignal`, and `resource.dispose()` detaches tracking and aborts in-flight work. Resources created inside `createRoot()` are disposed automatically. Effects, memos, resources, and `onCleanup()` callbacks created inside a root share its lifetime; generated component bindings create a root around their scope factory and DOM bindings.
+
+```ts
+import { createMemo, createResource, createRoot, createSignal, onCleanup } from "tachyon-dom";
+
+const dispose = createRoot((disposeRoot) => {
+  const userId = createSignal("42");
+  const user = createResource(userId, loadUser);
+  const label = createMemo(() => user.data()?.name ?? "Loading");
+
+  onCleanup(() => console.log(`Disposed ${label()}`));
+  return disposeRoot;
+});
+
+dispose();
+```
+
+Use `untrack(fn)` to read signals without subscribing the active effect, and use `catchError(fn, onError)` when an effect should recover and keep tracking after a thrown error.
+
+`createErrorBoundary()` is available from the root entry and `tachyon-dom/runtime/error-boundary` for DOM-mounted fallback UI around client enhancements. `createI18n()` and `localeMiddleware()` are available from `tachyon-dom/i18n` for dictionary lookup, interpolation, and request locale selection.
 
 Adapters are lower-level deployment APIs for Node, Workers, and Lambda composition. They are useful when composing Tachyon DOM with an existing Request-to-Response handler, but an adapter-only app with TypeScript string templates is not the standard framework shape. If you are migrating an existing SSR app, start by replacing hand-written enhancement registries with `tachyon-dom/runtime/enhancement`, then move one screen at a time into `.td` templates, and finally wire those screens through the app or route layer.
 
