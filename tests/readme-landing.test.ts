@@ -71,6 +71,28 @@ describe("README landing page", () => {
     expect(ci).toContain("pnpm check:quick-example-size");
   });
 
+  it("keeps displayed bundle sizes synchronized with the measurement contract", async () => {
+    const readme = await read("README.md");
+    const sizes = JSON.parse(await read("scripts/browser-bundle-sizes.json")) as {
+      browserEntryMinifiedBytes: number;
+      quickExampleMinifiedBytes: number;
+      quickExampleBrotliBytes: number;
+    };
+
+    expect(readme).toContain(`${sizes.browserEntryMinifiedBytes} bytes minified`);
+    expect(readme).toContain(
+      `Quick example client bundle: ${sizes.quickExampleMinifiedBytes} bytes minified, ${sizes.quickExampleBrotliBytes} bytes Brotli`,
+    );
+  });
+
+  it("points routing security and whitespace references at their current contracts", async () => {
+    const routing = await read("docs/routing.md");
+
+    expect(routing).toContain("docs/migrations/whitespace.md");
+    expect(routing).not.toContain("README migration table is the normative");
+    expect(routing).not.toContain("constructs request URLs from the incoming `Host` and `X-Forwarded-Proto`");
+  });
+
   it("cites a clean production benchmark artifact and its measured ratio", async () => {
     const artifact = "benchmark/local-compare/results/2026-07-13-readme-baseline.json";
     const readme = await read("README.md");

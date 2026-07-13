@@ -1,6 +1,11 @@
+import { readFile } from "node:fs/promises";
 import { brotliCompressSync } from "node:zlib";
 import { build } from "esbuild";
 import { compileTemplate, generateClientModule } from "../dist/compiler.js";
+
+const expectedSizes = JSON.parse(
+  await readFile(new URL("./browser-bundle-sizes.json", import.meta.url), "utf8"),
+);
 
 const templateSource = `<main>
   <button on:click={increment}>{count}</button>
@@ -58,6 +63,14 @@ const brotliBytes = result.outputFiles.reduce(
   (total, output) => total + brotliCompressSync(output.contents).byteLength,
   0,
 );
+if (
+  minifiedBytes !== expectedSizes.quickExampleMinifiedBytes ||
+  brotliBytes !== expectedSizes.quickExampleBrotliBytes
+) {
+  throw new Error(
+    `Quick example measured ${minifiedBytes} minified/${brotliBytes} Brotli bytes; update the implementation, README, and browser-bundle-sizes.json together.`,
+  );
+}
 const maxMinifiedBytes = 12_000;
 const maxBrotliBytes = 4_000;
 if (minifiedBytes > maxMinifiedBytes || brotliBytes > maxBrotliBytes) {
