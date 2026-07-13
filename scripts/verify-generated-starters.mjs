@@ -165,8 +165,8 @@ try {
     path.join(projectRoot, "packages", "create-tachyon-dom"),
   );
 
-  const tachyonTarball = path.join(artifacts, "tachyon-dom-0.1.0.tgz");
-  const createTarball = path.join(artifacts, "create-tachyon-dom-0.1.0.tgz");
+  const tachyonTarball = path.join(artifacts, "tachyon-dom-0.1.1.tgz");
+  const createTarball = path.join(artifacts, "create-tachyon-dom-0.1.1.tgz");
   await run("pnpm", ["pkg", "set", `pnpm.overrides.create-tachyon-dom>tachyon-dom=file:${tachyonTarball}`], harness);
   await run("pnpm", ["add", tachyonTarball, createTarball], harness);
   await run("pnpm", ["exec", "tachyon-dom", "init", "--out", cliProject, "--template", "basic"], harness);
