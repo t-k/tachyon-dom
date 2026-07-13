@@ -6,6 +6,7 @@ release-artifacts/
 .codex/
 .worktrees/
 docs.local/
+docs/superpowers/
 benchmark/local-compare/results/
 benchmark/streaming-backpressure-results/
 benchmark/html-minification-results/

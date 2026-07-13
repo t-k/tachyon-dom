@@ -261,6 +261,15 @@ describe("DX helpers", () => {
     expect(script).not.toContain("--outdir dist/");
   });
 
+  it("derives packaged starter tarball names from package manifests", async () => {
+    const verifier = await readFile("scripts/verify-generated-starters.mjs", "utf8");
+
+    expect(verifier).toContain("rootPackage.version");
+    expect(verifier).toContain("createPackage.version");
+    expect(verifier).not.toContain('tachyon-dom-0.1.1.tgz');
+    expect(verifier).not.toContain('create-tachyon-dom-0.1.1.tgz');
+  });
+
   it("documents the recommended application shape", async () => {
     const gettingStarted = await readFile("docs/getting-started.md", "utf8");
     const adapters = await readFile("docs/adapters.md", "utf8");

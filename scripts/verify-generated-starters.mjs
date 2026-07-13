@@ -165,8 +165,12 @@ try {
     path.join(projectRoot, "packages", "create-tachyon-dom"),
   );
 
-  const tachyonTarball = path.join(artifacts, "tachyon-dom-0.1.1.tgz");
-  const createTarball = path.join(artifacts, "create-tachyon-dom-0.1.1.tgz");
+  const rootPackage = JSON.parse(await readFile(path.join(projectRoot, "package.json"), "utf8"));
+  const createPackage = JSON.parse(
+    await readFile(path.join(projectRoot, "packages", "create-tachyon-dom", "package.json"), "utf8"),
+  );
+  const tachyonTarball = path.join(artifacts, `tachyon-dom-${rootPackage.version}.tgz`);
+  const createTarball = path.join(artifacts, `create-tachyon-dom-${createPackage.version}.tgz`);
   await run("pnpm", ["pkg", "set", `pnpm.overrides.create-tachyon-dom>tachyon-dom=file:${tachyonTarball}`], harness);
   await run("pnpm", ["add", tachyonTarball, createTarball], harness);
   await run("pnpm", ["exec", "tachyon-dom", "init", "--out", cliProject, "--template", "basic"], harness);
