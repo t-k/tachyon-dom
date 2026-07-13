@@ -141,7 +141,7 @@ describe("progressive stream trusted HTML contract", () => {
     expect(readFileSync(path.join(root, "src/router.ts"), "utf8")).toContain(
       "adapters do not escape or sanitize chunks",
     );
-    expect(readFileSync(path.join(root, "README.md"), "utf8")).toContain("trustedHtmlChunk(escapeToHtml");
+    expect(readFileSync(path.join(root, "docs/security.md"), "utf8")).toContain("trustedHtmlChunk(escapeToHtml");
     expect(readFileSync(path.join(root, "docs/routing.md"), "utf8")).toContain("trusted raw HTML");
   });
 });
