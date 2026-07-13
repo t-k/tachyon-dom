@@ -220,6 +220,7 @@
     "build:create-package": "pnpm --dir packages/create-tachyon-dom build",
     "check:exports": "publint --strict && attw --pack --no-emoji --profile esm-only",
     "check:size": "size-limit",
+    "check:browser-entry": "node scripts/verify-browser-entry.mjs",
     "verify:package": "node scripts/verify-package-artifacts.mjs",
     "verify:release": "node scripts/release-contract.mjs --verify-artifacts release-artifacts",
     "prepare:release": "node scripts/release-contract.mjs",

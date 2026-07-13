@@ -1,12 +1,11 @@
 import {
   catchError,
   createErrorBoundary,
-  createI18n,
   createResource,
   createSignal,
   effect,
-  localeMiddleware,
 } from "../src/index";
+import { createI18n, localeMiddleware } from "../src/i18n";
 import { createClientRouter } from "../src/runtime/router";
 
 type ExampleUser = {

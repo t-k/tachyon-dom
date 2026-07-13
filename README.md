@@ -42,7 +42,7 @@ The compiler output is intentionally close to the current direct DOM runtime: st
 
 The first server streaming adapter, `tachyon-dom/server/stream`, accepts sync or async HTML chunks and adapts them to `ReadableStream<Uint8Array>` or `Response` without building a single full HTML string first.
 
-The first list runtime path, `tachyon-dom/runtime/list`, preserves keyed row elements across updates, moves reused elements into order, patches text/class bindings, removes stale rows, and keeps event handlers current through a mutable row scope. Row events are delegated through the list container so reused rows do not need one listener per row.
+The first list runtime path, `tachyon-dom/runtime/list`, preserves keyed row elements across updates, moves reused elements into order, patches text/class bindings, removes stale rows, and keeps event handlers current through a mutable row scope. Event listeners are attached once per created row target. Reused rows retain their listeners while handlers are resolved from the current mutable row scope.
 
 ## App Layer
 
@@ -187,6 +187,7 @@ For request-scoped dynamic SSR, use `tachyonSsr()` in the Vite plugin list. It m
 
 ```ts
 import { defineConfig } from "vite";
+import { attr, html } from "tachyon-dom/server/html";
 import { tachyonDom, tachyonSsr } from "tachyon-dom/vite";
 
 const clientScript = (request: Request) =>
@@ -199,7 +200,12 @@ export default defineConfig({
       clientScript,
       fetch: async (request, { clientScript }) => {
         const user = new URL(request.url).searchParams.get("user") ?? "Guest";
-        return new Response(`<main>Hello ${user}</main><script type="module" src="${clientScript ?? ""}"></script>`, {
+        const body = html`
+          <main>Hello ${user}</main>
+          <script type="module"${attr("src", clientScript ?? "")}></script>
+        `;
+
+        return new Response(String(body), {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
       },

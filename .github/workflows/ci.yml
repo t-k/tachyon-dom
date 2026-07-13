@@ -39,6 +39,8 @@ jobs:
 
       - run: pnpm check:size
 
+      - run: pnpm check:browser-entry
+
       - run: pnpm test
 
       - run: pnpm bench:local:smoke

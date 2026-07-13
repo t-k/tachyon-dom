@@ -315,11 +315,13 @@ describe("DX helpers", () => {
       "publint --strict && attw --pack --no-emoji --profile esm-only",
     );
     expect(packageJson.scripts?.["check:size"]).toBe("size-limit");
+    expect(packageJson.scripts?.["check:browser-entry"]).toBe("node scripts/verify-browser-entry.mjs");
     expect(packageJson["size-limit"]?.map((entry) => entry.name)).toEqual(publicJsExportNames);
     expect(packageJson["size-limit"]?.some((entry) => entry.name === "td-modules")).toBe(false);
     expect(ci).toContain("workflow_dispatch");
     expect(ci).toContain("pnpm check:exports");
     expect(ci).toContain("pnpm check:size");
+    expect(ci).toContain("pnpm check:browser-entry");
     expect(ci).toContain("github.event_name == 'workflow_dispatch'");
     expect(ci).toContain("pnpm bench:local:smoke");
     expect(release).toContain("tags:");
@@ -333,6 +335,19 @@ describe("DX helpers", () => {
     );
     expect(publisher).toContain("if (confirmed.integrity !== entry.integrity) throw error");
     expect(finalizer).toContain("await addDistTag(entry.name, verified.version, verified.npmTag)");
+  });
+
+  it("keeps the package root browser-safe and the request-scoped SSR example escaped", async () => {
+    const indexSource = await readFile("src/index.ts", "utf8");
+    const readme = await readFile("README.md", "utf8");
+
+    expect(indexSource).not.toMatch(/\.\/app\.js|\.\/compiler\/|\.\/server\//);
+    expect(readme).toContain('import { attr, html } from "tachyon-dom/server/html";');
+    expect(readme).toContain("const body = html`");
+    expect(readme).toContain('${attr("src", clientScript ?? "")}');
+    expect(readme).toContain("new Response(String(body)");
+    expect(readme).not.toContain("`<main>Hello ${user}</main><script");
+    expect(readme).toContain("Event listeners are attached once per created row target.");
   });
 
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
