@@ -1,5 +1,15 @@
 # Benchmark result provenance
 
+## Reproducing the local keyed benchmark
+
+```sh
+pnpm bench:local
+```
+
+The canonical local run uses a production Vite build, two warmups, seven measured iterations, Playwright Chromium, and the trimmed mean with a 20% trim fraction. Result JSON is written under `benchmark/local-compare/results/` with command, Git, runtime, host, dependency, and browser provenance.
+
+This comparison follows the row-operation model used by `js-framework-benchmark`, but it uses this repository's local runner and fixtures rather than the upstream official driver. Treat results as measurements of the recorded machine and revision, not as universal rankings.
+
 New benchmark result files use schema version 2. Each result contains a benchmark and contract identifier, the lossless process argument vector, a display command, working directory, capture time, Git commit and dirty state, a working-tree hash, Node and operating-system details, CPU and host identity, and benchmark-specific dependency or browser versions. Workload controls and measurements are separate fields so comparison tools can validate controls before interpreting numbers.
 
 Comparisons fail closed when required workload or environment fields differ. Source revision differences must be explicitly allowed and remain visible as intentional differences in the comparison report. Legacy files without the provenance envelope remain unchanged and readable as historical records, but they must not be used for authoritative rankings or before-and-after claims.
