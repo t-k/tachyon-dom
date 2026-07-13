@@ -122,4 +122,22 @@ describe("mountConditional", () => {
 
     expect(calls).toEqual(["new"]);
   });
+
+  it("resolves bindings from every root in multi-root conditional content", () => {
+    document.body.innerHTML = `<main><!----></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+
+    mountConditional(root, [0], true, { message: "Ready", nested: true }, {
+      templateHtml: `<h2>Heading</h2><section><span> </span><!----></section>`,
+      bindings: [
+        { kind: "text", path: [1, 0, 0], expression: "message" },
+        { kind: "if", path: [1, 1], test: "nested", templateHtml: `<em>nested</em>`, bindings: [] },
+      ],
+    });
+
+    expect(root.innerHTML).toBe(
+      `<!----><h2>Heading</h2><section><span>Ready</span><!----><em>nested</em></section>`,
+    );
+  });
 });

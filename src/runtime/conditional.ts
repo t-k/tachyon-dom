@@ -1,9 +1,9 @@
-import { elementAt, setClassPresence } from "./class.js";
+import { setClassPresence } from "./class.js";
 import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
 import { delegate } from "./event.js";
 import { bindControl, setControlValue } from "./form.js";
 import { mountKeyedList } from "./list.js";
-import { setText, textAt } from "./text.js";
+import { setText } from "./text.js";
 
 type TextBinding = {
   kind: "text";
@@ -182,6 +182,12 @@ const createNodes = (templateHtml: string): Node[] => {
   return Array.from(template.content.childNodes).map((node) => node.cloneNode(true));
 };
 
+const nodeAtState = (state: ConditionalState, path: readonly number[]): Node => {
+  if (state.nodes.length <= 1) return nodeAt(state.nodes[0] as Node, path);
+  const [firstIndex, ...rest] = path;
+  return nodeAt(state.nodes[firstIndex ?? 0] as Node, rest);
+};
+
 const bindNodes = (
   anchor: Comment,
   state: ConditionalState,
@@ -195,44 +201,48 @@ const bindNodes = (
   }
   for (const binding of options.bindings) {
     if (binding.kind === "text") {
-      setText(textAt(firstElement, binding.path), readBinding(scope, binding));
+      setText(nodeAtState(state, binding.path) as Text, readBinding(scope, binding));
     } else if (binding.kind === "class") {
-      setClassPresence(elementAt(firstElement, binding.path), binding.className, readBinding(scope, binding));
+      setClassPresence(nodeAtState(state, binding.path) as Element, binding.className, readBinding(scope, binding));
     } else if (binding.kind === "attr") {
-      setAttributeValue(elementAt(firstElement, binding.path), binding.name, readBinding(scope, binding));
+      setAttributeValue(nodeAtState(state, binding.path) as Element, binding.name, readBinding(scope, binding));
     } else if (binding.kind === "style") {
-      setStyleValue(elementAt(firstElement, binding.path), binding.name, readBinding(scope, binding));
+      setStyleValue(nodeAtState(state, binding.path) as Element, binding.name, readBinding(scope, binding));
     } else if (binding.kind === "ref") {
-      setRef(scope, binding.expression, elementAt(firstElement, binding.path));
+      setRef(scope, binding.expression, nodeAtState(state, binding.path) as Element);
     } else if (binding.kind === "model") {
       setControlValue(
-        elementAt(firstElement, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+        nodeAtState(state, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
         binding.property,
         readBinding(scope, binding),
       );
     } else if (binding.kind === "list") {
+      const container = nodeAtState(state, binding.path);
+      if (!(container instanceof Element)) continue;
       mountKeyedList(
-        firstElement,
-        binding.path,
+        container,
+        [],
         readExpression(scope, binding.each, binding.read) as readonly unknown[] | undefined,
         { ...binding, scope },
       );
     } else if (binding.kind === "if") {
-      mountConditional(firstElement, binding.path, readExpression(scope, binding.test, binding.read), scope, binding);
+      mountConditional(nodeAtState(state, binding.path), [], readExpression(scope, binding.test, binding.read), scope, binding);
     }
   }
   if (state.cleanups.length === 0) {
     for (const binding of options.bindings) {
       if (binding.kind === "event") {
+        const target = nodeAtState(state, binding.path);
+        if (!(target instanceof Element)) continue;
         const listener: EventListener = (event) => {
           const handler = readEvent(state.scope, binding);
           if (typeof handler === "function") {
             (handler as EventListener)(event);
           }
         };
-        state.cleanups.push(delegate(firstElement, binding.eventName, binding.path, listener));
+        state.cleanups.push(delegate(target, binding.eventName, [], listener));
       } else if (binding.kind === "model") {
-        const element = elementAt(firstElement, binding.path) as
+        const element = nodeAtState(state, binding.path) as
           | HTMLInputElement
           | HTMLSelectElement
           | HTMLTextAreaElement;

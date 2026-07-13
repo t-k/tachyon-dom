@@ -743,6 +743,36 @@ describe("mountKeyedList", () => {
     expect(root.innerHTML).toBe(`<h2>Two updated</h2><p>Second updated</p><h2>One updated</h2><p>First updated</p>`);
   });
 
+  it("mounts nested lists and conditionals in later roots of a multi-root row", () => {
+    document.body.innerHTML = `<section id="items"></section>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<h2> </h2><section><ul></ul><!----></section>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "item.title" },
+        {
+          kind: "list" as const,
+          path: [1, 0],
+          each: "item.children",
+          itemName: "child",
+          key: "child.id",
+          templateHtml: `<li> </li>`,
+          bindings: [{ kind: "text" as const, path: [0], expression: "child.label" }],
+        },
+        { kind: "if" as const, path: [1, 1], test: "item.visible", templateHtml: `<em>visible</em>`, bindings: [] },
+      ],
+    };
+
+    mountKeyedList(root, [], [{ id: 1, title: "One", visible: true, children: [{ id: 2, label: "Two" }] }], options);
+
+    expect(root.innerHTML).toBe(
+      `<h2>One</h2><section><ul><li>Two</li></ul><!----><em>visible</em></section>`,
+    );
+  });
+
   it("owns formatted separators while adopting, reordering, and removing server rows", () => {
     document.body.innerHTML = `<ul id="items"> <li><span>A</span></li>  <li><span>B</span></li> </ul>`;
     const root = document.querySelector("#items");

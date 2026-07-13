@@ -331,11 +331,14 @@ const applyRowBinding = (
   } else if (binding.kind === "list") {
     const eachBinding = binding.read ? { expression: binding.each, read: binding.read } : { expression: binding.each };
     const value = readBinding(scope, eachBinding) as readonly unknown[] | undefined;
-    mountKeyedList(record.element, binding.path, value, { ...binding, scope });
+    const container = nodeAtRecord(record, binding.path);
+    if (container instanceof Element) {
+      mountKeyedList(container, [], value, { ...binding, scope });
+    }
   } else if (binding.kind === "if") {
     const testBinding = binding.read ? { expression: binding.test, read: binding.read } : { expression: binding.test };
     const value = readBinding(scope, testBinding);
-    mountConditional(record.element, binding.path, value, scope, binding);
+    mountConditional(nodeAtRecord(record, binding.path), [], value, scope, binding);
   }
 };
 
