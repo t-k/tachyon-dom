@@ -58,6 +58,25 @@ describe("HTML-first compiler", () => {
     expect(second).toBe(first);
   });
 
+  it("freezes cached compiler output so consumers cannot poison later compiles", () => {
+    const source = `<ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul>`;
+    const first = compileTemplate(source);
+    if (!first.ok) throw new Error(first.error.message);
+    const list = first.value.client.bindings[0];
+    if (!list || list.kind !== "list") throw new Error("Missing list binding.");
+
+    expect(Object.isFrozen(first.value)).toBe(true);
+    expect(Object.isFrozen(first.value.client.bindings)).toBe(true);
+    expect(Object.isFrozen(list)).toBe(true);
+    expect(() => {
+      (list as { each: string }).each = "poison";
+    }).toThrow(TypeError);
+
+    const second = compileTemplate(source);
+    expect(second).toBe(first);
+    expect(list.each).toBe("rows");
+  });
+
   it("condenses formatting newlines through one shared template tree", () => {
     const source = `<main>
   <ul>
@@ -212,8 +231,12 @@ describe("HTML-first compiler", () => {
     const firstRenderer = compileServerTemplate(result.value);
     const firstRenderedHtml = renderServerTemplate(result.value, { title: "Hello" });
 
-    result.value.root.tagName = "article";
-    result.value.client.templateHtml = "<article></article>";
+    expect(() => {
+      (result.value.root as { tagName: string }).tagName = "article";
+    }).toThrow(TypeError);
+    expect(() => {
+      (result.value.client as { templateHtml: string }).templateHtml = "<article></article>";
+    }).toThrow(TypeError);
 
     expect(generateClientModule(result.value, { reactive: true })).toBe(firstClientCode);
     expect(generateServerModule(result.value)).toBe(firstServerCode);

@@ -9,6 +9,13 @@ import { applyTemplateWhitespace } from "./whitespace.js";
 const compileCacheLimit = 128;
 const compileCache = new Map<string, Result<CompiledTemplate, CompilerError>>();
 
+const deepFreeze = <T>(value: T, seen = new WeakSet<object>()): T => {
+  if (value === null || typeof value !== "object" || seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) deepFreeze(child, seen);
+  return Object.freeze(value);
+};
+
 const rememberCompiledTemplate = (
   cacheKey: string,
   result: Result<CompiledTemplate, CompilerError>,
@@ -48,12 +55,12 @@ export const compileTemplate = (
   if (!irResult.ok) {
     return rememberCompiledTemplate(cacheKey, err(irResult.error));
   }
-  return rememberCompiledTemplate(cacheKey, ok({
+  return rememberCompiledTemplate(cacheKey, ok(deepFreeze({
     source,
     ir: irResult.value,
     root: irResult.value.root,
     client: lowerClientTemplate(irResult.value.root),
-  }));
+  })));
 };
 
 export * from "./types.js";
