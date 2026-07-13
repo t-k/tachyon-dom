@@ -1,0 +1,2063 @@
+{
+  "schemaVersion": 2,
+  "benchmark": {
+    "name": "local-compare",
+    "contractVersion": 4
+  },
+  "provenance": {
+    "capturedAt": "2026-07-13T02:30:59.299Z",
+    "command": {
+      "argv": [
+        "/home/tk/.volta/tools/image/node/24.13.0/bin/node",
+        "/home/tk/work/tachyon-dom/.worktrees/readme-benchmark/benchmark/local-compare/run-local-compare.ts"
+      ],
+      "display": "/home/tk/.volta/tools/image/node/24.13.0/bin/node /home/tk/work/tachyon-dom/.worktrees/readme-benchmark/benchmark/local-compare/run-local-compare.ts",
+      "cwd": "/home/tk/work/tachyon-dom/.worktrees/readme-benchmark"
+    },
+    "git": {
+      "available": true,
+      "commit": "c6e3e9218fbfb71af36df88e22fcba0ab8f8d2d2",
+      "dirty": false,
+      "workingTreeSha256": "130ea4ad1861e58ae180076cbe29fc0fbfbcbc6e60d512a07e675036cb0a68b0"
+    },
+    "runtime": {
+      "node": "v24.13.0",
+      "platform": "linux",
+      "arch": "x64",
+      "osRelease": "6.8.0-134-generic"
+    },
+    "host": {
+      "hostname": "ubuntu",
+      "cpuModel": "AMD Ryzen 9 9950X 16-Core Processor",
+      "logicalCpuCount": 32
+    },
+    "dependencies": {
+      "playwright": {
+        "version": "1.61.0"
+      },
+      "vite": {
+        "version": "8.0.16"
+      },
+      "marko": {
+        "version": "5.39.7"
+      },
+      "solid-js": {
+        "version": "1.9.13"
+      }
+    },
+    "browser": {
+      "name": "chromium",
+      "version": "149.0.7827.55"
+    }
+  },
+  "workload": {
+    "runId": "bc260cc6-5559-4e13-867c-ab8237da9f11",
+    "seed": 1,
+    "runIndex": 0,
+    "order": [
+      "vanillajs-3-keyed",
+      "mreact-keyed",
+      "tachyon-dom",
+      "solid-keyed",
+      "vanillajs-keyed",
+      "vanillajs-lite-keyed",
+      "marko-keyed"
+    ],
+    "scenarioOrder": [
+      "createRows",
+      "clearRows",
+      "swapRows",
+      "appendRows",
+      "createManyRows",
+      "selectRow",
+      "removeRow",
+      "partialUpdate",
+      "replaceAllRows"
+    ],
+    "iterations": 7,
+    "warmup": 2,
+    "serveMode": "production",
+    "operationStatistic": "trimmedMean",
+    "trimFraction": 0.2,
+    "baseline": "vanillajs-lite-keyed",
+    "candidate": "tachyon-dom",
+    "implementations": [
+      "vanillajs-lite-keyed",
+      "vanillajs-3-keyed",
+      "vanillajs-keyed",
+      "solid-keyed",
+      "marko-keyed",
+      "mreact-keyed",
+      "tachyon-dom"
+    ]
+  },
+  "measurements": {
+    "summaries": [
+      {
+        "id": "createRows",
+        "label": "create rows",
+        "implementation": "vanillajs-3-keyed",
+        "values": [
+          33.30000001192093,
+          33.19999998807907,
+          33.299999952316284,
+          33.30000001192093,
+          33.40000003576279,
+          33.39999997615814,
+          33.40000003576279
+        ],
+        "mean": 33.328571430274415,
+        "median": 33.30000001192093,
+        "trimmedMean": 33.33999999761581,
+        "standardDeviation": 0.06998543269388598,
+        "relativeStandardDeviation": 0.20998629611323172,
+        "medianAbsoluteDeviation": 0.09999996423721313,
+        "relativeMedianAbsoluteDeviation": 0.30030019279704073,
+        "min": 33.19999998807907,
+        "max": 33.40000003576279,
+        "p95": 33.40000003576279
+      },
+      {
+        "id": "clearRows",
+        "label": "clear rows",
+        "implementation": "vanillajs-3-keyed",
+        "values": [
+          26.400000035762787,
+          27.19999998807907,
+          29.100000023841858,
+          23.5,
+          26.900000035762787,
+          27.100000023841858,
+          28.599999964237213
+        ],
+        "mean": 26.97142858164651,
+        "median": 27.100000023841858,
+        "trimmedMean": 27.240000009536743,
+        "standardDeviation": 1.6747829562577388,
+        "relativeStandardDeviation": 6.209470704111659,
+        "medianAbsoluteDeviation": 0.699999988079071,
+        "relativeMedianAbsoluteDeviation": 2.5830257839971575,
+        "min": 23.5,
+        "max": 29.100000023841858,
+        "p95": 29.100000023841858
+      },
+      {
+        "id": "swapRows",
+        "label": "swap rows",
+        "implementation": "vanillajs-3-keyed",
+        "values": [
+          26.200000047683716,
+          27.30000001192093,
+          28.399999976158142,
+          27.700000047683716,
+          29.30000001192093,
+          28.69999998807907,
+          27.100000023841858
+        ],
+        "mean": 27.814285729612624,
+        "median": 27.700000047683716,
+        "trimmedMean": 27.840000009536745,
+        "standardDeviation": 0.9804205514382062,
+        "relativeStandardDeviation": 3.5248812821189808,
+        "medianAbsoluteDeviation": 0.6999999284744263,
+        "relativeMedianAbsoluteDeviation": 2.5270755497091075,
+        "min": 26.200000047683716,
+        "max": 29.30000001192093,
+        "p95": 29.30000001192093
+      },
+      {
+        "id": "appendRows",
+        "label": "append rows",
+        "implementation": "vanillajs-3-keyed",
+        "values": [
+          38.69999998807907,
+          38.5,
+          40.90000003576279,
+          39.09999996423721,
+          39.5,
+          48.799999952316284,
+          40.09999996423721
+        ],
+        "mean": 40.79999998637608,
+        "median": 39.5,
+        "trimmedMean": 39.659999990463255,
+        "standardDeviation": 3.35474077060982,
+        "relativeStandardDeviation": 8.222403852279495,
+        "medianAbsoluteDeviation": 0.800000011920929,
+        "relativeMedianAbsoluteDeviation": 2.0253164858757695,
+        "min": 38.5,
+        "max": 48.799999952316284,
+        "p95": 48.799999952316284
+      },
+      {
+        "id": "createManyRows",
+        "label": "create many rows",
+        "implementation": "vanillajs-3-keyed",
+        "values": [
+          233.19999998807907,
+          233.30000001192093,
+          283.2999999523163,
+          243.20000004768372,
+          250,
+          233.30000001192093,
+          233.29999995231628
+        ],
+        "mean": 244.22857142346245,
+        "median": 233.30000001192093,
+        "trimmedMean": 238.62000000476837,
+        "standardDeviation": 17.074936865284275,
+        "relativeStandardDeviation": 6.991375646905137,
+        "medianAbsoluteDeviation": 0.10000002384185791,
+        "relativeMedianAbsoluteDeviation": 0.042863276398091815,
+        "min": 233.19999998807907,
+        "max": 283.2999999523163,
+        "p95": 283.2999999523163
+      },
+      {
+        "id": "selectRow",
+        "label": "select row",
+        "implementation": "vanillajs-3-keyed",
+        "values": [
+          27.80000001192093,
+          27.5,
+          27.900000035762787,
+          29.30000001192093,
+          28.600000023841858,
+          23.5,
+          27.099999964237213
+        ],
+        "mean": 27.385714292526245,
+        "median": 27.80000001192093,
+        "trimmedMean": 27.78000000715256,
+        "standardDeviation": 1.722480420755861,
+        "relativeStandardDeviation": 6.2897041952487545,
+        "medianAbsoluteDeviation": 0.7000000476837158,
+        "relativeMedianAbsoluteDeviation": 2.5179857819552107,
+        "min": 23.5,
+        "max": 29.30000001192093,
+        "p95": 29.30000001192093
+      },
+      {
+        "id": "removeRow",
+        "label": "remove row",
+        "implementation": "vanillajs-3-keyed",
+        "values": [
+          25.5,
+          26.80000001192093,
+          21.899999976158142,
+          28.200000047683716,
+          20.099999964237213,
+          20.30000001192093,
+          29.30000001192093
+        ],
+        "mean": 24.585714289120265,
+        "median": 25.5,
+        "trimmedMean": 24.540000009536744,
+        "standardDeviation": 3.5199142092868305,
+        "relativeStandardDeviation": 14.316908461123996,
+        "medianAbsoluteDeviation": 3.600000023841858,
+        "relativeMedianAbsoluteDeviation": 14.11764715232101,
+        "min": 20.099999964237213,
+        "max": 29.30000001192093,
+        "p95": 29.30000001192093
+      },
+      {
+        "id": "partialUpdate",
+        "label": "partial update",
+        "implementation": "vanillajs-3-keyed",
+        "values": [
+          28,
+          27.19999998807907,
+          26.299999952316284,
+          25.899999976158142,
+          28.80000001192093,
+          29.399999976158142,
+          25.80000001192093
+        ],
+        "mean": 27.342857130936213,
+        "median": 27.19999998807907,
+        "trimmedMean": 27.239999985694887,
+        "standardDeviation": 1.3286482351122584,
+        "relativeStandardDeviation": 4.859215073061993,
+        "medianAbsoluteDeviation": 1.300000011920929,
+        "relativeMedianAbsoluteDeviation": 4.779411810627497,
+        "min": 25.80000001192093,
+        "max": 29.399999976158142,
+        "p95": 29.399999976158142
+      },
+      {
+        "id": "replaceAllRows",
+        "label": "replace all rows",
+        "implementation": "vanillajs-3-keyed",
+        "values": [
+          29.69999998807907,
+          29.600000023841858,
+          37.69999998807907,
+          25.100000023841858,
+          36.19999998807907,
+          41.5,
+          26.69999998807907
+        ],
+        "mean": 32.357142857142854,
+        "median": 29.69999998807907,
+        "trimmedMean": 31.97999999523163,
+        "standardDeviation": 5.68503225721277,
+        "relativeStandardDeviation": 17.569636115006354,
+        "medianAbsoluteDeviation": 4.599999964237213,
+        "relativeMedianAbsoluteDeviation": 15.488215374018694,
+        "min": 25.100000023841858,
+        "max": 41.5,
+        "p95": 41.5
+      },
+      {
+        "id": "createRows",
+        "label": "create rows",
+        "implementation": "mreact-keyed",
+        "values": [
+          33.299999952316284,
+          33.19999998807907,
+          33.30000001192093,
+          33.19999998807907,
+          33.19999998807907,
+          34.69999998807907,
+          33.30000001192093
+        ],
+        "mean": 33.45714284692492,
+        "median": 33.299999952316284,
+        "trimmedMean": 33.25999999046326,
+        "standardDeviation": 0.5095015566212422,
+        "relativeStandardDeviation": 1.5228483763611962,
+        "medianAbsoluteDeviation": 0.09999996423721313,
+        "relativeMedianAbsoluteDeviation": 0.3003001933345568,
+        "min": 33.19999998807907,
+        "max": 34.69999998807907,
+        "p95": 34.69999998807907
+      },
+      {
+        "id": "clearRows",
+        "label": "clear rows",
+        "implementation": "mreact-keyed",
+        "values": [
+          33.19999998807907,
+          25,
+          22.19999998807907,
+          24.5,
+          22.399999976158142,
+          20.5,
+          24.400000035762787
+        ],
+        "mean": 24.59999999829701,
+        "median": 24.400000035762787,
+        "trimmedMean": 23.7,
+        "standardDeviation": 3.8093869012288866,
+        "relativeStandardDeviation": 15.485312607693494,
+        "medianAbsoluteDeviation": 2.0000000596046448,
+        "relativeMedianAbsoluteDeviation": 8.196721543742905,
+        "min": 20.5,
+        "max": 33.19999998807907,
+        "p95": 33.19999998807907
+      },
+      {
+        "id": "swapRows",
+        "label": "swap rows",
+        "implementation": "mreact-keyed",
+        "values": [
+          27.19999998807907,
+          25,
+          27.600000023841858,
+          25.400000035762787,
+          25.100000023841858,
+          28.100000023841858,
+          32.60000002384186
+        ],
+        "mean": 27.285714302744186,
+        "median": 27.19999998807907,
+        "trimmedMean": 26.680000019073486,
+        "standardDeviation": 2.4660138888131247,
+        "relativeStandardDeviation": 9.03774723084714,
+        "medianAbsoluteDeviation": 1.7999999523162842,
+        "relativeMedianAbsoluteDeviation": 6.617646886416064,
+        "min": 25,
+        "max": 32.60000002384186,
+        "p95": 32.60000002384186
+      },
+      {
+        "id": "appendRows",
+        "label": "append rows",
+        "implementation": "mreact-keyed",
+        "values": [
+          41.90000003576279,
+          44.19999998807907,
+          38.69999998807907,
+          45.39999997615814,
+          40,
+          41.19999998807907,
+          41.19999998807907
+        ],
+        "mean": 41.79999999489103,
+        "median": 41.19999998807907,
+        "trimmedMean": 41.7,
+        "standardDeviation": 2.1480888476168336,
+        "relativeStandardDeviation": 5.138968535596607,
+        "medianAbsoluteDeviation": 1.199999988079071,
+        "relativeMedianAbsoluteDeviation": 2.9126213311317537,
+        "min": 38.69999998807907,
+        "max": 45.39999997615814,
+        "p95": 45.39999997615814
+      },
+      {
+        "id": "createManyRows",
+        "label": "create many rows",
+        "implementation": "mreact-keyed",
+        "values": [
+          250,
+          233.30000001192093,
+          253.89999997615814,
+          250,
+          233.30000001192093,
+          250.10000002384186,
+          249.89999997615814
+        ],
+        "mean": 245.78571428571428,
+        "median": 250,
+        "trimmedMean": 246.66000000238418,
+        "standardDeviation": 8.00614558998116,
+        "relativeStandardDeviation": 3.257368156342234,
+        "medianAbsoluteDeviation": 0.10000002384185791,
+        "relativeMedianAbsoluteDeviation": 0.04000000953674317,
+        "min": 233.30000001192093,
+        "max": 253.89999997615814,
+        "p95": 253.89999997615814
+      },
+      {
+        "id": "selectRow",
+        "label": "select row",
+        "implementation": "mreact-keyed",
+        "values": [
+          29.100000023841858,
+          28.099999964237213,
+          28.600000023841858,
+          29.19999998807907,
+          18.799999952316284,
+          27.80000001192093,
+          28.80000001192093
+        ],
+        "mean": 27.19999999659402,
+        "median": 28.600000023841858,
+        "trimmedMean": 28.480000007152558,
+        "standardDeviation": 3.461213678524548,
+        "relativeStandardDeviation": 12.725050290286621,
+        "medianAbsoluteDeviation": 0.5000000596046448,
+        "relativeMedianAbsoluteDeviation": 1.7482519552021993,
+        "min": 18.799999952316284,
+        "max": 29.19999998807907,
+        "p95": 29.19999998807907
+      },
+      {
+        "id": "removeRow",
+        "label": "remove row",
+        "implementation": "mreact-keyed",
+        "values": [
+          26.600000023841858,
+          26.30000001192093,
+          22.69999998807907,
+          27.19999998807907,
+          32.5,
+          28.900000035762787,
+          27.899999976158142
+        ],
+        "mean": 27.442857146263123,
+        "median": 27.19999998807907,
+        "trimmedMean": 27.380000007152557,
+        "standardDeviation": 2.7380165655086337,
+        "relativeStandardDeviation": 9.977155625289795,
+        "medianAbsoluteDeviation": 0.8999999761581421,
+        "relativeMedianAbsoluteDeviation": 3.308823443208032,
+        "min": 22.69999998807907,
+        "max": 32.5,
+        "p95": 32.5
+      },
+      {
+        "id": "partialUpdate",
+        "label": "partial update",
+        "implementation": "mreact-keyed",
+        "values": [
+          27.399999976158142,
+          29.69999998807907,
+          29.899999976158142,
+          26.600000023841858,
+          29.80000001192093,
+          26.900000035762787,
+          27.400000035762787
+        ],
+        "mean": 28.242857149669103,
+        "median": 27.400000035762787,
+        "trimmedMean": 28.240000009536743,
+        "standardDeviation": 1.3741045180681375,
+        "relativeStandardDeviation": 4.865316957084977,
+        "medianAbsoluteDeviation": 0.800000011920929,
+        "relativeMedianAbsoluteDeviation": 2.9197080688932844,
+        "min": 26.600000023841858,
+        "max": 29.899999976158142,
+        "p95": 29.899999976158142
+      },
+      {
+        "id": "replaceAllRows",
+        "label": "replace all rows",
+        "implementation": "mreact-keyed",
+        "values": [
+          26.599999964237213,
+          27.399999976158142,
+          26.69999998807907,
+          29.30000001192093,
+          27.69999998807907,
+          45.69999998807907,
+          25.900000035762787
+        ],
+        "mean": 29.89999999318804,
+        "median": 27.399999976158142,
+        "trimmedMean": 27.539999985694884,
+        "standardDeviation": 6.527086418553742,
+        "relativeStandardDeviation": 21.829720468363792,
+        "medianAbsoluteDeviation": 0.800000011920929,
+        "relativeMedianAbsoluteDeviation": 2.9197080752446776,
+        "min": 25.900000035762787,
+        "max": 45.69999998807907,
+        "p95": 45.69999998807907
+      },
+      {
+        "id": "createRows",
+        "label": "create rows",
+        "implementation": "tachyon-dom",
+        "values": [
+          33.40000003576279,
+          33.39999997615814,
+          33.19999998807907,
+          33.39999997615814,
+          33.39999997615814,
+          33.39999997615814,
+          33.39999997615814
+        ],
+        "mean": 33.371428557804656,
+        "median": 33.39999997615814,
+        "trimmedMean": 33.39999997615814,
+        "standardDeviation": 0.06998542052713685,
+        "relativeStandardDeviation": 0.2097165855693319,
+        "medianAbsoluteDeviation": 0,
+        "relativeMedianAbsoluteDeviation": 0,
+        "min": 33.19999998807907,
+        "max": 33.40000003576279,
+        "p95": 33.40000003576279
+      },
+      {
+        "id": "clearRows",
+        "label": "clear rows",
+        "implementation": "tachyon-dom",
+        "values": [
+          30.30000001192093,
+          22.80000001192093,
+          20.299999952316284,
+          30.30000001192093,
+          27.099999964237213,
+          25.30000001192093,
+          28.899999976158142
+        ],
+        "mean": 26.42857142005648,
+        "median": 27.099999964237213,
+        "trimmedMean": 26.87999999523163,
+        "standardDeviation": 3.5563682559613214,
+        "relativeStandardDeviation": 13.456528540405388,
+        "medianAbsoluteDeviation": 3.200000047683716,
+        "relativeMedianAbsoluteDeviation": 11.808118272718184,
+        "min": 20.299999952316284,
+        "max": 30.30000001192093,
+        "p95": 30.30000001192093
+      },
+      {
+        "id": "swapRows",
+        "label": "swap rows",
+        "implementation": "tachyon-dom",
+        "values": [
+          29,
+          30.399999976158142,
+          29.69999998807907,
+          29.100000023841858,
+          30.099999964237213,
+          30.30000001192093,
+          28.100000023841858
+        ],
+        "mean": 29.52857142686844,
+        "median": 29.69999998807907,
+        "trimmedMean": 29.639999997615813,
+        "standardDeviation": 0.775912877805478,
+        "relativeStandardDeviation": 2.627668188172031,
+        "medianAbsoluteDeviation": 0.6000000238418579,
+        "relativeMedianAbsoluteDeviation": 2.020202101288501,
+        "min": 28.100000023841858,
+        "max": 30.399999976158142,
+        "p95": 30.399999976158142
+      },
+      {
+        "id": "appendRows",
+        "label": "append rows",
+        "implementation": "tachyon-dom",
+        "values": [
+          26.69999998807907,
+          31.69999998807907,
+          41.10000002384186,
+          39.5,
+          44.40000003576279,
+          38,
+          31.600000023841858
+        ],
+        "mean": 36.14285715137209,
+        "median": 38,
+        "trimmedMean": 36.38000000715256,
+        "standardDeviation": 5.818899549848084,
+        "relativeStandardDeviation": 16.099722070885537,
+        "medianAbsoluteDeviation": 6.300000011920929,
+        "relativeMedianAbsoluteDeviation": 16.578947399791918,
+        "min": 26.69999998807907,
+        "max": 44.40000003576279,
+        "p95": 44.40000003576279
+      },
+      {
+        "id": "createManyRows",
+        "label": "create many rows",
+        "implementation": "tachyon-dom",
+        "values": [
+          249.89999997615814,
+          233.4000000357628,
+          216.5,
+          216.5,
+          233.80000001192093,
+          233.19999998807907,
+          233.19999998807907
+        ],
+        "mean": 230.92857142857142,
+        "median": 233.19999998807907,
+        "trimmedMean": 230.02000000476838,
+        "standardDeviation": 10.696823860691266,
+        "relativeStandardDeviation": 4.632091990401414,
+        "medianAbsoluteDeviation": 0.6000000238418579,
+        "relativeMedianAbsoluteDeviation": 0.257289890168323,
+        "min": 216.5,
+        "max": 249.89999997615814,
+        "p95": 249.89999997615814
+      },
+      {
+        "id": "selectRow",
+        "label": "select row",
+        "implementation": "tachyon-dom",
+        "values": [
+          30.5,
+          30.399999976158142,
+          31.5,
+          30.5,
+          31,
+          29.5,
+          18.80000001192093
+        ],
+        "mean": 28.885714284011296,
+        "median": 30.5,
+        "trimmedMean": 30.37999999523163,
+        "standardDeviation": 4.156038139449336,
+        "relativeStandardDeviation": 14.387866952453274,
+        "medianAbsoluteDeviation": 0.5,
+        "relativeMedianAbsoluteDeviation": 1.639344262295082,
+        "min": 18.80000001192093,
+        "max": 31.5,
+        "p95": 31.5
+      },
+      {
+        "id": "removeRow",
+        "label": "remove row",
+        "implementation": "tachyon-dom",
+        "values": [
+          27.899999976158142,
+          29.099999964237213,
+          32.19999998807907,
+          28.399999976158142,
+          24,
+          29.600000023841858,
+          29.899999976158142
+        ],
+        "mean": 28.72857141494751,
+        "median": 29.099999964237213,
+        "trimmedMean": 28.979999983310698,
+        "standardDeviation": 2.3137565511468736,
+        "relativeStandardDeviation": 8.053851748239119,
+        "medianAbsoluteDeviation": 0.800000011920929,
+        "relativeMedianAbsoluteDeviation": 2.749140937814771,
+        "min": 24,
+        "max": 32.19999998807907,
+        "p95": 32.19999998807907
+      },
+      {
+        "id": "partialUpdate",
+        "label": "partial update",
+        "implementation": "tachyon-dom",
+        "values": [
+          31.599999964237213,
+          28.600000023841858,
+          28.100000023841858,
+          26.599999964237213,
+          30.5,
+          29.5,
+          26.900000035762787
+        ],
+        "mean": 28.82857143027442,
+        "median": 28.600000023841858,
+        "trimmedMean": 28.7200000166893,
+        "standardDeviation": 1.6984987275269738,
+        "relativeStandardDeviation": 5.891720065404593,
+        "medianAbsoluteDeviation": 1.699999988079071,
+        "relativeMedianAbsoluteDeviation": 5.944055897419222,
+        "min": 26.599999964237213,
+        "max": 31.599999964237213,
+        "p95": 31.599999964237213
+      },
+      {
+        "id": "replaceAllRows",
+        "label": "replace all rows",
+        "implementation": "tachyon-dom",
+        "values": [
+          30,
+          30.80000001192093,
+          28.80000001192093,
+          31,
+          32.40000003576279,
+          29.69999998807907,
+          32.80000001192093
+        ],
+        "mean": 30.785714294229233,
+        "median": 30.80000001192093,
+        "trimmedMean": 30.78000000715256,
+        "standardDeviation": 1.3335544110674076,
+        "relativeStandardDeviation": 4.331731264450089,
+        "medianAbsoluteDeviation": 1.100000023841858,
+        "relativeMedianAbsoluteDeviation": 3.5714286474549035,
+        "min": 28.80000001192093,
+        "max": 32.80000001192093,
+        "p95": 32.80000001192093
+      },
+      {
+        "id": "createRows",
+        "label": "create rows",
+        "implementation": "solid-keyed",
+        "values": [
+          33.30000001192093,
+          33.19999998807907,
+          33.30000001192093,
+          33.40000003576279,
+          33.39999997615814,
+          33.40000003576279,
+          33.39999997615814
+        ],
+        "mean": 33.342857147966114,
+        "median": 33.39999997615814,
+        "trimmedMean": 33.36000000238418,
+        "standardDeviation": 0.07284313991627756,
+        "relativeStandardDeviation": 0.21846700057232774,
+        "medianAbsoluteDeviation": 5.960464477539063e-8,
+        "relativeMedianAbsoluteDeviation": 1.7845702041298832e-7,
+        "min": 33.19999998807907,
+        "max": 33.40000003576279,
+        "p95": 33.40000003576279
+      },
+      {
+        "id": "clearRows",
+        "label": "clear rows",
+        "implementation": "solid-keyed",
+        "values": [
+          28.100000023841858,
+          27.100000023841858,
+          25.5,
+          25.5,
+          24.099999964237213,
+          30.200000047683716,
+          31.599999964237213
+        ],
+        "mean": 27.442857146263123,
+        "median": 27.100000023841858,
+        "trimmedMean": 27.280000019073487,
+        "standardDeviation": 2.5116057207869615,
+        "relativeStandardDeviation": 9.152129121981622,
+        "medianAbsoluteDeviation": 1.600000023841858,
+        "relativeMedianAbsoluteDeviation": 5.904059123373508,
+        "min": 24.099999964237213,
+        "max": 31.599999964237213,
+        "p95": 31.599999964237213
+      },
+      {
+        "id": "swapRows",
+        "label": "swap rows",
+        "implementation": "solid-keyed",
+        "values": [
+          26.5,
+          27.099999964237213,
+          29.80000001192093,
+          23.5,
+          25.30000001192093,
+          29.099999964237213,
+          29
+        ],
+        "mean": 27.185714278902328,
+        "median": 27.099999964237213,
+        "trimmedMean": 27.39999998807907,
+        "standardDeviation": 2.118239542475655,
+        "relativeStandardDeviation": 7.79173767790067,
+        "medianAbsoluteDeviation": 1.9000000357627869,
+        "relativeMedianAbsoluteDeviation": 7.01107025191934,
+        "min": 23.5,
+        "max": 29.80000001192093,
+        "p95": 29.80000001192093
+      },
+      {
+        "id": "appendRows",
+        "label": "append rows",
+        "implementation": "solid-keyed",
+        "values": [
+          40.10000002384186,
+          43.69999998807907,
+          37,
+          39.10000002384186,
+          47,
+          46.80000001192093,
+          45.39999997615814
+        ],
+        "mean": 42.72857143197741,
+        "median": 43.69999998807907,
+        "trimmedMean": 43.02000000476837,
+        "standardDeviation": 3.6993104639812464,
+        "relativeStandardDeviation": 8.657697507791564,
+        "medianAbsoluteDeviation": 3.300000011920929,
+        "relativeMedianAbsoluteDeviation": 7.551487443526628,
+        "min": 37,
+        "max": 47,
+        "p95": 47
+      },
+      {
+        "id": "createManyRows",
+        "label": "create many rows",
+        "implementation": "solid-keyed",
+        "values": [
+          299.9000000357628,
+          266.5999999642372,
+          333.60000002384186,
+          283.0999999642372,
+          249.80000001192093,
+          267.80000001192093,
+          283.19999998807907
+        ],
+        "mean": 283.42857142857144,
+        "median": 283.0999999642372,
+        "trimmedMean": 280.11999999284745,
+        "standardDeviation": 25.204801949920505,
+        "relativeStandardDeviation": 8.892823268621147,
+        "medianAbsoluteDeviation": 16.5,
+        "relativeMedianAbsoluteDeviation": 5.828329213028743,
+        "min": 249.80000001192093,
+        "max": 333.60000002384186,
+        "p95": 333.60000002384186
+      },
+      {
+        "id": "selectRow",
+        "label": "select row",
+        "implementation": "solid-keyed",
+        "values": [
+          28,
+          28.19999998807907,
+          33.60000002384186,
+          26.599999964237213,
+          26.69999998807907,
+          32.80000001192093,
+          28.30000001192093
+        ],
+        "mean": 29.17142856972558,
+        "median": 28.19999998807907,
+        "trimmedMean": 28.8,
+        "standardDeviation": 2.634233047972106,
+        "relativeStandardDeviation": 9.030181849599032,
+        "medianAbsoluteDeviation": 1.5,
+        "relativeMedianAbsoluteDeviation": 5.319148938418765,
+        "min": 26.599999964237213,
+        "max": 33.60000002384186,
+        "p95": 33.60000002384186
+      },
+      {
+        "id": "removeRow",
+        "label": "remove row",
+        "implementation": "solid-keyed",
+        "values": [
+          26,
+          24.400000035762787,
+          28.599999964237213,
+          30.19999998807907,
+          26.69999998807907,
+          29.30000001192093,
+          27.80000001192093
+        ],
+        "mean": 27.571428571428573,
+        "median": 27.80000001192093,
+        "trimmedMean": 27.67999999523163,
+        "standardDeviation": 1.862957917577263,
+        "relativeStandardDeviation": 6.756842188104062,
+        "medianAbsoluteDeviation": 1.5,
+        "relativeMedianAbsoluteDeviation": 5.395683450923685,
+        "min": 24.400000035762787,
+        "max": 30.19999998807907,
+        "p95": 30.19999998807907
+      },
+      {
+        "id": "partialUpdate",
+        "label": "partial update",
+        "implementation": "solid-keyed",
+        "values": [
+          28.80000001192093,
+          28.799999952316284,
+          27.399999976158142,
+          28.5,
+          30.80000001192093,
+          28.5,
+          26.30000001192093
+        ],
+        "mean": 28.442857137748174,
+        "median": 28.5,
+        "trimmedMean": 28.39999998807907,
+        "standardDeviation": 1.2815806583185962,
+        "relativeStandardDeviation": 4.505808442913901,
+        "medianAbsoluteDeviation": 0.30000001192092896,
+        "relativeMedianAbsoluteDeviation": 1.0526316207751893,
+        "min": 26.30000001192093,
+        "max": 30.80000001192093,
+        "p95": 30.80000001192093
+      },
+      {
+        "id": "replaceAllRows",
+        "label": "replace all rows",
+        "implementation": "solid-keyed",
+        "values": [
+          25.599999964237213,
+          26.399999976158142,
+          29.900000035762787,
+          27.19999998807907,
+          40.5,
+          25.599999964237213,
+          28.5
+        ],
+        "mean": 29.09999998978206,
+        "median": 27.19999998807907,
+        "trimmedMean": 27.519999992847442,
+        "standardDeviation": 4.875009168225006,
+        "relativeStandardDeviation": 16.75260883139786,
+        "medianAbsoluteDeviation": 1.600000023841858,
+        "relativeMedianAbsoluteDeviation": 5.882353031408416,
+        "min": 25.599999964237213,
+        "max": 40.5,
+        "p95": 40.5
+      },
+      {
+        "id": "createRows",
+        "label": "create rows",
+        "implementation": "vanillajs-keyed",
+        "values": [
+          33.30000001192093,
+          33.30000001192093,
+          33.200000047683716,
+          33.30000001192093,
+          33.39999997615814,
+          33.39999997615814,
+          33.30000001192093
+        ],
+        "mean": 33.314285721097676,
+        "median": 33.30000001192093,
+        "trimmedMean": 33.320000004768374,
+        "standardDeviation": 0.06388763365198756,
+        "relativeStandardDeviation": 0.191772485194026,
+        "medianAbsoluteDeviation": 0,
+        "relativeMedianAbsoluteDeviation": 0,
+        "min": 33.200000047683716,
+        "max": 33.39999997615814,
+        "p95": 33.39999997615814
+      },
+      {
+        "id": "clearRows",
+        "label": "clear rows",
+        "implementation": "vanillajs-keyed",
+        "values": [
+          26.400000035762787,
+          28.69999998807907,
+          30.399999976158142,
+          29.69999998807907,
+          30.80000001192093,
+          29.5,
+          31.600000023841858
+        ],
+        "mean": 29.585714289120265,
+        "median": 29.69999998807907,
+        "trimmedMean": 29.819999992847443,
+        "standardDeviation": 1.5651823857792313,
+        "relativeStandardDeviation": 5.290331578557849,
+        "medianAbsoluteDeviation": 1,
+        "relativeMedianAbsoluteDeviation": 3.367003368354808,
+        "min": 26.400000035762787,
+        "max": 31.600000023841858,
+        "p95": 31.600000023841858
+      },
+      {
+        "id": "swapRows",
+        "label": "swap rows",
+        "implementation": "vanillajs-keyed",
+        "values": [
+          30.799999952316284,
+          30.200000047683716,
+          31.69999998807907,
+          32,
+          31.5,
+          32.700000047683716,
+          32.10000002384186
+        ],
+        "mean": 31.57142857994352,
+        "median": 31.69999998807907,
+        "trimmedMean": 31.619999992847443,
+        "standardDeviation": 0.7777518688808044,
+        "relativeStandardDeviation": 2.4634674573290902,
+        "medianAbsoluteDeviation": 0.40000003576278687,
+        "relativeMedianAbsoluteDeviation": 1.2618297662877247,
+        "min": 30.200000047683716,
+        "max": 32.700000047683716,
+        "p95": 32.700000047683716
+      },
+      {
+        "id": "appendRows",
+        "label": "append rows",
+        "implementation": "vanillajs-keyed",
+        "values": [
+          46.5,
+          26.80000001192093,
+          44.69999998807907,
+          43.69999998807907,
+          29.200000047683716,
+          29.19999998807907,
+          30.799999952316284
+        ],
+        "mean": 35.84285713945116,
+        "median": 30.799999952316284,
+        "trimmedMean": 35.519999992847445,
+        "standardDeviation": 8.010859970322741,
+        "relativeStandardDeviation": 22.349948105854057,
+        "medianAbsoluteDeviation": 3.9999999403953552,
+        "relativeMedianAbsoluteDeviation": 12.98701281359755,
+        "min": 26.80000001192093,
+        "max": 46.5,
+        "p95": 46.5
+      },
+      {
+        "id": "createManyRows",
+        "label": "create many rows",
+        "implementation": "vanillajs-keyed",
+        "values": [
+          285.5,
+          233.30000001192093,
+          233.4000000357628,
+          216.69999998807907,
+          249.69999998807907,
+          266.2000000476837,
+          233.39999997615814
+        ],
+        "mean": 245.45714286395483,
+        "median": 233.4000000357628,
+        "trimmedMean": 243.20000001192093,
+        "standardDeviation": 21.76897249639787,
+        "relativeStandardDeviation": 8.868746797262025,
+        "medianAbsoluteDeviation": 16.299999952316284,
+        "relativeMedianAbsoluteDeviation": 6.98371891594632,
+        "min": 216.69999998807907,
+        "max": 285.5,
+        "p95": 285.5
+      },
+      {
+        "id": "selectRow",
+        "label": "select row",
+        "implementation": "vanillajs-keyed",
+        "values": [
+          28,
+          29.30000001192093,
+          28.099999964237213,
+          28.700000047683716,
+          17.19999998807907,
+          29.200000047683716,
+          24.5
+        ],
+        "mean": 26.42857143708638,
+        "median": 28.099999964237213,
+        "trimmedMean": 27.700000011920928,
+        "standardDeviation": 4.057344070837942,
+        "relativeStandardDeviation": 15.352112695521633,
+        "medianAbsoluteDeviation": 1.1000000834465027,
+        "relativeMedianAbsoluteDeviation": 3.9145910492756926,
+        "min": 17.19999998807907,
+        "max": 29.30000001192093,
+        "p95": 29.30000001192093
+      },
+      {
+        "id": "removeRow",
+        "label": "remove row",
+        "implementation": "vanillajs-keyed",
+        "values": [
+          29.099999964237213,
+          29.5,
+          29.299999952316284,
+          31.5,
+          29.600000023841858,
+          32.30000001192093,
+          30.899999976158142
+        ],
+        "mean": 30.314285704067775,
+        "median": 29.600000023841858,
+        "trimmedMean": 30.159999990463255,
+        "standardDeviation": 1.1568782870607328,
+        "relativeStandardDeviation": 3.8162808728344704,
+        "medianAbsoluteDeviation": 0.5000000596046448,
+        "relativeMedianAbsoluteDeviation": 1.689189389195644,
+        "min": 29.099999964237213,
+        "max": 32.30000001192093,
+        "p95": 32.30000001192093
+      },
+      {
+        "id": "partialUpdate",
+        "label": "partial update",
+        "implementation": "vanillajs-keyed",
+        "values": [
+          24.399999976158142,
+          21.600000023841858,
+          23.200000047683716,
+          33.10000002384186,
+          27.5,
+          31.399999976158142,
+          27.19999998807907
+        ],
+        "mean": 26.914285719394684,
+        "median": 27.19999998807907,
+        "trimmedMean": 26.739999997615815,
+        "standardDeviation": 3.9127734229441304,
+        "relativeStandardDeviation": 14.537905496501994,
+        "medianAbsoluteDeviation": 3.9999999403953552,
+        "relativeMedianAbsoluteDeviation": 14.705882140251592,
+        "min": 21.600000023841858,
+        "max": 33.10000002384186,
+        "p95": 33.10000002384186
+      },
+      {
+        "id": "replaceAllRows",
+        "label": "replace all rows",
+        "implementation": "vanillajs-keyed",
+        "values": [
+          43.19999998807907,
+          29.30000001192093,
+          25.80000001192093,
+          28.5,
+          26.399999976158142,
+          27.69999998807907,
+          27.100000023841858
+        ],
+        "mean": 29.714285714285715,
+        "median": 27.69999998807907,
+        "trimmedMean": 27.8,
+        "standardDeviation": 5.6151398797644605,
+        "relativeStandardDeviation": 18.897105364591933,
+        "medianAbsoluteDeviation": 1.300000011920929,
+        "relativeMedianAbsoluteDeviation": 4.693140839279404,
+        "min": 25.80000001192093,
+        "max": 43.19999998807907,
+        "p95": 43.19999998807907
+      },
+      {
+        "id": "createRows",
+        "label": "create rows",
+        "implementation": "vanillajs-lite-keyed",
+        "values": [
+          33.30000001192093,
+          33.299999952316284,
+          33.30000001192093,
+          33.30000001192093,
+          33.39999997615814,
+          33.39999997615814,
+          33.10000002384186
+        ],
+        "mean": 33.29999999489103,
+        "median": 33.30000001192093,
+        "trimmedMean": 33.31999999284744,
+        "standardDeviation": 0.09258199526174304,
+        "relativeStandardDeviation": 0.27802400983767933,
+        "medianAbsoluteDeviation": 5.960464477539063e-8,
+        "relativeMedianAbsoluteDeviation": 1.7899292718934839e-7,
+        "min": 33.10000002384186,
+        "max": 33.39999997615814,
+        "p95": 33.39999997615814
+      },
+      {
+        "id": "clearRows",
+        "label": "clear rows",
+        "implementation": "vanillajs-lite-keyed",
+        "values": [
+          27.100000023841858,
+          29.19999998807907,
+          28.69999998807907,
+          27.19999998807907,
+          28.69999998807907,
+          24.19999998807907,
+          29.5
+        ],
+        "mean": 27.79999999489103,
+        "median": 28.69999998807907,
+        "trimmedMean": 28.17999999523163,
+        "standardDeviation": 1.7020995434405315,
+        "relativeStandardDeviation": 6.122660229328548,
+        "medianAbsoluteDeviation": 0.800000011920929,
+        "relativeMedianAbsoluteDeviation": 2.7874564886871767,
+        "min": 24.19999998807907,
+        "max": 29.5,
+        "p95": 29.5
+      },
+      {
+        "id": "swapRows",
+        "label": "swap rows",
+        "implementation": "vanillajs-lite-keyed",
+        "values": [
+          32.10000002384186,
+          30.399999976158142,
+          30.900000035762787,
+          30.900000035762787,
+          29.399999976158142,
+          30.19999998807907,
+          31.099999964237213
+        ],
+        "mean": 30.714285714285715,
+        "median": 30.900000035762787,
+        "trimmedMean": 30.7,
+        "standardDeviation": 0.7772269004556713,
+        "relativeStandardDeviation": 2.5305061875300927,
+        "medianAbsoluteDeviation": 0.5000000596046448,
+        "relativeMedianAbsoluteDeviation": 1.6181231683687989,
+        "min": 29.399999976158142,
+        "max": 32.10000002384186,
+        "p95": 32.10000002384186
+      },
+      {
+        "id": "appendRows",
+        "label": "append rows",
+        "implementation": "vanillajs-lite-keyed",
+        "values": [
+          43.59999996423721,
+          42.69999998807907,
+          53.10000002384186,
+          45.10000002384186,
+          51.90000003576279,
+          46.59999996423721,
+          41.5
+        ],
+        "mean": 46.357142857142854,
+        "median": 45.10000002384186,
+        "trimmedMean": 45.97999999523163,
+        "standardDeviation": 4.181543525374451,
+        "relativeStandardDeviation": 9.020278791254595,
+        "medianAbsoluteDeviation": 2.400000035762787,
+        "relativeMedianAbsoluteDeviation": 5.321507837015611,
+        "min": 41.5,
+        "max": 53.10000002384186,
+        "p95": 53.10000002384186
+      },
+      {
+        "id": "createManyRows",
+        "label": "create many rows",
+        "implementation": "vanillajs-lite-keyed",
+        "values": [
+          216.70000004768372,
+          216.5,
+          216.5,
+          249.9000000357628,
+          252.4000000357628,
+          216.69999998807907,
+          216.69999998807907
+        ],
+        "mean": 226.4857142993382,
+        "median": 216.69999998807907,
+        "trimmedMean": 223.30000001192093,
+        "standardDeviation": 15.613586457634566,
+        "relativeStandardDeviation": 6.8938504602540345,
+        "medianAbsoluteDeviation": 0.19999998807907104,
+        "relativeMedianAbsoluteDeviation": 0.09229348781267803,
+        "min": 216.5,
+        "max": 252.4000000357628,
+        "p95": 252.4000000357628
+      },
+      {
+        "id": "selectRow",
+        "label": "select row",
+        "implementation": "vanillajs-lite-keyed",
+        "values": [
+          29.30000001192093,
+          31.399999976158142,
+          30,
+          24.599999964237213,
+          30.899999976158142,
+          22.5,
+          29.200000047683716
+        ],
+        "mean": 28.271428568022593,
+        "median": 29.30000001192093,
+        "trimmedMean": 28.8,
+        "standardDeviation": 3.125797859643046,
+        "relativeStandardDeviation": 11.056384547820802,
+        "medianAbsoluteDeviation": 1.5999999642372131,
+        "relativeMedianAbsoluteDeviation": 5.46075072896328,
+        "min": 22.5,
+        "max": 31.399999976158142,
+        "p95": 31.399999976158142
+      },
+      {
+        "id": "removeRow",
+        "label": "remove row",
+        "implementation": "vanillajs-lite-keyed",
+        "values": [
+          29.80000001192093,
+          24.399999976158142,
+          29.399999976158142,
+          28.80000001192093,
+          26.30000001192093,
+          29.19999998807907,
+          30.799999952316284
+        ],
+        "mean": 28.385714275496348,
+        "median": 29.19999998807907,
+        "trimmedMean": 28.7,
+        "standardDeviation": 2.067730685505631,
+        "relativeStandardDeviation": 7.2844060411422396,
+        "medianAbsoluteDeviation": 0.6000000238418579,
+        "relativeMedianAbsoluteDeviation": 2.0547946030370157,
+        "min": 24.399999976158142,
+        "max": 30.799999952316284,
+        "p95": 30.799999952316284
+      },
+      {
+        "id": "partialUpdate",
+        "label": "partial update",
+        "implementation": "vanillajs-lite-keyed",
+        "values": [
+          31,
+          28.899999976158142,
+          26.5,
+          30,
+          29.19999998807907,
+          31.200000047683716,
+          26.599999964237213
+        ],
+        "mean": 29.057142853736877,
+        "median": 29.19999998807907,
+        "trimmedMean": 29.139999985694885,
+        "standardDeviation": 1.767853550872897,
+        "relativeStandardDeviation": 6.084058435378973,
+        "medianAbsoluteDeviation": 1.800000011920929,
+        "relativeMedianAbsoluteDeviation": 6.1643836049855505,
+        "min": 26.5,
+        "max": 31.200000047683716,
+        "p95": 31.200000047683716
+      },
+      {
+        "id": "replaceAllRows",
+        "label": "replace all rows",
+        "implementation": "vanillajs-lite-keyed",
+        "values": [
+          29.600000023841858,
+          29.30000001192093,
+          29,
+          28.700000047683716,
+          26.899999976158142,
+          31,
+          25.899999976158142
+        ],
+        "mean": 28.6285714336804,
+        "median": 29,
+        "trimmedMean": 28.700000011920928,
+        "standardDeviation": 1.585392515434055,
+        "relativeStandardDeviation": 5.537798206615725,
+        "medianAbsoluteDeviation": 0.6000000238418579,
+        "relativeMedianAbsoluteDeviation": 2.0689655994546823,
+        "min": 25.899999976158142,
+        "max": 31,
+        "p95": 31
+      },
+      {
+        "id": "createRows",
+        "label": "create rows",
+        "implementation": "marko-keyed",
+        "values": [
+          33.39999997615814,
+          33.40000003576279,
+          33.19999998807907,
+          33.39999997615814,
+          33.30000001192093,
+          33.39999997615814,
+          33.30000001192093
+        ],
+        "mean": 33.34285713945116,
+        "median": 33.39999997615814,
+        "trimmedMean": 33.35999999046326,
+        "standardDeviation": 0.07284313323660127,
+        "relativeStandardDeviation": 0.21846698059481384,
+        "medianAbsoluteDeviation": 5.960464477539063e-8,
+        "relativeMedianAbsoluteDeviation": 1.7845702041298832e-7,
+        "min": 33.19999998807907,
+        "max": 33.40000003576279,
+        "p95": 33.40000003576279
+      },
+      {
+        "id": "clearRows",
+        "label": "clear rows",
+        "implementation": "marko-keyed",
+        "values": [
+          25.80000001192093,
+          25,
+          25.400000035762787,
+          27.599999964237213,
+          26.5,
+          25.69999998807907,
+          28.099999964237213
+        ],
+        "mean": 26.29999999489103,
+        "median": 25.80000001192093,
+        "trimmedMean": 26.2,
+        "standardDeviation": 1.0743768769638318,
+        "relativeStandardDeviation": 4.085083183165541,
+        "medianAbsoluteDeviation": 0.699999988079071,
+        "relativeMedianAbsoluteDeviation": 2.7131782471148647,
+        "min": 25,
+        "max": 28.099999964237213,
+        "p95": 28.099999964237213
+      },
+      {
+        "id": "swapRows",
+        "label": "swap rows",
+        "implementation": "marko-keyed",
+        "values": [
+          23.5,
+          23.5,
+          23.100000023841858,
+          27.80000001192093,
+          20.19999998807907,
+          20.599999964237213,
+          23.19999998807907
+        ],
+        "mean": 23.12857142516545,
+        "median": 23.19999998807907,
+        "trimmedMean": 22.779999995231627,
+        "standardDeviation": 2.3013749329252216,
+        "relativeStandardDeviation": 9.950354868961643,
+        "medianAbsoluteDeviation": 0.30000001192092896,
+        "relativeMedianAbsoluteDeviation": 1.293103500323616,
+        "min": 20.19999998807907,
+        "max": 27.80000001192093,
+        "p95": 27.80000001192093
+      },
+      {
+        "id": "appendRows",
+        "label": "append rows",
+        "implementation": "marko-keyed",
+        "values": [
+          39.299999952316284,
+          44.700000047683716,
+          39.69999998807907,
+          33.09999996423721,
+          37.200000047683716,
+          43.39999997615814,
+          41.39999997615814
+        ],
+        "mean": 39.82857142175947,
+        "median": 39.69999998807907,
+        "trimmedMean": 40.19999998807907,
+        "standardDeviation": 3.61414455829334,
+        "relativeStandardDeviation": 9.07425104461274,
+        "medianAbsoluteDeviation": 2.4999999403953552,
+        "relativeMedianAbsoluteDeviation": 6.297229070896834,
+        "min": 33.09999996423721,
+        "max": 44.700000047683716,
+        "p95": 44.700000047683716
+      },
+      {
+        "id": "createManyRows",
+        "label": "create many rows",
+        "implementation": "marko-keyed",
+        "values": [
+          249.89999997615814,
+          250.19999998807907,
+          266.7000000476837,
+          266.69999998807907,
+          253.39999997615814,
+          266.5999999642372,
+          250
+        ],
+        "mean": 257.6428571343422,
+        "median": 253.39999997615814,
+        "trimmedMean": 257.3799999833107,
+        "standardDeviation": 7.892647062870519,
+        "relativeStandardDeviation": 3.0634061237548966,
+        "medianAbsoluteDeviation": 3.5,
+        "relativeMedianAbsoluteDeviation": 1.3812154697432153,
+        "min": 249.89999997615814,
+        "max": 266.7000000476837,
+        "p95": 266.7000000476837
+      },
+      {
+        "id": "selectRow",
+        "label": "select row",
+        "implementation": "marko-keyed",
+        "values": [
+          26.69999998807907,
+          27.19999998807907,
+          36.09999996423721,
+          31.19999998807907,
+          28.599999964237213,
+          27.399999976158142,
+          27.19999998807907
+        ],
+        "mean": 29.199999979564122,
+        "median": 27.399999976158142,
+        "trimmedMean": 28.319999980926514,
+        "standardDeviation": 3.150056682993587,
+        "relativeStandardDeviation": 10.787865360267746,
+        "medianAbsoluteDeviation": 0.699999988079071,
+        "relativeMedianAbsoluteDeviation": 2.554744484263393,
+        "min": 26.69999998807907,
+        "max": 36.09999996423721,
+        "p95": 36.09999996423721
+      },
+      {
+        "id": "removeRow",
+        "label": "remove row",
+        "implementation": "marko-keyed",
+        "values": [
+          20.19999998807907,
+          27,
+          24.899999976158142,
+          23.5,
+          26.899999976158142,
+          24.099999964237213,
+          26.19999998807907
+        ],
+        "mean": 24.685714270387376,
+        "median": 24.899999976158142,
+        "trimmedMean": 25.119999980926515,
+        "standardDeviation": 2.2190271814953393,
+        "relativeStandardDeviation": 8.989114745434982,
+        "medianAbsoluteDeviation": 1.399999976158142,
+        "relativeMedianAbsoluteDeviation": 5.622489869472482,
+        "min": 20.19999998807907,
+        "max": 27,
+        "p95": 27
+      },
+      {
+        "id": "partialUpdate",
+        "label": "partial update",
+        "implementation": "marko-keyed",
+        "values": [
+          31.099999964237213,
+          26.30000001192093,
+          27.899999976158142,
+          25.899999976158142,
+          23.099999964237213,
+          27.099999964237213,
+          25
+        ],
+        "mean": 26.62857140813555,
+        "median": 26.30000001192093,
+        "trimmedMean": 26.439999985694886,
+        "standardDeviation": 2.316841617973206,
+        "relativeStandardDeviation": 8.700585481898461,
+        "medianAbsoluteDeviation": 1.300000011920929,
+        "relativeMedianAbsoluteDeviation": 4.942965822553922,
+        "min": 23.099999964237213,
+        "max": 31.099999964237213,
+        "p95": 31.099999964237213
+      },
+      {
+        "id": "replaceAllRows",
+        "label": "replace all rows",
+        "implementation": "marko-keyed",
+        "values": [
+          38.299999952316284,
+          40.09999996423721,
+          43.5,
+          44.10000002384186,
+          30.200000047683716,
+          26.19999998807907,
+          25.399999976158142
+        ],
+        "mean": 35.39999999318804,
+        "median": 38.299999952316284,
+        "trimmedMean": 35.659999990463255,
+        "standardDeviation": 7.4015442404404865,
+        "relativeStandardDeviation": 20.908317067414554,
+        "medianAbsoluteDeviation": 5.800000071525574,
+        "relativeMedianAbsoluteDeviation": 15.143603338763986,
+        "min": 25.399999976158142,
+        "max": 44.10000002384186,
+        "p95": 44.10000002384186
+      }
+    ],
+    "auxiliaryMetrics": [
+      {
+        "id": "startup",
+        "label": "startup load + 2 frames",
+        "unit": "ms",
+        "implementation": "vanillajs-3-keyed",
+        "value": 47
+      },
+      {
+        "id": "readyHeap",
+        "label": "ready JS heap",
+        "unit": "mb",
+        "implementation": "vanillajs-3-keyed",
+        "value": 2.2722129821777344
+      },
+      {
+        "id": "runHeap",
+        "label": "1k rows JS heap",
+        "unit": "mb",
+        "implementation": "vanillajs-3-keyed",
+        "value": 2.566326141357422
+      },
+      {
+        "id": "runClearHeap",
+        "label": "run/clear 5x JS heap",
+        "unit": "mb",
+        "implementation": "vanillajs-3-keyed",
+        "value": 3.365863800048828
+      },
+      {
+        "id": "readyDomNodes",
+        "label": "ready DOM nodes",
+        "unit": "count",
+        "implementation": "vanillajs-3-keyed",
+        "value": 30
+      },
+      {
+        "id": "runDomNodes",
+        "label": "1k rows DOM nodes",
+        "unit": "count",
+        "implementation": "vanillajs-3-keyed",
+        "value": 8030
+      },
+      {
+        "id": "runClearDomNodes",
+        "label": "run/clear 5x DOM nodes",
+        "unit": "count",
+        "implementation": "vanillajs-3-keyed",
+        "value": 30
+      },
+      {
+        "id": "localSourceSize",
+        "label": "local source size",
+        "unit": "kib",
+        "implementation": "vanillajs-3-keyed",
+        "value": 5.28515625
+      },
+      {
+        "id": "entrySourceSize",
+        "label": "benchmark entry source size",
+        "unit": "kib",
+        "implementation": "vanillajs-3-keyed",
+        "value": 3.1787109375
+      },
+      {
+        "id": "startup",
+        "label": "startup load + 2 frames",
+        "unit": "ms",
+        "implementation": "mreact-keyed",
+        "value": 50.89999997615814
+      },
+      {
+        "id": "readyHeap",
+        "label": "ready JS heap",
+        "unit": "mb",
+        "implementation": "mreact-keyed",
+        "value": 2.357555389404297
+      },
+      {
+        "id": "runHeap",
+        "label": "1k rows JS heap",
+        "unit": "mb",
+        "implementation": "mreact-keyed",
+        "value": 3.1459999084472656
+      },
+      {
+        "id": "runClearHeap",
+        "label": "run/clear 5x JS heap",
+        "unit": "mb",
+        "implementation": "mreact-keyed",
+        "value": 4.643486022949219
+      },
+      {
+        "id": "readyDomNodes",
+        "label": "ready DOM nodes",
+        "unit": "count",
+        "implementation": "mreact-keyed",
+        "value": 31
+      },
+      {
+        "id": "runDomNodes",
+        "label": "1k rows DOM nodes",
+        "unit": "count",
+        "implementation": "mreact-keyed",
+        "value": 8031
+      },
+      {
+        "id": "runClearDomNodes",
+        "label": "run/clear 5x DOM nodes",
+        "unit": "count",
+        "implementation": "mreact-keyed",
+        "value": 31
+      },
+      {
+        "id": "localSourceSize",
+        "label": "local source size",
+        "unit": "kib",
+        "implementation": "mreact-keyed",
+        "value": 7.3876953125
+      },
+      {
+        "id": "entrySourceSize",
+        "label": "benchmark entry source size",
+        "unit": "kib",
+        "implementation": "mreact-keyed",
+        "value": 5.521484375
+      },
+      {
+        "id": "startup",
+        "label": "startup load + 2 frames",
+        "unit": "ms",
+        "implementation": "tachyon-dom",
+        "value": 46.5
+      },
+      {
+        "id": "readyHeap",
+        "label": "ready JS heap",
+        "unit": "mb",
+        "implementation": "tachyon-dom",
+        "value": 2.3007850646972656
+      },
+      {
+        "id": "runHeap",
+        "label": "1k rows JS heap",
+        "unit": "mb",
+        "implementation": "tachyon-dom",
+        "value": 2.5909996032714844
+      },
+      {
+        "id": "runClearHeap",
+        "label": "run/clear 5x JS heap",
+        "unit": "mb",
+        "implementation": "tachyon-dom",
+        "value": 3.1055908203125
+      },
+      {
+        "id": "readyDomNodes",
+        "label": "ready DOM nodes",
+        "unit": "count",
+        "implementation": "tachyon-dom",
+        "value": 31
+      },
+      {
+        "id": "runDomNodes",
+        "label": "1k rows DOM nodes",
+        "unit": "count",
+        "implementation": "tachyon-dom",
+        "value": 8031
+      },
+      {
+        "id": "runClearDomNodes",
+        "label": "run/clear 5x DOM nodes",
+        "unit": "count",
+        "implementation": "tachyon-dom",
+        "value": 31
+      },
+      {
+        "id": "localSourceSize",
+        "label": "local source size",
+        "unit": "kib",
+        "implementation": "tachyon-dom",
+        "value": 4.04296875
+      },
+      {
+        "id": "entrySourceSize",
+        "label": "benchmark entry source size",
+        "unit": "kib",
+        "implementation": "tachyon-dom",
+        "value": 2.1669921875
+      },
+      {
+        "id": "startup",
+        "label": "startup load + 2 frames",
+        "unit": "ms",
+        "implementation": "solid-keyed",
+        "value": 50
+      },
+      {
+        "id": "readyHeap",
+        "label": "ready JS heap",
+        "unit": "mb",
+        "implementation": "solid-keyed",
+        "value": 2.3536376953125
+      },
+      {
+        "id": "runHeap",
+        "label": "1k rows JS heap",
+        "unit": "mb",
+        "implementation": "solid-keyed",
+        "value": 3.5018043518066406
+      },
+      {
+        "id": "runClearHeap",
+        "label": "run/clear 5x JS heap",
+        "unit": "mb",
+        "implementation": "solid-keyed",
+        "value": 6.976097106933594
+      },
+      {
+        "id": "readyDomNodes",
+        "label": "ready DOM nodes",
+        "unit": "count",
+        "implementation": "solid-keyed",
+        "value": 31
+      },
+      {
+        "id": "runDomNodes",
+        "label": "1k rows DOM nodes",
+        "unit": "count",
+        "implementation": "solid-keyed",
+        "value": 8031
+      },
+      {
+        "id": "runClearDomNodes",
+        "label": "run/clear 5x DOM nodes",
+        "unit": "count",
+        "implementation": "solid-keyed",
+        "value": 31
+      },
+      {
+        "id": "localSourceSize",
+        "label": "local source size",
+        "unit": "kib",
+        "implementation": "solid-keyed",
+        "value": 4.19921875
+      },
+      {
+        "id": "entrySourceSize",
+        "label": "benchmark entry source size",
+        "unit": "kib",
+        "implementation": "solid-keyed",
+        "value": 3.9248046875
+      },
+      {
+        "id": "startup",
+        "label": "startup load + 2 frames",
+        "unit": "ms",
+        "implementation": "vanillajs-keyed",
+        "value": 44.80000001192093
+      },
+      {
+        "id": "readyHeap",
+        "label": "ready JS heap",
+        "unit": "mb",
+        "implementation": "vanillajs-keyed",
+        "value": 2.2879791259765625
+      },
+      {
+        "id": "runHeap",
+        "label": "1k rows JS heap",
+        "unit": "mb",
+        "implementation": "vanillajs-keyed",
+        "value": 2.736328125
+      },
+      {
+        "id": "runClearHeap",
+        "label": "run/clear 5x JS heap",
+        "unit": "mb",
+        "implementation": "vanillajs-keyed",
+        "value": 4.210624694824219
+      },
+      {
+        "id": "readyDomNodes",
+        "label": "ready DOM nodes",
+        "unit": "count",
+        "implementation": "vanillajs-keyed",
+        "value": 30
+      },
+      {
+        "id": "runDomNodes",
+        "label": "1k rows DOM nodes",
+        "unit": "count",
+        "implementation": "vanillajs-keyed",
+        "value": 8030
+      },
+      {
+        "id": "runClearDomNodes",
+        "label": "run/clear 5x DOM nodes",
+        "unit": "count",
+        "implementation": "vanillajs-keyed",
+        "value": 30
+      },
+      {
+        "id": "localSourceSize",
+        "label": "local source size",
+        "unit": "kib",
+        "implementation": "vanillajs-keyed",
+        "value": 9.005859375
+      },
+      {
+        "id": "entrySourceSize",
+        "label": "benchmark entry source size",
+        "unit": "kib",
+        "implementation": "vanillajs-keyed",
+        "value": 7.1455078125
+      },
+      {
+        "id": "startup",
+        "label": "startup load + 2 frames",
+        "unit": "ms",
+        "implementation": "vanillajs-lite-keyed",
+        "value": 50.5
+      },
+      {
+        "id": "readyHeap",
+        "label": "ready JS heap",
+        "unit": "mb",
+        "implementation": "vanillajs-lite-keyed",
+        "value": 2.2988662719726562
+      },
+      {
+        "id": "runHeap",
+        "label": "1k rows JS heap",
+        "unit": "mb",
+        "implementation": "vanillajs-lite-keyed",
+        "value": 2.531810760498047
+      },
+      {
+        "id": "runClearHeap",
+        "label": "run/clear 5x JS heap",
+        "unit": "mb",
+        "implementation": "vanillajs-lite-keyed",
+        "value": 2.9701576232910156
+      },
+      {
+        "id": "readyDomNodes",
+        "label": "ready DOM nodes",
+        "unit": "count",
+        "implementation": "vanillajs-lite-keyed",
+        "value": 32
+      },
+      {
+        "id": "runDomNodes",
+        "label": "1k rows DOM nodes",
+        "unit": "count",
+        "implementation": "vanillajs-lite-keyed",
+        "value": 8032
+      },
+      {
+        "id": "runClearDomNodes",
+        "label": "run/clear 5x DOM nodes",
+        "unit": "count",
+        "implementation": "vanillajs-lite-keyed",
+        "value": 32
+      },
+      {
+        "id": "localSourceSize",
+        "label": "local source size",
+        "unit": "kib",
+        "implementation": "vanillajs-lite-keyed",
+        "value": 4.8505859375
+      },
+      {
+        "id": "entrySourceSize",
+        "label": "benchmark entry source size",
+        "unit": "kib",
+        "implementation": "vanillajs-lite-keyed",
+        "value": 2.740234375
+      },
+      {
+        "id": "startup",
+        "label": "startup load + 2 frames",
+        "unit": "ms",
+        "implementation": "marko-keyed",
+        "value": 50.69999998807907
+      },
+      {
+        "id": "readyHeap",
+        "label": "ready JS heap",
+        "unit": "mb",
+        "implementation": "marko-keyed",
+        "value": 2.3465538024902344
+      },
+      {
+        "id": "runHeap",
+        "label": "1k rows JS heap",
+        "unit": "mb",
+        "implementation": "marko-keyed",
+        "value": 3.273914337158203
+      },
+      {
+        "id": "runClearHeap",
+        "label": "run/clear 5x JS heap",
+        "unit": "mb",
+        "implementation": "marko-keyed",
+        "value": 6.953948974609375
+      },
+      {
+        "id": "readyDomNodes",
+        "label": "ready DOM nodes",
+        "unit": "count",
+        "implementation": "marko-keyed",
+        "value": 31
+      },
+      {
+        "id": "runDomNodes",
+        "label": "1k rows DOM nodes",
+        "unit": "count",
+        "implementation": "marko-keyed",
+        "value": 8031
+      },
+      {
+        "id": "runClearDomNodes",
+        "label": "run/clear 5x DOM nodes",
+        "unit": "count",
+        "implementation": "marko-keyed",
+        "value": 31
+      },
+      {
+        "id": "localSourceSize",
+        "label": "local source size",
+        "unit": "kib",
+        "implementation": "marko-keyed",
+        "value": 4.7919921875
+      },
+      {
+        "id": "entrySourceSize",
+        "label": "benchmark entry source size",
+        "unit": "kib",
+        "implementation": "marko-keyed",
+        "value": 4.4267578125
+      }
+    ],
+    "tables": {
+      "operations": "| Scenario | vanillajs-lite-keyed trimmed mean | vanillajs-3-keyed trimmed mean | vanillajs-keyed trimmed mean | solid-keyed trimmed mean | marko-keyed trimmed mean | mreact-keyed trimmed mean | tachyon-dom trimmed mean | tachyon-dom vs fastest | tachyon-dom RSD |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n| create rows | 33.32ms | 33.34ms | 33.32ms | 33.36ms | 33.36ms | 33.26ms | 33.40ms | 1.004x | 0.2% |\n| clear rows | 28.18ms | 27.24ms | 29.82ms | 27.28ms | 26.20ms | 23.70ms | 26.88ms | 1.134x | 13.5% |\n| swap rows | 30.70ms | 27.84ms | 31.62ms | 27.40ms | 22.78ms | 26.68ms | 29.64ms | 1.301x | 2.6% |\n| append rows | 45.98ms | 39.66ms | 35.52ms | 43.02ms | 40.20ms | 41.70ms | 36.38ms | 1.024x | 16.1% |\n| create many rows | 223.30ms | 238.62ms | 243.20ms | 280.12ms | 257.38ms | 246.66ms | 230.02ms | 1.030x | 4.6% |\n| select row | 28.80ms | 27.78ms | 27.70ms | 28.80ms | 28.32ms | 28.48ms | 30.38ms | 1.097x | 14.4% |\n| remove row | 28.70ms | 24.54ms | 30.16ms | 27.68ms | 25.12ms | 27.38ms | 28.98ms | 1.181x | 8.1% |\n| partial update | 29.14ms | 27.24ms | 26.74ms | 28.40ms | 26.44ms | 28.24ms | 28.72ms | 1.086x | 5.9% |\n| replace all rows | 28.70ms | 31.98ms | 27.80ms | 27.52ms | 35.66ms | 27.54ms | 30.78ms | 1.118x | 4.3% |",
+      "auxiliary": "| Metric | vanillajs-lite-keyed | vanillajs-3-keyed | vanillajs-keyed | solid-keyed | marko-keyed | mreact-keyed | tachyon-dom | tachyon-dom vs best |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|\n| startup load + 2 frames | 50.50ms | 47.00ms | 44.80ms | 50.00ms | 50.70ms | 50.90ms | 46.50ms | 1.038x |\n| ready JS heap | 2.30MB | 2.27MB | 2.29MB | 2.35MB | 2.35MB | 2.36MB | 2.30MB | 1.013x |\n| 1k rows JS heap | 2.53MB | 2.57MB | 2.74MB | 3.50MB | 3.27MB | 3.15MB | 2.59MB | 1.023x |\n| run/clear 5x JS heap | 2.97MB | 3.37MB | 4.21MB | 6.98MB | 6.95MB | 4.64MB | 3.11MB | 1.046x |\n| ready DOM nodes | 32 | 30 | 30 | 31 | 31 | 31 | 31 | 1.033x |\n| 1k rows DOM nodes | 8032 | 8030 | 8030 | 8031 | 8031 | 8031 | 8031 | 1.000x |\n| run/clear 5x DOM nodes | 32 | 30 | 30 | 31 | 31 | 31 | 31 | 1.033x |\n| local source size | 4.85KiB | 5.29KiB | 9.01KiB | 4.20KiB | 4.79KiB | 7.39KiB | 4.04KiB | 1.000x |\n| benchmark entry source size | 2.74KiB | 3.18KiB | 7.15KiB | 3.92KiB | 4.43KiB | 5.52KiB | 2.17KiB | 1.000x |",
+      "directComparisons": "| Baseline | Candidate | Trimmed geomean | Mean geomean | Median geomean | Trimmed losses |\n|---|---|---:|---:|---:|---|\n| vanillajs-lite-keyed | tachyon-dom | 0.982x | 0.976x | 0.987x | create rows 1.002x, create many rows 1.030x, select row 1.055x, remove row 1.010x, replace all rows 1.072x |\n| solid-keyed | tachyon-dom | 0.991x | 0.975x | 1.001x | create rows 1.001x, swap rows 1.082x, select row 1.055x, remove row 1.047x, partial update 1.011x, replace all rows 1.118x |\n| marko-keyed | tachyon-dom | 1.025x | 1.014x | 1.034x | create rows 1.001x, clear rows 1.026x, swap rows 1.301x, select row 1.073x, remove row 1.154x, partial update 1.086x |"
+    }
+  },
+  "manifest": {
+    "pid": 3986040,
+    "processStartedAt": "2026-07-13T02:25:15.297Z",
+    "sha256": "a2411e43c8263f047d69d1ab9a90cafdc44cc82461a5e41e98f9361eda9efae4"
+  }
+}

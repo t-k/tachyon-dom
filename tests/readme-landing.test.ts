@@ -70,4 +70,24 @@ describe("README landing page", () => {
     );
     expect(ci).toContain("pnpm check:quick-example-size");
   });
+
+  it("cites a clean production benchmark artifact and its measured ratio", async () => {
+    const artifact = "benchmark/local-compare/results/2026-07-13-readme-baseline.json";
+    const readme = await read("README.md");
+    const result = JSON.parse(await read(artifact)) as {
+      schemaVersion: number;
+      provenance: { git: { dirty: boolean } };
+      workload: { iterations: number; warmup: number; serveMode: string };
+      measurements: { tables: { directComparisons: string } };
+    };
+
+    expect(result.schemaVersion).toBe(2);
+    expect(result.provenance.git.dirty).toBe(false);
+    expect(result.workload).toMatchObject({ iterations: 7, warmup: 2, serveMode: "production" });
+    expect(readme).toContain(`(${artifact})`);
+    expect(readme).toContain("0.982x");
+    expect(result.measurements.tables.directComparisons).toContain(
+      "| vanillajs-lite-keyed | tachyon-dom | 0.982x |",
+    );
+  });
 });

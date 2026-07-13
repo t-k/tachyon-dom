@@ -78,7 +78,15 @@ The local keyed benchmark builds every implementation with Vite in production mo
 pnpm bench:local
 ```
 
-The runner records the command, Git revision and working-tree state, Node and OS versions, CPU, browser, dependencies, workload controls, raw samples, and summary tables in JSON. The README cites a clean, committed snapshot below once its provenance has been validated.
+The clean 2026-07-13 snapshot used an AMD Ryzen 9 9950X and Chromium 149.0.7827.55. Lower ratios are faster; the value is Tachyon DOM time divided by the named baseline's time.
+
+| Baseline | Tachyon DOM trimmed geomean |
+| --- | ---: |
+| vanillajs-lite-keyed | 0.982x |
+| solid-keyed | 0.991x |
+| marko-keyed | 1.025x |
+
+The [complete JSON artifact](benchmark/local-compare/results/2026-07-13-readme-baseline.json) records the command, clean Git revision, Node and OS versions, CPU, browser, dependencies, workload controls, raw samples, per-operation variability, and summary tables.
 
 This is a local comparison based on the `js-framework-benchmark` row-operation model, not the upstream official driver or a universal framework ranking. Read the [benchmark methodology](benchmark/README.md) before interpreting results.
 
