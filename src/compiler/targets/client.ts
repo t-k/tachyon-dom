@@ -530,8 +530,21 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (reactive || needsEvent || needsModel || hasDefaultScope) {
     lines.push(`  return () => {`);
-    lines.push(`    for (const cleanup of cleanups) cleanup();`);
-    if (hasDefaultScope) lines.push(`    __tachyonDisposeRoot();`);
+    lines.push(`    let __tachyonCleanupError;`);
+    lines.push(`    let __tachyonCleanupFailed = false;`);
+    lines.push(`    for (const cleanup of cleanups) {`);
+    lines.push(`      try { cleanup(); } catch (error) {`);
+    lines.push(`        if (!__tachyonCleanupFailed) __tachyonCleanupError = error;`);
+    lines.push(`        __tachyonCleanupFailed = true;`);
+    lines.push(`      }`);
+    lines.push(`    }`);
+    if (hasDefaultScope) {
+      lines.push(`    try { __tachyonDisposeRoot(); } catch (error) {`);
+      lines.push(`      if (!__tachyonCleanupFailed) __tachyonCleanupError = error;`);
+      lines.push(`      __tachyonCleanupFailed = true;`);
+      lines.push(`    }`);
+    }
+    lines.push(`    if (__tachyonCleanupFailed) throw __tachyonCleanupError;`);
     lines.push(`  };`);
   }
   lines.push(hasDefaultScope ? `});` : `};`);

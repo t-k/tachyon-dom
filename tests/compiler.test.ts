@@ -77,6 +77,22 @@ describe("HTML-first compiler", () => {
     expect(list.each).toBe("rows");
   });
 
+  it("freezes cached compiler errors so consumers cannot poison later failures", () => {
+    const source = `<if></if>`;
+    const first = compileTemplate(source);
+    if (first.ok) throw new Error("Expected compiler failure.");
+
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.error)).toBe(true);
+    expect(() => {
+      (first.error as { message: string }).message = "poison";
+    }).toThrow(TypeError);
+
+    const second = compileTemplate(source);
+    expect(second).toBe(first);
+    expect(second.ok ? "" : second.error.message).toBe("<if> requires test={condition}.");
+  });
+
   it("condenses formatting newlines through one shared template tree", () => {
     const source = `<main>
   <ul>
@@ -411,8 +427,13 @@ describe("HTML-first compiler", () => {
 
   it.each([
     ['<div title={format(`a}b`)}></div>', 'format(`a}b`)'],
+    ['<div title={`a${value ? `b}c` : "d"}`}></div>', '`a${value ? `b}c` : "d"}`'],
     ["<div title={value /* } */}></div>", "value /* } */"],
+    ["<div title={value // }\n + 1}></div>", "value // }\n + 1"],
     ["<div title={/}/.test(value)}></div>", "/}/.test(value)"],
+    ["<div title={/[}]/.test(value)}></div>", "/[}]/.test(value)"],
+    [String.raw`<div title={/a\/${"}"}b/.test(value)}></div>`, String.raw`/a\/${"}"}b/.test(value)`],
+    ["<div title={value / 2}></div>", "value / 2"],
   ])("keeps JavaScript lexical braces inside an attribute expression: %s", (source, expression) => {
     const result = compileTemplate(source);
 
@@ -528,6 +549,8 @@ describe("HTML-first compiler", () => {
       code.indexOf(`__tachyonCreateRoot((__tachyonDisposeRoot) => {`),
     );
     expect(code).toContain(`__tachyonDisposeRoot();`);
+    expect(code).toContain(`for (const cleanup of cleanups) {`);
+    expect(code).toContain(`if (__tachyonCleanupFailed) throw __tachyonCleanupError;`);
   });
 
   it("keeps nested client control-flow bindings instead of dropping them", () => {

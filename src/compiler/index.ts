@@ -20,10 +20,11 @@ const rememberCompiledTemplate = (
   cacheKey: string,
   result: Result<CompiledTemplate, CompilerError>,
 ): Result<CompiledTemplate, CompilerError> => {
+  const frozenResult = deepFreeze(result);
   if (compileCache.has(cacheKey)) {
     compileCache.delete(cacheKey);
   }
-  compileCache.set(cacheKey, result);
+  compileCache.set(cacheKey, frozenResult);
   while (compileCache.size > compileCacheLimit) {
     const oldest = compileCache.keys().next().value;
     if (oldest === undefined) {
@@ -31,7 +32,7 @@ const rememberCompiledTemplate = (
     }
     compileCache.delete(oldest);
   }
-  return result;
+  return frozenResult;
 };
 
 export const compileTemplate = (

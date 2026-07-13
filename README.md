@@ -169,7 +169,7 @@ Only keys marked `public: true` are exposed under `result.value.publicEnv`. By d
 
 ## Runtime APIs
 
-The root entry exports browser-safe reactive and runtime APIs, including `createSignal()`, `createMemo()`, `effect()`, `batch()`, `untrack()`, `createResource()`, `createRoot()`, `onCleanup()`, and `catchError()`. Compiler, app, router, server, and Vite APIs live under their documented subpath entries so importing a signal does not pull their dependency graphs into browser tooling.
+The root entry exports browser-safe reactive and runtime APIs, including `createSignal()`, `createMemo()`, `effect()`, `batch()`, `untrack()`, `createResource()`, `createRoot()`, `onCleanup()`, `catchError()`, and the client router. Compiler, app, server, and Vite APIs live under their documented subpath entries so importing a signal does not pull their dependency graphs into browser tooling.
 
 Use `createResource(source, loader)` for signal-driven async data with `data`, `error`, `loading`, and `refetch` accessors. Source changes abort superseded loads; the loader receives an `AbortSignal`, and `resource.dispose()` detaches tracking and aborts in-flight work. Resources created inside `createRoot()` are disposed automatically. Effects, memos, resources, and `onCleanup()` callbacks created inside a root share its lifetime; generated component bindings create a root around their scope factory and DOM bindings.
 

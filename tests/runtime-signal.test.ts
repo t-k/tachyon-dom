@@ -40,6 +40,23 @@ describe("signal runtime", () => {
     expect(cleanups).toEqual(["second", "first"]);
   });
 
+  it("runs every root cleanup before rethrowing the first cleanup error", () => {
+    const cleanups: string[] = [];
+    const dispose = createRoot((disposeRoot) => {
+      onCleanup(() => cleanups.push("last"));
+      onCleanup(() => {
+        cleanups.push("throws");
+        throw new Error("cleanup failed");
+      });
+      onCleanup(() => cleanups.push("first"));
+      return disposeRoot;
+    });
+
+    expect(dispose).toThrow("cleanup failed");
+    expect(cleanups).toEqual(["first", "throws", "last"]);
+    expect(() => dispose()).not.toThrow();
+  });
+
   it("aborts root-owned resources and detaches their source tracking", async () => {
     const key = createSignal("first");
     const calls: string[] = [];

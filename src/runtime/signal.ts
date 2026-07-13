@@ -35,10 +35,18 @@ export const createRoot = <T>(fn: (dispose: () => void) => T): T => {
   const dispose = (): void => {
     if (owner.disposed) return;
     owner.disposed = true;
+    let firstError: unknown;
+    let failed = false;
     for (let index = owner.cleanups.length - 1; index >= 0; index--) {
-      owner.cleanups[index]?.();
+      try {
+        owner.cleanups[index]?.();
+      } catch (error) {
+        if (!failed) firstError = error;
+        failed = true;
+      }
     }
     owner.cleanups.length = 0;
+    if (failed) throw firstError;
   };
   if (parent && !parent.disposed) parent.cleanups.push(dispose);
   currentOwner = owner;
