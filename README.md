@@ -70,25 +70,35 @@ pnpm check:quick-example-size
 
 These numbers are produced from repository scripts, not estimated from source files. Subpath size budgets remain available through `pnpm check:size`.
 
-## Reproducible Benchmark
+## Keyed List Benchmark
 
-The local keyed benchmark builds every implementation with Vite in production mode and measures row operations in Playwright Chromium. The canonical contract uses two warmups, seven measured iterations, and a 20% trimmed mean.
+On this machine, Tachyon DOM performed within 3% of the comparison implementations across nine keyed-row operations.
+
+| Compared with | Tachyon DOM result |
+| --- | ---: |
+| vanillajs-lite-keyed | 1.8% faster |
+| solid-keyed | 0.9% faster |
+| marko-keyed | 2.5% slower |
+
+Results are the geometric mean of nine operations: row creation, replacement, partial updates, selection, swapping, removal, append, clear, and creation of many rows. Lower execution time is better.
+
+The recorded run used:
+
+- AMD Ryzen 9 9950X
+- Chromium 149.0.7827.55
+- Production Vite builds
+- 2 warmup runs and 7 measured runs per operation
+- 20% trimmed means to reduce outlier influence
+
+The [complete JSON artifact](benchmark/local-compare/results/2026-07-13-readme-baseline.json) includes raw samples, variability, dependency versions, and clean Git provenance.
+
+Reproduce the same benchmark contract locally:
 
 ```sh
 pnpm bench:local
 ```
 
-The clean 2026-07-13 snapshot used an AMD Ryzen 9 9950X and Chromium 149.0.7827.55. Lower ratios are faster; the value is Tachyon DOM time divided by the named baseline's time.
-
-| Baseline | Tachyon DOM trimmed geomean |
-| --- | ---: |
-| vanillajs-lite-keyed | 0.982x |
-| solid-keyed | 0.991x |
-| marko-keyed | 1.025x |
-
-The [complete JSON artifact](benchmark/local-compare/results/2026-07-13-readme-baseline.json) records the command, clean Git revision, Node and OS versions, CPU, browser, dependencies, workload controls, raw samples, per-operation variability, and summary tables.
-
-This is a local comparison based on the `js-framework-benchmark` row-operation model, not the upstream official driver or a universal framework ranking. Read the [benchmark methodology](benchmark/README.md) before interpreting results.
+This is a repository-local comparison based on the `js-framework-benchmark` row-operation model. It is not an official upstream result or a general ranking of framework performance. See the [benchmark methodology](benchmark/README.md) for details.
 
 ## Install
 

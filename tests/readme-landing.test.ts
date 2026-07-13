@@ -27,7 +27,7 @@ describe("README landing page", () => {
     expect(readme).toContain("600 bytes");
     expect(readme).toContain("pnpm check:quick-example-size");
     expect(readme).toMatch(/Quick example client bundle: \d+ bytes minified, \d+ bytes Brotli/);
-    expect(readme).toContain("## Reproducible Benchmark");
+    expect(readme).toContain("## Keyed List Benchmark");
     expect(readme).toContain("pnpm bench:local");
   });
 
@@ -107,7 +107,11 @@ describe("README landing page", () => {
     expect(result.provenance.git.dirty).toBe(false);
     expect(result.workload).toMatchObject({ iterations: 7, warmup: 2, serveMode: "production" });
     expect(readme).toContain(`(${artifact})`);
-    expect(readme).toContain("0.982x");
+    expect(readme).toContain("| vanillajs-lite-keyed | 1.8% faster |");
+    expect(readme).toContain("| solid-keyed | 0.9% faster |");
+    expect(readme).toContain("| marko-keyed | 2.5% slower |");
+    expect(readme).toContain("geometric mean of nine operations");
+    expect(readme).toContain("Lower execution time is better.");
     expect(result.measurements.tables.directComparisons).toContain(
       "| vanillajs-lite-keyed | tachyon-dom | 0.982x |",
     );
