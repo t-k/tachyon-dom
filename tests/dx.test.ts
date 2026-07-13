@@ -262,13 +262,13 @@ describe("DX helpers", () => {
   });
 
   it("documents the recommended application shape", async () => {
-    const readme = await readFile("README.md", "utf8");
+    const gettingStarted = await readFile("docs/getting-started.md", "utf8");
+    const adapters = await readFile("docs/adapters.md", "utf8");
 
-    expect(readme).toContain("## Recommended App Shape");
-    expect(readme).toContain("src/routes/index/page.td");
-    expect(readme).toContain("src/client/main.ts");
-    expect(readme).toContain("Do not put application code in `public/client/main.js`");
-    expect(readme).toContain("Adapters are lower-level deployment APIs");
+    expect(gettingStarted).toContain("src/routes/index/page.td");
+    expect(gettingStarted).toContain("src/client/main.ts");
+    expect(gettingStarted).toContain("Do not put application code in `public/client/main.js`");
+    expect(adapters).toContain("## Shared Contract");
   });
 
   it("documents typed templates, environment validation, and release gates", async () => {
@@ -276,13 +276,13 @@ describe("DX helpers", () => {
     const runtimeDocs = await readFile("docs/runtime.md", "utf8");
     const releasingDocs = await readFile("docs/releasing.md", "utf8");
 
-    expect(readme).toContain("tachyon-dom/typed");
-    expect(readme).toContain("tachyon-dom/env");
+    expect(runtimeDocs).toContain("tachyon-dom/typed");
+    expect(runtimeDocs).toContain("tachyon-dom/env");
     expect(readme).toContain("createResource");
-    expect(readme).toContain("createErrorBoundary");
-    expect(readme).toContain("createI18n");
-    expect(readme).toContain("viewTransition");
-    expect(readme).toContain("restoreScroll");
+    expect(runtimeDocs).toContain("createErrorBoundary");
+    expect(runtimeDocs).toContain("createI18n");
+    expect(runtimeDocs).toContain("viewTransition");
+    expect(runtimeDocs).toContain("restoreScroll");
     expect(readme).toContain("pnpm check:exports");
     expect(readme).toContain("pnpm check:size");
     expect(runtimeDocs).toContain("defineTemplate()");
@@ -341,16 +341,17 @@ describe("DX helpers", () => {
     const indexSource = await readFile("src/index.ts", "utf8");
     const sfcSource = await readFile("src/compiler/sfc.ts", "utf8");
     const readme = await readFile("README.md", "utf8");
+    const appViteDocs = await readFile("docs/app-vite.md", "utf8");
 
     expect(indexSource).not.toMatch(/\.\/app\.js|\.\/compiler\/|\.\/server\//);
     expect(sfcSource).toContain('compileTachyonSfc: "tachyon-dom/compiler"');
     expect(sfcSource).toContain('renderToReadableStream: "tachyon-dom/server/stream"');
-    expect(readme).toContain('import { attr, html } from "tachyon-dom/server/html";');
-    expect(readme).toContain("const body = html`");
-    expect(readme).toContain('${attr("src", clientScript ?? "")}');
-    expect(readme).toContain("new Response(String(body)");
-    expect(readme).not.toContain("`<main>Hello ${user}</main><script");
-    expect(readme).toContain("Event listeners are attached once per created row target.");
+    expect(appViteDocs).toContain('import { attr, html } from "tachyon-dom/server/html";');
+    expect(appViteDocs).toContain("const body = html`");
+    expect(appViteDocs).toContain('${attr("src", clientScript ?? "")}');
+    expect(appViteDocs).toContain("new Response(String(body)");
+    expect(appViteDocs).not.toContain("new Response(`<main>Hello ${user}</main><script");
+    expect(readme).toContain("Events are attached once per created target");
   });
 
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
