@@ -41,6 +41,8 @@ jobs:
 
       - run: pnpm check:browser-entry
 
+      - run: pnpm check:quick-example-size
+
       - run: pnpm test
 
       - run: pnpm bench:local:smoke
