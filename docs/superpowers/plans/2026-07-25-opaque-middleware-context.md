@@ -18,6 +18,8 @@
 - Modify `tests/dx.test.ts`: keep the package verification script contract synchronized with the new declaration gate.
 - Modify `src/router.ts`: define the opaque context carrier, expose `RouteMiddlewareContext`, validate the carrier in `requireUser()`, and keep authorization state request-local.
 - Modify `src/adapters/workers.ts`: derive Workers middleware context from `RouteMiddlewareContext` while preserving typed bindings.
+- Modify `tests/i18n.test.ts`: invoke locale middleware through the router-issued context.
+- Modify `tests/examples-runtime-apis.test.ts`: invoke the runtime API example middleware through the router-issued context.
 - Modify `tests/router-security.test.ts`: reproduce cast-based manual reconstruction and prove fail-closed ordering.
 - Modify `docs/routing.md`: document the compile-time and runtime contract for wrapped guards.
 - Create `docs.local/logs/2026-07-25/2026-07-25-008-opaque-middleware-context-fix.md`: ignored Japanese work log with commits, test results, reviews, process state, and merge/push status.
@@ -189,6 +191,8 @@ expect(packageJson.scripts?.["verify:package"]).toBe(
 - Modify: `src/router.ts:1302-1315`
 - Modify: `src/adapters/workers.ts:1-15`
 - Modify: `src/adapters/workers.ts:129-134`
+- Modify: `tests/i18n.test.ts:1-40`
+- Modify: `tests/examples-runtime-apis.test.ts:1-30`
 - Test: `tests/middleware-context-types.ts`
 - Test: `scripts/verify-middleware-context-types.mjs`
 
@@ -255,6 +259,8 @@ export type WorkersRouteMiddleware<Env> = (
 
 - [ ] **Step 4: Run the source and package type contracts**
 
+Before running the contracts, update the two tests that directly invoke locale middleware with a manually constructed context. Use `renderRoute()` with the locale middleware in `options.middleware`, then assert the returned route result's status and `location` header. This preserves the behavior assertion while ensuring every public middleware invocation receives a router-issued context.
+
 Run:
 
 ```bash
@@ -269,7 +275,7 @@ Expected: both commands pass. The emitted `dist/router.d.ts` contains a non-expo
 Run:
 
 ```bash
-git add src/router.ts src/adapters/workers.ts tests/middleware-context-types.ts tests/dx.test.ts scripts/verify-middleware-context-types.mjs package.json
+git add src/router.ts src/adapters/workers.ts tests/middleware-context-types.ts tests/i18n.test.ts tests/examples-runtime-apis.test.ts tests/dx.test.ts scripts/verify-middleware-context-types.mjs package.json docs/superpowers/plans/2026-07-25-opaque-middleware-context.md
 git commit -m "fix: brand router middleware contexts"
 ```
 

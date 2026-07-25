@@ -222,7 +222,7 @@
     "check:size": "size-limit",
     "check:browser-entry": "node scripts/verify-browser-entry.mjs",
     "check:quick-example-size": "node scripts/verify-quick-example-bundle.mjs",
-    "verify:package": "node scripts/verify-package-artifacts.mjs",
+    "verify:package": "node scripts/verify-package-artifacts.mjs && node scripts/verify-middleware-context-types.mjs",
     "verify:release": "node scripts/release-contract.mjs --verify-artifacts release-artifacts",
     "prepare:release": "node scripts/release-contract.mjs",
     "verify:starters": "node scripts/verify-generated-starters.mjs",

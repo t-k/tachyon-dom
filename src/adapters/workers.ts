@@ -9,6 +9,7 @@ import {
   type RouteHeadDescriptor,
   type RouteResource,
   type RouteHooks,
+  type RouteMiddlewareContext,
   type RouteRenderOptions,
 } from "../router.js";
 
@@ -126,12 +127,9 @@ export type WorkersRouteDefinition<Env, Data = unknown, ActionResult = unknown> 
   children?: WorkersRouteDefinition<Env>[];
 };
 
-export type WorkersRouteMiddleware<Env> = (context: {
-  request: Request;
-  url: URL;
-  env: RouteEnvironment;
-  bindings: Env;
-}) => ReturnType<NonNullable<RouteRenderOptions["middleware"]>[number]>;
+export type WorkersRouteMiddleware<Env> = (
+  context: RouteMiddlewareContext & { bindings: Env },
+) => ReturnType<NonNullable<RouteRenderOptions["middleware"]>[number]>;
 
 export type WorkersCsrfOptions<Env> = {
   verify: (context: { request: Request; url: URL; env: RouteEnvironment; bindings: Env }) => boolean | Promise<boolean>;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createI18n, localeMiddleware } from "../src/i18n";
+import { renderRoute } from "../src/router";
 
 describe("i18n routing", () => {
   it("translates with interpolation and falls back to the default locale", () => {
@@ -27,10 +28,12 @@ describe("i18n routing", () => {
       headers: { "accept-language": "ja,en;q=0.8" },
     });
 
-    const response = await middleware({ request, url: new URL(request.url), env: {} });
+    const result = await renderRoute([{ path: "/dashboard", render: () => "ok" }], request, {
+      middleware: [middleware],
+    });
 
-    expect(response).toBeInstanceOf(Response);
-    expect((response as Response).status).toBe(302);
-    expect((response as Response).headers.get("location")).toBe("/ja/dashboard?tab=1");
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.value.status).toBe(302);
+    expect(result.ok && result.value.headers.get("location")).toBe("/ja/dashboard?tab=1");
   });
 });

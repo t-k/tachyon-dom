@@ -171,11 +171,26 @@ export type RouteResponse = {
 
 export type RouteMiddlewareResult = Request | Response | RouteResponse | void;
 
-export type RouteMiddleware = (context: {
+const userGuardAuthorizationState: unique symbol = Symbol("tachyon.userGuardAuthorizationState");
+
+type UserGuardAuthorizationState = {
+  authorized: boolean;
+};
+
+type InternalRouteMiddlewareContext = {
+  [userGuardAuthorizationState]?: UserGuardAuthorizationState;
+};
+
+export type RouteMiddlewareContext = {
   request: Request;
   url: URL;
   env: RouteEnvironment;
-}) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>;
+  readonly [userGuardAuthorizationState]: UserGuardAuthorizationState;
+};
+
+export type RouteMiddleware = (
+  context: RouteMiddlewareContext,
+) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>;
 
 type RouteExecutionContext = RouteContext & { bindings?: unknown };
 
@@ -191,12 +206,9 @@ type RouteExecutionOptions = Omit<RouteRenderOptionsBase, "csrf" | "middleware">
       bindings?: unknown;
     }) => boolean | Promise<boolean>;
   };
-  middleware?: readonly ((context: {
-    request: Request;
-    url: URL;
-    env: RouteEnvironment;
-    bindings?: unknown;
-  }) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>)[];
+  middleware?: readonly ((
+    context: RouteMiddlewareContext & { bindings?: unknown },
+  ) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>)[];
 };
 
 export type RouteHooks = {
@@ -612,15 +624,6 @@ export const applySecurityHeaders = (response: Response, headers: Headers): Resp
 };
 
 const userGuardAuthorizedRequests = new WeakSet<Request>();
-const userGuardAuthorizationState = Symbol("tachyon.userGuardAuthorizationState");
-
-type UserGuardAuthorizationState = {
-  authorized: boolean;
-};
-
-type InternalRouteMiddlewareContext = {
-  [userGuardAuthorizationState]?: UserGuardAuthorizationState;
-};
 
 export const requireUser =
   <User>(
@@ -1303,7 +1306,7 @@ const renderRouteInternal = async (
   for (const middleware of options.middleware ?? []) {
     const middlewareRequest = callbackRequestSnapshot(request);
     const authorizationState: UserGuardAuthorizationState = { authorized: false };
-    const middlewareContext = {
+    const middlewareContext: RouteMiddlewareContext & { bindings?: unknown } = {
       request: middlewareRequest,
       url: new URL(url),
       env,

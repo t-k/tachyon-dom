@@ -1568,7 +1568,9 @@ void chunks;
       scripts?: Record<string, string>;
     };
     const workflow = await readFile(path.join(process.cwd(), ".github", "workflows", "ci.yml"), "utf8");
-    expect(packageJson.scripts?.["verify:package"]).toBe("node scripts/verify-package-artifacts.mjs");
+    expect(packageJson.scripts?.["verify:package"]).toBe(
+      "node scripts/verify-package-artifacts.mjs && node scripts/verify-middleware-context-types.mjs",
+    );
     expect(packageJson.scripts?.["verify:starters"]).toBe("node scripts/verify-generated-starters.mjs");
     expect(workflow).toContain("pnpm verify:package");
     expect(workflow).toContain("pnpm verify:starters");
