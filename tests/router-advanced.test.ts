@@ -426,6 +426,50 @@ describe("advanced router features", () => {
     expect(returnCalls).toBe(1);
   });
 
+  it.each(["done", "return", "error"] as const)(
+    "releases the request body when a progressive iterator closes via %s",
+    async (mode) => {
+      const input = new Request("https://example.com/progressive-body", {
+        method: "POST",
+        body: "payload",
+      });
+      const result = await renderRouteStream(
+        [
+          {
+            path: "/progressive-body",
+            render: () => "buffered",
+            stream: () => ({
+              [Symbol.asyncIterator]: () => ({
+                next: async () => {
+                  if (mode === "error") {
+                    throw new Error("stream failed");
+                  }
+                  return mode === "done"
+                    ? { done: true as const, value: undefined }
+                    : { done: false as const, value: "chunk" };
+                },
+                return: async () => ({ done: true as const, value: undefined }),
+              }),
+            }),
+          },
+        ],
+        input,
+      );
+      if (!result.ok) throw new Error(result.error.message);
+      const iterator = result.value.chunks[Symbol.asyncIterator]();
+
+      if (mode === "return") {
+        await iterator.return?.();
+      } else if (mode === "error") {
+        await expect(iterator.next()).rejects.toThrow("stream failed");
+      } else {
+        await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+      }
+
+      expect(input.bodyUsed).toBe(true);
+    },
+  );
+
   it("forwards route-module streams and never starts them for HEAD", async () => {
     let calls = 0;
     const route = routeFromModule(

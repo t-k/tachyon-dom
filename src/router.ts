@@ -1129,15 +1129,28 @@ const applyHeaders = (headers: Headers, extra: HeadersInit): void => {
   });
 };
 
-const ownAsyncIterable = (source: AsyncIterable<string>): AsyncIterable<string> => {
+const ownAsyncIterable = (source: AsyncIterable<string>, onClose: () => void = () => {}): AsyncIterable<string> => {
   const sourceIterator = source[Symbol.asyncIterator]();
   let finished = false;
   let returned = false;
+  let closed = false;
+  const notifyClosed = (): void => {
+    if (closed) return;
+    closed = true;
+    onClose();
+  };
   const close = async (): Promise<void> => {
-    if (finished || returned) return;
+    if (finished || returned) {
+      notifyClosed();
+      return;
+    }
     returned = true;
-    await sourceIterator.return?.();
-    finished = true;
+    try {
+      await sourceIterator.return?.();
+    } finally {
+      finished = true;
+      notifyClosed();
+    }
   };
   const iterator: AsyncIterableIterator<string> = {
     [Symbol.asyncIterator]: () => iterator,
@@ -1145,7 +1158,10 @@ const ownAsyncIterable = (source: AsyncIterable<string>): AsyncIterable<string> 
       if (finished) return { done: true, value: undefined };
       try {
         const next = await sourceIterator.next();
-        if (next.done) finished = true;
+        if (next.done) {
+          finished = true;
+          notifyClosed();
+        }
         return next;
       } catch (error) {
         await close();
@@ -1497,7 +1513,7 @@ const renderRouteInternal = async (
     }
     let responseChunks: AsyncIterable<string> | undefined;
     if (progressive) {
-      responseChunks = ownAsyncIterable(progressive(deepestContext));
+      responseChunks = ownAsyncIterable(progressive(deepestContext), () => releaseRequestSnapshot(request));
     }
     const result: RouteRenderResult = {
       status: 200,
