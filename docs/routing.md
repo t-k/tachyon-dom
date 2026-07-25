@@ -57,7 +57,7 @@ Actions run for non-GET/HEAD requests before loaders. Loaders run from parent to
 
 `renderRouteStream()` resolves commit-critical route metadata before it returns. A route `fallback` is never sent while a loader can still change the status, redirect location, cache policy, cookies, or security headers. Use compiler-generated async stream fragments when progressive body chunks are required after the HTTP metadata has been committed.
 
-`middleware` runs before route matching and can rewrite the incoming `Request` or return a short-circuit `Response`. `hooks` expose request, match, loader, action, render, and error observations for tracing and metrics.
+`middleware` runs before route matching and can rewrite the incoming `Request` or return a short-circuit `Response`. A returned request is copied into router-owned state, so mutating it after the middleware returns does not affect later authorization, actions, or loaders. `hooks` expose isolated request, match, loader, action, render, and error observations for tracing and metrics.
 
 `requireUser(getUser, options)` creates route middleware for protected routes. It redirects to `/login` by default, can use a custom redirect target, or can return a custom forbidden response.
 
@@ -115,7 +115,7 @@ await renderRoute(routes, request, { cspNonce: nonce });
 
 - `allowedMethods`
 - `maxActionBodyBytes`, enforced from both `Content-Length` and the actual action body bytes read by the router
-- `csrf: { verify }` for action requests. `verify` receives the current request, URL, and configured environment, so applications can compare a submitted token with the current session without shared mutable handler state.
+- `csrf: { verify }` for action requests. `verify` receives an isolated snapshot of the current request, URL, and configured environment, so it can read the body without consuming the action request and compare a submitted token with the current session without shared mutable handler state.
 - `middleware`
 - `hooks`
 
