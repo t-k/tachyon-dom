@@ -232,6 +232,7 @@
     "format": "oxfmt --write ."
   },
   "dependencies": {
+    "@noble/hashes": "^2.2.0",
     "oxc-parser": "^0.136.0",
     "parse5": "^7.3.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",

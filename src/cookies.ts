@@ -1,4 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { hmac } from "@noble/hashes/hmac.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 export type CookieOptions = {
   path?: string;
@@ -74,12 +75,43 @@ const sessionId = (): string => {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 };
 
-const base64UrlEncode = (value: string): string => Buffer.from(value, "utf8").toString("base64url");
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
-const base64UrlDecode = (value: string): string => Buffer.from(value, "base64url").toString("utf8");
+const bytesToBase64Url = (value: Uint8Array): string => {
+  let binary = "";
+  for (const byte of value) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/g, "");
+};
 
-const signatureFor = (value: string, secret: string): string =>
-  createHmac("sha256", secret).update(value).digest("base64url");
+const base64UrlToBytes = (value: string): Uint8Array => {
+  if (!/^[A-Za-z0-9_-]*$/.test(value) || value.length % 4 === 1) {
+    throw new Error("Invalid base64url value.");
+  }
+  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
+  const binary = atob(normalized + "=".repeat((4 - (normalized.length % 4)) % 4));
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+};
+
+const base64UrlEncode = (value: string): string => bytesToBase64Url(textEncoder.encode(value));
+
+const base64UrlDecode = (value: string): string => textDecoder.decode(base64UrlToBytes(value));
+
+const signatureBytesFor = (value: string, secret: string): Uint8Array =>
+  hmac(sha256, textEncoder.encode(secret), textEncoder.encode(value));
+
+const signatureFor = (value: string, secret: string): string => bytesToBase64Url(signatureBytesFor(value, secret));
+
+const constantTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
+  let difference = left.length ^ right.length;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    difference |= (left[index] ?? 0) ^ (right[index] ?? 0);
+  }
+  return difference === 0;
+};
 
 const defaultSessionCookie = (): CookieOptions => ({ httpOnly: true, path: "/", sameSite: "Lax", secure: true });
 
@@ -92,17 +124,18 @@ export const verifySignedCookieValue = (signedValue: string | undefined, secret:
   if (!signedValue) {
     return undefined;
   }
-  const [payload, signature] = signedValue.split(".");
+  const parts = signedValue.split(".");
+  if (parts.length !== 2) {
+    return undefined;
+  }
+  const [payload, signature] = parts;
   if (!payload || !signature) {
     return undefined;
   }
-  const expected = signatureFor(payload, secret);
-  const actualBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-  if (actualBuffer.byteLength !== expectedBuffer.byteLength || !timingSafeEqual(actualBuffer, expectedBuffer)) {
-    return undefined;
-  }
   try {
+    if (!constantTimeEqual(base64UrlToBytes(signature), signatureBytesFor(payload, secret))) {
+      return undefined;
+    }
     return base64UrlDecode(payload);
   } catch {
     return undefined;
@@ -208,7 +241,7 @@ export const createCookieSessionStorage = <Data extends Record<string, unknown> 
   options: CookieSessionStorageOptions,
 ) => {
   for (const secret of [options.secret, ...(options.verificationSecrets ?? [])]) {
-    if (Buffer.byteLength(secret, "utf8") < 32) {
+    if (textEncoder.encode(secret).byteLength < 32) {
       throw new Error("Cookie session secrets must be at least 32 bytes.");
     }
   }

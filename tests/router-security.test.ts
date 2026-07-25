@@ -377,6 +377,7 @@ describe("router security helpers", () => {
     const signed = signCookieValue("session", "secret");
     expect(verifySignedCookieValue(signed, "secret")).toBe("session");
     expect(verifySignedCookieValue(`${signed}x`, "secret")).toBeUndefined();
+    expect(verifySignedCookieValue(`${signed}.extra`, "secret")).toBeUndefined();
 
     const storage = createCookieSessionStorage<{ userId: string }>({
       secret: sessionSecret,
@@ -393,6 +394,24 @@ describe("router security helpers", () => {
 
     const tampered = cookie.replace(/=([^;]+)/, "=tampered");
     await expect(storage.getSession(tampered)).resolves.toEqual({ id: "", data: {} });
+  });
+
+  it("preserves the signing contract without a Node Buffer global", () => {
+    const bufferDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Buffer");
+    Object.defineProperty(globalThis, "Buffer", { configurable: true, value: undefined });
+    try {
+      const signed = signCookieValue("hello", "key");
+
+      expect(signed).toBe("aGVsbG8.a-znJOS63WXYo_y1dro-4sxa6aNs1kHDt_ruUVSEy0k");
+      expect(verifySignedCookieValue(signed, "key")).toBe("hello");
+      expect(verifySignedCookieValue(`${signed}x`, "key")).toBeUndefined();
+    } finally {
+      if (bufferDescriptor) {
+        Object.defineProperty(globalThis, "Buffer", bufferDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, "Buffer");
+      }
+    }
   });
 
   it("rejects an expired signed cookie session when it is replayed", async () => {

@@ -47,4 +47,24 @@ if (outputBytes > 2_048) {
   throw new Error(`Browser entry bundle is ${outputBytes} bytes; expected at most 2048 bytes.`);
 }
 
+const cookiesResult = await build({
+  bundle: true,
+  format: "esm",
+  logLevel: "silent",
+  metafile: true,
+  minify: true,
+  platform: "browser",
+  stdin: {
+    contents:
+      'import { parseCookies } from "tachyon-dom/cookies"; export const value = parseCookies("theme=dark");',
+    loader: "js",
+    resolveDir: process.cwd(),
+  },
+  write: false,
+});
+const cookiesOutput = cookiesResult.outputFiles.map((output) => output.text).join("\n");
+if (cookiesOutput.includes("node:") || cookiesOutput.includes("Buffer")) {
+  throw new Error("The parseCookies browser bundle includes Node-only runtime dependencies.");
+}
+
 console.log(`Browser entry bundle: ${outputBytes} bytes, ${Object.keys(result.metafile.inputs).length} inputs.`);
