@@ -117,6 +117,58 @@ describe("router security helpers", () => {
     await expect(verifyCsrfRequest(formRequest, { token })).resolves.toBe(true);
   });
 
+  it.each([
+    {
+      label: "text/plain",
+      request: () =>
+        new Request("https://x.test/action", {
+          method: "POST",
+          headers: { "content-type": "text/plain" },
+          body: "_csrf=fixed",
+        }),
+    },
+    {
+      label: "multipart without a boundary",
+      request: () =>
+        new Request("https://x.test/action", {
+          method: "POST",
+          headers: { "content-type": "multipart/form-data" },
+          body: "_csrf=fixed",
+        }),
+    },
+  ])("fails closed for unsupported or malformed CSRF body: $label", async ({ request }) => {
+    await expect(verifyCsrfRequest(request(), { token: "fixed" })).resolves.toBe(false);
+  });
+
+  it("returns 403 instead of 500 when a CSRF form body is malformed", async () => {
+    let actionCalled = false;
+    const result = await renderRoute(
+      [
+        {
+          path: "/action",
+          action: () => {
+            actionCalled = true;
+            return { ok: true };
+          },
+          render: () => "ok",
+        },
+      ],
+      new Request("https://x.test/action", {
+        method: "POST",
+        headers: { "content-type": "multipart/form-data" },
+        body: "_csrf=fixed",
+      }),
+      {
+        csrf: {
+          verify: ({ request }) => verifyCsrfRequest(request, { token: "fixed" }),
+        },
+      },
+    );
+
+    expect(result.ok && result.value.status).toBe(403);
+    expect(actionCalled).toBe(false);
+  });
+
   it("blocks route actions when CSRF verification fails", async () => {
     const routes: RouteDefinition[] = [{ path: "/action", action: () => ({ ok: true }), render: () => "ok" }];
     const result = await renderRoute(routes, new Request("https://x.test/action", { method: "POST" }), {

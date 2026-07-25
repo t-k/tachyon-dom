@@ -195,14 +195,14 @@ export const verifyCsrfRequest = async (request: Request, options: CsrfOptions):
   if (await timingSafeEqual(request.headers.get(headerName), options.token)) {
     return true;
   }
-  const contentType = request.headers.get("content-type") ?? "";
-  if (
-    contentType.includes("application/x-www-form-urlencoded") ||
-    contentType.includes("multipart/form-data") ||
-    contentType.includes("text/plain")
-  ) {
-    const form = await request.clone().formData();
-    return await timingSafeEqual(form.get(fieldName), options.token);
+  const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (contentType === "application/x-www-form-urlencoded" || contentType === "multipart/form-data") {
+    try {
+      const form = await request.clone().formData();
+      return await timingSafeEqual(form.get(fieldName), options.token);
+    } catch {
+      return false;
+    }
   }
   return false;
 };
