@@ -832,6 +832,45 @@ describe("router security helpers", () => {
     expect(actionCookie).toBeNull();
   });
 
+  it("rejects reconstructed guard contexts before identity lookup", async () => {
+    const { requireUser } = await import("../src/router");
+    let getUserCalled = false;
+    let actionCalled = false;
+    const guard = requireUser(() => {
+      getUserCalled = true;
+      return { id: "user" };
+    });
+
+    await expect(
+      renderRoute(
+        [
+          {
+            path: "/admin",
+            action: () => {
+              actionCalled = true;
+            },
+            render: () => "ok",
+          },
+        ],
+        new Request("https://x.test/admin", { method: "POST" }),
+        {
+          middleware: [
+            (context) => {
+              const { request, url, env } = context;
+              return guard({
+                request: request.clone(),
+                url: new URL(url),
+                env,
+              } as Parameters<typeof guard>[0]);
+            },
+          ],
+        },
+      ),
+    ).rejects.toThrow("requireUser must receive the complete router-supplied middleware context");
+    expect(getUserCalled).toBe(false);
+    expect(actionCalled).toBe(false);
+  });
+
   it("rejects request replacement after a cloned wrapper authorizes an identity", async () => {
     const { requireUser } = await import("../src/router");
     const guard = requireUser(({ request }) =>

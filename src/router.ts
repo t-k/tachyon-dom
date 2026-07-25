@@ -623,25 +623,21 @@ export const applySecurityHeaders = (response: Response, headers: Headers): Resp
   });
 };
 
-const userGuardAuthorizedRequests = new WeakSet<Request>();
-
 export const requireUser =
   <User>(
     getUser: (context: { request: Request; url: URL }) => User | undefined | null | Promise<User | undefined | null>,
     options: UserGuardOptions<User> = {},
   ): RouteMiddleware => {
     const middleware: RouteMiddleware = async (context) => {
+      const authorizationState = (context as InternalRouteMiddlewareContext)[userGuardAuthorizationState];
+      if (!authorizationState) {
+        throw new TypeError("requireUser must receive the complete router-supplied middleware context.");
+      }
       const { request, url } = context;
       const user = await getUser({ request, url });
       if (user) {
         await options.onUser?.({ request, url, user });
-        userGuardAuthorizedRequests.add(request);
-        const authorizationState = (context as typeof context & InternalRouteMiddlewareContext)[
-          userGuardAuthorizationState
-        ];
-        if (authorizationState) {
-          authorizationState.authorized = true;
-        }
+        authorizationState.authorized = true;
         return;
       }
       if (options.forbidden) {
@@ -1321,8 +1317,7 @@ const renderRouteInternal = async (
       releaseRequestSnapshot(request);
       throw error;
     }
-    const authorizedByMiddleware =
-      authorizationState.authorized || userGuardAuthorizedRequests.has(middlewareRequest);
+    const authorizedByMiddleware = authorizationState.authorized;
     if (isRouteResponse(result)) {
       releaseRequestSnapshot(middlewareRequest);
       return finish(routeResponseResult(result));
