@@ -1318,7 +1318,7 @@ const renderRouteInternal = async (
         continue;
       }
       const previousRequest = request;
-      let nextRequest: Request;
+      let nextRequest: Request | undefined;
       if (options.maxActionBodyBytes !== undefined) {
         const limitedRequest = await requestWithinBodyLimit(result, options.maxActionBodyBytes);
         if (!limitedRequest) {
@@ -1328,13 +1328,29 @@ const renderRouteInternal = async (
           }
           return finish(payloadTooLargeResult(emptyMatch()));
         }
-        nextRequest = limitedRequest === result ? callbackRequestSnapshot(result) : limitedRequest;
+        if (limitedRequest === result) {
+          try {
+            nextRequest = result.clone();
+          } catch {
+            // Handled below after every exposed request branch is released.
+          }
+        } else {
+          nextRequest = limitedRequest;
+        }
       } else {
-        nextRequest = callbackRequestSnapshot(result);
+        try {
+          nextRequest = result.clone();
+        } catch {
+          // Handled below after every exposed request branch is released.
+        }
       }
       releaseRequestSnapshot(middlewareRequest);
       if (result !== middlewareRequest) {
         releaseRequestSnapshot(result);
+      }
+      if (!nextRequest) {
+        releaseRequestSnapshot(previousRequest);
+        throw new TypeError("Middleware returned a Request with an unavailable body.");
       }
       request = nextRequest;
       releaseRequestSnapshot(previousRequest);

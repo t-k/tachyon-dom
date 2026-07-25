@@ -345,6 +345,36 @@ describe("router security helpers", () => {
     expect(result.ok && result.value.status).toBe(413);
   });
 
+  it("rejects a consumed middleware request body when no byte cap is configured", async () => {
+    let actionCalled = false;
+    const input = new Request("https://x.test/upload", { method: "POST", body: "payload" });
+
+    await expect(
+      renderRoute(
+        [
+          {
+            path: "/upload",
+            action: () => {
+              actionCalled = true;
+            },
+            render: () => "ok",
+          },
+        ],
+        input,
+        {
+          middleware: [
+            async ({ request }) => {
+              await request.text();
+              return request;
+            },
+          ],
+        },
+      ),
+    ).rejects.toThrow("Middleware returned a Request with an unavailable body");
+    expect(actionCalled).toBe(false);
+    expect(input.bodyUsed).toBe(true);
+  });
+
   it("releases the superseded body branch when middleware returns its request snapshot", async () => {
     let actionBody = "";
     const input = new Request("https://x.test/upload", { method: "POST", body: "payload" });
