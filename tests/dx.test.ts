@@ -1104,7 +1104,7 @@ export default { selected: false };
       console.log = originalLog;
     }
 
-    expect(messages[0]).toBe("0.1.2");
+    expect(messages[0]).toBe("0.1.3");
     expect(messages[1]).toContain("tachyon-dom compile <input>");
     expect(messages[1]).toContain("--target client|server|stream");
     expect(messages[2]).toContain("tachyon-dom dev");
@@ -1670,7 +1670,7 @@ void chunks;
     expect(workflow).toContain("ea165f8d65b6e75b540449e92b4886f43607fa02");
     expect(workflow).toContain("d3f86a106a0bac45b974a628896c90dbdf5c8093");
     expect(createPackage.files).toContain("LICENSE");
-    expect(createPackage.dependencies?.["tachyon-dom"]).toBe("0.1.2");
+    expect(createPackage.dependencies?.["tachyon-dom"]).toBe("0.1.3");
   });
 
   it("packages a Cloudflare Pages worker with copied assets and ASSETS fallback", async () => {
