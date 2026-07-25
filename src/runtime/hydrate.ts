@@ -264,12 +264,13 @@ export const scheduleHydration = (
     return () => observer.disconnect();
   }
   const eventName = options.interaction ?? "click";
+  const element = handle.element();
   const listener = (): void => {
     handle.hydrate();
-    document.removeEventListener(eventName, listener, true);
+    element.removeEventListener(eventName, listener, true);
   };
-  document.addEventListener(eventName, listener, true);
-  return () => document.removeEventListener(eventName, listener, true);
+  element.addEventListener(eventName, listener, true);
+  return () => element.removeEventListener(eventName, listener, true);
 };
 
 export const scheduleHydrationBoundaries = (

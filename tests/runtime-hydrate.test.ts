@@ -211,6 +211,33 @@ describe("hydrate boundary runtime", () => {
     cleanup();
   });
 
+  it("hydrates only the interaction boundary that receives the event", () => {
+    document.body.innerHTML = `<main>
+      <!--tachyon-hydrate:a:start--><section id="a"><button>A</button></section><!--tachyon-hydrate:a:end-->
+      <!--tachyon-hydrate:b:start--><section id="b"><button>B</button></section><!--tachyon-hydrate:b:end-->
+    </main>`;
+    const main = document.querySelector("main");
+    if (!main) {
+      throw new Error("Missing main.");
+    }
+    const hydrated: string[] = [];
+    const cleanup = scheduleHydrationBoundaries(
+      main,
+      [
+        { id: "a", strategy: "interaction", interaction: "click" },
+        { id: "b", strategy: "interaction", interaction: "click" },
+      ],
+      (element) => {
+        hydrated.push(element.id);
+      },
+    );
+
+    main.querySelector("#a button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(hydrated).toEqual(["a"]);
+    cleanup();
+  });
+
   it("indexes comments once when scheduling many hydration boundaries", () => {
     document.body.innerHTML = `<main>${Array.from(
       { length: 5 },
