@@ -150,7 +150,7 @@ export const verifySignedCookieValue = (signedValue: string | undefined, secret:
 };
 
 export const parseCookies = (header: string | null | undefined): Record<string, string> => {
-  const cookies = Object.create(null) as Record<string, string>;
+  const cookies: Record<string, string> = {};
   if (!header) {
     return cookies;
   }

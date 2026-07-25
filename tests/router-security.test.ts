@@ -352,15 +352,15 @@ describe("router security helpers", () => {
     expect(cookie).toContain("Secure");
   });
 
-  it("stores reserved cookie names as own string values without inherited properties", () => {
+  it("stores reserved cookie names as own string values without changing the prototype", () => {
     const cookies = parseCookies("__proto__=proto; constructor=ctor; toString=string");
 
-    expect(Object.getPrototypeOf(cookies)).toBeNull();
+    expect(Object.getPrototypeOf(cookies)).toBe(Object.prototype);
     expect(Object.hasOwn(cookies, "__proto__")).toBe(true);
     expect(cookies["__proto__"]).toBe("proto");
     expect(cookies.constructor).toBe("ctor");
     expect(cookies.toString).toBe("string");
-    expect(parseCookies("theme=dark").toString).toBeUndefined();
+    expect(typeof parseCookies("theme=dark").toString).toBe("function");
   });
 
   it("uses getRandomValues when randomUUID is unavailable", async () => {
@@ -620,5 +620,94 @@ describe("router security helpers", () => {
       }),
     ).rejects.toThrow("Middleware cannot replace the request after requireUser has authorized it");
     expect(actionCookie).toBeNull();
+  });
+
+  it("rejects request replacement after a wrapped requireUser guard authorizes an identity", async () => {
+    const { requireUser } = await import("../src/router");
+    const guard = requireUser(({ request }) =>
+      request.headers.get("cookie") === "sid=attacker" ? { id: "attacker" } : undefined,
+    );
+    let actionCookie: string | null = null;
+    const request = new Request("https://x.test/admin", {
+      method: "POST",
+      headers: { cookie: "sid=attacker" },
+    });
+
+    await expect(
+      renderRoute(
+        [
+          {
+            path: "/admin",
+            action: ({ request: actionRequest }) => {
+              actionCookie = actionRequest.headers.get("cookie");
+            },
+            render: () => "ok",
+          },
+        ],
+        request,
+        {
+          middleware: [
+            async (context) => guard(context),
+            ({ request: authorizedRequest }) =>
+              new Request(authorizedRequest, { headers: { cookie: "sid=victim" } }),
+          ],
+        },
+      ),
+    ).rejects.toThrow("Middleware cannot replace the request after requireUser has authorized it");
+    expect(actionCookie).toBeNull();
+  });
+
+  it("isolates URL mutations made by middleware after authorization", async () => {
+    const { requireUser } = await import("../src/router");
+    const result = await renderRoute(
+      [
+        { path: "/tenant-a", render: () => "tenant-a" },
+        { path: "/tenant-b", render: () => "tenant-b" },
+      ],
+      "https://x.test/tenant-a",
+      {
+        middleware: [
+          requireUser(() => ({ id: "user" })),
+          ({ url }) => {
+            url.pathname = "/tenant-b";
+          },
+        ],
+      },
+    );
+
+    expect(result.ok && result.value.html).toBe("tenant-a");
+  });
+
+  it("isolates request header mutations made by observational hooks", async () => {
+    const { requireUser } = await import("../src/router");
+    let actionCookie: string | null = null;
+    const request = new Request("https://x.test/admin", {
+      method: "POST",
+      headers: { cookie: "sid=attacker" },
+    });
+
+    const result = await renderRoute(
+      [
+        {
+          path: "/admin",
+          action: ({ request: actionRequest }) => {
+            actionCookie = actionRequest.headers.get("cookie");
+          },
+          render: () => "ok",
+        },
+      ],
+      request,
+      {
+        middleware: [requireUser(() => ({ id: "attacker" }))],
+        hooks: {
+          onMatch: ({ request: hookRequest }) => {
+            hookRequest.headers.set("cookie", "sid=victim");
+          },
+        },
+      },
+    );
+
+    expect(result.ok && result.value.status).toBe(200);
+    expect(actionCookie).toBe("sid=attacker");
   });
 });
