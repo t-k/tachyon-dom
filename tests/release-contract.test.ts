@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import * as releaseContract from "../scripts/release-contract.mjs";
 import { decideDistTagTransition, readRegistryState } from "../scripts/npm-registry-state.mjs";
 import { preflightReleasePublication } from "../scripts/preflight-release-publication.mjs";
+import * as releasePublisher from "../scripts/publish-release-package.mjs";
 
 const { verifyReleaseIdentity } = releaseContract;
 
@@ -261,6 +262,37 @@ describe("initializer package artifacts", () => {
 });
 
 describe("retryable npm publication", () => {
+  it("rejects a direct publish when the release tag advanced after preflight", () => {
+    const decideDirectPublication = (releasePublisher as any).decideDirectPublication;
+    expect(decideDirectPublication).toBeTypeOf("function");
+    if (typeof decideDirectPublication !== "function") return;
+
+    expect(
+      decideDirectPublication({
+        expectedIntegrity: "sha512-a",
+        publishedIntegrity: null,
+        currentTag: "1.2.4",
+        targetVersion: "1.2.3",
+      }),
+    ).toEqual({ ok: false, error: expect.stringMatching(/rollback/) });
+    expect(
+      decideDirectPublication({
+        expectedIntegrity: "sha512-a",
+        publishedIntegrity: "sha512-a",
+        currentTag: "1.2.2",
+        targetVersion: "1.2.3",
+      }),
+    ).toEqual({ ok: false, error: expect.stringMatching(/dist-tag/) });
+    expect(
+      decideDirectPublication({
+        expectedIntegrity: "sha512-a",
+        publishedIntegrity: "sha512-a",
+        currentTag: "1.2.3",
+        targetVersion: "1.2.3",
+      }),
+    ).toEqual({ ok: true, action: "skip" });
+  });
+
   it("publishes missing versions, skips identical versions, and rejects conflicts", () => {
     expect(
       (releaseContract as any).decidePublication({ expectedIntegrity: "sha512-a", publishedIntegrity: null }),

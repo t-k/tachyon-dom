@@ -357,6 +357,12 @@ describe("DX helpers", () => {
     );
     expect(publisher).not.toContain("stagingTagFor");
     expect(publisher).toContain("if (confirmed.integrity !== entry.integrity) throw error");
+    const artifactReverification = publisher.indexOf("const reverified = await verifyReleaseArtifacts");
+    const registryRecheck = publisher.indexOf("const confirmedRegistry = await readRegistryState", artifactReverification);
+    const npmPublish = publisher.indexOf('output = await execFile(', artifactReverification);
+    expect(artifactReverification).toBeGreaterThan(-1);
+    expect(registryRecheck).toBeGreaterThan(artifactReverification);
+    expect(registryRecheck).toBeLessThan(npmPublish);
     expect(registryState).not.toContain("stagingTagFor");
     expect(registryState).not.toContain("decideOwnedTagMutation");
     await expect(readFile("scripts/finalize-release-tags.mjs", "utf8")).rejects.toMatchObject({ code: "ENOENT" });

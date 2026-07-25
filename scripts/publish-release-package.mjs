@@ -3,9 +3,28 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { decidePublication, verifyReleaseArtifacts } from "./release-contract.mjs";
-import { npmRegistryUrl, readRegistryState } from "./npm-registry-state.mjs";
+import { decideDistTagTransition, npmRegistryUrl, readRegistryState } from "./npm-registry-state.mjs";
 
 const execFile = promisify(execFileCallback);
+
+export const decideDirectPublication = ({
+  expectedIntegrity,
+  publishedIntegrity,
+  currentTag,
+  targetVersion,
+}) => {
+  const publication = decidePublication({ expectedIntegrity, publishedIntegrity });
+  if (!publication.ok) return publication;
+  const distTag = decideDistTagTransition({ currentVersion: currentTag, targetVersion });
+  if (!distTag.ok) return distTag;
+  if (publication.action === "skip") {
+    if (distTag.action !== "noop") {
+      return { ok: false, error: "Published version exists, but the release dist-tag does not point to it." };
+    }
+    return publication;
+  }
+  return { ok: true, action: "publish" };
+};
 
 export const publishReleasePackage = async ({ artifactDir, tag, packageKey }) => {
   const verified = await verifyReleaseArtifacts({ artifactDir, tag });
@@ -13,13 +32,29 @@ export const publishReleasePackage = async ({ artifactDir, tag, packageKey }) =>
   if (packageKey !== "root" && packageKey !== "create") throw new Error("Package key must be root or create.");
   const entry = verified.manifest.packages[packageKey];
   const registry = await readRegistryState({ name: entry.name, version: verified.version });
-  const decision = decidePublication({ expectedIntegrity: entry.integrity, publishedIntegrity: registry.integrity });
+  const decision = decideDirectPublication({
+    expectedIntegrity: entry.integrity,
+    publishedIntegrity: registry.integrity,
+    currentTag: registry.distTags[verified.npmTag],
+    targetVersion: verified.version,
+  });
   if (!decision.ok) throw new Error(decision.error);
   if (decision.action === "skip") {
     return { action: "skip", package: entry.name, version: verified.version };
   }
   const reverified = await verifyReleaseArtifacts({ artifactDir, tag });
   if (!reverified.ok) throw new Error(reverified.error);
+  const confirmedRegistry = await readRegistryState({ name: entry.name, version: verified.version });
+  const confirmedDecision = decideDirectPublication({
+    expectedIntegrity: entry.integrity,
+    publishedIntegrity: confirmedRegistry.integrity,
+    currentTag: confirmedRegistry.distTags[verified.npmTag],
+    targetVersion: verified.version,
+  });
+  if (!confirmedDecision.ok) throw new Error(confirmedDecision.error);
+  if (confirmedDecision.action === "skip") {
+    return { action: "skip", package: entry.name, version: verified.version };
+  }
   let output;
   try {
     output = await execFile(
