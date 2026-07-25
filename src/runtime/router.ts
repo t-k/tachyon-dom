@@ -362,7 +362,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   const cache = new Map<string, unknown>();
   const layoutStates = new WeakMap<
     ClientRouteDefinition,
-    { root: Element; loaded: LoadedClientBranch; paramsKey: string }
+    { root: Element; loaded: LoadedClientBranch; paramsKey: string; searchKey: string }
   >();
   const prefetchControllers = new Map<string, AbortController>();
   const eagerlyNavigated = new WeakSet<HTMLAnchorElement>();
@@ -474,12 +474,14 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     const renderNestedBranch = async (): Promise<void> => {
       let parentTarget = target;
       const paramsKey = JSON.stringify(match.params);
+      const searchKey = url.search;
       for (const layoutRoute of match.branch.slice(0, -1)) {
         const layoutState = layoutStates.get(layoutRoute);
         let layoutRoot = layoutState?.root;
         if (
           !layoutRoot?.isConnected ||
           layoutState?.paramsKey !== paramsKey ||
+          layoutState?.searchKey !== searchKey ||
           (layoutRoute.load !== undefined && layoutState?.loaded !== loaded)
         ) {
           const layoutValue = await layoutRoute.render({
@@ -493,7 +495,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
           }
           renderInto(parentTarget, layoutValue);
           layoutRoot = parentTarget.firstElementChild ?? parentTarget;
-          layoutStates.set(layoutRoute, { root: layoutRoot, loaded, paramsKey });
+          layoutStates.set(layoutRoute, { root: layoutRoot, loaded, paramsKey, searchKey });
         }
         const outlet = outletFor(layoutRoot);
         if (!outlet) {

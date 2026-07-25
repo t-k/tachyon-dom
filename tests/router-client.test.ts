@@ -274,6 +274,41 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("rerenders parent layouts when the query changes", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/app/child?tab=one");
+    let layoutRenders = 0;
+    const router = createClientRouter({
+      root,
+      routes: [
+        {
+          id: "app",
+          path: "/app",
+          render: ({ url }) => {
+            layoutRenders += 1;
+            return rawHtml(
+              `<section data-query="${url.search}"><div data-tachyon-outlet></div></section>`,
+            );
+          },
+          children: [{ id: "child", path: "child", render: () => rawHtml("<p>Child</p>") }],
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    await router.navigate("/app/child?tab=two");
+
+    expect(root.querySelector("[data-query]")?.getAttribute("data-query")).toBe("?tab=two");
+    expect(location.search).toBe("?tab=two");
+    expect(layoutRenders).toBe(2);
+    router.dispose();
+  });
+
   it("rerenders loaded parent layouts when route params change", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");
