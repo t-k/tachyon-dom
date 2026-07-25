@@ -3,7 +3,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { decidePublication, verifyReleaseArtifacts } from "./release-contract.mjs";
-import { npmRegistryUrl, readRegistryState, stagingTagFor } from "./npm-registry-state.mjs";
+import { npmRegistryUrl, readRegistryState } from "./npm-registry-state.mjs";
 
 const execFile = promisify(execFileCallback);
 
@@ -30,7 +30,7 @@ export const publishReleasePackage = async ({ artifactDir, tag, packageKey }) =>
         "--access",
         "public",
         "--tag",
-        stagingTagFor(verified.version),
+        verified.npmTag,
         "--registry",
         npmRegistryUrl,
       ],

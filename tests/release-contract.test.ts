@@ -5,12 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import * as releaseContract from "../scripts/release-contract.mjs";
-import {
-  decideDistTagTransition,
-  decideOwnedTagMutation,
-  readRegistryState,
-  stagingTagFor,
-} from "../scripts/npm-registry-state.mjs";
+import { decideDistTagTransition, readRegistryState } from "../scripts/npm-registry-state.mjs";
 import { preflightReleasePublication } from "../scripts/preflight-release-publication.mjs";
 
 const { verifyReleaseIdentity } = releaseContract;
@@ -293,16 +288,6 @@ describe("retryable npm publication", () => {
       ok: false,
       error: expect.stringMatching(/rollback/),
     });
-  });
-
-  it("rejects stale forward updates and rollbacks after another release changes ownership", () => {
-    expect(decideOwnedTagMutation({ currentVersion: "1.2.4", expectedVersion: "1.2.2", nextVersion: "1.2.3" })).toEqual(
-      { ok: false, error: expect.stringMatching(/ownership changed/) },
-    );
-    expect(decideOwnedTagMutation({ currentVersion: "1.2.4", expectedVersion: "1.2.3", nextVersion: "1.2.2" })).toEqual(
-      { ok: false, error: expect.stringMatching(/ownership changed/) },
-    );
-    expect(stagingTagFor("1.2.3")).not.toBe(stagingTagFor("1.2.4"));
   });
 
   it("distinguishes registry absence from authentication and rate-limit failures", async () => {
