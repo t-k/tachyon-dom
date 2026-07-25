@@ -63,6 +63,8 @@ Actions run for non-GET/HEAD requests before loaders. Loaders run from parent to
 
 Middleware wrappers that replace the request passed to `requireUser()` must derive the next context from the complete router-supplied context, for example `{ ...context, request: context.request.clone() }`. Object spread carries the opaque, router-owned authorization state while isolating request reads. TypeScript rejects reconstruction from named public fields, and JavaScript or cast-based callers that omit the carrier receive a `TypeError` before identity lookup.
 
+Route middleware is trusted application code. The opaque carrier prevents accidental state loss across supported wrappers; it is not an isolation boundary against hostile in-process middleware that inspects symbol properties or mutates received objects.
+
 ## Response Helpers
 
 - `redirect("/path")` returns a 302 route response. External redirects are rejected unless `allowExternal` is set and the target origin is included in `allowedOrigins`.
