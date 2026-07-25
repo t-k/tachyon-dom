@@ -60,7 +60,7 @@ See the [syntax specification](docs/syntax-spec.md) for supported expressions an
 
 `import { createSignal } from "tachyon-dom"` bundles to **600 bytes minified** in the current esbuild contract.
 
-Quick example client bundle: 11519 bytes minified, 3838 bytes Brotli, including the counter, keyed-list binding code, and browser runtime. CI rejects TypeScript, parse5, compiler, server, app, and language-server modules from both browser metafiles.
+Quick example client bundle: 11571 bytes minified, 3843 bytes Brotli, including the counter, keyed-list binding code, and browser runtime. CI rejects TypeScript, parse5, compiler, server, app, and language-server modules from both browser metafiles.
 
 ```sh
 pnpm build
