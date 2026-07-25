@@ -604,15 +604,7 @@ export const applySecurityHeaders = (response: Response, headers: Headers): Resp
   });
 };
 
-const userGuardAuthorization = Symbol("tachyon-dom.user-guard-authorization");
-
-const userGuardAuthorizationResult = Object.freeze({ [userGuardAuthorization]: true });
 const userGuardAuthorizedRequests = new WeakSet<Request>();
-
-const isUserGuardAuthorizationResult = (value: unknown): boolean =>
-  typeof value === "object" &&
-  value !== null &&
-  (value as { [userGuardAuthorization]?: boolean })[userGuardAuthorization] === true;
 
 export const requireUser =
   <User>(
@@ -625,7 +617,7 @@ export const requireUser =
       if (user) {
         await options.onUser?.({ request, url, user });
         userGuardAuthorizedRequests.add(request);
-        return userGuardAuthorizationResult as never;
+        return;
       }
       if (options.forbidden) {
         return options.forbidden({ request, url });
@@ -1246,11 +1238,14 @@ const renderRouteInternal = async (
       match,
     };
   };
+  const finish = (result: RouteRenderResult): Result<RouteRenderResult, RouteError> => {
+    releaseRequestSnapshot(request);
+    return ok(result);
+  };
   if (options.maxActionBodyBytes !== undefined) {
     const limitedRequest = await requestWithinBodyLimit(request, options.maxActionBodyBytes);
     if (!limitedRequest) {
-      releaseRequestSnapshot(request);
-      return ok(payloadTooLargeResult(emptyMatch()));
+      return finish(payloadTooLargeResult(emptyMatch()));
     }
     request = limitedRequest;
     url = new URL(request.url);
@@ -1275,23 +1270,15 @@ const renderRouteInternal = async (
       releaseRequestSnapshot(request);
       throw error;
     }
-    const authorizedByMiddleware =
-      userGuardAuthorizedRequests.has(middlewareRequest) || isUserGuardAuthorizationResult(result);
-    if (isUserGuardAuthorizationResult(result)) {
-      releaseRequestSnapshot(middlewareRequest);
-      userGuardAuthorized = true;
-      continue;
-    }
+    const authorizedByMiddleware = userGuardAuthorizedRequests.has(middlewareRequest);
     if (isRouteResponse(result)) {
       releaseRequestSnapshot(middlewareRequest);
-      releaseRequestSnapshot(request);
-      return ok(routeResponseResult(result));
+      return finish(routeResponseResult(result));
     }
     if (isWebResponse(result)) {
       const rendered = await webResponseResult(result);
       releaseRequestSnapshot(middlewareRequest);
-      releaseRequestSnapshot(request);
-      return ok(rendered);
+      return finish(rendered);
     }
     if (result instanceof Request) {
       if ((userGuardAuthorized || authorizedByMiddleware) && result !== middlewareRequest) {
@@ -1309,8 +1296,7 @@ const renderRouteInternal = async (
         const limitedRequest = await requestWithinBodyLimit(result, options.maxActionBodyBytes);
         if (!limitedRequest) {
           releaseRequestSnapshot(middlewareRequest);
-          releaseRequestSnapshot(request);
-          return ok(payloadTooLargeResult(emptyMatch()));
+          return finish(payloadTooLargeResult(emptyMatch()));
         }
         request = limitedRequest;
         releaseRequestSnapshot(middlewareRequest);
@@ -1328,7 +1314,7 @@ const renderRouteInternal = async (
     userGuardAuthorized ||= authorizedByMiddleware;
   }
   if (options.allowedMethods && !options.allowedMethods.includes(request.method)) {
-    return ok({
+    return finish({
       status: 405,
       html: "<h1>Method Not Allowed</h1>",
       headHtml: "",
@@ -1348,7 +1334,7 @@ const renderRouteInternal = async (
       : options.notFound
         ? await options.notFound({ request, url })
         : `<h1>Not Found</h1>`;
-    return ok({
+    return finish({
       status: 404,
       html,
       headHtml: "",
@@ -1373,7 +1359,7 @@ const renderRouteInternal = async (
     const loaderData: Record<string, unknown> = {};
     if (request.method !== "GET" && request.method !== "HEAD" && match.value.route.action) {
       if (options.csrf && !(await verifyCsrf(request, url, env, bindings, options.csrf))) {
-        return ok({
+        return finish({
           status: 403,
           html: "<h1>Forbidden</h1>",
           headHtml: "",
@@ -1409,7 +1395,7 @@ const renderRouteInternal = async (
         }
       }
       if (isRouteResponse(actionResult)) {
-        return ok({ ...routeResponseResult(actionResult, match.value), loaderData, actionResult });
+        return finish({ ...routeResponseResult(actionResult, match.value), loaderData, actionResult });
       }
     }
     for (const entry of match.value.branch) {
@@ -1426,7 +1412,7 @@ const renderRouteInternal = async (
           actionResult,
         } as Omit<RouteExecutionContext, "data" | "outlet">);
         if (isRouteResponse(data)) {
-          return ok({ ...routeResponseResult(data, match.value), loaderData, actionResult });
+          return finish({ ...routeResponseResult(data, match.value), loaderData, actionResult });
         }
         loaderData[id] = isDeferredData(data) ? await resolveDeferredData(data) : data;
         if (options.hooks?.onLoader) {
@@ -1513,7 +1499,7 @@ const renderRouteInternal = async (
     if (progressive) {
       responseChunks = ownAsyncIterable(progressive(deepestContext));
     }
-    return ok({
+    const result: RouteRenderResult = {
       status: 200,
       html: outlet,
       headHtml: renderHead(mergeHead(heads), options.cspNonce === undefined ? {} : { nonce: options.cspNonce }),
@@ -1534,7 +1520,8 @@ const renderRouteInternal = async (
       headers,
       match: match.value,
       ...(responseChunks ? { responseChunks } : {}),
-    });
+    };
+    return responseChunks ? ok(result) : finish(result);
   } catch (error) {
     if (options.hooks?.onError) {
       const hookRequest = callbackRequestSnapshot(request);
@@ -1546,7 +1533,7 @@ const renderRouteInternal = async (
     }
     const boundary = [...match.value.branch].reverse().find((entry) => entry.route.error)?.route.error ?? options.error;
     const html = boundary ? await boundary({ request, url, error }) : `<h1>Internal Server Error</h1>`;
-    return ok({
+    return finish({
       status: 500,
       html,
       headHtml: "",

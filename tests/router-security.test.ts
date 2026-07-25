@@ -351,6 +351,24 @@ describe("router security helpers", () => {
     expect(forbidden.bodyUsed).toBe(true);
   });
 
+  it("releases request bodies on method, not-found, and CSRF rejection responses", async () => {
+    const methodRejected = new Request("https://x.test/upload", { method: "POST", body: "payload" });
+    const notFound = new Request("https://x.test/missing", { method: "POST", body: "payload" });
+    const csrfRejected = new Request("https://x.test/upload", { method: "POST", body: "payload" });
+    const routes: RouteDefinition[] = [{ path: "/upload", action: () => "ok", render: () => "ok" }];
+
+    const methodResult = await renderRoute(routes, methodRejected, { allowedMethods: ["GET"] });
+    const notFoundResult = await renderRoute(routes, notFound);
+    const csrfResult = await renderRoute(routes, csrfRejected, { csrf: { verify: () => false } });
+
+    expect(methodResult.ok && methodResult.value.status).toBe(405);
+    expect(notFoundResult.ok && notFoundResult.value.status).toBe(404);
+    expect(csrfResult.ok && csrfResult.value.status).toBe(403);
+    expect(methodRejected.bodyUsed).toBe(true);
+    expect(notFound.bodyUsed).toBe(true);
+    expect(csrfRejected.bodyUsed).toBe(true);
+  });
+
   it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 1.5])(
     "rejects invalid maxActionBodyBytes configuration %s before request callbacks",
     async (maxActionBodyBytes) => {
@@ -692,6 +710,7 @@ describe("router security helpers", () => {
       request.headers.get("cookie") === "sid=attacker" ? { id: "attacker" } : undefined,
     );
     let actionCookie: string | null = null;
+    let wrapperContinued = false;
     const request = new Request("https://x.test/admin", {
       method: "POST",
       headers: { cookie: "sid=attacker" },
@@ -712,7 +731,11 @@ describe("router security helpers", () => {
         {
           middleware: [
             async (context) => {
-              await guard({ ...context });
+              const result = await guard({ ...context });
+              if (result) {
+                return result;
+              }
+              wrapperContinued = true;
             },
             ({ request: authorizedRequest }) =>
               new Request(authorizedRequest, { headers: { cookie: "sid=victim" } }),
@@ -720,6 +743,7 @@ describe("router security helpers", () => {
         },
       ),
     ).rejects.toThrow("Middleware cannot replace the request after requireUser has authorized it");
+    expect(wrapperContinued).toBe(true);
     expect(actionCookie).toBeNull();
   });
 
