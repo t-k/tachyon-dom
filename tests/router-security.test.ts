@@ -224,6 +224,80 @@ describe("router security helpers", () => {
     expect(result.ok && result.value).toMatchObject({ status: 413, html: "<h1>Payload Too Large</h1>" });
   });
 
+  it("applies the body byte cap before request hooks and middleware consume the stream", async () => {
+    const calls: string[] = [];
+    const request = new Request("https://x.test/upload", {
+      method: "POST",
+      body: "abcdef",
+    });
+
+    const result = await renderRoute([{ path: "/upload", action: () => "ok", render: () => "ok" }], request, {
+      maxActionBodyBytes: 3,
+      hooks: {
+        onRequest: async ({ request: hookRequest }) => {
+          calls.push(await hookRequest.text());
+        },
+      },
+      middleware: [
+        async ({ request: middlewareRequest }) => {
+          calls.push(await middlewareRequest.text());
+        },
+      ],
+    });
+
+    expect(result.ok && result.value.status).toBe(413);
+    expect(calls).toEqual([]);
+  });
+
+  it("reapplies the body byte cap after middleware replaces the request", async () => {
+    let actionCalled = false;
+    let laterMiddlewareCalled = false;
+
+    const result = await renderRoute(
+      [
+        {
+          path: "/upload",
+          action: () => {
+            actionCalled = true;
+          },
+          render: () => "ok",
+        },
+      ],
+      new Request("https://x.test/upload", { method: "POST", body: "ok" }),
+      {
+        maxActionBodyBytes: 3,
+        middleware: [
+          ({ request }) => new Request(request.url, { method: "POST", body: "abcdef" }),
+          () => {
+            laterMiddlewareCalled = true;
+          },
+        ],
+      },
+    );
+
+    expect(result.ok && result.value.status).toBe(413);
+    expect(laterMiddlewareCalled).toBe(false);
+    expect(actionCalled).toBe(false);
+  });
+
+  it("fails closed when middleware returns a consumed request body", async () => {
+    const result = await renderRoute(
+      [{ path: "/upload", action: () => "ok", render: () => "ok" }],
+      new Request("https://x.test/upload", { method: "POST", body: "ok" }),
+      {
+        maxActionBodyBytes: 3,
+        middleware: [
+          async ({ request }) => {
+            await request.text();
+            return request;
+          },
+        ],
+      },
+    );
+
+    expect(result.ok && result.value.status).toBe(413);
+  });
+
   it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 1.5])(
     "rejects invalid maxActionBodyBytes configuration %s before request callbacks",
     async (maxActionBodyBytes) => {
@@ -276,6 +350,45 @@ describe("router security helpers", () => {
 
     expect(restored.data).toEqual({ userId: "u1" });
     expect(cookie).toContain("Secure");
+  });
+
+  it("stores reserved cookie names as own string values without inherited properties", () => {
+    const cookies = parseCookies("__proto__=proto; constructor=ctor; toString=string");
+
+    expect(Object.getPrototypeOf(cookies)).toBeNull();
+    expect(Object.hasOwn(cookies, "__proto__")).toBe(true);
+    expect(cookies["__proto__"]).toBe("proto");
+    expect(cookies.constructor).toBe("ctor");
+    expect(cookies.toString).toBe("string");
+    expect(parseCookies("theme=dark").toString).toBeUndefined();
+  });
+
+  it("uses getRandomValues when randomUUID is unavailable", async () => {
+    const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    let randomCalls = 0;
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        getRandomValues: (bytes: Uint8Array) => {
+          randomCalls++;
+          bytes.fill(7);
+          return bytes;
+        },
+      },
+    });
+    try {
+      const storage = createMemorySessionStorage();
+      const session = await storage.createSession({});
+
+      expect(session.id).toBe("BwcHBwcHBwcHBwcHBwcHBw");
+      expect(randomCalls).toBe(1);
+    } finally {
+      if (cryptoDescriptor) {
+        Object.defineProperty(globalThis, "crypto", cryptoDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, "crypto");
+      }
+    }
   });
 
   it("does not commit authenticated data under an unknown cookie session ID", async () => {
@@ -475,5 +588,37 @@ describe("router security helpers", () => {
       middleware: [requireUser(() => ({ id: "u1" }), { forbidden: () => html(unsafeHtml("no")) })],
     });
     expect(allowed.ok && allowed.value.html).toBe("<h1>Admin</h1>");
+  });
+
+  it("rejects request replacement after requireUser authorizes an identity", async () => {
+    const { requireUser } = await import("../src/router");
+    let actionCookie: string | null = null;
+    const routes: RouteDefinition[] = [
+      {
+        path: "/admin",
+        action: ({ request }) => {
+          actionCookie = request.headers.get("cookie");
+          return "saved";
+        },
+        render: () => "<h1>Admin</h1>",
+      },
+    ];
+    const request = new Request("https://x.test/admin", {
+      method: "POST",
+      headers: { cookie: "sid=attacker" },
+    });
+
+    await expect(
+      renderRoute(routes, request, {
+        middleware: [
+          requireUser(({ request: guardedRequest }) =>
+            guardedRequest.headers.get("cookie") === "sid=attacker" ? { id: "attacker" } : undefined,
+          ),
+          ({ request: authorizedRequest }) =>
+            new Request(authorizedRequest, { headers: { cookie: "sid=victim" } }),
+        ],
+      }),
+    ).rejects.toThrow("Middleware cannot replace the request after requireUser has authorized it");
+    expect(actionCookie).toBeNull();
   });
 });

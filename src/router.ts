@@ -466,6 +466,9 @@ const readLimitedRequest = async (request: Request, maxBytes: number): Promise<R
   if (!request.body) {
     return request;
   }
+  if (request.bodyUsed || request.body.locked) {
+    return undefined;
+  }
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -494,6 +497,17 @@ const readLimitedRequest = async (request: Request, maxBytes: number): Promise<R
     redirect: request.redirect,
     signal: request.signal,
   });
+};
+
+const requestWithinBodyLimit = async (request: Request, maxBytes: number): Promise<Request | undefined> => {
+  const contentLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
+  if (contentLength > maxBytes) {
+    return undefined;
+  }
+  if (request.method === "GET" || request.method === "HEAD") {
+    return request;
+  }
+  return readLimitedRequest(request, maxBytes);
 };
 
 const validateCspNonce = (nonce: string): string => {
@@ -568,21 +582,31 @@ export const applySecurityHeaders = (response: Response, headers: Headers): Resp
   });
 };
 
+const userGuardMiddleware = Symbol("tachyon-dom.user-guard-middleware");
+
+type BrandedUserGuardMiddleware = RouteMiddleware & { [userGuardMiddleware]: true };
+
+const isUserGuardMiddleware = (middleware: NonNullable<RouteExecutionOptions["middleware"]>[number]): boolean =>
+  (middleware as BrandedUserGuardMiddleware)[userGuardMiddleware] === true;
+
 export const requireUser =
   <User>(
     getUser: (context: { request: Request; url: URL }) => User | undefined | null | Promise<User | undefined | null>,
     options: UserGuardOptions<User> = {},
-  ): RouteMiddleware =>
-  async ({ request, url }) => {
-    const user = await getUser({ request, url });
-    if (user) {
-      await options.onUser?.({ request, url, user });
-      return;
-    }
-    if (options.forbidden) {
-      return options.forbidden({ request, url });
-    }
-    return redirect(options.getRedirect?.({ request, url }) ?? options.redirectTo ?? "/login");
+  ): RouteMiddleware => {
+    const middleware: RouteMiddleware = async ({ request, url }) => {
+      const user = await getUser({ request, url });
+      if (user) {
+        await options.onUser?.({ request, url, user });
+        return;
+      }
+      if (options.forbidden) {
+        return options.forbidden({ request, url });
+      }
+      return redirect(options.getRedirect?.({ request, url }) ?? options.redirectTo ?? "/login");
+    };
+    Object.defineProperty(middleware, userGuardMiddleware, { value: true });
+    return middleware;
   };
 
 export const defineRouteModule = <Data = unknown, ActionResult = unknown>(
@@ -1196,9 +1220,19 @@ const renderRouteInternal = async (
       match,
     };
   };
-  await options.hooks?.onRequest?.({ request, url });
+  if (options.maxActionBodyBytes !== undefined) {
+    const limitedRequest = await requestWithinBodyLimit(request, options.maxActionBodyBytes);
+    if (!limitedRequest) {
+      return ok(payloadTooLargeResult(emptyMatch()));
+    }
+    request = limitedRequest;
+    url = new URL(request.url);
+  }
+  await options.hooks?.onRequest?.({ request: request.clone(), url });
+  let userGuardAuthorized = false;
   for (const middleware of options.middleware ?? []) {
-    const result = await middleware({ request, url, env, bindings });
+    const middlewareRequest = request.clone();
+    const result = await middleware({ request: middlewareRequest, url, env, bindings });
     if (isRouteResponse(result)) {
       return ok(routeResponseResult(result));
     }
@@ -1206,8 +1240,25 @@ const renderRouteInternal = async (
       return ok(await webResponseResult(result));
     }
     if (result instanceof Request) {
-      request = result;
+      if (userGuardAuthorized && result !== middlewareRequest) {
+        throw new TypeError("Middleware cannot replace the request after requireUser has authorized it.");
+      }
+      if (userGuardAuthorized) {
+        continue;
+      }
+      if (options.maxActionBodyBytes !== undefined) {
+        const limitedRequest = await requestWithinBodyLimit(result, options.maxActionBodyBytes);
+        if (!limitedRequest) {
+          return ok(payloadTooLargeResult(emptyMatch()));
+        }
+        request = limitedRequest;
+      } else {
+        request = result;
+      }
       url = new URL(request.url);
+    }
+    if (isUserGuardMiddleware(middleware)) {
+      userGuardAuthorized = true;
     }
   }
   if (options.allowedMethods && !options.allowedMethods.includes(request.method)) {
@@ -1222,23 +1273,6 @@ const renderRouteInternal = async (
       headers: new Headers({ allow: options.allowedMethods.join(", "), "content-type": "text/html; charset=utf-8" }),
       match: emptyMatch(),
     });
-  }
-  const contentLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
-  if (options.maxActionBodyBytes !== undefined && contentLength > options.maxActionBodyBytes) {
-    return ok(payloadTooLargeResult(emptyMatch()));
-  }
-  if (
-    options.maxActionBodyBytes !== undefined &&
-    request.method !== "GET" &&
-    request.method !== "HEAD" &&
-    request.body
-  ) {
-    const limitedRequest = await readLimitedRequest(request, options.maxActionBodyBytes);
-    if (!limitedRequest) {
-      return ok(payloadTooLargeResult(emptyMatch()));
-    }
-    request = limitedRequest;
-    url = new URL(request.url);
   }
   const match = matchRoute(routes, url);
   if (!match.ok) {

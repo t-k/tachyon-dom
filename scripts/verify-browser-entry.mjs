@@ -56,15 +56,15 @@ const cookiesResult = await build({
   platform: "browser",
   stdin: {
     contents:
-      'import { parseCookies } from "tachyon-dom/cookies"; export const value = parseCookies("theme=dark");',
+      'import { parseCookies, signCookieValue, verifySignedCookieValue } from "tachyon-dom/cookies"; export const cookies = parseCookies("theme=dark"); export const signed = signCookieValue("hello", "key"); export const verified = verifySignedCookieValue(signed, "key");',
     loader: "js",
     resolveDir: process.cwd(),
   },
   write: false,
 });
 const cookiesOutput = cookiesResult.outputFiles.map((output) => output.text).join("\n");
-if (cookiesOutput.includes("node:") || cookiesOutput.includes("Buffer")) {
-  throw new Error("The parseCookies browser bundle includes Node-only runtime dependencies.");
+if (cookiesOutput.includes("node:") || /\bBuffer\b/.test(cookiesOutput)) {
+  throw new Error("The cookies browser bundle includes Node-only runtime dependencies.");
 }
 
 console.log(`Browser entry bundle: ${outputBytes} bytes, ${Object.keys(result.metafile.inputs).length} inputs.`);

@@ -69,10 +69,17 @@ const tryDecodeCookiePart = (value: string): string | undefined => {
 };
 
 const sessionId = (): string => {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
+  if (typeof crypto !== "undefined") {
+    if (typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    if (typeof crypto.getRandomValues === "function") {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      return bytesToBase64Url(bytes);
+    }
   }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  throw new Error("A cryptographically secure random number generator is required for session IDs.");
 };
 
 const textEncoder = new TextEncoder();
@@ -143,10 +150,10 @@ export const verifySignedCookieValue = (signedValue: string | undefined, secret:
 };
 
 export const parseCookies = (header: string | null | undefined): Record<string, string> => {
+  const cookies = Object.create(null) as Record<string, string>;
   if (!header) {
-    return {};
+    return cookies;
   }
-  const cookies: Record<string, string> = {};
   for (const part of header.split(";")) {
     const trimmed = part.trim();
     if (hasControlCharacter(trimmed)) {
@@ -161,7 +168,12 @@ export const parseCookies = (header: string | null | undefined): Record<string, 
     if (name === undefined || value === undefined || hasControlCharacter(name) || hasControlCharacter(value)) {
       continue;
     }
-    cookies[name] = value;
+    Object.defineProperty(cookies, name, {
+      configurable: true,
+      enumerable: true,
+      value,
+      writable: true,
+    });
   }
   return cookies;
 };
