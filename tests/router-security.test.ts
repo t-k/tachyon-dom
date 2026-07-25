@@ -656,6 +656,14 @@ describe("router security helpers", () => {
     }
   });
 
+  it.each(["l", "m", "n"])("rejects non-canonical base64url signature alias ending in %s", (lastCharacter) => {
+    const signed = signCookieValue("hello", "key");
+    const [payload, signature] = signed.split(".");
+
+    expect(signature?.endsWith("k")).toBe(true);
+    expect(verifySignedCookieValue(`${payload}.${signature?.slice(0, -1)}${lastCharacter}`, "key")).toBeUndefined();
+  });
+
   it("rejects an expired signed cookie session when it is replayed", async () => {
     let now = 1_000;
     const storage = createCookieSessionStorage<{ userId: string }>({

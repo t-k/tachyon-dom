@@ -140,7 +140,11 @@ export const verifySignedCookieValue = (signedValue: string | undefined, secret:
     return undefined;
   }
   try {
-    if (!constantTimeEqual(base64UrlToBytes(signature), signatureBytesFor(payload, secret))) {
+    const signatureBytes = base64UrlToBytes(signature);
+    if (
+      bytesToBase64Url(signatureBytes) !== signature ||
+      !constantTimeEqual(signatureBytes, signatureBytesFor(payload, secret))
+    ) {
       return undefined;
     }
     return base64UrlDecode(payload);

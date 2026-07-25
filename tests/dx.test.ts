@@ -365,6 +365,18 @@ describe("DX helpers", () => {
     expect(workflow).toMatch(/test:\n[\s\S]+?permissions:\n\s+contents: read\n\s+steps:/);
   });
 
+  it("pins release actions and keeps verification read-only", async () => {
+    const workflow = await readFile(".github/workflows/release.yml", "utf8");
+    const actionReferences = Array.from(workflow.matchAll(/uses:\s+([^\s#]+)/g), (match) => match[1]);
+    const verifyJob = workflow.slice(workflow.indexOf("  verify:"), workflow.indexOf("  publish:"));
+
+    expect(actionReferences.length).toBeGreaterThan(0);
+    expect(actionReferences.every((reference) => /@[0-9a-f]{40}$/.test(reference ?? ""))).toBe(true);
+    expect(verifyJob).toMatch(/permissions:\n\s+contents: read\n\s+steps:/);
+    expect(verifyJob).not.toContain("contents: write");
+    expect(verifyJob).not.toContain("id-token: write");
+  });
+
   it("keeps the package root browser-safe and the request-scoped SSR example escaped", async () => {
     const indexSource = await readFile("src/index.ts", "utf8");
     const sfcSource = await readFile("src/compiler/sfc.ts", "utf8");
@@ -1610,6 +1622,12 @@ void chunks;
       await readFile(path.join(process.cwd(), "packages", "create-tachyon-dom", "package.json"), "utf8"),
     ) as { files?: string[]; dependencies?: Record<string, string> };
     const preparation = workflow.indexOf("pnpm prepare:release");
+    const releaseGates = [
+      "pnpm verify:starters",
+      "pnpm check:browser-entry",
+      "pnpm check:quick-example-size",
+      "pnpm verify:whitespace-types",
+    ];
     const dryRun = workflow.indexOf("--dry-run-artifacts", preparation);
     const upload = workflow.indexOf("actions/upload-artifact@", dryRun);
     const publishJob = workflow.indexOf("publish:", upload);
@@ -1620,6 +1638,11 @@ void chunks;
     const finalize = workflow.indexOf("finalize-release-tags.mjs", createPublish);
 
     expect(preparation).toBeGreaterThan(-1);
+    for (const command of releaseGates) {
+      expect(workflow.indexOf(command)).toBeGreaterThan(-1);
+      expect(workflow.indexOf(command)).toBeLessThan(preparation);
+      expect(workflow.indexOf(command)).toBe(workflow.lastIndexOf(command));
+    }
     expect(dryRun).toBeGreaterThan(preparation);
     expect(upload).toBeGreaterThan(dryRun);
     expect(publishJob).toBeGreaterThan(upload);

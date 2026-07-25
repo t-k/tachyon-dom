@@ -66,5 +66,19 @@ const cookiesOutput = cookiesResult.outputFiles.map((output) => output.text).joi
 if (cookiesOutput.includes("node:") || /\bBuffer\b/.test(cookiesOutput)) {
   throw new Error("The cookies browser bundle includes Node-only runtime dependencies.");
 }
+const cookiesOutputBytes = cookiesResult.outputFiles.reduce(
+  (total, output) => total + output.contents.byteLength,
+  0,
+);
+if (cookiesOutputBytes !== expectedSizes.cookiesEntryMinifiedBytes) {
+  throw new Error(
+    `Cookies entry bundle is ${cookiesOutputBytes} bytes; update the implementation and browser-bundle-sizes.json together.`,
+  );
+}
+if (cookiesOutputBytes > 8_192) {
+  throw new Error(`Cookies entry bundle is ${cookiesOutputBytes} bytes; expected at most 8192 bytes.`);
+}
 
-console.log(`Browser entry bundle: ${outputBytes} bytes, ${Object.keys(result.metafile.inputs).length} inputs.`);
+console.log(
+  `Browser entry bundle: ${outputBytes} bytes, ${Object.keys(result.metafile.inputs).length} inputs. Cookies entry bundle: ${cookiesOutputBytes} bytes, ${Object.keys(cookiesResult.metafile.inputs).length} inputs.`,
+);
