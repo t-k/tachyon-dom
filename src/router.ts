@@ -448,7 +448,14 @@ const verifyCsrf = async (
   env: RouteEnvironment,
   bindings: unknown,
   options: NonNullable<RouteExecutionOptions["csrf"]>,
-): Promise<boolean> => options.verify({ request, url, env, bindings });
+): Promise<boolean> => {
+  const csrfRequest = callbackRequestSnapshot(request);
+  try {
+    return await options.verify({ request: csrfRequest, url: new URL(url), env, bindings });
+  } finally {
+    releaseRequestSnapshot(csrfRequest);
+  }
+};
 
 const payloadTooLargeResult = (match: MatchedRoute): RouteRenderResult => ({
   status: 413,
@@ -1270,6 +1277,9 @@ const renderRouteInternal = async (
     const hookRequest = callbackRequestSnapshot(request);
     try {
       await options.hooks.onRequest({ request: hookRequest, url: new URL(url) });
+    } catch (error) {
+      releaseRequestSnapshot(request);
+      throw error;
     } finally {
       releaseRequestSnapshot(hookRequest);
     }
@@ -1308,20 +1318,25 @@ const renderRouteInternal = async (
         continue;
       }
       const previousRequest = request;
+      let nextRequest: Request;
       if (options.maxActionBodyBytes !== undefined) {
         const limitedRequest = await requestWithinBodyLimit(result, options.maxActionBodyBytes);
         if (!limitedRequest) {
           releaseRequestSnapshot(middlewareRequest);
+          if (result !== middlewareRequest) {
+            releaseRequestSnapshot(result);
+          }
           return finish(payloadTooLargeResult(emptyMatch()));
         }
-        request = limitedRequest;
-        releaseRequestSnapshot(middlewareRequest);
+        nextRequest = limitedRequest === result ? callbackRequestSnapshot(result) : limitedRequest;
       } else {
-        request = result;
-        if (result !== middlewareRequest) {
-          releaseRequestSnapshot(middlewareRequest);
-        }
+        nextRequest = callbackRequestSnapshot(result);
       }
+      releaseRequestSnapshot(middlewareRequest);
+      if (result !== middlewareRequest) {
+        releaseRequestSnapshot(result);
+      }
+      request = nextRequest;
       releaseRequestSnapshot(previousRequest);
       url = new URL(request.url);
     } else {

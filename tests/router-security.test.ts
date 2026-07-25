@@ -169,6 +169,35 @@ describe("router security helpers", () => {
     expect(actionCalled).toBe(false);
   });
 
+  it("isolates action bodies from custom CSRF verification", async () => {
+    let actionBody = "";
+    const result = await renderRoute(
+      [
+        {
+          path: "/action",
+          action: async ({ request }) => {
+            actionBody = await request.text();
+            return { ok: true };
+          },
+          render: () => "ok",
+        },
+      ],
+      new Request("https://x.test/action", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "_csrf=fixed&title=Hello",
+      }),
+      {
+        csrf: {
+          verify: async ({ request }) => (await request.text()).includes("_csrf=fixed"),
+        },
+      },
+    );
+
+    expect(result.ok && result.value.status).toBe(200);
+    expect(actionBody).toBe("_csrf=fixed&title=Hello");
+  });
+
   it("blocks route actions when CSRF verification fails", async () => {
     const routes: RouteDefinition[] = [{ path: "/action", action: () => ({ ok: true }), render: () => "ok" }];
     const result = await renderRoute(routes, new Request("https://x.test/action", { method: "POST" }), {
@@ -247,6 +276,24 @@ describe("router security helpers", () => {
 
     expect(result.ok && result.value.status).toBe(413);
     expect(calls).toEqual([]);
+  });
+
+  it("releases the original request body when onRequest throws", async () => {
+    const request = new Request("https://x.test/upload", {
+      method: "POST",
+      body: "payload",
+    });
+
+    await expect(
+      renderRoute([{ path: "/upload", action: () => "ok", render: () => "ok" }], request, {
+        hooks: {
+          onRequest: () => {
+            throw new Error("hook failed");
+          },
+        },
+      }),
+    ).rejects.toThrow("hook failed");
+    expect(request.bodyUsed).toBe(true);
   });
 
   it("reapplies the body byte cap after middleware replaces the request", async () => {
@@ -745,6 +792,44 @@ describe("router security helpers", () => {
     ).rejects.toThrow("Middleware cannot replace the request after requireUser has authorized it");
     expect(wrapperContinued).toBe(true);
     expect(actionCookie).toBeNull();
+  });
+
+  it("isolates adopted middleware requests from retained header mutations after authorization", async () => {
+    const { requireUser } = await import("../src/router");
+    const guard = requireUser(() => ({ id: "user" }));
+    let retainedRequest: Request | undefined;
+    let actionCookie: string | null = null;
+
+    const result = await renderRoute(
+      [
+        {
+          path: "/admin",
+          action: ({ request }) => {
+            actionCookie = request.headers.get("cookie");
+          },
+          render: () => "ok",
+        },
+      ],
+      new Request("https://x.test/admin", {
+        method: "POST",
+        headers: { cookie: "sid=original" },
+      }),
+      {
+        middleware: [
+          ({ request }) => {
+            retainedRequest = request;
+            return request;
+          },
+          async (context) => {
+            await guard(context);
+            retainedRequest?.headers.set("cookie", "sid=mutated");
+          },
+        ],
+      },
+    );
+
+    expect(result.ok && result.value.status).toBe(200);
+    expect(actionCookie).toBe("sid=original");
   });
 
   it("isolates URL mutations made by middleware after authorization", async () => {

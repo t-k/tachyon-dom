@@ -274,6 +274,53 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("rerenders loaded parent layouts when route params change", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/app/1/child");
+    let parentLoads = 0;
+    let parentRenders = 0;
+    const router = createClientRouter({
+      root,
+      routes: [
+        {
+          id: "app",
+          path: "/app/:id",
+          load: ({ params }) => {
+            parentLoads += 1;
+            return { id: params.id };
+          },
+          render: ({ data }) => {
+            parentRenders += 1;
+            return rawHtml(
+              `<section data-parent="${(data as { id: string }).id}"><div data-tachyon-outlet></div></section>`,
+            );
+          },
+          children: [
+            {
+              id: "child",
+              path: "child",
+              render: ({ params }) => rawHtml(`<p data-child="${params.id}"></p>`),
+            },
+          ],
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    await router.navigate("/app/2/child");
+
+    expect(root.querySelector("[data-parent]")?.getAttribute("data-parent")).toBe("2");
+    expect(root.querySelector("[data-child]")?.getAttribute("data-child")).toBe("2");
+    expect(parentLoads).toBe(2);
+    expect(parentRenders).toBe(2);
+    router.dispose();
+  });
+
   it("runs nested loaders and heads with route-local data", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");

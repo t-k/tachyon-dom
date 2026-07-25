@@ -360,7 +360,10 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   let actionVersion = 0;
   let currentNavigation: Promise<void> = Promise.resolve();
   const cache = new Map<string, unknown>();
-  const layoutRoots = new WeakMap<ClientRouteDefinition, Element>();
+  const layoutStates = new WeakMap<
+    ClientRouteDefinition,
+    { root: Element; loaded: LoadedClientBranch; paramsKey: string }
+  >();
   const prefetchControllers = new Map<string, AbortController>();
   const eagerlyNavigated = new WeakSet<HTMLAnchorElement>();
   const scrollPositions = new Map<number, { x: number; y: number }>();
@@ -470,18 +473,27 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     let committedTarget = target;
     const renderNestedBranch = async (): Promise<void> => {
       let parentTarget = target;
+      const paramsKey = JSON.stringify(match.params);
       for (const layoutRoute of match.branch.slice(0, -1)) {
-        let layoutRoot = layoutRoots.get(layoutRoute);
-        if (!layoutRoot?.isConnected) {
+        const layoutState = layoutStates.get(layoutRoute);
+        let layoutRoot = layoutState?.root;
+        if (
+          !layoutRoot?.isConnected ||
+          layoutState?.paramsKey !== paramsKey ||
+          (layoutRoute.load !== undefined && layoutState?.loaded !== loaded)
+        ) {
           const layoutValue = await layoutRoute.render({
             url,
             params: match.params,
             data: loaded.dataByRoute.get(layoutRoute),
             signal,
           } as ClientRouteContext);
+          if (signal.aborted) {
+            return;
+          }
           renderInto(parentTarget, layoutValue);
           layoutRoot = parentTarget.firstElementChild ?? parentTarget;
-          layoutRoots.set(layoutRoute, layoutRoot);
+          layoutStates.set(layoutRoute, { root: layoutRoot, loaded, paramsKey });
         }
         const outlet = outletFor(layoutRoot);
         if (!outlet) {

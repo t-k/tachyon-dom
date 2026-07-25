@@ -128,6 +128,29 @@ describe("runtime form and HMR helpers", () => {
     expect(result.values.constructor).toBe("constructor-value");
   });
 
+  it("records validation errors for dangerous rule names", () => {
+    const rules = Object.create(null) as Record<string, { required: boolean; message: string }>;
+    Object.defineProperty(rules, "__proto__", {
+      enumerable: true,
+      value: { required: true, message: "Prototype is required." },
+    });
+    Object.defineProperty(rules, "constructor", {
+      enumerable: true,
+      value: { required: true, message: "Constructor is required." },
+    });
+
+    const result = validateFormData(new FormData(), rules);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("Expected invalid form data.");
+    }
+    expect(Object.getPrototypeOf(result.errors)).toBe(Object.prototype);
+    expect(Object.hasOwn(result.errors, "__proto__")).toBe(true);
+    expect(result.errors["__proto__"]).toBe("Prototype is required.");
+    expect(result.errors.constructor).toBe("Constructor is required.");
+  });
+
   it.each([/^ok$/g, /^ok$/y])("validates stateful pattern %s deterministically", (pattern) => {
     const formData = new FormData();
     formData.set("value", "ok");
