@@ -1109,14 +1109,19 @@ export default { selected: false };
   it("detects CLI entrypoints through npm bin symlinks", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-bin-"));
     try {
-      const target = path.join(dir, "dist", "cli.js");
-      const link = path.join(dir, "node_modules", ".bin", "tachyon-dom");
+      const physicalDir = path.join(dir, "physical");
+      const aliasDir = path.join(dir, "alias");
+      const target = path.join(physicalDir, "dist", "cli.js");
+      const link = path.join(physicalDir, "node_modules", ".bin", "tachyon-dom");
       await mkdir(path.dirname(target), { recursive: true });
       await mkdir(path.dirname(link), { recursive: true });
       await writeFile(target, "");
       await symlink(target, link);
+      await symlink(physicalDir, aliasDir, "dir");
 
-      await expect(isCliEntrypoint(link, pathToFileURL(target).href)).resolves.toBe(true);
+      await expect(isCliEntrypoint(link, pathToFileURL(path.join(aliasDir, "dist", "cli.js")).href)).resolves.toBe(
+        true,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1292,12 +1297,24 @@ export const bindRows = (root, rows, options) => effect(() => {
   it("regenerates adjacent template declarations during normal Vite transforms", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-auto-types-"));
     try {
-      const id = path.join(dir, "page.td");
+      const physicalDir = path.join(dir, "physical");
+      const aliasDir = path.join(dir, "alias");
+      const id = path.join(physicalDir, "page.td");
+      await mkdir(physicalDir);
+      await symlink(physicalDir, aliasDir, "dir");
+      await writeFile(id, `<main>{title}</main>`);
       const plugin = tachyonDom();
       if (typeof plugin.transform !== "function" || typeof plugin.configResolved !== "function") {
         throw new Error("Missing Vite hooks.");
       }
-      await plugin.configResolved.call({} as never, { command: "serve", mode: "development", root: dir } as never);
+      await plugin.configResolved.call(
+        {} as never,
+        {
+          command: "serve",
+          mode: "development",
+          root: aliasDir,
+        } as never,
+      );
       const context = {
         error: (error: string): never => {
           throw new Error(error);
@@ -1308,6 +1325,23 @@ export const bindRows = (root, rows, options) => effect(() => {
       await expect(readFile(`${id}.d.ts`, "utf8")).resolves.toContain("title: unknown;");
       await plugin.transform.call(context, `<main>{title}<small>{subtitle}</small></main>`, `${id}?raw`);
       await expect(readFile(`${id}.d.ts`, "utf8")).resolves.toContain("subtitle: unknown;");
+
+      const generatedId = path.join(aliasDir, "generated.td");
+      await plugin.transform.call(context, `<main>{generated}</main>`, `${generatedId}?raw`);
+      await expect(readFile(`${generatedId}.d.ts`, "utf8")).resolves.toContain("generated: unknown;");
+
+      const outsideDir = path.join(dir, "outside");
+      await mkdir(outsideDir);
+      await symlink(outsideDir, path.join(physicalDir, "external"), "dir");
+      const escapedId = path.join(aliasDir, "external", "escaped.td");
+      await plugin.transform.call(context, `<main>{escaped}</main>`, `${escapedId}?raw`);
+      await expect(access(`${escapedId}.d.ts`)).rejects.toMatchObject({ code: "ENOENT" });
+
+      const siblingDir = `${aliasDir}-other`;
+      await mkdir(siblingDir);
+      const siblingId = path.join(siblingDir, "sibling.td");
+      await plugin.transform.call(context, `<main>{sibling}</main>`, `${siblingId}?raw`);
+      await expect(access(`${siblingId}.d.ts`)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
