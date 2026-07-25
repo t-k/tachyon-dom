@@ -72,6 +72,22 @@ describe("server form action helpers", () => {
     expect(preserveFormValues(body, { sensitiveNames: ["token"] })).toEqual({ tag: ["one", "two"] });
   });
 
+  it("preserves dangerous field names without changing the result prototype", () => {
+    const body = new FormData();
+    body.append("__proto__", "first");
+    body.append("__proto__", "second");
+    body.append("constructor", "constructor-value");
+    body.append("prototype", "prototype-value");
+
+    const values = preserveFormValues(body);
+
+    expect(Object.getPrototypeOf(values)).toBe(Object.prototype);
+    expect(Object.hasOwn(values, "__proto__")).toBe(true);
+    expect(values["__proto__"]).toEqual(["first", "second"]);
+    expect(values.constructor).toBe("constructor-value");
+    expect(values.prototype).toBe("prototype-value");
+  });
+
   it("rejects unsafe redirect targets by default", () => {
     expect(() => redirectResponse("//evil.test/path")).toThrow("Unsafe redirect target");
     expect(() => redirectResponse("/%5C%5Cevil.test/path")).toThrow("Unsafe redirect target");

@@ -172,6 +172,29 @@ describe("router security helpers", () => {
     expect(result.ok && result.value).toMatchObject({ status: 413, html: "<h1>Payload Too Large</h1>" });
   });
 
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 1.5])(
+    "rejects invalid maxActionBodyBytes configuration %s before request callbacks",
+    async (maxActionBodyBytes) => {
+      let calls = 0;
+      const request = new Request("https://x.test/upload", {
+        method: "POST",
+        body: "abcdef",
+      });
+
+      await expect(
+        renderRoute([{ path: "/upload", action: () => new Response("ok"), render: () => "ok" }], request, {
+          maxActionBodyBytes,
+          middleware: [
+            () => {
+              calls++;
+            },
+          ],
+        }),
+      ).rejects.toThrow("maxActionBodyBytes must be a non-negative finite integer");
+      expect(calls).toBe(0);
+    },
+  );
+
   it("drops unsafe URL and event-handler attributes from rendered head descriptors", () => {
     expect(
       renderHead({

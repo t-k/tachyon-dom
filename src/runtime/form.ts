@@ -102,9 +102,14 @@ const requestForForm = (form: HTMLFormElement, formData: FormData): Request => {
 const valuesForFormData = (formData: FormData): Record<string, FormDataEntryValue | FormDataEntryValue[]> => {
   const values: Record<string, FormDataEntryValue | FormDataEntryValue[]> = {};
   for (const [name, value] of formData) {
-    const current = values[name];
+    const current = Object.hasOwn(values, name) ? values[name] : undefined;
     if (current === undefined) {
-      values[name] = value;
+      Object.defineProperty(values, name, {
+        configurable: true,
+        enumerable: true,
+        value,
+        writable: true,
+      });
     } else if (Array.isArray(current)) {
       current.push(value);
     } else {

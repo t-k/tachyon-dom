@@ -110,6 +110,24 @@ describe("runtime form and HMR helpers", () => {
     cleanup();
   });
 
+  it("returns dangerous form field names as own values without changing the prototype", () => {
+    const formData = new FormData();
+    formData.append("__proto__", "first");
+    formData.append("__proto__", "second");
+    formData.append("constructor", "constructor-value");
+
+    const result = validateFormData(formData, {});
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("Expected valid form data.");
+    }
+    expect(Object.getPrototypeOf(result.values)).toBe(Object.prototype);
+    expect(Object.hasOwn(result.values, "__proto__")).toBe(true);
+    expect(result.values["__proto__"]).toEqual(["first", "second"]);
+    expect(result.values.constructor).toBe("constructor-value");
+  });
+
   it("invalidates cached routes and re-navigates the current page on HMR updates", async () => {
     const calls: string[] = [];
     const reloader = createRouteHotReloader({

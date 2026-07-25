@@ -1151,6 +1151,14 @@ const renderRouteInternal = async (
   input: Request | URL | string,
   options: RouteExecutionOptions = {},
 ): Promise<Result<RouteRenderResult, RouteError>> => {
+  if (
+    options.maxActionBodyBytes !== undefined &&
+    (!Number.isFinite(options.maxActionBodyBytes) ||
+      !Number.isInteger(options.maxActionBodyBytes) ||
+      options.maxActionBodyBytes < 0)
+  ) {
+    throw new TypeError("maxActionBodyBytes must be a non-negative finite integer.");
+  }
   let request = requestFor(input);
   let url = new URL(request.url);
   const env = options.env ?? {};
