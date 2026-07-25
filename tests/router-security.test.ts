@@ -832,6 +832,116 @@ describe("router security helpers", () => {
     expect(actionCookie).toBeNull();
   });
 
+  it("rejects request replacement after a cloned wrapper authorizes an identity", async () => {
+    const { requireUser } = await import("../src/router");
+    const guard = requireUser(({ request }) =>
+      request.headers.get("cookie") === "sid=original" ? { id: "user" } : undefined,
+    );
+    let actionCookie: string | null = null;
+
+    await expect(
+      renderRoute(
+        [
+          {
+            path: "/admin",
+            action: ({ request }) => {
+              actionCookie = request.headers.get("cookie");
+            },
+            render: () => "ok",
+          },
+        ],
+        new Request("https://x.test/admin", {
+          method: "POST",
+          headers: { cookie: "sid=original" },
+        }),
+        {
+          middleware: [
+            (context) => guard({ ...context, request: context.request.clone() }),
+            ({ request }) => new Request(request, { headers: { cookie: "sid=mutated" } }),
+          ],
+        },
+      ),
+    ).rejects.toThrow("Middleware cannot replace the request after requireUser has authorized it");
+    expect(actionCookie).toBeNull();
+  });
+
+  it("preserves denial responses from cloned guard wrappers", async () => {
+    const { requireUser } = await import("../src/router");
+    const guard = requireUser(() => undefined, { redirectTo: "/login" });
+    const result = await renderRoute(
+      [{ path: "/admin", render: () => "ok" }],
+      new Request("https://x.test/admin"),
+      {
+        middleware: [
+          (context) => guard({ ...context, request: context.request.clone() }),
+        ],
+      },
+    );
+
+    expect(result.ok && result.value.status).toBe(302);
+    expect(result.ok && result.value.headers.get("location")).toBe("/login");
+  });
+
+  it("isolates wrapped authorization state between concurrent requests", async () => {
+    const { requireUser } = await import("../src/router");
+    let arrivals = 0;
+    let releaseBarrier: () => void = () => undefined;
+    const barrier = new Promise<void>((resolve) => {
+      releaseBarrier = resolve;
+    });
+    const guard = requireUser(async ({ request }) => {
+      arrivals += 1;
+      if (arrivals === 2) {
+        releaseBarrier();
+      }
+      await barrier;
+      return request.headers.get("cookie") === "sid=authorized" ? { id: "user" } : undefined;
+    });
+    let actions = 0;
+    const routes: RouteDefinition[] = [
+      {
+        path: "/admin",
+        action: () => {
+          actions += 1;
+        },
+        render: () => "ok",
+      },
+    ];
+    const options = {
+      middleware: [
+        (context: Parameters<typeof guard>[0]) =>
+          guard({ ...context, request: context.request.clone() }),
+        ({ request }: Parameters<typeof guard>[0]) =>
+          new Request(request, { headers: { cookie: "sid=replaced" } }),
+      ],
+    };
+
+    const [authorized, denied] = await Promise.allSettled([
+      renderRoute(
+        routes,
+        new Request("https://x.test/admin", {
+          method: "POST",
+          headers: { cookie: "sid=authorized" },
+        }),
+        options,
+      ),
+      renderRoute(
+        routes,
+        new Request("https://x.test/admin", { method: "POST" }),
+        options,
+      ),
+    ]);
+
+    expect(authorized.status).toBe("rejected");
+    expect(denied.status).toBe("fulfilled");
+    if (authorized.status !== "rejected" || denied.status !== "fulfilled") {
+      throw new Error("Unexpected concurrent authorization results.");
+    }
+    expect(authorized.reason).toBeInstanceOf(TypeError);
+    expect(denied.value.ok && denied.value.value.status).toBe(302);
+    expect(actions).toBe(0);
+  });
+
   it("isolates adopted middleware requests from retained header mutations after authorization", async () => {
     const { requireUser } = await import("../src/router");
     const guard = requireUser(() => ({ id: "user" }));

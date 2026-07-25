@@ -612,6 +612,15 @@ export const applySecurityHeaders = (response: Response, headers: Headers): Resp
 };
 
 const userGuardAuthorizedRequests = new WeakSet<Request>();
+const userGuardAuthorizationState = Symbol("tachyon.userGuardAuthorizationState");
+
+type UserGuardAuthorizationState = {
+  authorized: boolean;
+};
+
+type InternalRouteMiddlewareContext = {
+  [userGuardAuthorizationState]?: UserGuardAuthorizationState;
+};
 
 export const requireUser =
   <User>(
@@ -624,6 +633,12 @@ export const requireUser =
       if (user) {
         await options.onUser?.({ request, url, user });
         userGuardAuthorizedRequests.add(request);
+        const authorizationState = (context as typeof context & InternalRouteMiddlewareContext)[
+          userGuardAuthorizationState
+        ];
+        if (authorizationState) {
+          authorizationState.authorized = true;
+        }
         return;
       }
       if (options.forbidden) {
@@ -1287,7 +1302,14 @@ const renderRouteInternal = async (
   let userGuardAuthorized = false;
   for (const middleware of options.middleware ?? []) {
     const middlewareRequest = callbackRequestSnapshot(request);
-    const middlewareContext = { request: middlewareRequest, url: new URL(url), env, bindings };
+    const authorizationState: UserGuardAuthorizationState = { authorized: false };
+    const middlewareContext = {
+      request: middlewareRequest,
+      url: new URL(url),
+      env,
+      bindings,
+      [userGuardAuthorizationState]: authorizationState,
+    };
     let result: RouteMiddlewareResult;
     try {
       result = await middleware(middlewareContext);
@@ -1296,7 +1318,8 @@ const renderRouteInternal = async (
       releaseRequestSnapshot(request);
       throw error;
     }
-    const authorizedByMiddleware = userGuardAuthorizedRequests.has(middlewareRequest);
+    const authorizedByMiddleware =
+      authorizationState.authorized || userGuardAuthorizedRequests.has(middlewareRequest);
     if (isRouteResponse(result)) {
       releaseRequestSnapshot(middlewareRequest);
       return finish(routeResponseResult(result));
