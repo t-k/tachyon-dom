@@ -125,6 +125,9 @@ const fieldStringValue = (formData: FormData, name: string): string => {
 };
 
 const matchesPattern = (pattern: RegExp, value: string): boolean => {
+  if (!pattern.global && !pattern.sticky) {
+    return pattern.test(value);
+  }
   const lastIndex = pattern.lastIndex;
   pattern.lastIndex = 0;
   try {

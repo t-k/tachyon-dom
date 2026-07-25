@@ -139,6 +139,14 @@ describe("runtime form and HMR helpers", () => {
     expect(pattern.lastIndex).toBe(initialLastIndex);
   });
 
+  it("accepts a frozen non-stateful pattern", () => {
+    const formData = new FormData();
+    formData.set("value", "ok");
+    const pattern = Object.freeze(/^ok$/);
+
+    expect(validateFormData(formData, { value: { pattern } }).ok).toBe(true);
+  });
+
   it("invalidates cached routes and re-navigates the current page on HMR updates", async () => {
     const calls: string[] = [];
     const reloader = createRouteHotReloader({
