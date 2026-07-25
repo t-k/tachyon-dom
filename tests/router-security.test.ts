@@ -882,6 +882,42 @@ describe("router security helpers", () => {
     expect(result.ok && result.value.headers.get("location")).toBe("/login");
   });
 
+  it("rejects request replacement returned by the cloned authorization wrapper", async () => {
+    const { requireUser } = await import("../src/router");
+    const guard = requireUser(() => ({ id: "user" }));
+    let actionCalled = false;
+
+    await expect(
+      renderRoute(
+        [
+          {
+            path: "/admin",
+            action: () => {
+              actionCalled = true;
+            },
+            render: () => "ok",
+          },
+        ],
+        new Request("https://x.test/admin", {
+          method: "POST",
+          headers: { cookie: "sid=original" },
+        }),
+        {
+          middleware: [
+            async (context) => {
+              const result = await guard({ ...context, request: context.request.clone() });
+              if (result) {
+                return result;
+              }
+              return new Request(context.request, { headers: { cookie: "sid=mutated" } });
+            },
+          ],
+        },
+      ),
+    ).rejects.toThrow("Middleware cannot replace the request after requireUser has authorized it");
+    expect(actionCalled).toBe(false);
+  });
+
   it("isolates wrapped authorization state between concurrent requests", async () => {
     const { requireUser } = await import("../src/router");
     let arrivals = 0;

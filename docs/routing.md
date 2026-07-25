@@ -61,7 +61,7 @@ Actions run for non-GET/HEAD requests before loaders. Loaders run from parent to
 
 `requireUser(getUser, options)` creates route middleware for protected routes. It redirects to `/login` by default, can use a custom redirect target, or can return a custom forbidden response.
 
-Middleware wrappers that replace the request passed to `requireUser()` should derive the guard context from the router-supplied context, for example `{ ...context, request: context.request.clone() }`. This preserves router-owned authorization state while isolating request reads.
+Middleware wrappers that replace the request passed to `requireUser()` must preserve the router-supplied context, for example `{ ...context, request: context.request.clone() }`. Object spread carries router-owned authorization state while isolating request reads. Do not manually reconstruct the context from only its public fields, because doing so discards that state and prevents the router from enforcing post-authorization request identity.
 
 ## Response Helpers
 
