@@ -46,6 +46,14 @@ jobs:
 
       - run: pnpm check:size
 
+      - run: pnpm verify:starters
+
+      - run: pnpm check:browser-entry
+
+      - run: pnpm check:quick-example-size
+
+      - run: pnpm verify:whitespace-types
+
       - run: pnpm prepare:release --tag "$GITHUB_REF_NAME" --output release-artifacts
 
       - run: node scripts/release-contract.mjs --dry-run-artifacts release-artifacts --tag "$GITHUB_REF_NAME"

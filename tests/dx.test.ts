@@ -331,9 +331,18 @@ describe("DX helpers", () => {
     expect(ci).toContain("pnpm check:exports");
     expect(ci).toContain("pnpm check:size");
     expect(ci).toContain("pnpm check:browser-entry");
+    expect(ci).toContain("pnpm verify:whitespace-types");
     expect(ci).toContain("github.event_name == 'workflow_dispatch'");
     expect(ci).toContain("pnpm bench:local:smoke");
     expect(release).toContain("tags:");
+    for (const command of [
+      "pnpm verify:starters",
+      "pnpm check:browser-entry",
+      "pnpm check:quick-example-size",
+      "pnpm verify:whitespace-types",
+    ]) {
+      expect(release).toContain(command);
+    }
     expect(release).toContain("node scripts/publish-release-package.mjs --artifact-dir release-artifacts");
     expect(release).toContain("--package root");
     expect(release).toContain("--package create");
@@ -344,6 +353,16 @@ describe("DX helpers", () => {
     );
     expect(publisher).toContain("if (confirmed.integrity !== entry.integrity) throw error");
     expect(finalizer).toContain("await addDistTag(entry.name, verified.version, verified.npmTag)");
+  });
+
+  it("pins CI actions and limits the job to repository reads", async () => {
+    const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+    const actionReferences = Array.from(workflow.matchAll(/uses:\s+([^\s#]+)/g), (match) => match[1]);
+
+    expect(actionReferences.length).toBeGreaterThan(0);
+    expect(actionReferences.every((reference) => /@[0-9a-f]{40}$/.test(reference ?? ""))).toBe(true);
+    expect(workflow).toContain("permissions: {}\n");
+    expect(workflow).toMatch(/test:\n[\s\S]+?permissions:\n\s+contents: read\n\s+steps:/);
   });
 
   it("keeps the package root browser-safe and the request-scoped SSR example escaped", async () => {
