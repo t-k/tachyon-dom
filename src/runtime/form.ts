@@ -124,6 +124,16 @@ const fieldStringValue = (formData: FormData, name: string): string => {
   return typeof File !== "undefined" && value instanceof File ? value.name : String(value ?? "");
 };
 
+const matchesPattern = (pattern: RegExp, value: string): boolean => {
+  const lastIndex = pattern.lastIndex;
+  pattern.lastIndex = 0;
+  try {
+    return pattern.test(value);
+  } finally {
+    pattern.lastIndex = lastIndex;
+  }
+};
+
 export const validateFormData = (formData: FormData, rules: Record<string, FormFieldRule>): FormValidationResult => {
   const errors: Record<string, string> = {};
   for (const [name, rule] of Object.entries(rules)) {
@@ -141,7 +151,7 @@ export const validateFormData = (formData: FormData, rules: Record<string, FormF
       errors[name] = message;
       continue;
     }
-    if (rule.pattern && !rule.pattern.test(value)) {
+    if (rule.pattern && !matchesPattern(rule.pattern, value)) {
       errors[name] = message;
       continue;
     }

@@ -484,7 +484,7 @@ const responseFor = async <Env>(
       await emitResponse(options.observability, state, response, true);
       return response;
     }
-    const response = new Response(result.value.responseBody ?? result.value.html, {
+    const response = new Response(request.method === "HEAD" ? null : (result.value.responseBody ?? result.value.html), {
       status: result.value.status,
       headers: mergeHeaders(result.value.headers, options.securityHeaders),
     });

@@ -11,7 +11,10 @@ export const readTextStreamChunks = async (stream: ReadableStream<Uint8Array>): 
       }
       return chunks;
     }
-    chunks.push(decoder.decode(result.value, { stream: true }));
+    const chunk = decoder.decode(result.value, { stream: true });
+    if (chunk) {
+      chunks.push(chunk);
+    }
   }
 };
 

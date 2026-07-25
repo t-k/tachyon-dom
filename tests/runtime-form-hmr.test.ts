@@ -128,6 +128,17 @@ describe("runtime form and HMR helpers", () => {
     expect(result.values.constructor).toBe("constructor-value");
   });
 
+  it.each([/^ok$/g, /^ok$/y])("validates stateful pattern %s deterministically", (pattern) => {
+    const formData = new FormData();
+    formData.set("value", "ok");
+    pattern.lastIndex = 2;
+    const initialLastIndex = pattern.lastIndex;
+
+    expect(validateFormData(formData, { value: { pattern } }).ok).toBe(true);
+    expect(validateFormData(formData, { value: { pattern } }).ok).toBe(true);
+    expect(pattern.lastIndex).toBe(initialLastIndex);
+  });
+
   it("invalidates cached routes and re-navigates the current page on HMR updates", async () => {
     const calls: string[] = [];
     const reloader = createRouteHotReloader({

@@ -71,6 +71,19 @@ describe("router compatibility matrix", () => {
     }
   });
 
+  it("omits empty text chunks when UTF-8 characters cross byte boundaries", async () => {
+    const encoded = new TextEncoder().encode("€");
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoded.slice(0, 1));
+        controller.enqueue(encoded.slice(1));
+        controller.close();
+      },
+    });
+
+    await expect(readTextStreamChunks(stream)).resolves.toEqual(["€"]);
+  });
+
   it("exports the Lambda adapter through the compatibility entry", async () => {
     const handler = createLambdaHandler({
       routes: [{ path: "/", render: () => "<h1>Lambda</h1>" }],
