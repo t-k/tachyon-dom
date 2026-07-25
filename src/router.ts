@@ -1287,6 +1287,7 @@ const renderRouteInternal = async (
     if (result instanceof Request) {
       if ((userGuardAuthorized || authorizedByMiddleware) && result !== middlewareRequest) {
         releaseRequestSnapshot(middlewareRequest);
+        releaseRequestSnapshot(request);
         throw new TypeError("Middleware cannot replace the request after requireUser has authorized it.");
       }
       if (userGuardAuthorized || authorizedByMiddleware) {
@@ -1294,16 +1295,23 @@ const renderRouteInternal = async (
         userGuardAuthorized = true;
         continue;
       }
+      const previousRequest = request;
       if (options.maxActionBodyBytes !== undefined) {
         const limitedRequest = await requestWithinBodyLimit(result, options.maxActionBodyBytes);
         if (!limitedRequest) {
           releaseRequestSnapshot(middlewareRequest);
+          releaseRequestSnapshot(request);
           return ok(payloadTooLargeResult(emptyMatch()));
         }
         request = limitedRequest;
+        releaseRequestSnapshot(middlewareRequest);
       } else {
         request = result;
+        if (result !== middlewareRequest) {
+          releaseRequestSnapshot(middlewareRequest);
+        }
       }
+      releaseRequestSnapshot(previousRequest);
       url = new URL(request.url);
     } else {
       releaseRequestSnapshot(middlewareRequest);

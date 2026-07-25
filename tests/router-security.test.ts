@@ -298,6 +298,31 @@ describe("router security helpers", () => {
     expect(result.ok && result.value.status).toBe(413);
   });
 
+  it("releases the superseded body branch when middleware returns its request snapshot", async () => {
+    let actionBody = "";
+    const input = new Request("https://x.test/upload", { method: "POST", body: "payload" });
+
+    const result = await renderRoute(
+      [
+        {
+          path: "/upload",
+          action: async ({ request }) => {
+            actionBody = await request.text();
+          },
+          render: () => "ok",
+        },
+      ],
+      input,
+      {
+        middleware: [({ request }) => request],
+      },
+    );
+
+    expect(result.ok && result.value.status).toBe(200);
+    expect(actionBody).toBe("payload");
+    expect(input.bodyUsed).toBe(true);
+  });
+
   it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 1.5])(
     "rejects invalid maxActionBodyBytes configuration %s before request callbacks",
     async (maxActionBodyBytes) => {
