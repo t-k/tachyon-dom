@@ -1117,7 +1117,9 @@ describe("server adapters", () => {
     expect(action).not.toHaveBeenCalled();
   });
 
-  it("preserves delayed HEAD metadata without emitting bodies across streaming adapters", async () => {
+  it.each([false, true])(
+    "preserves delayed HEAD metadata without emitting bodies across adapters with streaming=$streaming",
+    async (streaming) => {
     const routes: RouteDefinition[] = [
       {
         path: "/head",
@@ -1131,7 +1133,7 @@ describe("server adapters", () => {
       },
     ];
 
-    const workers = await createWorkersHandler({ routes, streaming: true }).fetch(
+    const workers = await createWorkersHandler({ routes, streaming }).fetch(
       new Request("https://example.com/head", { method: "HEAD" }),
     );
     expect(workers.headers.get("cache-control")).toBe("no-store");
@@ -1159,12 +1161,12 @@ describe("server adapters", () => {
         nodeResponse.writableEnded = true;
       },
     });
-    await createNodeHandler({ routes, streaming: true })(nodeRequest as never, nodeResponse as never);
+    await createNodeHandler({ routes, streaming })(nodeRequest as never, nodeResponse as never);
     expect(nodeHeaders.get("cache-control")).toBe("no-store");
     expect(nodeHeaders.get("vary")).toBe("Cookie");
     expect(nodeChunks).toEqual([]);
 
-    const lambda = await createLambdaHandler({ routes, streaming: true })(
+    const lambda = await createLambdaHandler({ routes, streaming })(
       lambdaEvent({
         rawPath: "/head",
         requestContext: { domainName: "lambda.example", http: { method: "HEAD", path: "/head" } },
@@ -1174,6 +1176,9 @@ describe("server adapters", () => {
     expect(lambda.headers.vary).toBe("Cookie");
     expect(lambda.body).toBe("");
 
+    if (!streaming) {
+      return;
+    }
     const metadata = vi.fn((stream: Writable) => stream);
     const runtime = {
       streamifyResponse: vi.fn((handler) => handler),
@@ -1204,7 +1209,8 @@ describe("server adapters", () => {
       expect.objectContaining({ headers: expect.objectContaining({ "cache-control": "no-store", vary: "Cookie" }) }),
     );
     expect(lambdaChunks).toEqual([]);
-  });
+    },
+  );
 
   it("preserves delayed redirects and cookies across streaming adapters", async () => {
     const routes: RouteDefinition[] = [

@@ -103,6 +103,14 @@ type ClientMatch = {
   params: ClientRouteParams;
 };
 
+const loadedClientBranchBrand = Symbol("tachyon.loadedClientBranch");
+
+type LoadedClientBranch = {
+  [loadedClientBranchBrand]: true;
+  dataByRoute: Map<ClientRouteDefinition, unknown>;
+  leafData: unknown;
+};
+
 type RankedClientRoute = {
   route: ClientRouteDefinition;
   order: number;
@@ -303,6 +311,19 @@ const applyHead = (descriptor: ClientHeadDescriptor | undefined): void => {
   }
 };
 
+const mergeHead = (heads: readonly ClientHeadDescriptor[]): ClientHeadDescriptor | undefined => {
+  if (heads.length === 0) {
+    return undefined;
+  }
+  const title = [...heads].reverse().find((head) => head.title !== undefined)?.title;
+  return {
+    ...(title === undefined ? {} : { title }),
+    metas: heads.flatMap((head) => head.metas ?? []),
+    links: heads.flatMap((head) => head.links ?? []),
+    scripts: heads.flatMap((head) => head.scripts ?? []),
+  };
+};
+
 const routeTargetFor = (root: Element, match: ClientMatch, url: URL, data: unknown): Element => {
   const target = match.route.target;
   if (!target) {
@@ -339,7 +360,10 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   let actionVersion = 0;
   let currentNavigation: Promise<void> = Promise.resolve();
   const cache = new Map<string, unknown>();
-  const layoutRoots = new WeakMap<ClientRouteDefinition, Element>();
+  const layoutStates = new WeakMap<
+    ClientRouteDefinition,
+    { root: Element; loaded: LoadedClientBranch; paramsKey: string; searchKey: string }
+  >();
   const prefetchControllers = new Map<string, AbortController>();
   const eagerlyNavigated = new WeakSet<HTMLAnchorElement>();
   const scrollPositions = new Map<number, { x: number; y: number }>();
@@ -357,16 +381,41 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     renderInto(options.root, options.error ? options.error({ url, error }) : rawHtml(`<h1>Navigation Error</h1>`));
   };
 
-  const loadData = async (url: URL, match: ClientMatch, signal: AbortSignal): Promise<unknown> => {
+  const isLoadedClientBranch = (value: unknown): value is LoadedClientBranch =>
+    typeof value === "object" &&
+    value !== null &&
+    loadedClientBranchBrand in value &&
+    (value as LoadedClientBranch)[loadedClientBranchBrand] === true;
+
+  const loadData = async (url: URL, match: ClientMatch, signal: AbortSignal): Promise<LoadedClientBranch> => {
     const key = cacheKey(url);
-    if (options.cache && cache.has(key)) {
-      return cache.get(key);
+    const cached = options.cache && cache.has(key) ? cache.get(key) : undefined;
+    if (isLoadedClientBranch(cached)) {
+      return cached;
     }
-    const data = match.route.load ? await match.route.load({ url, params: match.params, signal }) : undefined;
+    const hasLeafSeed = options.cache === true && cache.has(key);
+    const dataByRoute = new Map<ClientRouteDefinition, unknown>();
+    for (const route of match.branch) {
+      if (signal.aborted) {
+        break;
+      }
+      const data =
+        route === match.route && hasLeafSeed
+          ? cached
+          : route.load
+            ? await route.load({ url, params: match.params, signal })
+            : undefined;
+      dataByRoute.set(route, data);
+    }
+    const loaded: LoadedClientBranch = {
+      [loadedClientBranchBrand]: true,
+      dataByRoute,
+      leafData: dataByRoute.get(match.route),
+    };
     if (options.cache && !signal.aborted) {
-      cache.set(key, data);
+      cache.set(key, loaded);
     }
-    return data;
+    return loaded;
   };
 
   const updateA11y = (url: URL, data: unknown): void => {
@@ -378,14 +427,23 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     }
   };
 
-  const updateHead = async (url: URL, match: ClientMatch, data: unknown, signal: AbortSignal): Promise<void> => {
-    if (!match.route.head) {
-      applyHead(undefined);
-      return;
+  const updateHead = async (
+    url: URL,
+    match: ClientMatch,
+    loaded: LoadedClientBranch,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    const heads: ClientHeadDescriptor[] = [];
+    for (const route of match.branch) {
+      if (signal.aborted) {
+        return;
+      }
+      if (route.head) {
+        heads.push(await route.head({ url, params: match.params, data: loaded.dataByRoute.get(route), signal }));
+      }
     }
-    const descriptor = await match.route.head({ url, params: match.params, data, signal });
     if (!signal.aborted) {
-      applyHead(descriptor);
+      applyHead(mergeHead(heads));
     }
   };
 
@@ -406,27 +464,38 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   const commitNavigation = async (
     url: URL,
     match: ClientMatch,
-    data: unknown,
+    loaded: LoadedClientBranch,
     rendered: ClientRenderValue,
     navigateOptions: NavigateOptions,
     signal: AbortSignal,
   ): Promise<void> => {
-    const target = routeTargetFor(options.root, match, url, data);
+    const target = routeTargetFor(options.root, match, url, loaded.leafData);
     let committedTarget = target;
     const renderNestedBranch = async (): Promise<void> => {
       let parentTarget = target;
+      const paramsKey = JSON.stringify(match.params);
+      const searchKey = url.search;
       for (const layoutRoute of match.branch.slice(0, -1)) {
-        let layoutRoot = layoutRoots.get(layoutRoute);
-        if (!layoutRoot?.isConnected) {
+        const layoutState = layoutStates.get(layoutRoute);
+        let layoutRoot = layoutState?.root;
+        if (
+          !layoutRoot?.isConnected ||
+          layoutState?.paramsKey !== paramsKey ||
+          layoutState?.searchKey !== searchKey ||
+          (layoutRoute.load !== undefined && layoutState?.loaded !== loaded)
+        ) {
           const layoutValue = await layoutRoute.render({
             url,
             params: match.params,
-            data,
+            data: loaded.dataByRoute.get(layoutRoute),
             signal,
           } as ClientRouteContext);
+          if (signal.aborted) {
+            return;
+          }
           renderInto(parentTarget, layoutValue);
           layoutRoot = parentTarget.firstElementChild ?? parentTarget;
-          layoutRoots.set(layoutRoute, layoutRoot);
+          layoutStates.set(layoutRoute, { root: layoutRoot, loaded, paramsKey, searchKey });
         }
         const outlet = outletFor(layoutRoot);
         if (!outlet) {
@@ -443,15 +512,15 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
       } else {
         renderInto(target, rendered);
       }
-      await updateHead(url, match, data, signal);
+      await updateHead(url, match, loaded, signal);
       if (signal.aborted) {
         return;
       }
       restoreOrScroll(url, navigateOptions);
       focusRouteContent(committedTarget, focusSelector);
-      updateA11y(url, data);
+      updateA11y(url, loaded.leafData);
     };
-    if (!shouldUseViewTransition(url, match, data)) {
+    if (!shouldUseViewTransition(url, match, loaded.leafData)) {
       await commit();
       return;
     }
@@ -673,18 +742,23 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         focusRouteContent(options.root, focusSelector);
         return;
       }
-      let data: unknown;
+      let loaded: LoadedClientBranch;
       try {
-        data = await loadData(url, match, nextController.signal);
+        loaded = await loadData(url, match, nextController.signal);
         if (nextController.signal.aborted) {
           return;
         }
-        const rendered = await match.route.render({ url, params: match.params, data, signal: nextController.signal });
+        const rendered = await match.route.render({
+          url,
+          params: match.params,
+          data: loaded.leafData,
+          signal: nextController.signal,
+        });
         if (nextController.signal.aborted) {
           return;
         }
         writeHistory(url, navigateOptions);
-        await commitNavigation(url, match, data, rendered, navigateOptions, nextController.signal);
+        await commitNavigation(url, match, loaded, rendered, navigateOptions, nextController.signal);
       } catch (error) {
         if (!nextController.signal.aborted) {
           renderError(url, error);

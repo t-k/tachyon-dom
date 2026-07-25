@@ -1,8 +1,8 @@
 import type { Plugin } from "vite";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createNodeFetchHandler, type NodeFetchHandlerOptions, type StaticAssetOptions } from "./adapters/node.js";
 import {
@@ -59,6 +59,38 @@ export type TachyonAppViteOptions = {
   htmlWhitespace?: HtmlWhitespacePolicy;
   /** @deprecated Use `htmlWhitespace` instead. */
   minifyHtml?: boolean;
+};
+
+const canonicalPath = async (value: string): Promise<string> => {
+  let existingAncestor = resolve(value);
+  const missingSegments: string[] = [];
+  while (true) {
+    try {
+      return join(await realpath(existingAncestor), ...missingSegments);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR") {
+        throw error;
+      }
+      const parent = dirname(existingAncestor);
+      if (parent === existingAncestor) {
+        throw error;
+      }
+      missingSegments.unshift(basename(existingAncestor));
+      existingAncestor = parent;
+    }
+  }
+};
+
+const isPathInside = async (root: string, candidate: string): Promise<boolean> => {
+  const [canonicalRoot, canonicalCandidate] = await Promise.all([canonicalPath(root), canonicalPath(candidate)]);
+  const candidateRelativePath = relative(canonicalRoot, canonicalCandidate);
+  return (
+    candidateRelativePath === "" ||
+    (candidateRelativePath !== ".." &&
+      !candidateRelativePath.startsWith(`..${sep}`) &&
+      !isAbsolute(candidateRelativePath))
+  );
 };
 
 const configuredAppHtmlWhitespace = (options: TachyonAppViteOptions): HtmlWhitespacePolicy | undefined => {
@@ -334,7 +366,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
             ? undefined
             : typeof options.declarationOutput === "function"
               ? options.declarationOutput(cleanId(id))
-              : configResolved && rootDir && cleanId(id).startsWith(rootDir)
+              : configResolved && rootDir && (await isPathInside(rootDir, cleanId(id)))
                 ? `${cleanId(id)}.d.ts`
                 : undefined;
         if (declarationOutput) {

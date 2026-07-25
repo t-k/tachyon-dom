@@ -9,6 +9,7 @@ import {
   type RouteHeadDescriptor,
   type RouteResource,
   type RouteHooks,
+  type RouteMiddlewareContext,
   type RouteRenderOptions,
 } from "../router.js";
 
@@ -126,12 +127,9 @@ export type WorkersRouteDefinition<Env, Data = unknown, ActionResult = unknown> 
   children?: WorkersRouteDefinition<Env>[];
 };
 
-export type WorkersRouteMiddleware<Env> = (context: {
-  request: Request;
-  url: URL;
-  env: RouteEnvironment;
-  bindings: Env;
-}) => ReturnType<NonNullable<RouteRenderOptions["middleware"]>[number]>;
+export type WorkersRouteMiddleware<Env> = (
+  context: RouteMiddlewareContext & { bindings: Env },
+) => ReturnType<NonNullable<RouteRenderOptions["middleware"]>[number]>;
 
 export type WorkersCsrfOptions<Env> = {
   verify: (context: { request: Request; url: URL; env: RouteEnvironment; bindings: Env }) => boolean | Promise<boolean>;
@@ -484,7 +482,7 @@ const responseFor = async <Env>(
       await emitResponse(options.observability, state, response, true);
       return response;
     }
-    const response = new Response(result.value.responseBody ?? result.value.html, {
+    const response = new Response(request.method === "HEAD" ? null : (result.value.responseBody ?? result.value.html), {
       status: result.value.status,
       headers: mergeHeaders(result.value.headers, options.securityHeaders),
     });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { access, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { generateTachyonModuleTypes, generateTemplateTypes, pagesFromRouteFiles } from "./app.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
@@ -823,7 +823,7 @@ export const isCliEntrypoint = async (
     return false;
   }
   try {
-    return pathToFileURL(await realpath(scriptPath)).href === moduleUrl;
+    return (await realpath(scriptPath)) === (await realpath(fileURLToPath(moduleUrl)));
   } catch {
     return scriptPath.endsWith("cli.js") && moduleUrl.endsWith("/cli.js");
   }

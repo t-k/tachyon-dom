@@ -282,6 +282,9 @@ export const mountConditional = (
     }
     return;
   }
+  if (current && current.signature !== signature) {
+    cleanup(current);
+  }
   const state =
     current && current.signature === signature
       ? current

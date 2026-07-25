@@ -6,6 +6,7 @@ import {
   mountResourceStatusExample,
   restoreCurrentScrollExample,
 } from "../examples/runtime-apis";
+import { renderRoute } from "../src/router";
 
 describe("runtime API examples", () => {
   it("demonstrates resource, error recovery, and i18n APIs", async () => {
@@ -14,13 +15,16 @@ describe("runtime API examples", () => {
     await expect(example.user.refetch()).resolves.toEqual({ id: "42", name: "User 42" });
     expect(example.user.data()).toEqual({ id: "42", name: "User 42" });
     expect(example.i18n.t("ja", "greeting", { name: "太郎" })).toBe("こんにちは太郎");
-    const redirect = example.requireLocale({
-      request: new Request("https://example.com/", { headers: { "accept-language": "ja,en;q=0.8" } }),
-      url: new URL("https://example.com/"),
-      env: {},
-    });
-    expect(redirect).toBeInstanceOf(Response);
-    expect((redirect as Response).headers.get("location")).toBe("/ja");
+    const redirect = await renderRoute(
+      [{ path: "/", render: () => "ok" }],
+      new Request("https://example.com/", { headers: { "accept-language": "ja,en;q=0.8" } }),
+      {
+        middleware: [example.requireLocale],
+      },
+    );
+    expect(redirect.ok).toBe(true);
+    expect(redirect.ok && redirect.value.status).toBe(302);
+    expect(redirect.ok && redirect.value.headers.get("location")).toBe("/ja");
 
     example.disposeErrorHandler();
   });

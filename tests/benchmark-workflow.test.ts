@@ -26,9 +26,11 @@ describe("benchmark GitHub Actions workflow", () => {
 
   it("失敗時も成果物を回収し、リポジトリへ書き込まない", async () => {
     const workflow = await readFile(".github/workflows/benchmarks.yml", "utf8");
+    const actionReferences = Array.from(workflow.matchAll(/uses:\s+([^\s#]+)/g), (match) => match[1]);
 
     expect(workflow).toContain("if: ${{ always() }}");
-    expect(workflow).toContain("uses: actions/upload-artifact@v4");
+    expect(actionReferences.length).toBeGreaterThan(0);
+    expect(actionReferences.every((reference) => /@[0-9a-f]{40}$/.test(reference ?? ""))).toBe(true);
     expect(workflow).toContain("if-no-files-found: warn");
     expect(workflow).toContain("contents: read");
     expect(workflow).not.toContain("git push");

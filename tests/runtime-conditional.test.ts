@@ -123,6 +123,32 @@ describe("mountConditional", () => {
     expect(calls).toEqual(["new"]);
   });
 
+  it("cleans old DOM and listeners when a visible signature changes", () => {
+    document.body.innerHTML = `<section><!----></section>`;
+    const root = document.querySelector("section");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing root.");
+    }
+    const oldHandler = vi.fn();
+
+    mountConditional(root, [0], true, { oldHandler }, {
+      signature: "old",
+      templateHtml: `<button>Old</button>`,
+      bindings: [{ kind: "event", path: [], eventName: "click", handler: "oldHandler" }],
+    });
+    const oldButton = root.querySelector("button");
+    mountConditional(root, [0], true, {}, {
+      signature: "new",
+      templateHtml: `<span>New</span>`,
+      bindings: [],
+    });
+    oldButton?.click();
+
+    expect(root.innerHTML).toBe(`<!----><span>New</span>`);
+    expect(oldButton?.isConnected).toBe(false);
+    expect(oldHandler).not.toHaveBeenCalled();
+  });
+
   it("resolves bindings from every root in multi-root conditional content", () => {
     document.body.innerHTML = `<main><!----></main>`;
     const root = document.querySelector("main");

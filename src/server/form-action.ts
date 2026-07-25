@@ -51,9 +51,14 @@ const fieldIdFor = (name: string): string =>
   name.replaceAll(/[^A-Za-z0-9_-]+/g, "-").replaceAll(/^-|-$/g, "") || "field";
 
 const appendValue = (values: Record<string, FormValue>, name: string, value: string): void => {
-  const current = values[name];
+  const current = Object.hasOwn(values, name) ? values[name] : undefined;
   if (current === undefined) {
-    values[name] = value;
+    Object.defineProperty(values, name, {
+      configurable: true,
+      enumerable: true,
+      value,
+      writable: true,
+    });
   } else if (Array.isArray(current)) {
     current.push(value);
   } else {

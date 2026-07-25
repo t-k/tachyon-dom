@@ -171,11 +171,26 @@ export type RouteResponse = {
 
 export type RouteMiddlewareResult = Request | Response | RouteResponse | void;
 
-export type RouteMiddleware = (context: {
+const userGuardAuthorizationState: unique symbol = Symbol("tachyon.userGuardAuthorizationState");
+
+type UserGuardAuthorizationState = {
+  authorized: boolean;
+};
+
+type InternalRouteMiddlewareContext = {
+  [userGuardAuthorizationState]?: UserGuardAuthorizationState;
+};
+
+export type RouteMiddlewareContext = {
   request: Request;
   url: URL;
   env: RouteEnvironment;
-}) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>;
+  readonly [userGuardAuthorizationState]: UserGuardAuthorizationState;
+};
+
+export type RouteMiddleware = (
+  context: RouteMiddlewareContext,
+) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>;
 
 type RouteExecutionContext = RouteContext & { bindings?: unknown };
 
@@ -191,12 +206,9 @@ type RouteExecutionOptions = Omit<RouteRenderOptionsBase, "csrf" | "middleware">
       bindings?: unknown;
     }) => boolean | Promise<boolean>;
   };
-  middleware?: readonly ((context: {
-    request: Request;
-    url: URL;
-    env: RouteEnvironment;
-    bindings?: unknown;
-  }) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>)[];
+  middleware?: readonly ((
+    context: RouteMiddlewareContext & { bindings?: unknown },
+  ) => RouteMiddlewareResult | Promise<RouteMiddlewareResult>)[];
 };
 
 export type RouteHooks = {
@@ -448,7 +460,14 @@ const verifyCsrf = async (
   env: RouteEnvironment,
   bindings: unknown,
   options: NonNullable<RouteExecutionOptions["csrf"]>,
-): Promise<boolean> => options.verify({ request, url, env, bindings });
+): Promise<boolean> => {
+  const csrfRequest = callbackRequestSnapshot(request);
+  try {
+    return await options.verify({ request: csrfRequest, url: new URL(url), env, bindings });
+  } finally {
+    releaseRequestSnapshot(csrfRequest);
+  }
+};
 
 const payloadTooLargeResult = (match: MatchedRoute): RouteRenderResult => ({
   status: 413,
@@ -465,6 +484,9 @@ const payloadTooLargeResult = (match: MatchedRoute): RouteRenderResult => ({
 const readLimitedRequest = async (request: Request, maxBytes: number): Promise<Request | undefined> => {
   if (!request.body) {
     return request;
+  }
+  if (request.bodyUsed || request.body.locked) {
+    return undefined;
   }
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -493,6 +515,39 @@ const readLimitedRequest = async (request: Request, maxBytes: number): Promise<R
     method: request.method,
     redirect: request.redirect,
     signal: request.signal,
+  });
+};
+
+const requestWithinBodyLimit = async (request: Request, maxBytes: number): Promise<Request | undefined> => {
+  const contentLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
+  if (contentLength > maxBytes) {
+    return undefined;
+  }
+  if (request.method === "GET" || request.method === "HEAD") {
+    return request;
+  }
+  return readLimitedRequest(request, maxBytes);
+};
+
+const callbackRequestSnapshot = (request: Request): Request => {
+  try {
+    return request.clone();
+  } catch {
+    return new Request(request.url, {
+      headers: request.headers,
+      method: request.method,
+      redirect: request.redirect,
+      signal: request.signal,
+    });
+  }
+};
+
+const releaseRequestSnapshot = (request: Request): void => {
+  if (!request.body || request.body.locked) {
+    return;
+  }
+  void request.body.cancel().catch(() => {
+    // The callback may already have consumed or canceled its isolated body.
   });
 };
 
@@ -572,17 +627,25 @@ export const requireUser =
   <User>(
     getUser: (context: { request: Request; url: URL }) => User | undefined | null | Promise<User | undefined | null>,
     options: UserGuardOptions<User> = {},
-  ): RouteMiddleware =>
-  async ({ request, url }) => {
-    const user = await getUser({ request, url });
-    if (user) {
-      await options.onUser?.({ request, url, user });
-      return;
-    }
-    if (options.forbidden) {
-      return options.forbidden({ request, url });
-    }
-    return redirect(options.getRedirect?.({ request, url }) ?? options.redirectTo ?? "/login");
+  ): RouteMiddleware => {
+    const middleware: RouteMiddleware = async (context) => {
+      const authorizationState = (context as InternalRouteMiddlewareContext)[userGuardAuthorizationState];
+      if (!authorizationState) {
+        throw new TypeError("requireUser must receive the complete router-supplied middleware context.");
+      }
+      const { request, url } = context;
+      const user = await getUser({ request, url });
+      if (user) {
+        await options.onUser?.({ request, url, user });
+        authorizationState.authorized = true;
+        return;
+      }
+      if (options.forbidden) {
+        return options.forbidden({ request, url });
+      }
+      return redirect(options.getRedirect?.({ request, url }) ?? options.redirectTo ?? "/login");
+    };
+    return middleware;
   };
 
 export const defineRouteModule = <Data = unknown, ActionResult = unknown>(
@@ -1087,15 +1150,28 @@ const applyHeaders = (headers: Headers, extra: HeadersInit): void => {
   });
 };
 
-const ownAsyncIterable = (source: AsyncIterable<string>): AsyncIterable<string> => {
+const ownAsyncIterable = (source: AsyncIterable<string>, onClose: () => void = () => {}): AsyncIterable<string> => {
   const sourceIterator = source[Symbol.asyncIterator]();
   let finished = false;
   let returned = false;
+  let closed = false;
+  const notifyClosed = (): void => {
+    if (closed) return;
+    closed = true;
+    onClose();
+  };
   const close = async (): Promise<void> => {
-    if (finished || returned) return;
+    if (finished || returned) {
+      notifyClosed();
+      return;
+    }
     returned = true;
-    await sourceIterator.return?.();
-    finished = true;
+    try {
+      await sourceIterator.return?.();
+    } finally {
+      finished = true;
+      notifyClosed();
+    }
   };
   const iterator: AsyncIterableIterator<string> = {
     [Symbol.asyncIterator]: () => iterator,
@@ -1103,7 +1179,10 @@ const ownAsyncIterable = (source: AsyncIterable<string>): AsyncIterable<string> 
       if (finished) return { done: true, value: undefined };
       try {
         const next = await sourceIterator.next();
-        if (next.done) finished = true;
+        if (next.done) {
+          finished = true;
+          notifyClosed();
+        }
         return next;
       } catch (error) {
         await close();
@@ -1151,6 +1230,14 @@ const renderRouteInternal = async (
   input: Request | URL | string,
   options: RouteExecutionOptions = {},
 ): Promise<Result<RouteRenderResult, RouteError>> => {
+  if (
+    options.maxActionBodyBytes !== undefined &&
+    (!Number.isFinite(options.maxActionBodyBytes) ||
+      !Number.isInteger(options.maxActionBodyBytes) ||
+      options.maxActionBodyBytes < 0)
+  ) {
+    throw new TypeError("maxActionBodyBytes must be a non-negative finite integer.");
+  }
   let request = requestFor(input);
   let url = new URL(request.url);
   const env = options.env ?? {};
@@ -1188,22 +1275,114 @@ const renderRouteInternal = async (
       match,
     };
   };
-  await options.hooks?.onRequest?.({ request, url });
-  for (const middleware of options.middleware ?? []) {
-    const result = await middleware({ request, url, env, bindings });
-    if (isRouteResponse(result)) {
-      return ok(routeResponseResult(result));
+  const finish = (result: RouteRenderResult): Result<RouteRenderResult, RouteError> => {
+    releaseRequestSnapshot(request);
+    return ok(result);
+  };
+  if (options.maxActionBodyBytes !== undefined) {
+    const limitedRequest = await requestWithinBodyLimit(request, options.maxActionBodyBytes);
+    if (!limitedRequest) {
+      return finish(payloadTooLargeResult(emptyMatch()));
     }
-    if (isWebResponse(result)) {
-      return ok(await webResponseResult(result));
-    }
-    if (result instanceof Request) {
-      request = result;
-      url = new URL(request.url);
+    request = limitedRequest;
+    url = new URL(request.url);
+  }
+  if (options.hooks?.onRequest) {
+    const hookRequest = callbackRequestSnapshot(request);
+    try {
+      await options.hooks.onRequest({ request: hookRequest, url: new URL(url) });
+    } catch (error) {
+      releaseRequestSnapshot(request);
+      throw error;
+    } finally {
+      releaseRequestSnapshot(hookRequest);
     }
   }
+  let userGuardAuthorized = false;
+  for (const middleware of options.middleware ?? []) {
+    const middlewareRequest = callbackRequestSnapshot(request);
+    const authorizationState: UserGuardAuthorizationState = { authorized: false };
+    const middlewareContext: RouteMiddlewareContext & { bindings?: unknown } = {
+      request: middlewareRequest,
+      url: new URL(url),
+      env,
+      bindings,
+      [userGuardAuthorizationState]: authorizationState,
+    };
+    let result: RouteMiddlewareResult;
+    try {
+      result = await middleware(middlewareContext);
+    } catch (error) {
+      releaseRequestSnapshot(middlewareRequest);
+      releaseRequestSnapshot(request);
+      throw error;
+    }
+    const authorizedByMiddleware = authorizationState.authorized;
+    if (isRouteResponse(result)) {
+      releaseRequestSnapshot(middlewareRequest);
+      return finish(routeResponseResult(result));
+    }
+    if (isWebResponse(result)) {
+      const rendered = await webResponseResult(result);
+      releaseRequestSnapshot(middlewareRequest);
+      return finish(rendered);
+    }
+    if (result instanceof Request) {
+      if ((userGuardAuthorized || authorizedByMiddleware) && result !== middlewareRequest) {
+        releaseRequestSnapshot(middlewareRequest);
+        releaseRequestSnapshot(request);
+        throw new TypeError("Middleware cannot replace the request after requireUser has authorized it.");
+      }
+      if (userGuardAuthorized || authorizedByMiddleware) {
+        releaseRequestSnapshot(middlewareRequest);
+        userGuardAuthorized = true;
+        continue;
+      }
+      const previousRequest = request;
+      let nextRequest: Request | undefined;
+      if (options.maxActionBodyBytes !== undefined) {
+        const limitedRequest = await requestWithinBodyLimit(result, options.maxActionBodyBytes);
+        if (!limitedRequest) {
+          releaseRequestSnapshot(middlewareRequest);
+          if (result !== middlewareRequest) {
+            releaseRequestSnapshot(result);
+          }
+          return finish(payloadTooLargeResult(emptyMatch()));
+        }
+        if (limitedRequest === result) {
+          try {
+            nextRequest = result.clone();
+          } catch {
+            // Handled below after every exposed request branch is released.
+          }
+        } else {
+          nextRequest = limitedRequest;
+        }
+      } else {
+        try {
+          nextRequest = result.clone();
+        } catch {
+          // Handled below after every exposed request branch is released.
+        }
+      }
+      releaseRequestSnapshot(middlewareRequest);
+      if (result !== middlewareRequest) {
+        releaseRequestSnapshot(result);
+      }
+      if (!nextRequest) {
+        releaseRequestSnapshot(previousRequest);
+        throw new TypeError("Middleware returned a Request with an unavailable body.");
+      }
+      request = nextRequest;
+      releaseRequestSnapshot(previousRequest);
+      url = new URL(request.url);
+    } else {
+      releaseRequestSnapshot(middlewareRequest);
+    }
+    userGuardAuthorized ||= authorizedByMiddleware;
+  }
   if (options.allowedMethods && !options.allowedMethods.includes(request.method)) {
-    return ok({
+    return finish({
       status: 405,
       html: "<h1>Method Not Allowed</h1>",
       headHtml: "",
@@ -1215,23 +1394,6 @@ const renderRouteInternal = async (
       match: emptyMatch(),
     });
   }
-  const contentLength = Number.parseInt(request.headers.get("content-length") ?? "0", 10);
-  if (options.maxActionBodyBytes !== undefined && contentLength > options.maxActionBodyBytes) {
-    return ok(payloadTooLargeResult(emptyMatch()));
-  }
-  if (
-    options.maxActionBodyBytes !== undefined &&
-    request.method !== "GET" &&
-    request.method !== "HEAD" &&
-    request.body
-  ) {
-    const limitedRequest = await readLimitedRequest(request, options.maxActionBodyBytes);
-    if (!limitedRequest) {
-      return ok(payloadTooLargeResult(emptyMatch()));
-    }
-    request = limitedRequest;
-    url = new URL(request.url);
-  }
   const match = matchRoute(routes, url);
   if (!match.ok) {
     const boundary = nearestNotFoundBoundary(routes, url.pathname);
@@ -1240,7 +1402,7 @@ const renderRouteInternal = async (
       : options.notFound
         ? await options.notFound({ request, url })
         : `<h1>Not Found</h1>`;
-    return ok({
+    return finish({
       status: 404,
       html,
       headHtml: "",
@@ -1253,12 +1415,19 @@ const renderRouteInternal = async (
     });
   }
   try {
-    await options.hooks?.onMatch?.({ request, url, match: match.value });
+    if (options.hooks?.onMatch) {
+      const hookRequest = callbackRequestSnapshot(request);
+      try {
+        await options.hooks.onMatch({ request: hookRequest, url: new URL(url), match: match.value });
+      } finally {
+        releaseRequestSnapshot(hookRequest);
+      }
+    }
     let actionResult: unknown;
     const loaderData: Record<string, unknown> = {};
     if (request.method !== "GET" && request.method !== "HEAD" && match.value.route.action) {
       if (options.csrf && !(await verifyCsrf(request, url, env, bindings, options.csrf))) {
-        return ok({
+        return finish({
           status: 403,
           html: "<h1>Forbidden</h1>",
           headHtml: "",
@@ -1280,9 +1449,21 @@ const renderRouteInternal = async (
         loaderData,
         actionResult: undefined,
       } as Omit<RouteExecutionContext, "data" | "outlet">);
-      await options.hooks?.onAction?.({ request, url, route: match.value.route, result: actionResult });
+      if (options.hooks?.onAction) {
+        const hookRequest = callbackRequestSnapshot(request);
+        try {
+          await options.hooks.onAction({
+            request: hookRequest,
+            url: new URL(url),
+            route: match.value.route,
+            result: actionResult,
+          });
+        } finally {
+          releaseRequestSnapshot(hookRequest);
+        }
+      }
       if (isRouteResponse(actionResult)) {
-        return ok({ ...routeResponseResult(actionResult, match.value), loaderData, actionResult });
+        return finish({ ...routeResponseResult(actionResult, match.value), loaderData, actionResult });
       }
     }
     for (const entry of match.value.branch) {
@@ -1299,10 +1480,22 @@ const renderRouteInternal = async (
           actionResult,
         } as Omit<RouteExecutionContext, "data" | "outlet">);
         if (isRouteResponse(data)) {
-          return ok({ ...routeResponseResult(data, match.value), loaderData, actionResult });
+          return finish({ ...routeResponseResult(data, match.value), loaderData, actionResult });
         }
         loaderData[id] = isDeferredData(data) ? await resolveDeferredData(data) : data;
-        await options.hooks?.onLoader?.({ request, url, route: entry.route, data: loaderData[id] });
+        if (options.hooks?.onLoader) {
+          const hookRequest = callbackRequestSnapshot(request);
+          try {
+            await options.hooks.onLoader({
+              request: hookRequest,
+              url: new URL(url),
+              route: entry.route,
+              data: loaderData[id],
+            });
+          } finally {
+            releaseRequestSnapshot(hookRequest);
+          }
+        }
       }
     }
     const progressive = options.progressiveBody === true && request.method !== "HEAD" && match.value.route.stream;
@@ -1329,7 +1522,14 @@ const renderRouteInternal = async (
       }
     }
     outlet = applyHtmlWhitespace(outlet, options.htmlWhitespace ?? "preserve-tags");
-    await options.hooks?.onRender?.({ request, url, html: outlet, match: match.value });
+    if (options.hooks?.onRender) {
+      const hookRequest = callbackRequestSnapshot(request);
+      try {
+        await options.hooks.onRender({ request: hookRequest, url: new URL(url), html: outlet, match: match.value });
+      } finally {
+        releaseRequestSnapshot(hookRequest);
+      }
+    }
     const stateScript = Object.entries(loaderData)
       .map(([id, data]) =>
         serializeHydrationState(`route:${id}`, data, options.cspNonce === undefined ? {} : { nonce: options.cspNonce }),
@@ -1365,9 +1565,9 @@ const renderRouteInternal = async (
     }
     let responseChunks: AsyncIterable<string> | undefined;
     if (progressive) {
-      responseChunks = ownAsyncIterable(progressive(deepestContext));
+      responseChunks = ownAsyncIterable(progressive(deepestContext), () => releaseRequestSnapshot(request));
     }
-    return ok({
+    const result: RouteRenderResult = {
       status: 200,
       html: outlet,
       headHtml: renderHead(mergeHead(heads), options.cspNonce === undefined ? {} : { nonce: options.cspNonce }),
@@ -1388,12 +1588,20 @@ const renderRouteInternal = async (
       headers,
       match: match.value,
       ...(responseChunks ? { responseChunks } : {}),
-    });
+    };
+    return responseChunks ? ok(result) : finish(result);
   } catch (error) {
-    await options.hooks?.onError?.({ request, url, error, match: match.value });
+    if (options.hooks?.onError) {
+      const hookRequest = callbackRequestSnapshot(request);
+      try {
+        await options.hooks.onError({ request: hookRequest, url: new URL(url), error, match: match.value });
+      } finally {
+        releaseRequestSnapshot(hookRequest);
+      }
+    }
     const boundary = [...match.value.branch].reverse().find((entry) => entry.route.error)?.route.error ?? options.error;
     const html = boundary ? await boundary({ request, url, error }) : `<h1>Internal Server Error</h1>`;
-    return ok({
+    return finish({
       status: 500,
       html,
       headHtml: "",

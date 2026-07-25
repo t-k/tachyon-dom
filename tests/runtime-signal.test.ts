@@ -91,6 +91,22 @@ describe("signal runtime", () => {
     expect(seen).toEqual([1, 2]);
   });
 
+  it("detaches an effect that throws during initial registration", () => {
+    const value = createSignal(0);
+    let runs = 0;
+
+    expect(() =>
+      effect(() => {
+        runs++;
+        value();
+        throw new Error("initial failure");
+      }),
+    ).toThrow("initial failure");
+
+    expect(() => value.set(1)).not.toThrow();
+    expect(runs).toBe(1);
+  });
+
   it("disposes nested effects before rerunning their owner", () => {
     const outer = createSignal(0);
     const inner = createSignal("a");

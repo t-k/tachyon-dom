@@ -331,9 +331,18 @@ describe("DX helpers", () => {
     expect(ci).toContain("pnpm check:exports");
     expect(ci).toContain("pnpm check:size");
     expect(ci).toContain("pnpm check:browser-entry");
+    expect(ci).toContain("pnpm verify:whitespace-types");
     expect(ci).toContain("github.event_name == 'workflow_dispatch'");
     expect(ci).toContain("pnpm bench:local:smoke");
     expect(release).toContain("tags:");
+    for (const command of [
+      "pnpm verify:starters",
+      "pnpm check:browser-entry",
+      "pnpm check:quick-example-size",
+      "pnpm verify:whitespace-types",
+    ]) {
+      expect(release).toContain(command);
+    }
     expect(release).toContain("node scripts/publish-release-package.mjs --artifact-dir release-artifacts");
     expect(release).toContain("--package root");
     expect(release).toContain("--package create");
@@ -344,6 +353,28 @@ describe("DX helpers", () => {
     );
     expect(publisher).toContain("if (confirmed.integrity !== entry.integrity) throw error");
     expect(finalizer).toContain("await addDistTag(entry.name, verified.version, verified.npmTag)");
+  });
+
+  it("pins CI actions and limits the job to repository reads", async () => {
+    const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+    const actionReferences = Array.from(workflow.matchAll(/uses:\s+([^\s#]+)/g), (match) => match[1]);
+
+    expect(actionReferences.length).toBeGreaterThan(0);
+    expect(actionReferences.every((reference) => /@[0-9a-f]{40}$/.test(reference ?? ""))).toBe(true);
+    expect(workflow).toContain("permissions: {}\n");
+    expect(workflow).toMatch(/test:\n[\s\S]+?permissions:\n\s+contents: read\n\s+steps:/);
+  });
+
+  it("pins release actions and keeps verification read-only", async () => {
+    const workflow = await readFile(".github/workflows/release.yml", "utf8");
+    const actionReferences = Array.from(workflow.matchAll(/uses:\s+([^\s#]+)/g), (match) => match[1]);
+    const verifyJob = workflow.slice(workflow.indexOf("  verify:"), workflow.indexOf("  publish:"));
+
+    expect(actionReferences.length).toBeGreaterThan(0);
+    expect(actionReferences.every((reference) => /@[0-9a-f]{40}$/.test(reference ?? ""))).toBe(true);
+    expect(verifyJob).toMatch(/permissions:\n\s+contents: read\n\s+steps:/);
+    expect(verifyJob).not.toContain("contents: write");
+    expect(verifyJob).not.toContain("id-token: write");
   });
 
   it("keeps the package root browser-safe and the request-scoped SSR example escaped", async () => {
@@ -1090,14 +1121,19 @@ export default { selected: false };
   it("detects CLI entrypoints through npm bin symlinks", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-bin-"));
     try {
-      const target = path.join(dir, "dist", "cli.js");
-      const link = path.join(dir, "node_modules", ".bin", "tachyon-dom");
+      const physicalDir = path.join(dir, "physical");
+      const aliasDir = path.join(dir, "alias");
+      const target = path.join(physicalDir, "dist", "cli.js");
+      const link = path.join(physicalDir, "node_modules", ".bin", "tachyon-dom");
       await mkdir(path.dirname(target), { recursive: true });
       await mkdir(path.dirname(link), { recursive: true });
       await writeFile(target, "");
       await symlink(target, link);
+      await symlink(physicalDir, aliasDir, "dir");
 
-      await expect(isCliEntrypoint(link, pathToFileURL(target).href)).resolves.toBe(true);
+      await expect(isCliEntrypoint(link, pathToFileURL(path.join(aliasDir, "dist", "cli.js")).href)).resolves.toBe(
+        true,
+      );
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1273,12 +1309,24 @@ export const bindRows = (root, rows, options) => effect(() => {
   it("regenerates adjacent template declarations during normal Vite transforms", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-auto-types-"));
     try {
-      const id = path.join(dir, "page.td");
+      const physicalDir = path.join(dir, "physical");
+      const aliasDir = path.join(dir, "alias");
+      const id = path.join(physicalDir, "page.td");
+      await mkdir(physicalDir);
+      await symlink(physicalDir, aliasDir, "dir");
+      await writeFile(id, `<main>{title}</main>`);
       const plugin = tachyonDom();
       if (typeof plugin.transform !== "function" || typeof plugin.configResolved !== "function") {
         throw new Error("Missing Vite hooks.");
       }
-      await plugin.configResolved.call({} as never, { command: "serve", mode: "development", root: dir } as never);
+      await plugin.configResolved.call(
+        {} as never,
+        {
+          command: "serve",
+          mode: "development",
+          root: aliasDir,
+        } as never,
+      );
       const context = {
         error: (error: string): never => {
           throw new Error(error);
@@ -1289,6 +1337,23 @@ export const bindRows = (root, rows, options) => effect(() => {
       await expect(readFile(`${id}.d.ts`, "utf8")).resolves.toContain("title: unknown;");
       await plugin.transform.call(context, `<main>{title}<small>{subtitle}</small></main>`, `${id}?raw`);
       await expect(readFile(`${id}.d.ts`, "utf8")).resolves.toContain("subtitle: unknown;");
+
+      const generatedId = path.join(aliasDir, "generated.td");
+      await plugin.transform.call(context, `<main>{generated}</main>`, `${generatedId}?raw`);
+      await expect(readFile(`${generatedId}.d.ts`, "utf8")).resolves.toContain("generated: unknown;");
+
+      const outsideDir = path.join(dir, "outside");
+      await mkdir(outsideDir);
+      await symlink(outsideDir, path.join(physicalDir, "external"), "dir");
+      const escapedId = path.join(aliasDir, "external", "escaped.td");
+      await plugin.transform.call(context, `<main>{escaped}</main>`, `${escapedId}?raw`);
+      await expect(access(`${escapedId}.d.ts`)).rejects.toMatchObject({ code: "ENOENT" });
+
+      const siblingDir = `${aliasDir}-other`;
+      await mkdir(siblingDir);
+      const siblingId = path.join(siblingDir, "sibling.td");
+      await plugin.transform.call(context, `<main>{sibling}</main>`, `${siblingId}?raw`);
+      await expect(access(`${siblingId}.d.ts`)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -1503,7 +1568,9 @@ void chunks;
       scripts?: Record<string, string>;
     };
     const workflow = await readFile(path.join(process.cwd(), ".github", "workflows", "ci.yml"), "utf8");
-    expect(packageJson.scripts?.["verify:package"]).toBe("node scripts/verify-package-artifacts.mjs");
+    expect(packageJson.scripts?.["verify:package"]).toBe(
+      "node scripts/verify-package-artifacts.mjs && node scripts/verify-middleware-context-types.mjs",
+    );
     expect(packageJson.scripts?.["verify:starters"]).toBe("node scripts/verify-generated-starters.mjs");
     expect(workflow).toContain("pnpm verify:package");
     expect(workflow).toContain("pnpm verify:starters");
@@ -1557,6 +1624,12 @@ void chunks;
       await readFile(path.join(process.cwd(), "packages", "create-tachyon-dom", "package.json"), "utf8"),
     ) as { files?: string[]; dependencies?: Record<string, string> };
     const preparation = workflow.indexOf("pnpm prepare:release");
+    const releaseGates = [
+      "pnpm verify:starters",
+      "pnpm check:browser-entry",
+      "pnpm check:quick-example-size",
+      "pnpm verify:whitespace-types",
+    ];
     const dryRun = workflow.indexOf("--dry-run-artifacts", preparation);
     const upload = workflow.indexOf("actions/upload-artifact@", dryRun);
     const publishJob = workflow.indexOf("publish:", upload);
@@ -1567,6 +1640,11 @@ void chunks;
     const finalize = workflow.indexOf("finalize-release-tags.mjs", createPublish);
 
     expect(preparation).toBeGreaterThan(-1);
+    for (const command of releaseGates) {
+      expect(workflow.indexOf(command)).toBeGreaterThan(-1);
+      expect(workflow.indexOf(command)).toBeLessThan(preparation);
+      expect(workflow.indexOf(command)).toBe(workflow.lastIndexOf(command));
+    }
     expect(dryRun).toBeGreaterThan(preparation);
     expect(upload).toBeGreaterThan(dryRun);
     expect(publishJob).toBeGreaterThan(upload);

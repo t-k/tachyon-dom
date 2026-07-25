@@ -110,6 +110,66 @@ describe("runtime form and HMR helpers", () => {
     cleanup();
   });
 
+  it("returns dangerous form field names as own values without changing the prototype", () => {
+    const formData = new FormData();
+    formData.append("__proto__", "first");
+    formData.append("__proto__", "second");
+    formData.append("constructor", "constructor-value");
+
+    const result = validateFormData(formData, {});
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error("Expected valid form data.");
+    }
+    expect(Object.getPrototypeOf(result.values)).toBe(Object.prototype);
+    expect(Object.hasOwn(result.values, "__proto__")).toBe(true);
+    expect(result.values["__proto__"]).toEqual(["first", "second"]);
+    expect(result.values.constructor).toBe("constructor-value");
+  });
+
+  it("records validation errors for dangerous rule names", () => {
+    const rules = Object.create(null) as Record<string, { required: boolean; message: string }>;
+    Object.defineProperty(rules, "__proto__", {
+      enumerable: true,
+      value: { required: true, message: "Prototype is required." },
+    });
+    Object.defineProperty(rules, "constructor", {
+      enumerable: true,
+      value: { required: true, message: "Constructor is required." },
+    });
+
+    const result = validateFormData(new FormData(), rules);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error("Expected invalid form data.");
+    }
+    expect(Object.getPrototypeOf(result.errors)).toBe(Object.prototype);
+    expect(Object.hasOwn(result.errors, "__proto__")).toBe(true);
+    expect(result.errors["__proto__"]).toBe("Prototype is required.");
+    expect(result.errors.constructor).toBe("Constructor is required.");
+  });
+
+  it.each([/^ok$/g, /^ok$/y])("validates stateful pattern %s deterministically", (pattern) => {
+    const formData = new FormData();
+    formData.set("value", "ok");
+    pattern.lastIndex = 2;
+    const initialLastIndex = pattern.lastIndex;
+
+    expect(validateFormData(formData, { value: { pattern } }).ok).toBe(true);
+    expect(validateFormData(formData, { value: { pattern } }).ok).toBe(true);
+    expect(pattern.lastIndex).toBe(initialLastIndex);
+  });
+
+  it("accepts a frozen non-stateful pattern", () => {
+    const formData = new FormData();
+    formData.set("value", "ok");
+    const pattern = Object.freeze(/^ok$/);
+
+    expect(validateFormData(formData, { value: { pattern } }).ok).toBe(true);
+  });
+
   it("invalidates cached routes and re-navigates the current page on HMR updates", async () => {
     const calls: string[] = [];
     const reloader = createRouteHotReloader({

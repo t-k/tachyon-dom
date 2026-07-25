@@ -257,7 +257,12 @@ const createEffect = (fn: () => void, computed: boolean): (() => void) => {
     },
   };
   parent?.children.add(runner);
-  runner.run();
+  try {
+    runner.run();
+  } catch (error) {
+    disposeRunner(runner);
+    throw error;
+  }
   const dispose = (): void => disposeRunner(runner);
   onCleanup(dispose);
   return dispose;

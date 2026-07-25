@@ -274,6 +274,153 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("rerenders parent layouts when the query changes", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/app/child?tab=one");
+    let layoutRenders = 0;
+    const router = createClientRouter({
+      root,
+      routes: [
+        {
+          id: "app",
+          path: "/app",
+          render: ({ url }) => {
+            layoutRenders += 1;
+            return rawHtml(
+              `<section data-query="${url.search}"><div data-tachyon-outlet></div></section>`,
+            );
+          },
+          children: [{ id: "child", path: "child", render: () => rawHtml("<p>Child</p>") }],
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    await router.navigate("/app/child?tab=two");
+
+    expect(root.querySelector("[data-query]")?.getAttribute("data-query")).toBe("?tab=two");
+    expect(location.search).toBe("?tab=two");
+    expect(layoutRenders).toBe(2);
+    router.dispose();
+  });
+
+  it("rerenders loaded parent layouts when route params change", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/app/1/child");
+    let parentLoads = 0;
+    let parentRenders = 0;
+    const router = createClientRouter({
+      root,
+      routes: [
+        {
+          id: "app",
+          path: "/app/:id",
+          load: ({ params }) => {
+            parentLoads += 1;
+            return { id: params.id };
+          },
+          render: ({ data }) => {
+            parentRenders += 1;
+            return rawHtml(
+              `<section data-parent="${(data as { id: string }).id}"><div data-tachyon-outlet></div></section>`,
+            );
+          },
+          children: [
+            {
+              id: "child",
+              path: "child",
+              render: ({ params }) => rawHtml(`<p data-child="${params.id}"></p>`),
+            },
+          ],
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    await router.navigate("/app/2/child");
+
+    expect(root.querySelector("[data-parent]")?.getAttribute("data-parent")).toBe("2");
+    expect(root.querySelector("[data-child]")?.getAttribute("data-child")).toBe("2");
+    expect(parentLoads).toBe(2);
+    expect(parentRenders).toBe(2);
+    router.dispose();
+  });
+
+  it("runs nested loaders and heads with route-local data", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) {
+      throw new Error("Missing app root.");
+    }
+    createWindow("/app/users");
+    const calls: string[] = [];
+    const router = createClientRouter({
+      root,
+      routes: [
+        {
+          id: "app",
+          path: "/app",
+          load: () => {
+            calls.push("load:parent");
+            return { label: "Parent" };
+          },
+          head: ({ data }) => {
+            calls.push(`head:${(data as { label: string }).label}`);
+            return { title: "Parent", metas: [{ name: "parent", content: "yes" }] };
+          },
+          render: ({ data }) => {
+            calls.push(`render:${(data as { label: string }).label}`);
+            return rawHtml(`<section><div data-tachyon-outlet></div></section>`);
+          },
+          children: [
+            {
+              id: "users",
+              path: "users",
+              load: () => {
+                calls.push("load:child");
+                return { label: "Child" };
+              },
+              head: ({ data }) => {
+                calls.push(`head:${(data as { label: string }).label}`);
+                return { title: "Child", metas: [{ name: "child", content: "yes" }] };
+              },
+              render: ({ data }) => {
+                calls.push(`render:${(data as { label: string }).label}`);
+                return rawHtml(`<h1>${(data as { label: string }).label}</h1>`);
+              },
+            },
+          ],
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+
+    expect(calls).toEqual([
+      "load:parent",
+      "load:child",
+      "render:Child",
+      "render:Parent",
+      "head:Parent",
+      "head:Child",
+    ]);
+    expect(document.title).toBe("Child");
+    expect(document.head.querySelector(`[name="parent"]`)).not.toBeNull();
+    expect(document.head.querySelector(`[name="child"]`)).not.toBeNull();
+    router.dispose();
+  });
+
   it("eagerly navigates prefetched route targets on primary pointer down", async () => {
     document.body.innerHTML = `<main id="app"><nav><a href="/orders">Orders</a></nav><section id="outlet"></section></main>`;
     const root = document.querySelector("#app");

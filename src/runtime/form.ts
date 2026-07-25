@@ -102,9 +102,14 @@ const requestForForm = (form: HTMLFormElement, formData: FormData): Request => {
 const valuesForFormData = (formData: FormData): Record<string, FormDataEntryValue | FormDataEntryValue[]> => {
   const values: Record<string, FormDataEntryValue | FormDataEntryValue[]> = {};
   for (const [name, value] of formData) {
-    const current = values[name];
+    const current = Object.hasOwn(values, name) ? values[name] : undefined;
     if (current === undefined) {
-      values[name] = value;
+      Object.defineProperty(values, name, {
+        configurable: true,
+        enumerable: true,
+        value,
+        writable: true,
+      });
     } else if (Array.isArray(current)) {
       current.push(value);
     } else {
@@ -119,30 +124,52 @@ const fieldStringValue = (formData: FormData, name: string): string => {
   return typeof File !== "undefined" && value instanceof File ? value.name : String(value ?? "");
 };
 
+const matchesPattern = (pattern: RegExp, value: string): boolean => {
+  if (!pattern.global && !pattern.sticky) {
+    return pattern.test(value);
+  }
+  const lastIndex = pattern.lastIndex;
+  pattern.lastIndex = 0;
+  try {
+    return pattern.test(value);
+  } finally {
+    pattern.lastIndex = lastIndex;
+  }
+};
+
+const setValidationError = (errors: Record<string, string>, name: string, message: string): void => {
+  Object.defineProperty(errors, name, {
+    configurable: true,
+    enumerable: true,
+    value: message,
+    writable: true,
+  });
+};
+
 export const validateFormData = (formData: FormData, rules: Record<string, FormFieldRule>): FormValidationResult => {
   const errors: Record<string, string> = {};
   for (const [name, rule] of Object.entries(rules)) {
     const value = fieldStringValue(formData, name);
     const message = rule.message ?? `${name} is invalid.`;
     if (rule.required && value.trim() === "") {
-      errors[name] = message;
+      setValidationError(errors, name, message);
       continue;
     }
     if (rule.minLength !== undefined && value.length < rule.minLength) {
-      errors[name] = message;
+      setValidationError(errors, name, message);
       continue;
     }
     if (rule.maxLength !== undefined && value.length > rule.maxLength) {
-      errors[name] = message;
+      setValidationError(errors, name, message);
       continue;
     }
-    if (rule.pattern && !rule.pattern.test(value)) {
-      errors[name] = message;
+    if (rule.pattern && !matchesPattern(rule.pattern, value)) {
+      setValidationError(errors, name, message);
       continue;
     }
     const customError = rule.validate?.(value, formData);
     if (customError) {
-      errors[name] = customError;
+      setValidationError(errors, name, customError);
     }
   }
   return Object.keys(errors).length > 0 ? { ok: false, errors } : { ok: true, values: valuesForFormData(formData) };
