@@ -323,6 +323,34 @@ describe("router security helpers", () => {
     expect(input.bodyUsed).toBe(true);
   });
 
+  it("releases request bodies on terminal size and middleware responses", async () => {
+    const oversized = new Request("https://x.test/upload", {
+      method: "POST",
+      headers: { "content-length": "7" },
+      body: "payload",
+    });
+    const denied = new Request("https://x.test/upload", { method: "POST", body: "payload" });
+    const forbidden = new Request("https://x.test/upload", { method: "POST", body: "payload" });
+    const { requireUser } = await import("../src/router");
+
+    const oversizedResult = await renderRoute([{ path: "/upload", render: () => "ok" }], oversized, {
+      maxActionBodyBytes: 3,
+    });
+    const deniedResult = await renderRoute([{ path: "/upload", render: () => "ok" }], denied, {
+      middleware: [requireUser(() => undefined)],
+    });
+    const forbiddenResult = await renderRoute([{ path: "/upload", render: () => "ok" }], forbidden, {
+      middleware: [() => new Response("forbidden", { status: 403 })],
+    });
+
+    expect(oversizedResult.ok && oversizedResult.value.status).toBe(413);
+    expect(deniedResult.ok && deniedResult.value.status).toBe(302);
+    expect(forbiddenResult.ok && forbiddenResult.value.status).toBe(403);
+    expect(oversized.bodyUsed).toBe(true);
+    expect(denied.bodyUsed).toBe(true);
+    expect(forbidden.bodyUsed).toBe(true);
+  });
+
   it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1, 1.5])(
     "rejects invalid maxActionBodyBytes configuration %s before request callbacks",
     async (maxActionBodyBytes) => {
@@ -414,6 +442,17 @@ describe("router security helpers", () => {
         Reflect.deleteProperty(globalThis, "crypto");
       }
     }
+  });
+
+  it("treats absent reserved session cookie names as missing", async () => {
+    const memoryStorage = createMemorySessionStorage({ cookieName: "constructor" });
+    const cookieStorage = createCookieSessionStorage({
+      cookieName: "constructor",
+      secret: sessionSecret,
+    });
+
+    await expect(memoryStorage.getSession(null)).resolves.toEqual({ id: "", data: {} });
+    await expect(cookieStorage.getSession(null)).resolves.toEqual({ id: "", data: {} });
   });
 
   it("does not commit authenticated data under an unknown cookie session ID", async () => {
@@ -672,7 +711,9 @@ describe("router security helpers", () => {
         request,
         {
           middleware: [
-            async (context) => guard(context),
+            async (context) => {
+              await guard({ ...context });
+            },
             ({ request: authorizedRequest }) =>
               new Request(authorizedRequest, { headers: { cookie: "sid=victim" } }),
           ],

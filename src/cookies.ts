@@ -178,6 +178,11 @@ export const parseCookies = (header: string | null | undefined): Record<string, 
   return cookies;
 };
 
+const ownCookieValue = (header: string | null | undefined, name: string): string | undefined => {
+  const cookies = parseCookies(header);
+  return Object.hasOwn(cookies, name) ? cookies[name] : undefined;
+};
+
 export const serializeCookie = (name: string, value: string, options: CookieOptions = {}): string => {
   const parts = [`${encodeCookiePart(name)}=${encodeCookiePart(value)}`];
   if (options.path) {
@@ -219,7 +224,7 @@ export const createMemorySessionStorage = <Data extends Record<string, unknown> 
       return { id, data };
     },
     getSession: async (cookieHeader: string | null | undefined): Promise<Session<Data>> => {
-      const id = parseCookies(cookieHeader)[cookieName];
+      const id = ownCookieValue(cookieHeader, cookieName);
       if (!id) {
         return { id: "", data: {} as Data };
       }
@@ -270,7 +275,7 @@ export const createCookieSessionStorage = <Data extends Record<string, unknown> 
   return {
     createSession: async (data: Data): Promise<Session<Data>> => ({ id: createId(), data }),
     getSession: async (cookieHeader: string | null | undefined): Promise<Session<Data>> => {
-      const signed = parseCookies(cookieHeader)[cookieName];
+      const signed = ownCookieValue(cookieHeader, cookieName);
       const verified = secrets.map((secret) => verifySignedCookieValue(signed, secret)).find((value) => value !== undefined);
       if (!verified) {
         return { id: "", data: {} as Data };

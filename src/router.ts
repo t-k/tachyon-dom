@@ -606,14 +606,13 @@ export const applySecurityHeaders = (response: Response, headers: Headers): Resp
 
 const userGuardAuthorization = Symbol("tachyon-dom.user-guard-authorization");
 
-type UserGuardAuthorizationContext = { [userGuardAuthorization]?: true };
+const userGuardAuthorizationResult = Object.freeze({ [userGuardAuthorization]: true });
+const userGuardAuthorizedRequests = new WeakSet<Request>();
 
-const markUserGuardAuthorized = (context: object): void => {
-  Object.defineProperty(context, userGuardAuthorization, { value: true });
-};
-
-const wasUserGuardAuthorized = (context: object): boolean =>
-  (context as UserGuardAuthorizationContext)[userGuardAuthorization] === true;
+const isUserGuardAuthorizationResult = (value: unknown): boolean =>
+  typeof value === "object" &&
+  value !== null &&
+  (value as { [userGuardAuthorization]?: boolean })[userGuardAuthorization] === true;
 
 export const requireUser =
   <User>(
@@ -625,8 +624,8 @@ export const requireUser =
       const user = await getUser({ request, url });
       if (user) {
         await options.onUser?.({ request, url, user });
-        markUserGuardAuthorized(context);
-        return;
+        userGuardAuthorizedRequests.add(request);
+        return userGuardAuthorizationResult as never;
       }
       if (options.forbidden) {
         return options.forbidden({ request, url });
@@ -1250,6 +1249,7 @@ const renderRouteInternal = async (
   if (options.maxActionBodyBytes !== undefined) {
     const limitedRequest = await requestWithinBodyLimit(request, options.maxActionBodyBytes);
     if (!limitedRequest) {
+      releaseRequestSnapshot(request);
       return ok(payloadTooLargeResult(emptyMatch()));
     }
     request = limitedRequest;
@@ -1272,16 +1272,25 @@ const renderRouteInternal = async (
       result = await middleware(middlewareContext);
     } catch (error) {
       releaseRequestSnapshot(middlewareRequest);
+      releaseRequestSnapshot(request);
       throw error;
     }
-    const authorizedByMiddleware = wasUserGuardAuthorized(middlewareContext);
+    const authorizedByMiddleware =
+      userGuardAuthorizedRequests.has(middlewareRequest) || isUserGuardAuthorizationResult(result);
+    if (isUserGuardAuthorizationResult(result)) {
+      releaseRequestSnapshot(middlewareRequest);
+      userGuardAuthorized = true;
+      continue;
+    }
     if (isRouteResponse(result)) {
       releaseRequestSnapshot(middlewareRequest);
+      releaseRequestSnapshot(request);
       return ok(routeResponseResult(result));
     }
     if (isWebResponse(result)) {
       const rendered = await webResponseResult(result);
       releaseRequestSnapshot(middlewareRequest);
+      releaseRequestSnapshot(request);
       return ok(rendered);
     }
     if (result instanceof Request) {
