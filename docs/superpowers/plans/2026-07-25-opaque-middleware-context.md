@@ -15,6 +15,7 @@
 - Create `tests/middleware-context-types.ts`: source-tree positive and negative type contracts for platform-neutral and Workers middleware wrappers.
 - Create `scripts/verify-middleware-context-types.mjs`: packed-package consumer compilation against generated declarations.
 - Modify `package.json`: run the packed middleware context verifier as part of `verify:package`.
+- Modify `tests/dx.test.ts`: keep the package verification script contract synchronized with the new declaration gate.
 - Modify `src/router.ts`: define the opaque context carrier, expose `RouteMiddlewareContext`, validate the carrier in `requireUser()`, and keep authorization state request-local.
 - Modify `src/adapters/workers.ts`: derive Workers middleware context from `RouteMiddlewareContext` while preserving typed bindings.
 - Modify `tests/router-security.test.ts`: reproduce cast-based manual reconstruction and prove fail-closed ordering.
@@ -28,6 +29,7 @@
 - Create: `tests/middleware-context-types.ts`
 - Create: `scripts/verify-middleware-context-types.mjs`
 - Modify: `package.json`
+- Modify: `tests/dx.test.ts:1569-1577`
 
 - [ ] **Step 1: Add the source-tree type contract**
 
@@ -170,6 +172,14 @@ Change the `verify:package` script in `package.json` to:
 
 This reuses the existing CI and release workflow gate without duplicating workflow steps.
 
+Update the exact script assertion in `tests/dx.test.ts`:
+
+```ts
+expect(packageJson.scripts?.["verify:package"]).toBe(
+  "node scripts/verify-package-artifacts.mjs && node scripts/verify-middleware-context-types.mjs",
+);
+```
+
 ### Task 2: Brand platform-neutral and Workers middleware contexts
 
 **Files:**
@@ -259,7 +269,7 @@ Expected: both commands pass. The emitted `dist/router.d.ts` contains a non-expo
 Run:
 
 ```bash
-git add src/router.ts src/adapters/workers.ts tests/middleware-context-types.ts scripts/verify-middleware-context-types.mjs package.json
+git add src/router.ts src/adapters/workers.ts tests/middleware-context-types.ts tests/dx.test.ts scripts/verify-middleware-context-types.mjs package.json
 git commit -m "fix: brand router middleware contexts"
 ```
 
