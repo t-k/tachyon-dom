@@ -30,7 +30,7 @@ export const assertRouteParity = async (
     const rendered = await renderRouteForTest(routes, testCase.path, options);
     if (rendered.html !== testCase.clientHtml) {
       throw new Error(
-        `Route parity mismatch for ${testCase.path}: expected ${rendered.html}, received ${testCase.clientHtml}`,
+        `Route parity mismatch for ${testCase.path}: expected ${testCase.clientHtml}, received ${rendered.html}`,
       );
     }
   }

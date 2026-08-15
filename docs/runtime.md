@@ -55,6 +55,10 @@ void env.value.publicEnv.PUBLIC_APP_NAME;
 void env.value.env.SESSION_SECRET;
 ```
 
+## Virtualized Lists
+
+`createVirtualizedList()` renders a fixed-height visible window with overscan. Provide `getKey(item, index)` to preserve row elements across scrolling and `update()` calls. Duplicate keys are rejected before the current window changes. When new objects reuse an existing key, use `updateItem(element, item, index)` to refresh their visible content without replacing the element; omitting it intentionally preserves local DOM state such as an edited input value. Without `getKey`, list identity remains index-based.
+
 ## Hydration Strategies
 
 `scheduleHydration(handle, options)` supports:
@@ -74,6 +78,8 @@ The compiler records hydration boundaries with `hydrate:id={id}`. Runtime schedu
 ## Progressive Forms
 
 `enhanceForm(form, options)` intercepts submit events only when JavaScript is running, builds a `Request` from the existing form markup, and calls `fetch()` or a custom `submit()` callback. Without JavaScript, the same form remains a normal browser form.
+
+After native validation succeeds, the first submission owns the form until its custom validation and request lifecycle settle. Further submit events are ignored during that interval. Submit buttons are disabled only while the request is pending and each control's original disabled state is restored after success, failure, or cleanup. Disposing the enhancement prevents a late response from navigating or invoking success and error callbacks.
 
 `enhanceForm()` also supports:
 
@@ -186,11 +192,11 @@ Client action concurrency is latest-operation-wins. A newer submission or naviga
 
 ## Signals
 
-`runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, `read()`, `untrack()`, `createResource()`, and `catchError()`. Effects run once when registered, then subsequent signal notifications are queued. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. `untrack(fn)` reads signals without subscribing the active effect, and effects created inside `untrack()` are not attached to the active owner. `createMemo()` exposes a cached computed accessor that updates before dependent effects observe the next flush. `createResource()` ties an async loader to a source accessor and exposes `data`, `error`, `loading`, `refetch`, and `dispose`. Accessor changes automatically abort the superseded load and start the next one; only the newest result may update state. The fetcher receives `{ signal }` as its second argument. Call `dispose()` when the resource owner is removed so source tracking detaches and in-flight work is aborted. `catchError()` wraps an effect body with an error callback while keeping the effect subscribed for later successful runs.
+`runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, `read()`, `untrack()`, `createResource()`, and `catchError()`. Effects run once when registered, then subsequent signal notifications are queued. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. A throwing effect does not prevent queued siblings from running. After the queue drains, one unhandled failure is rethrown directly and multiple failures are reported in an ordered `AggregateError`. `untrack(fn)` reads signals without subscribing the active effect, and effects created inside `untrack()` are not attached to the active effect lifecycle. `createMemo()` exposes a cached computed accessor that updates before dependent effects observe the next flush. `createResource()` ties an async loader to a source accessor and exposes `data`, `error`, `loading`, `refetch`, and `dispose`. Accessor changes automatically abort the superseded load and start the next one; only the newest result may update state. The fetcher receives `{ signal }` as its second argument. Call `dispose()` when the resource owner is removed so source tracking detaches and in-flight work is aborted. `catchError()` wraps an effect body with an error callback while keeping the effect subscribed for later successful runs.
 
 ## Error Boundaries and i18n
 
-`runtime/error-boundary` provides `createErrorBoundary()` for client enhancements that need a local fallback and reset hook instead of failing the whole mounted region. Plain fallback strings are rendered as text. Intentional markup must use `rawHtml()`; DOM `Node`, `DocumentFragment`, and node arrays are also accepted explicitly.
+`runtime/error-boundary` provides `createErrorBoundary()` for client enhancements that need a local fallback instead of failing the whole mounted region. The nearest active boundary receives later failures from reactive descendants, including descendants created inside `untrack()`. If a fallback throws, the failure continues to its parent boundary. Disposing a boundary detaches the reactive runners it owns. Plain fallback strings are rendered as text. Intentional markup must use `rawHtml()`; DOM `Node`, `DocumentFragment`, and node arrays are also accepted explicitly.
 
 `tachyon-dom/i18n` provides `createI18n()` for dictionary lookup/interpolation and `localeMiddleware()` for request locale selection from route middleware.
 
@@ -200,4 +206,5 @@ Client action concurrency is latest-operation-wins. A newer submission or naviga
 
 - `readTextStreamChunks(stream)` to decode a `ReadableStream<Uint8Array>` into text chunks.
 - `applyDeferredDataChunk(root, chunk)` to write streamed deferred values into `[data-tachyon-deferred-target="id:key"]` elements.
-- `readDeferredDataScript(root, id)` to read server-emitted deferred data scripts.
+- `readDeferredDataScriptResult(root, id)` to read server-emitted deferred data scripts while distinguishing missing data from invalid JSON without throwing.
+- `readDeferredDataScript(root, id)` as a deprecated compatibility wrapper that returns `undefined` for both missing and invalid data.

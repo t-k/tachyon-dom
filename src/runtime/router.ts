@@ -47,7 +47,7 @@ export type ClientRouterOptions = {
   error?: (context: { url: URL; error: unknown }) => ClientRenderValue;
   scrollTo?: (x: number, y: number) => void;
   focusSelector?: string;
-  cache?: boolean;
+  cache?: boolean | { maxEntries?: number };
   initialCache?: readonly { href: string; data: unknown }[];
   eager?: boolean;
   liveRegion?: Element;
@@ -360,6 +360,14 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   let actionVersion = 0;
   let currentNavigation: Promise<void> = Promise.resolve();
   const cache = new Map<string, unknown>();
+  const cacheLimit =
+    options.cache === true
+      ? 100
+      : typeof options.cache === "object"
+        ? Number.isFinite(options.cache.maxEntries)
+          ? Math.max(0, Math.floor(options.cache.maxEntries ?? 100))
+          : 100
+        : 0;
   const layoutStates = new WeakMap<
     ClientRouteDefinition,
     { root: Element; loaded: LoadedClientBranch; paramsKey: string; searchKey: string }
@@ -369,8 +377,25 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   const scrollPositions = new Map<number, { x: number; y: number }>();
   let nextScrollKey = 1;
   const cacheKey = (url: URL): string => `${url.pathname}${url.search}`;
+  const writeCache = (key: string, value: unknown): void => {
+    if (cacheLimit === 0) return;
+    cache.delete(key);
+    cache.set(key, value);
+    while (cache.size > cacheLimit) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+    }
+  };
+  const readCache = (key: string): { hit: boolean; value?: unknown } => {
+    if (cacheLimit === 0 || !cache.has(key)) return { hit: false };
+    const value = cache.get(key);
+    cache.delete(key);
+    cache.set(key, value);
+    return { hit: true, value };
+  };
   for (const entry of options.initialCache ?? []) {
-    cache.set(cacheKey(toUrl(entry.href, baseUrl)), entry.data);
+    writeCache(cacheKey(toUrl(entry.href, baseUrl)), entry.data);
   }
 
   const renderNotFound = (url: URL): void => {
@@ -389,11 +414,12 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
 
   const loadData = async (url: URL, match: ClientMatch, signal: AbortSignal): Promise<LoadedClientBranch> => {
     const key = cacheKey(url);
-    const cached = options.cache && cache.has(key) ? cache.get(key) : undefined;
+    const cachedEntry = readCache(key);
+    const cached = cachedEntry.value;
     if (isLoadedClientBranch(cached)) {
       return cached;
     }
-    const hasLeafSeed = options.cache === true && cache.has(key);
+    const hasLeafSeed = cachedEntry.hit;
     const dataByRoute = new Map<ClientRouteDefinition, unknown>();
     for (const route of match.branch) {
       if (signal.aborted) {
@@ -412,8 +438,8 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
       dataByRoute,
       leafData: dataByRoute.get(match.route),
     };
-    if (options.cache && !signal.aborted) {
-      cache.set(key, loaded);
+    if (!signal.aborted) {
+      writeCache(key, loaded);
     }
     return loaded;
   };

@@ -31,6 +31,14 @@ const mountClientTextBindings = (
 };
 
 describe("HTML-first compiler", () => {
+  const activeUrlCorpus = [
+    "javascript:alert(1)",
+    " JAVASCRIPT:alert(1)",
+    "java\tscript:alert(1)",
+    "vbscript:msgbox(1)",
+    "data:text/html,<script>alert(1)</script>",
+  ];
+
   it("preserves element, attribute, and text source spans in parser nodes", () => {
     const result = parseTemplate(`<main>\n  <input bind:value={name}>text\n</main>`);
     if (!result.ok) throw new Error(result.error.message);
@@ -160,6 +168,109 @@ describe("HTML-first compiler", () => {
     expect(renderServerTemplate(result.value, {})).toContain("line one\n    line two");
     expect(result.value.client.templateHtml).toContain("line one\n    line two");
     expect(generateServerStreamModule(result.value)).toContain("line one\\n    line two");
+  });
+
+  it.each(["script", "style"])("rejects dynamic text inside the %s raw-text element", (tagName) => {
+    const source = `<main><${tagName}>{payload}</${tagName}></main>`;
+    const result = compileTemplate(source);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        message: `Expressions inside <${tagName}> are not supported; serialize data outside raw text.`,
+        offset: source.indexOf("{payload}"),
+        endOffset: source.indexOf("{payload}") + "{payload}".length,
+      },
+    });
+  });
+
+  it.each(["textarea", "title"])("keeps dynamic text available inside the %s RCDATA element", (tagName) => {
+    const result = compileTemplate(`<${tagName}>{value}</${tagName}>`);
+
+    expect(result.ok).toBe(true);
+  });
+
+  it.each(["onclick", "ONLOAD", "srcdoc", "innerhtml", "outerhtml"])(
+    "rejects dangerous attribute %s before lowering every compiler target",
+    (name) => {
+      for (const value of ['"static"', "{value}"]) {
+        const source = `<iframe ${name}=${value}></iframe>`;
+        const result = compileTemplate(source);
+
+        expect(result.ok).toBe(false);
+        if (result.ok) throw new Error("Expected dangerous attribute diagnostic.");
+        expect(result.error).toMatchObject({
+          message: `Dangerous attribute is not supported: ${name}.`,
+          offset: source.indexOf(name),
+          endOffset: source.indexOf(name) + name.length,
+        });
+      }
+    },
+  );
+
+  it("keeps framework event directives and ordinary attributes available", () => {
+    const result = compileTemplate(`<button on:click={save} aria-label="Save" data-kind={kind}></button>`);
+
+    expect(result.ok).toBe(true);
+  });
+
+  it.each(activeUrlCorpus)("rejects active URL %j before lowering every compiler target", (value) => {
+    for (const [tagName, attribute] of [
+      ["a", "href"],
+      ["img", "src"],
+      ["form", "action"],
+      ["button", "formaction"],
+      ["use", "xlink:href"],
+    ] as const) {
+      const source = `<${tagName} ${attribute}="${value}"></${tagName}>`;
+      const result = compileTemplate(source);
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected unsafe URL diagnostic.");
+      expect(result.error.message).toBe(`Unsafe URL for ${attribute}.`);
+    }
+  });
+
+  it("rejects active dynamic URLs in interpreted, generated server, and stream output", async () => {
+    const result = compileTemplate(`<a href={url}>link</a>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const scope = { url: "java\tscript:alert(1)" };
+
+    expect(() => renderServerTemplate(result.value, scope)).toThrow("Unsafe URL for href");
+
+    const serverCode = generateServerModule(result.value);
+    const serverModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(serverCode).toString("base64")}`
+    )) as {
+      render(scope: Record<string, unknown>): string;
+    };
+    expect(() => serverModule.render(scope)).toThrow("Unsafe URL for href");
+
+    const streamCode = generateServerStreamModule(result.value);
+    const streamModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(streamCode).toString("base64")}`
+    )) as {
+      stream(scope: Record<string, unknown>): AsyncIterable<string>;
+    };
+    const consumeStream = async (): Promise<void> => {
+      for await (const _chunk of streamModule.stream(scope)) {
+        // Consume every chunk so URL validation runs at the generated yield boundary.
+      }
+    };
+    await expect(consumeStream()).rejects.toThrow("Unsafe URL for href");
+  });
+
+  it("normalizes a mixed-case dynamic URL attribute consistently", async () => {
+    const result = compileTemplate(`<img SRC={url}>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const scope = { url: " \n/images/avatar.png " };
+
+    expect(renderServerTemplate(result.value, scope)).toBe(`<img SRC="/images/avatar.png">`);
+    const code = generateServerModule(result.value);
+    const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
+      render(scope: Record<string, unknown>): string;
+    };
+    expect(module.render(scope)).toBe(`<img SRC="/images/avatar.png">`);
   });
 
   it.each([
@@ -332,6 +443,103 @@ describe("HTML-first compiler", () => {
     expect(generateServerStreamModule(result.value)).toContain(`__tachyonPush("<!---->");`);
   });
 
+  it.each(["", null, undefined])("preserves an empty text hydration anchor for %j across server targets", async (value) => {
+    const result = compileTemplate(`<p>a{value}b</p>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const scope = { value };
+    const expected = `<p>a<!----><!--td:text--><!---->b</p>`;
+
+    expect(renderServerTemplate(result.value, scope)).toBe(expected);
+
+    const serverModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerModule(result.value)).toString("base64")}`
+    )) as { render(scope: Record<string, unknown>): string };
+    expect(serverModule.render(scope)).toBe(expected);
+
+    const streamModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerStreamModule(result.value)).toString("base64")}`
+    )) as { stream(scope: Record<string, unknown>): AsyncIterable<string> };
+    const chunks: string[] = [];
+    for await (const chunk of streamModule.stream(scope)) chunks.push(chunk);
+    expect(chunks.join("")).toBe(expected);
+
+    document.body.innerHTML = expected;
+    const root = document.body.firstElementChild;
+    if (!(root instanceof HTMLElement)) throw new Error("Missing SSR root.");
+    const binding = result.value.client.bindings.find((candidate) => candidate.kind === "text");
+    if (!binding || binding.kind !== "text") throw new Error("Missing text binding.");
+    const target = textAt(root, binding.path);
+    expect(target).toBeInstanceOf(Text);
+    expect(root.textContent).toBe("ab");
+    setText(target, "Z");
+    expect(root.textContent).toBe("aZb");
+  });
+
+  it("throws when a text binding path is missing or resolves to a non-text node", () => {
+    document.body.innerHTML = `<p><span></span></p>`;
+    const root = document.body.firstElementChild;
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+
+    expect(() => textAt(root, [1])).toThrow("Missing text binding node at path 1");
+    expect(() => textAt(root, [0])).toThrow("Text binding path 0 resolved to SPAN instead of a Text node");
+  });
+
+  it.each([
+    ["implicit", `<table><tr><td>{value}</td></tr></table>`],
+    ["explicit", `<table><tbody><tr><td>{value}</td></tr></tbody></table>`],
+  ])("keeps %s tbody text bindings aligned with the parsed DOM", (_kind, source) => {
+    const result = compileTemplate(source);
+    if (!result.ok) throw new Error(result.error.message);
+
+    expect(result.value.client.templateHtml).toBe(`<table><tbody><tr><td> </td></tr></tbody></table>`);
+    const root = mountClientTextBindings(result.value.client.templateHtml, result.value.client.bindings, {
+      value: "Updated",
+    });
+    expect(root.querySelector("tbody td")?.textContent).toBe("Updated");
+    expect(renderServerTemplate(result.value, { value: "Server" })).toBe(
+      `<table><tbody><tr><td>Server</td></tr></tbody></table>`,
+    );
+  });
+
+  it("places table row list bindings inside a normalized tbody", () => {
+    const result = compileTemplate(
+      `<table><for each={rows} key={row.id}><tr><td>{row.label}</td></tr></for></table>`,
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    const list = result.value.client.bindings.find((binding) => binding.kind === "list");
+
+    expect(result.value.client.templateHtml).toBe(`<table><tbody></tbody></table>`);
+    expect(list).toMatchObject({ kind: "list", path: [0], templateHtml: `<tr><td> </td></tr>` });
+    expect(renderServerTemplate(result.value, { rows: [{ id: 1, label: "One" }] })).toBe(
+      `<table><tbody><tr><td>One</td></tr></tbody></table>`,
+    );
+  });
+
+  it("normalizes direct col children while preserving valid select and optgroup paths", () => {
+    const columns = compileTemplate(`<table><col><col></table>`);
+    const select = compileTemplate(`<select><optgroup label="Group"><option>{label}</option></optgroup></select>`);
+    if (!columns.ok) throw new Error(columns.error.message);
+    if (!select.ok) throw new Error(select.error.message);
+
+    expect(columns.value.client.templateHtml).toBe(`<table><colgroup><col><col></colgroup></table>`);
+    const root = mountClientTextBindings(select.value.client.templateHtml, select.value.client.bindings, {
+      label: "Choice",
+    });
+    expect(root.querySelector("optgroup option")?.textContent).toBe("Choice");
+  });
+
+  it.each([`<table><div>{value}</div></table>`, `<table>text<tr><td>x</td></tr></table>`, `<select><div>x</div></select>`])(
+    "reports unsupported HTML tree construction for %s",
+    (source) => {
+      const result = compileTemplate(source);
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected tree construction diagnostic.");
+      expect(result.error.message).toContain("Unsupported HTML tree construction");
+      expect(result.error.offset).toBeGreaterThanOrEqual(0);
+    },
+  );
+
   it("omits closing tags for void elements in client and server targets", () => {
     const result = compileTemplate(`<div><br/>{label}<hr/></div>`);
     if (!result.ok) {
@@ -402,6 +610,39 @@ describe("HTML-first compiler", () => {
     ).toBe(`<button class="btn danger" title="&lt;Save &amp; close&gt;">&lt;Save &amp; close&gt;</button>`);
   });
 
+  it("renders a dynamic base class with directive classes safely across server targets", async () => {
+    const result = compileTemplate(`<div class={base} class:active={active}></div>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const scope = { base: `card" data-x="1`, active: true };
+    const expected = `<div class="card&quot; data-x=&quot;1 active"></div>`;
+
+    expect(renderServerTemplate(result.value, scope)).toBe(expected);
+    expect(result.value.client.bindings).toEqual([
+      { kind: "attr", path: [], name: "class", expression: "base" },
+      { kind: "class", path: [], className: "active", expression: "active" },
+    ]);
+
+    const serverModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerModule(result.value)).toString("base64")}`
+    )) as { render(scope: Record<string, unknown>): string };
+    expect(serverModule.render(scope)).toBe(expected);
+
+    const streamModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerStreamModule(result.value)).toString("base64")}`
+    )) as { stream(scope: Record<string, unknown>): AsyncIterable<string> };
+    const chunks: string[] = [];
+    for await (const chunk of streamModule.stream(scope)) chunks.push(chunk);
+    expect(chunks.join("")).toBe(expected);
+
+    const collidingScope = { base: "card active", active: false };
+    const collidingExpected = `<div class="card active"></div>`;
+    expect(renderServerTemplate(result.value, collidingScope)).toBe(collidingExpected);
+    expect(serverModule.render(collidingScope)).toBe(collidingExpected);
+    const collidingChunks: string[] = [];
+    for await (const chunk of streamModule.stream(collidingScope)) collidingChunks.push(chunk);
+    expect(collidingChunks.join("")).toBe(collidingExpected);
+  });
+
   it("accepts expression syntax in text and braced attributes", () => {
     const result = compileTemplate(
       `<section data-count={count + 1} title={format(label)}><p>{selected ? label : "none"}</p></section>`,
@@ -426,7 +667,7 @@ describe("HTML-first compiler", () => {
   });
 
   it.each([
-    ['<div title={format(`a}b`)}></div>', 'format(`a}b`)'],
+    ["<div title={format(`a}b`)}></div>", "format(`a}b`)"],
     ['<div title={`a${value ? `b}c` : "d"}`}></div>', '`a${value ? `b}c` : "d"}`'],
     ["<div title={value /* } */}></div>", "value /* } */"],
     ["<div title={value // }\n + 1}></div>", "value // }\n + 1"],
@@ -475,7 +716,7 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`from "tachyon-dom/runtime/form"`);
     expect(code).toContain(`__tachyonSetAttributeValue(root, "data-count", (scope.count + 1));`);
     expect(code).toContain(`__tachyonSetStyleValue(root, "width", (scope.size + "px"));`);
-    expect(code).toContain(`__tachyonSetRef(scope, "refs.panel", root);`);
+    expect(code).toContain(`cleanups.push(__tachyonSetRef(scope, "refs.panel", root));`);
     expect(code).toContain(`__tachyonBindControl(__tachyonElementAt(root, [0]), "value"`);
     expect(code).toContain(`__tachyonBindControl(__tachyonElementAt(root, [1,0]), "checked"`);
   });
@@ -544,7 +785,9 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(
       `import { createRoot as __tachyonCreateRoot, effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
     );
-    expect(code).toContain(`export const bind = (root, inputScope = {}) => __tachyonCreateRoot((__tachyonDisposeRoot) => {`);
+    expect(code).toContain(
+      `export const bind = (root, inputScope = {}) => __tachyonCreateRoot((__tachyonDisposeRoot) => {`,
+    );
     expect(code.indexOf(`const scope = __tachyonCreateScope(inputScope);`)).toBeGreaterThan(
       code.indexOf(`__tachyonCreateRoot((__tachyonDisposeRoot) => {`),
     );
@@ -708,7 +951,7 @@ describe("HTML-first compiler", () => {
 
     expect(code).toContain(`export const stream = async function* (scope)`);
     expect(code).toContain(`for (const row of scope.rows)`);
-    expect(code).toContain(`__tachyonPush(escapeHtml(row.id));`);
+    expect(code).toContain(`__tachyonPush((escapeHtml(row.id) || "<!--td:text-->"));`);
     expect(code).not.toContain(`tachyon-dom/runtime`);
   });
 
@@ -871,6 +1114,31 @@ describe("HTML-first compiler", () => {
         ],
       },
     ]);
+  });
+
+  it.each([
+    `<ul><for each={rows} key={row.id}><li hydrate:idle>{row.label}</li></for></ul>`,
+    `<ul><for each={rows} key={row.id}><if test={row.visible}><li hydrate:id={row.id}>{row.label}</li></if></for></ul>`,
+    `<main><for each={rows} key={row.id}><component name="Row"><p>{row.label}</p></component></for></main>`,
+    `<main><for each={rows} key={row.id}><section><store value={row.value}/><p>{value}</p></section></for></main>`,
+  ])("rejects unsupported row-local hydration metadata in %s", (source) => {
+    const result = compileTemplate(source);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected row-local metadata diagnostic.");
+    expect(result.error.message).toContain("inside <for> is not supported");
+    expect(result.error.offset).toBeGreaterThan(0);
+  });
+
+  it("keeps ordinary list bindings and top-level hydration metadata supported", () => {
+    const result = compileTemplate(
+      `<main hydrate:idle><ul><for each={rows} key={row.id}><li on:click={select} ref={rowRef}>{row.label}</li></for></ul></main>`,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.client.hydrationBoundaries).toHaveLength(1);
+    expect(result.value.client.bindings.some((binding) => binding.kind === "list")).toBe(true);
   });
 
   it("renders keyed lists on the server", () => {

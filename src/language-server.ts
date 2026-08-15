@@ -1,15 +1,9 @@
-import {
-  createConnection,
-  DiagnosticSeverity,
-  ProposedFeatures,
-  TextDocumentSyncKind,
-  TextDocuments,
-  type Connection,
-  type Diagnostic,
-  type InitializeResult,
-} from "vscode-languageserver/node";
-import { TextDocument } from "vscode-languageserver-textdocument";
+import type { Connection, Diagnostic, InitializeResult } from "vscode-languageserver/node";
 import { diagnoseTachyonSfc } from "./diagnostics.js";
+import { requireOptionalPeer } from "./optional-peer.js";
+
+type LanguageServerModule = typeof import("vscode-languageserver/node");
+type TextDocumentModule = typeof import("vscode-languageserver-textdocument");
 
 const source = "tachyon-dom";
 type DiagnosticDocument = {
@@ -39,7 +33,7 @@ export const diagnosticsForTachyonDocument = (text: string): Diagnostic[] => {
         start: { line, character },
         end: { line: endLine, character: endCharacter },
       },
-      severity: DiagnosticSeverity.Error,
+      severity: 1,
       source,
     },
   ];
@@ -85,7 +79,18 @@ export const createDiagnosticsScheduler = (
   };
 };
 
-export const startLanguageServer = (connection: Connection = createConnection(ProposedFeatures.all)): void => {
+export const startLanguageServer = (providedConnection?: Connection): void => {
+  const { createConnection, ProposedFeatures, TextDocumentSyncKind, TextDocuments } =
+    requireOptionalPeer<LanguageServerModule>(
+      "vscode-languageserver",
+      "The Tachyon language server",
+      "vscode-languageserver/node",
+    );
+  const { TextDocument } = requireOptionalPeer<TextDocumentModule>(
+    "vscode-languageserver-textdocument",
+    "The Tachyon language server",
+  );
+  const connection = providedConnection ?? createConnection(ProposedFeatures.all);
   const documents = new TextDocuments(TextDocument);
   const diagnostics = createDiagnosticsScheduler((payload) => connection.sendDiagnostics(payload));
 

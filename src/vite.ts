@@ -419,7 +419,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         command,
         mode,
       });
-      if (!emitSourceMap && (!options.onSourceMap || options.sourcemap === false)) {
+      if (!emitSourceMap && !options.onSourceMap) {
         return {
           code,
           map: null,
@@ -559,45 +559,45 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
   return {
     name: "tachyon-dom-app",
     configureServer(server) {
-    server.middlewares.use((request, response, next) => {
-      const page = app.pageForPath(new URL(request.url ?? "/", "http://tachyon.local").pathname);
-      if (!page) {
-        next();
-        return;
-      }
-      response.statusCode = 200;
-      response.setHeader("Content-Type", "text/html; charset=utf-8");
-      response.end(
-        app.renderDocument(page.path, {
-          assets: {
-            scripts: [options.appScript ?? `${page.assetPrefix ?? "."}/main.ts`],
-            styles: [`${page.assetPrefix ?? "."}/styles.css`],
-          },
-          whitespace: whitespaceFor("development"),
-        }),
-      );
-    });
+      server.middlewares.use((request, response, next) => {
+        const page = app.pageForPath(new URL(request.url ?? "/", "http://tachyon.local").pathname);
+        if (!page) {
+          next();
+          return;
+        }
+        response.statusCode = 200;
+        response.setHeader("Content-Type", "text/html; charset=utf-8");
+        response.end(
+          app.renderDocument(page.path, {
+            assets: {
+              scripts: [options.appScript ?? `${page.assetPrefix ?? "."}/main.ts`],
+              styles: [`${page.assetPrefix ?? "."}/styles.css`],
+            },
+            whitespace: whitespaceFor("development"),
+          }),
+        );
+      });
     },
     generateBundle(_outputOptions, bundle) {
-    const entry = Object.values(bundle).find((item) => item.type === "chunk" && item.isEntry);
-    const cssFiles = Object.values(bundle).flatMap((item) =>
-      item.type === "asset" && item.fileName.endsWith(".css") ? [item.fileName] : [],
-    );
-    for (const page of app.pages) {
-      const prefix = page.assetPrefix ?? ".";
-      const assets: TachyonAppAssets = {
-        scripts: entry && entry.type === "chunk" ? [prefixed(prefix, entry.fileName)] : [],
-        styles: cssFiles.map((fileName) => prefixed(prefix, fileName)),
-      };
-      this.emitFile({
-        fileName: page.fileName,
-        source: app.renderDocument(page.path, {
-          assets,
-          whitespace: whitespaceFor("production"),
-        }),
-        type: "asset",
-      });
-    }
+      const entry = Object.values(bundle).find((item) => item.type === "chunk" && item.isEntry);
+      const cssFiles = Object.values(bundle).flatMap((item) =>
+        item.type === "asset" && item.fileName.endsWith(".css") ? [item.fileName] : [],
+      );
+      for (const page of app.pages) {
+        const prefix = page.assetPrefix ?? ".";
+        const assets: TachyonAppAssets = {
+          scripts: entry && entry.type === "chunk" ? [prefixed(prefix, entry.fileName)] : [],
+          styles: cssFiles.map((fileName) => prefixed(prefix, fileName)),
+        };
+        this.emitFile({
+          fileName: page.fileName,
+          source: app.renderDocument(page.path, {
+            assets,
+            whitespace: whitespaceFor("production"),
+          }),
+          type: "asset",
+        });
+      }
     },
   };
 };

@@ -18,6 +18,10 @@ Expressions are a compiler/runtime convenience for developer-authored templates,
 <h1>{title}</h1>
 ```
 
+Expressions inside `script` and `style` are rejected because ordinary HTML escaping corrupts raw text, while removing escaping would permit closing-tag breakout. Keep JavaScript and CSS static or external. For framework hydration data, use `serializeHydrationState(id, state)`, which applies the dedicated script-data serialization contract.
+
+`textarea` and `title` remain RCDATA elements. Dynamic values inside them continue through normal HTML text escaping so the browser reconstructs the intended text value.
+
 ## Conditional Rendering
 
 `<if test={condition}>...</if>` renders children only when `test` is truthy. The client target lowers it to a comment anchor plus a `runtime/conditional` binding. The server targets omit the children when the condition is falsy.
@@ -39,6 +43,8 @@ Expressions are a compiler/runtime convenience for developer-authored templates,
   </for>
 </ul>
 ```
+
+Hydration boundaries, nested `<component>` boundaries, and `<store>` declarations are not supported inside `<for>`. Their row-local ownership metadata cannot yet be represented without duplicate hydration identities or leaked cleanup ownership, so the compiler reports a positioned error instead of silently dropping it. Ordinary text, attributes, events, models, styles, refs, and nested control flow remain supported in list rows.
 
 ## Stores
 

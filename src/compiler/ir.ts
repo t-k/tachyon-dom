@@ -1,4 +1,6 @@
 import { err, ok, type Result } from "../result.js";
+import { isDangerousAttributeName } from "../attribute-policy.js";
+import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
 import { isAssignableExpression, parseExpression } from "./expression.js";
 import type {
   CompilerError,
@@ -79,10 +81,15 @@ const componentStores = (node: ElementNode): StoreDefinition[] => {
 const validateExpression = (expression: string, context: string, span: SourceSpan): Result<void, CompilerError> => {
   const parsed = parseExpression(expression);
   if (!parsed.ok) {
+    if (parsed.error.message.includes("optional peer dependency")) {
+      return semanticError(parsed.error.message, span);
+    }
     return semanticError(`Invalid ${context} expression: ${expression}.`, span);
   }
   return ok(undefined);
 };
+
+const rawTextExpressionForbiddenTags = new Set(["script", "style"]);
 
 const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError> => {
   if (node.type === "text") {
@@ -99,8 +106,25 @@ const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError
     }
     return ok(undefined);
   }
+  if (rawTextExpressionForbiddenTags.has(node.tagName.toLowerCase())) {
+    for (const child of node.children) {
+      if (child.type !== "text") {
+        continue;
+      }
+      const expression = textExpressionSegments(child.value).find((segment) => segment.kind === "expression");
+      if (expression) {
+        return semanticError(
+          `Expressions inside <${node.tagName}> are not supported; serialize data outside raw text.`,
+          {
+            start: (child.start ?? 0) + expression.start,
+            end: (child.start ?? 0) + expression.end,
+          },
+        );
+      }
+    }
+  }
   for (const attr of node.attrs) {
-    if (attr.name === "class" || attr.name === "name") {
+    if (attr.name === "name") {
       continue;
     }
     const expression = readExpressionAttribute(attr.value);
@@ -121,6 +145,28 @@ const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError
 };
 
 const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => {
+  for (const attr of node.attrs) {
+    if (!attr.name.startsWith("on:") && isDangerousAttributeName(attr.name)) {
+      return semanticError(`Dangerous attribute is not supported: ${attr.name}.`, {
+        start: attr.nameStart,
+        end: attr.nameEnd,
+      });
+    }
+    if (
+      attr.value !== true &&
+      !readExpressionAttribute(attr.value) &&
+      urlPurposeForAttribute(node.tagName, attr.name)
+    ) {
+      try {
+        sanitizeUrlAttributeValue(node.tagName, attr.name, attr.value);
+      } catch (error) {
+        return semanticError(error instanceof Error ? error.message : `Unsafe URL for ${attr.name}.`, {
+          start: attr.valueStart,
+          end: attr.valueEnd,
+        });
+      }
+    }
+  }
   if (node.tagName === "for") {
     const each = attrExpression(node, "each");
     const key = attrExpression(node, "key");
@@ -190,7 +236,11 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
   return ok(undefined);
 };
 
-const validateTree = (node: TemplateNode, hydrateIds: Set<string>): Result<void, CompilerError> => {
+const validateTree = (
+  node: TemplateNode,
+  hydrateIds: Set<string>,
+  insideFor = false,
+): Result<void, CompilerError> => {
   const expressionResult = validateTextExpressions(node);
   if (!expressionResult.ok) {
     return expressionResult;
@@ -203,14 +253,21 @@ const validateTree = (node: TemplateNode, hydrateIds: Set<string>): Result<void,
     return specialResult;
   }
   const hydrateBoundary = hydrationBoundaryFor(node, []);
+  if (insideFor && hydrateBoundary) {
+    return semanticError("Row-local hydration metadata inside <for> is not supported.", openingTagSpan(node));
+  }
+  if (insideFor && (node.tagName === "component" || node.tagName === "store")) {
+    return semanticError(`Row-local <${node.tagName}> metadata inside <for> is not supported.`, openingTagSpan(node));
+  }
   if (hydrateBoundary && hydrateBoundary.idKind !== "static") {
     if (hydrateIds.has(hydrateBoundary.id)) {
       return semanticError(`Duplicate hydrate boundary id expression: ${hydrateBoundary.id}.`, openingTagSpan(node));
     }
     hydrateIds.add(hydrateBoundary.id);
   }
+  const childInsideFor = insideFor || node.tagName === "for";
   for (const child of node.children) {
-    const result = validateTree(child, hydrateIds);
+    const result = validateTree(child, hydrateIds, childInsideFor);
     if (!result.ok) {
       return result;
     }

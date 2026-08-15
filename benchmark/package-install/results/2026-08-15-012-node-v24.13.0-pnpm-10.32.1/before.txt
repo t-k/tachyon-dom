@@ -1,0 +1,6 @@
+Issue: 012 optional compiler tooling dependencies
+Node: v24.13.0
+pnpm: 10.32.1
+Command: pnpm add <packed tachyon-dom tarball> --config.auto-install-peers=false
+Runtime consumer node_modules: 36 MiB (du -sh)
+Installed tooling packages: typescript, oxc-parser, parse5, vscode-languageserver, vscode-languageserver-textdocument

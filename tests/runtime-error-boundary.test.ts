@@ -1,9 +1,67 @@
 import { describe, expect, it } from "vitest";
 import { createErrorBoundary } from "../src/runtime/error-boundary";
 import { rawHtml } from "../src/runtime/router";
-import { createSignal } from "../src/runtime/signal";
+import { createSignal, effect, untrack } from "../src/runtime/signal";
 
 describe("runtime error boundary", () => {
+  it("routes a later untracked child effect failure to its nearest boundary", () => {
+    const root = document.createElement("section");
+    const value = createSignal("ok");
+    const errors: string[] = [];
+    const dispose = createErrorBoundary(root, {
+      render: (target) => {
+        untrack(() =>
+          effect(() => {
+            const current = value();
+            if (current === "bad") throw new Error("child");
+            target.textContent = current;
+          }),
+        );
+      },
+      fallback: (error) => {
+        errors.push(error instanceof Error ? error.message : String(error));
+        return "fallback";
+      },
+    });
+
+    expect(() => value.set("bad")).not.toThrow();
+    expect(errors).toEqual(["child"]);
+    expect(root.textContent).toBe("fallback");
+    value.set("recovered");
+    expect(root.textContent).toBe("recovered");
+    dispose();
+    expect(() => value.set("bad")).not.toThrow();
+    expect(errors).toEqual(["child"]);
+  });
+
+  it("routes a throwing child fallback to its parent boundary", () => {
+    const root = document.createElement("main");
+    const childRoot = document.createElement("section");
+    root.appendChild(childRoot);
+    const value = createSignal("ok");
+    let disposeChild: (() => void) | undefined;
+    const disposeParent = createErrorBoundary(root, {
+      render: () => {
+        disposeChild = createErrorBoundary(childRoot, {
+          render: () => {
+            effect(() => {
+              if (value() === "bad") throw new Error("child render");
+            });
+          },
+          fallback: () => {
+            throw new Error("child fallback");
+          },
+        });
+      },
+      fallback: (error) => `parent: ${error instanceof Error ? error.message : String(error)}`,
+    });
+
+    expect(() => value.set("bad")).not.toThrow();
+    expect(root.textContent).toBe("parent: child fallback");
+    disposeChild?.();
+    disposeParent();
+  });
+
   it("renders fallback for a throwing island without replacing siblings", () => {
     document.body.innerHTML = `<main><section id="island"></section><aside id="sibling">stable</aside></main>`;
     const island = document.querySelector("#island");

@@ -1,8 +1,41 @@
 import { describe, expect, it } from "vitest";
 import { setAttributeValue, setRef, setStyleValue } from "../src/runtime/attr";
+import { setClassPresence } from "../src/runtime/class";
 import { bindControl, setControlValue } from "../src/runtime/form";
 
 describe("attribute and form runtime helpers", () => {
+  it("retains directive classes when a dynamic base class changes", () => {
+    document.body.innerHTML = `<div></div>`;
+    const element = document.body.firstElementChild;
+    if (!(element instanceof HTMLDivElement)) throw new Error("Missing element.");
+
+    setAttributeValue(element, "class", "one");
+    setClassPresence(element, "active", true);
+    setAttributeValue(element, "class", "two");
+    expect(element.className).toBe("two active");
+
+    setClassPresence(element, "active", false);
+    expect(element.className).toBe("two");
+    setAttributeValue(element, "class", null);
+    expect(element.hasAttribute("class")).toBe(false);
+  });
+
+  it("does not remove a base class token when the matching directive is false", () => {
+    document.body.innerHTML = `<div></div>`;
+    const element = document.body.firstElementChild;
+    if (!(element instanceof HTMLDivElement)) throw new Error("Missing element.");
+
+    setAttributeValue(element, "class", "card active");
+    setClassPresence(element, "active", false);
+    expect(element.className).toBe("card active");
+
+    setClassPresence(element, "active", true);
+    expect(element.className).toBe("card active");
+    setClassPresence(element, "active", false);
+    setAttributeValue(element, "class", "active selected");
+    expect(element.className).toBe("active selected");
+  });
+
   it("sets DOM attributes, reflected properties, styles, and refs", () => {
     document.body.innerHTML = `<button></button>`;
     const button = document.querySelector("button");
@@ -46,7 +79,36 @@ describe("attribute and form runtime helpers", () => {
     expect(input.value).toBe("");
   });
 
-  it("does not reflect dangerous attribute names into executable DOM properties", () => {
+  it("clears only the element currently held by a ref", () => {
+    const scope = { refs: {} as { panel?: Element } };
+    const first = document.createElement("div");
+    const cleanup = setRef(scope, "refs.panel", first);
+    const replacement = document.createElement("span");
+    scope.refs.panel = replacement;
+
+    cleanup();
+
+    expect(scope.refs.panel).toBe(replacement);
+  });
+
+  it.each(["onclick", "ONLOAD", "srcdoc", "innerhtml", "outerhtml"])(
+    "rejects dangerous attribute %s before mutating the DOM",
+    (name) => {
+      document.body.innerHTML = `<div></div>`;
+      const element = document.body.firstElementChild;
+      if (!(element instanceof HTMLDivElement)) {
+        throw new Error("Missing element.");
+      }
+
+      for (const value of ["unsafe", null, false, true]) {
+        expect(() => setAttributeValue(element, name, value)).toThrow(`Dangerous attribute is not supported: ${name}`);
+      }
+      expect(element.getAttributeNames()).toEqual([]);
+      expect(element.childElementCount).toBe(0);
+    },
+  );
+
+  it("rejects dangerous attribute names instead of reflecting executable DOM properties", () => {
     document.body.innerHTML = `<div></div><iframe></iframe><button></button>`;
     const div = document.querySelector("div");
     const iframe = document.querySelector("iframe");
@@ -59,9 +121,13 @@ describe("attribute and form runtime helpers", () => {
       throw new Error("Missing elements.");
     }
 
-    setAttributeValue(div, "innerHTML", `<img src=x onerror="alert(1)">`);
-    setAttributeValue(iframe, "srcdoc", `<script>alert(1)</script>`);
-    setAttributeValue(button, "onclick", "alert(1)");
+    expect(() => setAttributeValue(div, "innerHTML", `<img src=x onerror="alert(1)">`)).toThrow(
+      "Dangerous attribute is not supported",
+    );
+    expect(() => setAttributeValue(iframe, "srcdoc", `<script>alert(1)</script>`)).toThrow(
+      "Dangerous attribute is not supported",
+    );
+    expect(() => setAttributeValue(button, "onclick", "alert(1)")).toThrow("Dangerous attribute is not supported");
 
     expect(div.childElementCount).toBe(0);
     expect(div.hasAttribute("innerHTML")).toBe(false);
@@ -69,6 +135,28 @@ describe("attribute and form runtime helpers", () => {
     expect(iframe.srcdoc).toBe("");
     expect(button.hasAttribute("onclick")).toBe(false);
     expect(button.onclick).toBeNull();
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    " JAVASCRIPT:alert(1)",
+    "java\tscript:alert(1)",
+    "vbscript:msgbox(1)",
+    "data:text/html,<script>alert(1)</script>",
+  ])("rejects active URL %j before mutating a client attribute", (value) => {
+    document.body.innerHTML = `<a></a><img><form></form><button></button><svg><use></use></svg>`;
+    const cases = [
+      [document.querySelector("a"), "href"],
+      [document.querySelector("img"), "src"],
+      [document.querySelector("form"), "action"],
+      [document.querySelector("button"), "formaction"],
+      [document.querySelector("use"), "xlink:href"],
+    ] as const;
+    for (const [element, attribute] of cases) {
+      if (!element) throw new Error(`Missing ${attribute} element.`);
+      expect(() => setAttributeValue(element, attribute, value)).toThrow(`Unsafe URL for ${attribute}`);
+      expect(element.hasAttribute(attribute)).toBe(false);
+    }
   });
 
   it("binds text inputs and checkbox controls", () => {

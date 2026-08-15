@@ -17,6 +17,11 @@ const expectedRepository = {
 
 const failure = (error) => ({ ok: false, error });
 
+export const verifyChangelogVersion = (changelog, version) =>
+  new RegExp(`^## \\[${version.replaceAll(".", "\\.")}\\]`, "m").test(changelog)
+    ? { ok: true }
+    : failure(`CHANGELOG.md must contain a ${version} release heading.`);
+
 const hasExpectedRepository = (packageJson) =>
   packageJson?.repository?.type === expectedRepository.type && packageJson.repository.url === expectedRepository.url;
 
@@ -36,6 +41,9 @@ export const verifyReleaseIdentity = ({ tag, rootPackage, createPackage }) => {
   }
   if (!hasExpectedRepository(rootPackage) || !hasExpectedRepository(createPackage)) {
     return failure("Both release packages must declare repository metadata for t-k/tachyon-dom.");
+  }
+  if (createPackage.repository.directory !== "packages/create-tachyon-dom") {
+    return failure("The create-tachyon-dom repository directory must be packages/create-tachyon-dom.");
   }
   return { ok: true, version, npmTag: version.includes("-") ? "next" : "latest" };
 };
@@ -178,6 +186,8 @@ export const prepareReleaseArtifacts = async ({ rootDir, artifactDir, tag }) => 
     createPackage: await readPackageJson(createDir),
   });
   if (!identity.ok) return identity;
+  const changelog = verifyChangelogVersion(await readFile(path.join(rootDir, "CHANGELOG.md"), "utf8"), identity.version);
+  if (!changelog.ok) return changelog;
   await mkdir(artifactDir, { recursive: true });
   const [rootPack, createPack] = await Promise.all([
     packPackage({ packageDir: rootDir, artifactDir }),

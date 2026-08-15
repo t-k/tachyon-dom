@@ -1,0 +1,1 @@
+{"node":"v24.13.0","items":10000,"updates":100,"renderCalls":26,"updateCalls":2600,"durationMs":70.91306300000002}

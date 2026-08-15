@@ -1,4 +1,4 @@
-import { catchError } from "./signal.js";
+import { createReactiveErrorScope, effect } from "./signal.js";
 import { isClientHtml, type ClientHtml } from "./html.js";
 
 type ErrorBoundaryRenderValue = string | ClientHtml | Node | readonly Node[] | DocumentFragment;
@@ -29,12 +29,15 @@ const renderValue = (root: Element, value: ErrorBoundaryRenderValue): void => {
   root.append(...value);
 };
 
-export const createErrorBoundary = (root: Element, options: ErrorBoundaryOptions): (() => void) =>
-  catchError(
-    () => {
-      options.render(root);
-    },
-    (error) => {
-      renderValue(root, options.fallback(error));
-    },
-  );
+export const createErrorBoundary = (root: Element, options: ErrorBoundaryOptions): (() => void) => {
+  const scope = createReactiveErrorScope((error) => {
+    renderValue(root, options.fallback(error));
+  });
+  try {
+    scope.run(() => effect(() => options.render(root)));
+  } catch (error) {
+    scope.dispose();
+    throw error;
+  }
+  return scope.dispose;
+};

@@ -207,13 +207,30 @@ const applyValidationErrors = (form: HTMLFormElement, errors: Record<string, str
   form.reportValidity();
 };
 
+type SubmitControl = HTMLButtonElement | HTMLInputElement;
+
+const submitControls = (form: HTMLFormElement): SubmitControl[] =>
+  Array.from(form.elements).filter((element): element is SubmitControl => {
+    if (element instanceof HTMLButtonElement) return element.type === "submit";
+    return element instanceof HTMLInputElement && (element.type === "submit" || element.type === "image");
+  });
+
 export const enhanceForm = (form: HTMLFormElement, options: EnhanceFormOptions = {}): (() => void) => {
   const submit = options.submit ?? ((context: EnhancedFormContext) => fetch(context.request));
+  let phase: "idle" | "validating" | "pending" = "idle";
+  let disposed = false;
+  let generation = 0;
+  let activeDisabledStates: Array<readonly [SubmitControl, boolean]> | undefined;
+  const restoreSubmitControls = (): void => {
+    for (const [control, disabled] of activeDisabledStates ?? []) control.disabled = disabled;
+    activeDisabledStates = undefined;
+  };
   const listener = (event: SubmitEvent): void => {
     if (event.defaultPrevented) {
       return;
     }
     event.preventDefault();
+    if (disposed || phase !== "idle") return;
     clearCustomValidity(form);
     if (!form.noValidate && !form.checkValidity()) {
       form.reportValidity();
@@ -222,25 +239,45 @@ export const enhanceForm = (form: HTMLFormElement, options: EnhanceFormOptions =
     const formData = event.submitter instanceof HTMLElement ? new FormData(form, event.submitter) : new FormData(form);
     const request = requestForForm(form, formData);
     const context = { form, request, formData };
+    phase = "validating";
+    const currentGeneration = ++generation;
+    const isCurrent = (): boolean => !disposed && generation === currentGeneration;
     void (async () => {
       try {
         const validation = await options.validate?.(context);
+        if (!isCurrent()) return;
         if (validation && !validation.ok) {
           applyValidationErrors(form, validation.errors);
           await options.onInvalid?.({ ...context, errors: validation.errors });
           return;
         }
+        phase = "pending";
+        activeDisabledStates = submitControls(form).map((control) => [control, control.disabled] as const);
+        for (const [control] of activeDisabledStates) control.disabled = true;
         const response = await submit(context);
+        if (!isCurrent()) return;
         const locationHeader = response.headers.get("location");
         if (response.redirected || (response.status >= 300 && response.status < 400 && locationHeader)) {
           await options.navigate?.(locationHeader ?? response.url, { replace: true });
         }
+        if (!isCurrent()) return;
         await options.onSuccess?.({ ...context, response });
       } catch (error) {
-        await options.onError?.({ ...context, error });
+        if (isCurrent()) await options.onError?.({ ...context, error });
+      } finally {
+        if (generation === currentGeneration) {
+          restoreSubmitControls();
+          phase = "idle";
+        }
       }
     })();
   };
   form.addEventListener("submit", listener);
-  return () => form.removeEventListener("submit", listener);
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    generation++;
+    restoreSubmitControls();
+    form.removeEventListener("submit", listener);
+  };
 };

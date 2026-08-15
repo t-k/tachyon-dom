@@ -58,9 +58,9 @@ See the [syntax specification](docs/syntax-spec.md) for supported expressions an
 
 ## Measured Size
 
-`import { createSignal } from "tachyon-dom"` bundles to **600 bytes minified** in the current esbuild contract.
+`import { createSignal } from "tachyon-dom"` bundles to **944 bytes minified** in the current esbuild contract.
 
-Quick example client bundle: 11571 bytes minified, 3850 bytes Brotli, including the counter, keyed-list binding code, and browser runtime. CI rejects TypeScript, parse5, compiler, server, app, and language-server modules from both browser metafiles.
+Quick example client bundle: 15604 bytes minified, 5077 bytes Brotli, including the counter, keyed-list binding code, browser runtime, and client-side URL policy. CI requires the minified baseline exactly, permits 1% Brotli variance across Node/zlib patch versions, enforces absolute 16000-byte minified and 5200-byte Brotli budgets, and rejects TypeScript, parse5, compiler, server, app, and language-server modules from both browser metafiles.
 
 ```sh
 pnpm build
@@ -120,15 +120,23 @@ The normal project shape keeps route markup in `src/routes/**/page.td`, client c
 The package root contains browser-safe reactive and runtime APIs such as `createSignal()`, `createMemo()`, `createResource()`, `createRoot()`, `onCleanup()`, and the client router. Heavier tools use explicit subpaths:
 
 ```ts
-import { createSignal } from "tachyon-dom";
+import { createClientRouter, createSignal } from "tachyon-dom";
 import { compileTemplate } from "tachyon-dom/compiler";
 import { defineApp } from "tachyon-dom/app";
-import { createRouter } from "tachyon-dom/router";
 import { html } from "tachyon-dom/server/html";
 import { tachyonDom } from "tachyon-dom/vite";
 ```
 
 This boundary keeps TypeScript, parse5, language-server, app, and server graphs away from a browser consumer that only needs reactivity.
+
+Runtime-only consumers do not install TypeScript, OXC, or language-server tooling. Add the optional peers for the features you use:
+
+```sh
+pnpm add typescript oxc-parser
+pnpm add vscode-languageserver vscode-languageserver-textdocument
+```
+
+TypeScript powers SFC script transformation and OXC parses advanced template expressions. The second command is only needed for `tachyon-dom/language-server`. Missing peers fail at the relevant feature boundary with the package name and install command; importing the root runtime remains available without them. parse5 remains a normal dependency because the synchronous `normalize-tags` policy is supported in Workers as well as Node and Lambda.
 
 ## Documentation
 

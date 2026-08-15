@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-07-26
+
+### Fixed
+
+- Rechecked the npm tag immediately before publishing and published each release to its matching npm tag.
+
+## [0.1.2] - 2026-07-26
+
+### Changed
+
+- Refreshed client layouts after query navigation and hardened release and package verification gates.
+
+### Fixed
+
+- Preserved request-body ownership across progressive, superseded, guarded, and terminal middleware paths.
+- Kept generated form patterns frozen and aligned adapter, cookie, Vite, CLI, and runtime boundaries.
+
+### Security
+
+- Failed closed on malformed CSRF bodies and enforced form-key and action-body limits.
+- Hardened request, cookie-signature, middleware authorization, and reconstructed-context boundaries.
+
 ## [0.1.1] - 2026-07-13
 
 ### Added
@@ -38,6 +60,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Initial public release of the experimental HTML-first compiler, fine-grained runtime, SSR and streaming targets, router, adapters, Vite integration, CLI, and project initializer.
 
-[Unreleased]: https://github.com/t-k/tachyon-dom/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/t-k/tachyon-dom/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/t-k/tachyon-dom/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/t-k/tachyon-dom/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/t-k/tachyon-dom/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/t-k/tachyon-dom/releases/tag/v0.1.0

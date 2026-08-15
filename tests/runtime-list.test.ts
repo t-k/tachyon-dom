@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSignal, effect } from "../src/runtime/signal";
+import { createRoot, createSignal, effect } from "../src/runtime/signal";
 import { mountKeyedList } from "../src/runtime/list";
 
 const stringify = JSON.stringify;
@@ -14,6 +14,63 @@ afterEach(() => {
 });
 
 describe("mountKeyedList", () => {
+  it("clears a row ref when its keyed row is removed", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const item: { id: number; ref?: Element } = { id: 1 };
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li></li>`,
+      bindings: [{ kind: "ref" as const, path: [], expression: "item.ref" }],
+    };
+
+    mountKeyedList(root, [], [item], options);
+    expect(item.ref).toBe(root.querySelector("li"));
+    mountKeyedList(root, [], [], options);
+
+    expect(item.ref).toBeUndefined();
+  });
+
+  it("disposes bindings for rows appended after root creation", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const rows = createSignal([{ id: 1 }]);
+    const shared = createSignal(0);
+    const calls = new Map<number, number>();
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          expression: "item.id",
+          read: (scope: Record<string, unknown>) => {
+            shared();
+            const id = (scope.item as { id: number }).id;
+            calls.set(id, (calls.get(id) ?? 0) + 1);
+            return id;
+          },
+        },
+      ],
+    };
+    const dispose = createRoot((disposeRoot) => {
+      effect(() => mountKeyedList(root, [], rows(), options));
+      return disposeRoot;
+    });
+
+    rows.set([{ id: 1 }, { id: 2 }]);
+    const beforeDispose = new Map(calls);
+    dispose();
+    shared.set(1);
+
+    expect(calls).toEqual(beforeDispose);
+  });
+
   it("mounts rows with direct text and class bindings", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

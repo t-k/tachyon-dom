@@ -223,6 +223,7 @@
     "check:browser-entry": "node scripts/verify-browser-entry.mjs",
     "check:quick-example-size": "node scripts/verify-quick-example-bundle.mjs",
     "verify:package": "node scripts/verify-package-artifacts.mjs && node scripts/verify-middleware-context-types.mjs",
+    "verify:clean-consumer": "node scripts/verify-clean-consumer.mjs",
     "verify:release": "node scripts/release-contract.mjs --verify-artifacts release-artifacts",
     "prepare:release": "node scripts/release-contract.mjs",
     "verify:starters": "node scripts/verify-generated-starters.mjs",
@@ -233,11 +234,7 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.2.0",
-    "oxc-parser": "^0.136.0",
-    "parse5": "^7.3.0",
-    "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vscode-languageserver": "^10.0.1",
-    "vscode-languageserver-textdocument": "^1.0.12"
+    "parse5": "^7.3.0"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "0.18.4",
@@ -264,6 +261,7 @@
     "jsdom": "^26.1.0",
     "marko": "^5.39.7",
     "next": "^16.2.9",
+    "oxc-parser": "^0.136.0",
     "oxfmt": "^0.55.0",
     "oxlint": "^1.70.0",
     "playwright": "^1.61.0",
@@ -273,11 +271,34 @@
     "size-limit": "12.1.0",
     "solid-js": "^1.9.13",
     "tsx": "^4.22.4",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vinxi": "^0.5.11",
     "vite": "^8.0.16",
     "vite-plugin-solid": "^2.11.12",
     "vitest": "^4.1.9",
+    "vscode-languageserver": "^10.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12",
     "wrangler": "^4.105.0"
+  },
+  "peerDependencies": {
+    "oxc-parser": "^0.136.0",
+    "typescript": ">=5.8.0 <7",
+    "vscode-languageserver": "^10.0.1",
+    "vscode-languageserver-textdocument": "^1.0.12"
+  },
+  "peerDependenciesMeta": {
+    "oxc-parser": {
+      "optional": true
+    },
+    "typescript": {
+      "optional": true
+    },
+    "vscode-languageserver": {
+      "optional": true
+    },
+    "vscode-languageserver-textdocument": {
+      "optional": true
+    }
   },
   "size-limit": [
     {

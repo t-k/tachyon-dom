@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { brotliCompressSync } from "node:zlib";
 import { build } from "esbuild";
 import { compileTemplate, generateClientModule } from "../dist/compiler.js";
+import { checkQuickExampleSizes } from "./quick-example-size-policy.mjs";
 
 const expectedSizes = JSON.parse(
   await readFile(new URL("./browser-bundle-sizes.json", import.meta.url), "utf8"),
@@ -63,22 +64,22 @@ const brotliBytes = result.outputFiles.reduce(
   (total, output) => total + brotliCompressSync(output.contents).byteLength,
   0,
 );
-if (
-  minifiedBytes !== expectedSizes.quickExampleMinifiedBytes ||
-  brotliBytes !== expectedSizes.quickExampleBrotliBytes
-) {
+const maxMinifiedBytes = 16_000;
+const maxBrotliBytes = 5_200;
+const sizeResult = checkQuickExampleSizes({
+  expectedMinified: expectedSizes.quickExampleMinifiedBytes,
+  actualMinified: minifiedBytes,
+  expectedBrotli: expectedSizes.quickExampleBrotliBytes,
+  actualBrotli: brotliBytes,
+  maxMinified: maxMinifiedBytes,
+  maxBrotli: maxBrotliBytes,
+});
+if (!sizeResult.ok) {
   throw new Error(
-    `Quick example measured ${minifiedBytes} minified/${brotliBytes} Brotli bytes; update the implementation, README, and browser-bundle-sizes.json together.`,
-  );
-}
-const maxMinifiedBytes = 12_000;
-const maxBrotliBytes = 4_000;
-if (minifiedBytes > maxMinifiedBytes || brotliBytes > maxBrotliBytes) {
-  throw new Error(
-    `Quick example exceeds its budget: ${minifiedBytes}/${maxMinifiedBytes} minified bytes, ${brotliBytes}/${maxBrotliBytes} Brotli bytes.`,
+    `Quick example failed its ${sizeResult.reason} check at ${minifiedBytes} minified/${brotliBytes} Brotli bytes; update the implementation, README, and browser-bundle-sizes.json together.`,
   );
 }
 
 console.log(
-  `Quick example client bundle: ${minifiedBytes} bytes minified, ${brotliBytes} bytes Brotli, ${Object.keys(result.metafile.inputs).length} inputs.`,
+  `Quick example client bundle: ${minifiedBytes} bytes minified, ${brotliBytes} bytes Brotli (±${sizeResult.tolerance}), ${Object.keys(result.metafile.inputs).length} inputs, Node ${process.version}, zlib ${process.versions.zlib}.`,
 );

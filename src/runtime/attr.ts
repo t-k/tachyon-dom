@@ -1,15 +1,19 @@
-const dangerousPropertyNames = new Set(["innerhtml", "outerhtml", "srcdoc"]);
-
-const shouldReflectProperty = (name: string): boolean => {
-  const normalized = name.toLowerCase();
-  return !normalized.startsWith("on") && !dangerousPropertyNames.has(normalized);
-};
+import { validateAttributeName } from "../attribute-policy.js";
+import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
+import { setClassValue } from "./class.js";
 
 export const setAttributeValue = (element: Element, name: string, value: unknown): void => {
-  const reflectProperty = shouldReflectProperty(name);
+  const validatedName = validateAttributeName(name);
+  if (!validatedName.ok) {
+    throw validatedName.error;
+  }
+  if (name.toLowerCase() === "class") {
+    setClassValue(element, value);
+    return;
+  }
   if (value == null || value === false) {
     element.removeAttribute(name);
-    if (reflectProperty && name in element) {
+    if (name in element) {
       try {
         const properties = element as unknown as Record<string, unknown>;
         const current = properties[name];
@@ -24,18 +28,19 @@ export const setAttributeValue = (element: Element, name: string, value: unknown
     }
     return;
   }
-  if (!reflectProperty) {
-    element.removeAttribute(name);
-    return;
-  }
+  let resolvedValue = value;
   if (value === true) {
     element.setAttribute(name, "");
   } else {
-    element.setAttribute(name, String(value));
+    const text = String(value);
+    resolvedValue = urlPurposeForAttribute(element.localName, name)
+      ? sanitizeUrlAttributeValue(element.localName, name, text)
+      : text;
+    element.setAttribute(name, String(resolvedValue));
   }
   if (name in element) {
     try {
-      (element as unknown as Record<string, unknown>)[name] = value;
+      (element as unknown as Record<string, unknown>)[name] = resolvedValue;
     } catch {
       // Some readonly DOM properties throw on assignment.
     }
@@ -49,18 +54,21 @@ export const setStyleValue = (element: Element, name: string, value: unknown): v
   element.style.setProperty(name, value == null || value === false ? "" : String(value));
 };
 
-export const setRef = (scope: Record<string, unknown>, expression: string, element: Element): void => {
+export const setRef = (scope: Record<string, unknown>, expression: string, element: Element): (() => void) => {
   const parts = expression.split(".");
   let current: Record<string, unknown> = scope;
   for (const part of parts.slice(0, -1)) {
     const next = current[part];
     if (next == null || typeof next !== "object") {
-      return;
+      return () => undefined;
     }
     current = next as Record<string, unknown>;
   }
   const last = parts.at(-1);
-  if (last) {
-    current[last] = element;
-  }
+  if (!last) return () => undefined;
+  current[last] = element;
+  const target = current;
+  return () => {
+    if (target[last] === element) target[last] = undefined;
+  };
 };

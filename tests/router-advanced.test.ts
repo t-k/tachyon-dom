@@ -27,6 +27,123 @@ import { scanFileRoutes } from "../src/router-node";
 import { renderRouteForTest } from "../src/testing";
 
 describe("advanced router features", () => {
+  it.each(["/items/%", "/items/%zz", "/items/%E0%A4%A"])(
+    "returns generic 400 for malformed path %s without invoking route callbacks",
+    async (pathname) => {
+      let callbackCalls = 0;
+      const routes: RouteDefinition[] = [
+        {
+          path: "/items/:id",
+          loader: () => {
+            callbackCalls += 1;
+          },
+          render: () => {
+            callbackCalls += 1;
+            return "item";
+          },
+          notFound: () => {
+            callbackCalls += 1;
+            return "custom missing";
+          },
+        },
+      ];
+
+      const buffered = await renderRoute(routes, `https://example.com${pathname}`, {
+        notFound: () => {
+          callbackCalls += 1;
+          return "global missing";
+        },
+      });
+      const streamed = await renderRouteStream(routes, `https://example.com${pathname}`);
+
+      expect(buffered.ok && buffered.value.status).toBe(400);
+      expect(buffered.ok && buffered.value.html).toBe("<h1>Bad Request</h1>");
+      expect(buffered.ok && buffered.value.headers.get("content-type")).toBe("text/html; charset=utf-8");
+      expect(streamed.ok && streamed.value.status).toBe(400);
+      expect(callbackCalls).toBe(0);
+    },
+  );
+
+  it.each([
+    ["nested", "/groups/:group/items/:id", "/groups/team/items/%zz"],
+    ["wildcard", "/files/*path", "/files/folder/%zz"],
+  ])("preserves 400 for malformed %s route parameters", async (_kind, routePath, pathname) => {
+    const result = await renderRoute(
+      [{ path: routePath, render: () => "unexpected" }],
+      `https://example.com${pathname}`,
+    );
+
+    expect(result.ok && result.value.status).toBe(400);
+    expect(result.ok && result.value.html).toBe("<h1>Bad Request</h1>");
+  });
+
+  it("continues to render valid percent-encoded route parameters", async () => {
+    const result = await renderRoute(
+      [{ path: "/items/:id", render: ({ params }) => params.id ?? "missing" }],
+      "https://example.com/items/part%2Fdetail",
+    );
+
+    expect(result.ok && result.value.status).toBe(200);
+    expect(result.ok && result.value.html).toBe("part/detail");
+  });
+
+  it.each([204, 205, 304])("normalizes bodyless route status %i in buffered and streaming results", async (status) => {
+    const routes: RouteDefinition[] = [
+      {
+        path: "/submit",
+        action: () =>
+          json(
+            { unexpected: true },
+            {
+              status,
+              headers: { "content-length": "19", "transfer-encoding": "chunked", "x-kept": "yes" },
+            },
+          ),
+        render: () => "unused",
+      },
+    ];
+    const request = (): Request => new Request("https://example.com/submit", { method: "POST" });
+
+    const buffered = await renderRoute(routes, request());
+    const streamed = await renderRouteStream(routes, request());
+
+    expect(buffered.ok && buffered.value.status).toBe(status);
+    expect(buffered.ok && buffered.value.html).toBe("");
+    expect(buffered.ok && buffered.value.responseBody).toBeUndefined();
+    expect(buffered.ok && buffered.value.headers.get("content-length")).toBeNull();
+    expect(buffered.ok && buffered.value.headers.get("transfer-encoding")).toBeNull();
+    expect(buffered.ok && buffered.value.headers.get("x-kept")).toBe("yes");
+    expect(streamed.ok && streamed.value.status).toBe(status);
+    if (!streamed.ok) throw new Error(streamed.error.message);
+    let streamedBody = "";
+    for await (const chunk of streamed.value.chunks) streamedBody += chunk;
+    expect(streamedBody).toBe("");
+  });
+
+  it.each([
+    ["unmatched", [{ path: "/safe", render: () => "safe" }]],
+    ["static literal", [{ path: "/%zz", render: () => "unsafe" }]],
+  ] satisfies Array<[string, RouteDefinition[]]>)(
+    "rejects malformed encoding before %s route selection",
+    async (_kind, routes) => {
+      let notFoundCalls = 0;
+      const buffered = await renderRoute(routes, "https://example.com/%zz", {
+        notFound: () => {
+          notFoundCalls += 1;
+          return "missing";
+        },
+      });
+      const streamed = await renderRouteStream(routes, "https://example.com/%zz");
+
+      expect(buffered.ok && buffered.value.status).toBe(400);
+      expect(buffered.ok && buffered.value.html).toBe("<h1>Bad Request</h1>");
+      expect(buffered.ok && buffered.value.error).toEqual({ message: "Invalid path encoding.", status: 400 });
+      expect(streamed.ok && streamed.value.status).toBe(400);
+      expect(streamed.ok && streamed.value.error).toEqual({ message: "Invalid path encoding.", status: 400 });
+      expect(notFoundCalls).toBe(0);
+    },
+  );
+
   it("creates file-based route manifests from route files", async () => {
     const files = [
       "/app/src/routes/index.tachyon.html",

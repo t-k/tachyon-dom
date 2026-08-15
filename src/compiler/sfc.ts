@@ -1,7 +1,19 @@
-import * as ts from "typescript";
+import type { BindingName, Diagnostic, Expression, Identifier, Node, PropertyName, SourceFile } from "typescript";
+import { requireOptionalPeer } from "../optional-peer.js";
 import { err, ok, type Result } from "../result.js";
 import { compileTemplate } from "./index.js";
 import type { CompiledTemplate, CompilerError, CompileTemplateOptions } from "./types.js";
+
+type TypeScriptModule = typeof import("typescript");
+
+let loadedTypeScript: TypeScriptModule | undefined;
+
+const ts = new Proxy({} as TypeScriptModule, {
+  get: (_target, property) => {
+    loadedTypeScript ??= requireOptionalPeer<TypeScriptModule>("typescript", "Tachyon SFC compilation");
+    return Reflect.get(loadedTypeScript, property);
+  },
+});
 
 export const sfcDefaultScopeName = "__tachyonSfcDefaultScope";
 export const sfcNamedScopeName = "__tachyonSfcScope";
@@ -37,7 +49,6 @@ export type TransformedSfcScript = {
   setupBindings: string[];
 };
 
-const scriptOpenPattern = /<script\b([^>]*)>/gi;
 const autoImports: Record<string, string> = {
   batch: "tachyon-dom",
   compileTachyonSfc: "tachyon-dom/compiler",
@@ -61,6 +72,47 @@ const autoImportPattern = new RegExp(
     .map((name) => name.replaceAll("$", "\\$"))
     .join("|")})\\b`,
 );
+const scriptSyntaxCacheLimit = 128;
+const jsSyntaxCache = new Map<string, { message: string; start: number } | null>();
+
+const rememberJsSyntax = (
+  source: string,
+  diagnostic: { message: string; start: number } | null,
+): { message: string; start: number } | null => {
+  if (jsSyntaxCache.has(source)) jsSyntaxCache.delete(source);
+  jsSyntaxCache.set(source, diagnostic);
+  while (jsSyntaxCache.size > scriptSyntaxCacheLimit) {
+    const oldest = jsSyntaxCache.keys().next().value;
+    if (oldest === undefined) break;
+    jsSyntaxCache.delete(oldest);
+  }
+  return diagnostic;
+};
+
+const jsSyntaxDiagnostic = (source: string): { message: string; start: number } | null => {
+  if (jsSyntaxCache.has(source)) {
+    return jsSyntaxCache.get(source) ?? null;
+  }
+  const result = ts.transpileModule(source, {
+    compilerOptions: {
+      allowJs: true,
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: "component.td.js",
+    reportDiagnostics: true,
+  });
+  const diagnostic = result.diagnostics?.find((item) => item.category === ts.DiagnosticCategory.Error);
+  return rememberJsSyntax(
+    source,
+    diagnostic
+      ? {
+          message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+          start: diagnostic.start ?? 0,
+        }
+      : null,
+  );
+};
 
 const mapGeneratedOffset = (ranges: readonly TemplateRange[], sourceLength: number, offset: number): number => {
   for (const range of ranges) {
@@ -98,6 +150,58 @@ const attrValue = (attrs: string, name: string): string | undefined => {
 const hasBooleanAttr = (attrs: string, name: string): boolean =>
   new RegExp(`(?:^|\\s)${name}(?:\\s|=|$)`, "i").test(attrs);
 
+const leadingTriviaEnd = (source: string): number => {
+  let offset = 0;
+  while (offset < source.length) {
+    const whitespace = /^\s+/.exec(source.slice(offset));
+    if (whitespace) {
+      offset += whitespace[0].length;
+      continue;
+    }
+    if (!source.startsWith("<!--", offset)) break;
+    const commentEnd = source.indexOf("-->", offset + 4);
+    if (commentEnd < 0) break;
+    offset = commentEnd + 3;
+  }
+  return offset;
+};
+
+const leadingScriptOpen = (source: string): { attrs: string; start: number; end: number } | undefined => {
+  const start = leadingTriviaEnd(source);
+  const prefix = /^<script\b/i.exec(source.slice(start));
+  if (!prefix) return undefined;
+  let quote: '"' | "'" | undefined;
+  for (let index = start + prefix[0].length; index < source.length; index += 1) {
+    const char = source[index] as string;
+    if (quote) {
+      if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+    } else if (char === ">") {
+      return {
+        attrs: source.slice(start + prefix[0].length, index).trim(),
+        start,
+        end: index + 1,
+      };
+    }
+  }
+  return undefined;
+};
+
+const isComponentScript = (attrs: string): boolean => {
+  if (hasBooleanAttr(attrs, "src")) return false;
+  const type = attrValue(attrs, "type")?.trim().toLowerCase();
+  return (
+    type === undefined ||
+    type === "" ||
+    type === "module" ||
+    type === "text/javascript" ||
+    type === "application/javascript"
+  );
+};
+
 export const sfcScriptLanguage = (script: TachyonSfcScript | undefined): "js" | "ts" => {
   const lang = attrValue(script?.attrs ?? "", "lang")?.toLowerCase();
   return lang === "ts" || lang === "typescript" ? "ts" : "js";
@@ -106,21 +210,21 @@ export const sfcScriptLanguage = (script: TachyonSfcScript | undefined): "js" | 
 export const isSfcSetupScript = (script: TachyonSfcScript | undefined): boolean =>
   hasBooleanAttr(script?.attrs ?? "", "setup");
 
-const unwrapStaticExpression = (node: ts.Expression): ts.Expression => {
+const unwrapStaticExpression = (node: Expression): Expression => {
   if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
     return unwrapStaticExpression(node.expression);
   }
   return node;
 };
 
-const staticPropertyName = (name: ts.PropertyName): string | undefined => {
+const staticPropertyName = (name: PropertyName): string | undefined => {
   if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
     return name.text;
   }
   return undefined;
 };
 
-const staticExpressionValue = (input: ts.Expression): Result<unknown, string> => {
+const staticExpressionValue = (input: Expression): Result<unknown, string> => {
   const node = unwrapStaticExpression(input);
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return ok(node.text);
   if (ts.isNumericLiteral(node)) return ok(Number(node.text));
@@ -172,7 +276,7 @@ export const extractStaticSfcScope = (source: string): Result<Record<string, unk
       if (!ts.isArrowFunction(initializer) && !ts.isFunctionExpression(initializer)) {
         return err("SFC scope must be a function returning a static object or be supplied explicitly by defineApp().");
       }
-      let returned: ts.Expression | undefined;
+      let returned: Expression | undefined;
       if (ts.isBlock(initializer.body)) {
         const returnStatement = initializer.body.statements.find(ts.isReturnStatement);
         returned = returnStatement?.expression;
@@ -191,7 +295,7 @@ export const extractStaticSfcScope = (source: string): Result<Record<string, unk
   return ok(undefined);
 };
 
-const sourceFileFor = (source: string, script: TachyonSfcScript | undefined): ts.SourceFile =>
+const sourceFileFor = (source: string, script: TachyonSfcScript | undefined): SourceFile =>
   ts.createSourceFile(
     sfcScriptLanguage(script) === "ts" ? "component.td.ts" : "component.td.js",
     source,
@@ -200,7 +304,7 @@ const sourceFileFor = (source: string, script: TachyonSfcScript | undefined): ts
     sfcScriptLanguage(script) === "ts" ? ts.ScriptKind.TS : ts.ScriptKind.JS,
   );
 
-const compilerErrorFromDiagnostic = (diagnostic: ts.Diagnostic, script: TachyonSfcScript): CompilerError => {
+const compilerErrorFromDiagnostic = (diagnostic: Diagnostic, script: TachyonSfcScript): CompilerError => {
   const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
   return {
     message,
@@ -211,7 +315,10 @@ const compilerErrorFromDiagnostic = (diagnostic: ts.Diagnostic, script: TachyonS
 const transpileScriptContent = (script: TachyonSfcScript): Result<string, CompilerError> => {
   const language = sfcScriptLanguage(script);
   if (language === "js") {
-    return ok(script.content.trim());
+    const diagnostic = jsSyntaxDiagnostic(script.content);
+    return diagnostic
+      ? err({ message: diagnostic.message, offset: script.offset + diagnostic.start })
+      : ok(script.content.trim());
   }
   const result = ts.transpileModule(script.content, {
     compilerOptions: {
@@ -220,7 +327,7 @@ const transpileScriptContent = (script: TachyonSfcScript): Result<string, Compil
       useDefineForClassFields: true,
       verbatimModuleSyntax: true,
     },
-    fileName: "component.td.ts",
+    fileName: language === "ts" ? "component.td.ts" : "component.td.js",
     reportDiagnostics: true,
   });
   const diagnostic = result.diagnostics?.find((item) => item.category === ts.DiagnosticCategory.Error);
@@ -230,7 +337,7 @@ const transpileScriptContent = (script: TachyonSfcScript): Result<string, Compil
   return ok(result.outputText.trim());
 };
 
-const addBindingNames = (name: ts.BindingName, names: Set<string>): void => {
+const addBindingNames = (name: BindingName, names: Set<string>): void => {
   if (ts.isIdentifier(name)) {
     names.add(name.text);
     return;
@@ -262,7 +369,7 @@ const topLevelBindings = (script: TachyonSfcScript | undefined): string[] => {
   return Array.from(names).sort();
 };
 
-const isDeclarationName = (node: ts.Identifier): boolean => {
+const isDeclarationName = (node: Identifier): boolean => {
   const parent = node.parent;
   return (
     (ts.isVariableDeclaration(parent) && parent.name === node) ||
@@ -285,7 +392,7 @@ const collectScriptIdentifiers = (
   const declared = new Set<string>();
   const referenced = new Set<string>();
   const sourceFile = sourceFileFor(source, script);
-  const visit = (node: ts.Node): void => {
+  const visit = (node: Node): void => {
     if (ts.isImportDeclaration(node)) {
       const clause = node.importClause;
       if (clause?.name) {
@@ -339,36 +446,31 @@ const autoImportScriptHelpers = (code: string, script: TachyonSfcScript | undefi
 };
 
 export const parseTachyonSfc = (source: string): Result<TachyonSfcDescriptor, CompilerError> => {
-  const matches = Array.from(source.matchAll(scriptOpenPattern));
-  if (matches.length === 0) {
+  const open = leadingScriptOpen(source);
+  if (!open || !isComponentScript(open.attrs)) {
     return ok({
       template: source,
       mapTemplateOffset: (offset) => offset,
     });
   }
-  if (matches.length > 1) {
-    return err({ message: "Only one <script> block is currently supported.", offset: matches[1]?.index ?? 0 });
+  const closePattern = /<\/script\s*>/gi;
+  closePattern.lastIndex = open.end;
+  const close = closePattern.exec(source);
+  if (!close) {
+    return err({ message: "Missing closing </script> tag.", offset: open.start });
   }
-
-  const match = matches[0];
-  const openStart = match?.index ?? 0;
-  const openEnd = openStart + (match?.[0].length ?? 0);
-  const closeStart = source.indexOf("</script>", openEnd);
-  if (closeStart < 0) {
-    return err({ message: "Missing closing </script> tag.", offset: openStart });
-  }
-  const closeEnd = closeStart + "</script>".length;
-  const before = source.slice(0, openStart);
+  const closeStart = close.index;
+  const closeEnd = close.index + close[0].length;
+  const before = "";
   const after = source.slice(closeEnd);
   const ranges: TemplateRange[] = [
-    { generatedStart: 0, originalStart: 0, length: before.length },
     { generatedStart: before.length, originalStart: closeEnd, length: after.length },
   ];
   return ok({
     script: {
-      attrs: match?.[1]?.trim() ?? "",
-      content: source.slice(openEnd, closeStart),
-      offset: openEnd,
+      attrs: open.attrs,
+      content: source.slice(open.end, closeStart),
+      offset: open.end,
     },
     template: `${before}${after}`,
     mapTemplateOffset: (offset) => mapGeneratedOffset(ranges, source.length, offset),

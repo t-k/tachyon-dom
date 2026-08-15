@@ -1,5 +1,7 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
+import { emptyTextMarker } from "../../text-marker.js";
+import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
 import {
   attrExpression,
   attrString,
@@ -14,7 +16,7 @@ import {
   renderableChildren,
   textExpressionSegments,
 } from "../utils.js";
-import { renderOpenTagExpression } from "./server.js";
+import { hasDynamicUrlAttribute, renderOpenTagExpression } from "./server.js";
 
 const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, indent: string): string[] => {
   const statements: string[] = [];
@@ -34,7 +36,9 @@ const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, 
       continue;
     }
     separateTextNode();
-    statements.push(`${indent}yield escapeHtml(${expressionToScopeAccess(segment.value, locals)});`);
+    statements.push(
+      `${indent}yield (escapeHtml(${expressionToScopeAccess(segment.value, locals)}) || ${jsString(emptyTextMarker)});`,
+    );
     lastEmittedWasText = true;
   }
   return statements;
@@ -237,6 +241,7 @@ export const generateServerStreamModule = (template: CompiledTemplate): string =
   });
   const lines = [
     ...generatedEscapeHtmlHelperLines,
+    ...(hasDynamicUrlAttribute(template.root) ? generatedUrlAttributeHelperLines : []),
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `export const stream = async function* (scope) {`,
     `  const __tachyonFlushBytes = 8192;`,

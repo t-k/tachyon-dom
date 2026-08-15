@@ -649,6 +649,7 @@ const starterPackageJsonSource = (): string =>
       },
       devDependencies: {
         "@types/node": "^24.0.3",
+        "oxc-parser": "^0.136.0",
         typescript: "^5.8.3",
         vite: "^8.0.0",
         vitest: "^4.1.9",

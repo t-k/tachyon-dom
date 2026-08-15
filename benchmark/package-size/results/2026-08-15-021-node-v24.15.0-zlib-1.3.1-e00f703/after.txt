@@ -1,0 +1,1 @@
+Quick example client bundle: 15604 bytes minified, 5077 bytes Brotli (±51), 20 inputs, Node v24.15.0, zlib 1.3.1-e00f703.

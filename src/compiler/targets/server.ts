@@ -1,5 +1,8 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
+import { emptyTextMarker } from "../../text-marker.js";
+import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../../url-policy.js";
+import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
 import {
   attrExpression,
   attrString,
@@ -68,7 +71,7 @@ const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
       continue;
     }
     separateTextNode();
-    output += escapeHtml(readPath(scope, segment.value));
+    output += escapeHtml(readPath(scope, segment.value)) || emptyTextMarker;
     lastEmittedWasText = true;
   }
   return output;
@@ -155,14 +158,21 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
       continue;
     }
     if (attr.name === "class" && attr.value !== true) {
-      classes.push(attr.value);
+      const expression = readExpressionAttribute(attr.value);
+      const value = expression ? readPath(scope, expression) : attr.value;
+      if (value != null && value !== false) {
+        classes.push(String(value));
+      }
       continue;
     }
     const expression = readExpressionAttribute(attr.value);
     if (expression) {
       const value = readPath(scope, expression);
       if (value != null && value !== false) {
-        attrs.push(` ${attr.name}="${escapeHtml(value)}"`);
+        const safeValue = urlPurposeForAttribute(node.tagName, attr.name)
+          ? sanitizeUrlAttributeValue(node.tagName, attr.name, String(value))
+          : value;
+        attrs.push(` ${attr.name}="${escapeHtml(safeValue)}"`);
       }
       continue;
     }
@@ -213,7 +223,7 @@ const renderTextExpression = (node: TextNode, locals: ReadonlySet<string> = new 
       continue;
     }
     separateTextNode();
-    parts.push(`escapeHtml(${expressionToScopeAccess(segment.value, locals)})`);
+    parts.push(`(escapeHtml(${expressionToScopeAccess(segment.value, locals)}) || ${jsString(emptyTextMarker)})`);
     lastEmittedWasText = true;
   }
   return parts.length > 0 ? parts.join(" + ") : `""`;
@@ -243,6 +253,7 @@ const foldStaticExpressionParts = (parts: string[]): string[] => {
 export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<string>): string => {
   const parts: string[] = [jsString(`<${node.tagName}`)];
   const staticClasses: string[] = [];
+  const dynamicBaseClasses: string[] = [];
   const dynamicClasses: string[] = [];
   const dynamicStyles: string[] = [];
 
@@ -275,30 +286,41 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
       continue;
     }
     if (attr.name === "class" && attr.value !== true) {
-      staticClasses.push(attr.value);
+      const expression = readExpressionAttribute(attr.value);
+      if (expression) {
+        const value = expressionToScopeAccess(expression, locals);
+        dynamicBaseClasses.push(`(${value} == null || ${value} === false ? "" : " " + String(${value}))`);
+      } else {
+        staticClasses.push(attr.value);
+      }
       continue;
     }
     const expression = readExpressionAttribute(attr.value);
     if (expression) {
       const value = expressionToScopeAccess(expression, locals);
+      const safeValue = urlPurposeForAttribute(node.tagName, attr.name)
+        ? `__tachyonSafeUrlAttribute(${jsString(node.tagName)}, ${jsString(attr.name)}, ${value})`
+        : value;
       parts.push(
-        `(${value} == null || ${value} === false ? "" : ${jsString(` ${attr.name}="`)} + escapeHtml(${value}) + ${jsString(`"`)} )`,
+        `(${value} == null || ${value} === false ? "" : ${jsString(` ${attr.name}="`)} + escapeHtml(${safeValue}) + ${jsString(`"`)} )`,
       );
       continue;
     }
     parts.push(jsString(serializeStaticAttr(attr)));
   }
 
-  if (staticClasses.length > 0 || dynamicClasses.length > 0) {
+  if (staticClasses.length > 0 || dynamicBaseClasses.length > 0 || dynamicClasses.length > 0) {
     const classExpression = `${jsString(staticClasses.join(" "))}${
+      dynamicBaseClasses.length > 0 ? ` + ${dynamicBaseClasses.join(" + ")}` : ""
+    }${
       dynamicClasses.length > 0 ? ` + ${dynamicClasses.join(" + ")}` : ""
     }`;
     parts.splice(
       1,
       0,
-      dynamicClasses.length === 0
+      dynamicBaseClasses.length === 0 && dynamicClasses.length === 0
         ? jsString(` class="${staticClasses.join(" ")}"`)
-        : `(${classExpression} ? ${jsString(` class="`)} + (${classExpression}).trim() + ${jsString(`"`)} : "")`,
+        : `((value) => value ? ${jsString(` class="`)} + escapeHtml(value.trim()) + ${jsString(`"`)} : "")(${classExpression})`,
     );
   }
   if (dynamicStyles.length > 0) {
@@ -433,6 +455,15 @@ const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string
 
 const serverModuleCache = new WeakMap<CompiledTemplate, string>();
 
+export const hasDynamicUrlAttribute = (node: TemplateNode): boolean =>
+  node.type === "element" &&
+  (node.attrs.some(
+    (attribute) =>
+      Boolean(readExpressionAttribute(attribute.value)) &&
+      urlPurposeForAttribute(node.tagName, attribute.name) !== undefined,
+  ) ||
+    node.children.some(hasDynamicUrlAttribute));
+
 export const generateServerModule = (template: CompiledTemplate): string => {
   const cached = serverModuleCache.get(template);
   if (cached) {
@@ -440,6 +471,7 @@ export const generateServerModule = (template: CompiledTemplate): string => {
   }
   const lines = [
     ...generatedEscapeHtmlHelperLines,
+    ...(hasDynamicUrlAttribute(template.root) ? generatedUrlAttributeHelperLines : []),
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll(">", "\\\\u003e");`,
     `const ATTRIBUTE_ESCAPE = { "&": "&amp;", '"': "&quot;", "<": "&lt;" };`,

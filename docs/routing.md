@@ -18,6 +18,10 @@ Template routes may use `.td`, `.tachyon`, or `.tachyon.html` extensions. Route 
 
 `tachyon-dom/router/node` exports `scanFileRoutes(rootDir)` for Node-based tooling that should read the filesystem. The runtime `tachyon-dom/router` entry does not import Node built-ins, so it is suitable for Workers bundles.
 
+## Client Loader Cache
+
+`createClientRouter({ cache: true })` retains up to 100 loader results using least-recently-used eviction. Use `cache: { maxEntries }` to choose another bound; `maxEntries: 0`, `cache: false`, and an omitted option disable loader caching. Successful navigation, prefetch, and `initialCache` seeds share the same bound, and a cache hit refreshes its recency. Query strings are part of the cache key. `invalidate()` and `revalidate()` continue to remove selected entries or the whole cache.
+
 ## Route Modules
 
 Use `defineRouteModule()` for route modules:
@@ -58,6 +62,12 @@ Actions run for non-GET/HEAD requests before loaders. Loaders run from parent to
 `renderRouteStream()` resolves commit-critical route metadata before it returns. A route `fallback` is never sent while a loader can still change the status, redirect location, cache policy, cookies, or security headers. Use compiler-generated async stream fragments when progressive body chunks are required after the HTTP metadata has been committed.
 
 `middleware` runs before route matching and can rewrite the incoming `Request` or return a short-circuit `Response`. A returned request is copied into router-owned state, so mutating it after the middleware returns does not affect later authorization, actions, or loaders. `hooks` expose isolated request, match, loader, action, render, and error observations for tracing and metrics.
+
+Configured static routes and assets are resolved before route middleware. The adapter dispatch order is `staticRoutes -> assets -> route middleware and route matching -> NotFound`. An asset response configured to fall through, such as the default 404 from a Workers asset binding without `basePath`, continues to middleware exactly once.
+
+This order is an authorization boundary: route middleware must not be used to authorize static content. Do not place protected content in `staticRoutes`, a Node static asset root, or a Workers asset binding. Omitting an asset `basePath` lets the binding inspect every request path before route middleware, so prefer a narrow public base path whenever possible.
+
+Native `Response` bodies remain byte-for-byte unchanged when middleware short-circuits routing. The router transfers the body stream directly and does not decode binary bodies through text; Workers, Node, and Lambda adapters preserve the status, headers, and bytes. `HEAD` requests retain response metadata without emitting the body.
 
 `requireUser(getUser, options)` creates route middleware for protected routes. It redirects to `/login` by default, can use a custom redirect target, or can return a custom forbidden response.
 
@@ -143,7 +153,7 @@ const csrf = {
 - `csrfInput(token)`
 - `verifyCsrfRequest(request, { token })`
 
-`tachyon-dom/cookies` exports `parseCookies()`, `serializeCookie()`, and `createMemorySessionStorage()` for small server adapters and examples. `parseCookies()` ignores malformed cookie pairs and decoded NUL/control-character names or values. `serializeCookie()` validates `Path` and `Domain` attributes and throws on semicolons, control characters, CRLF, whitespace in domains, or other values that would inject extra cookie attributes or invalid header bytes. Memory and cookie session storage default to Secure, HTTP-only, SameSite=Lax cookies. Memory storage treats an unknown cookie ID as untrusted and assigns a fresh ID when it is committed; call `regenerateSession()` at login or privilege changes to rotate an existing session deliberately.
+`tachyon-dom/cookies` exports `parseCookies()`, `serializeCookie()`, and `createMemorySessionStorage()` for small server adapters and examples. `parseCookies()` ignores malformed cookie pairs and decoded NUL/control-character names or values. `serializeCookie()` validates `Path` and `Domain` attributes and throws on semicolons, control characters, CRLF, whitespace in domains, or other values that would inject extra cookie attributes or invalid header bytes. Memory and cookie session storage default to Secure, HTTP-only, SameSite=Lax cookies. Partial cookie options are merged with these secure defaults; properties explicitly set to `false` remain disabled, while `undefined` does not erase a default. `__Host-` requires `Secure`, `Path=/`, and no `Domain`, and `__Secure-` requires `Secure`; invalid storage configurations throw during construction. Use a prefix-free cookie name when explicitly setting `secure: false` for local HTTP development. Memory storage treats an unknown cookie ID as untrusted and assigns a fresh ID when it is committed; call `regenerateSession()` at login or privilege changes to rotate an existing session deliberately.
 
 For server sessions, `createCookieSessionStorage({ secret, maxAgeMs, verificationSecrets })` stores signed session payloads in secure, HTTP-only, SameSite=Lax cookies. Its signing and verification secrets must be at least 32 bytes. `maxAgeMs` adds an authenticated absolute expiry, and `verificationSecrets` permits bounded key rotation while new cookies use `secret`. Stateless signed cookies cannot revoke a copied, still-valid cookie after logout; use memory or external server-side storage, or a server-checked session version, when logout must revoke every replayed copy. The lower-level `signCookieValue()` and `verifySignedCookieValue()` helpers are also exported for custom adapters and leave secret policy to their caller.
 

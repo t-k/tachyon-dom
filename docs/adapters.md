@@ -16,7 +16,7 @@ The Workers entry avoids Node built-ins. It can try a Cloudflare Assets binding 
 
 The Node adapter supports file-system static assets. Set `staticAssets.fallthroughOnNotFound: true` when missing assets, application paths such as `/healthz`, or non-GET/HEAD requests such as `POST /login` should continue to the application handler.
 
-The adapter derives request URLs from `Host` only when `trustedHosts` is configured, or from a fixed `origin`. Without either, it falls back to `localhost`. Enable `trustProxy` only behind an edge that normalizes forwarded headers.
+The adapter derives request URLs from `Host` only when `trustedHosts` is configured, or from a fixed `origin`. Without either, it falls back to `localhost`. Enable `trustProxy` only behind an edge that normalizes forwarded headers. When enabled, `X-Forwarded-Proto` must contain exactly one `http` or `https` value after trimming and case normalization. Missing, invalid, and comma-separated values return `400 Bad Request`. A configured `origin` takes precedence over forwarded protocol metadata and does not inspect this header.
 
 ## AWS Lambda
 

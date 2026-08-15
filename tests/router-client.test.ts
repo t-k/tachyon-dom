@@ -620,6 +620,55 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("evicts the least recently used loader cache entry", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    const calls = new Map<string, number>();
+    const route = (path: string): ClientRouteDefinition => ({
+      path,
+      load: () => {
+        calls.set(path, (calls.get(path) ?? 0) + 1);
+        return path;
+      },
+      render: ({ data }) => String(data),
+    });
+    const router = createClientRouter({
+      root,
+      routes: [route("/a"), route("/b"), route("/c")],
+      cache: { maxEntries: 2 },
+    });
+
+    await router.prefetch("/a");
+    await router.prefetch("/b");
+    await router.prefetch("/a");
+    await router.prefetch("/c");
+    await router.navigate("/b");
+
+    expect(Object.fromEntries(calls)).toEqual({ "/a": 1, "/b": 2, "/c": 1 });
+    router.dispose();
+  });
+
+  it("disables loader caching when maxEntries is zero", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    let loads = 0;
+    const router = createClientRouter({
+      root,
+      routes: [{ path: "/a", load: () => ++loads, render: ({ data }) => String(data) }],
+      cache: { maxEntries: 0 },
+    });
+
+    await router.navigate("/a");
+    await router.navigate("/a");
+
+    expect(loads).toBe(2);
+    router.dispose();
+  });
+
   it("reconciles managed head metadata on client navigation", async () => {
     document.head.innerHTML = `<meta name="viewport" content="width=device-width">`;
     document.body.innerHTML = `<main id="app"></main>`;

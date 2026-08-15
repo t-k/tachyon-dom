@@ -28,7 +28,7 @@ import {
 } from "../src/app";
 import type { TemplateWhitespacePolicy } from "../src/compiler/types";
 import { diagnoseTachyonSfc, diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
-import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
+import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
 import { verifyPackageArtifacts } from "../src/package-integrity";
 import { loadRouteApp, packageCloudflarePages, tachyonApp, tachyonDom, tachyonDomRoutes } from "../src/vite";
@@ -81,7 +81,78 @@ const collectRelativeModuleSpecifiers = (sourceFile: ts.SourceFile): string[] =>
   return specifiers;
 };
 
+type PublicMarkdownImport = {
+  file: string;
+  line: number;
+  specifier: string;
+  names: string[];
+};
+
+const collectMarkdownFiles = async (directory: string): Promise<string[]> => {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) return collectMarkdownFiles(entryPath);
+      return entry.isFile() && entry.name.endsWith(".md") ? [entryPath] : [];
+    }),
+  );
+  return nested.flat();
+};
+
+const collectPublicMarkdownImports = async (files: readonly string[]): Promise<PublicMarkdownImport[]> => {
+  const imports: PublicMarkdownImport[] = [];
+  for (const file of files) {
+    const markdown = await readFile(file, "utf8");
+    const fencePattern = /```(?:js|jsx|mjs|mts|ts|tsx|javascript|typescript)\s*\n([\s\S]*?)```/g;
+    for (const fence of markdown.matchAll(fencePattern)) {
+      const source = fence[1] ?? "";
+      const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+      for (const statement of sourceFile.statements) {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+        const specifier = statement.moduleSpecifier.text;
+        if (specifier !== "tachyon-dom" && !specifier.startsWith("tachyon-dom/")) continue;
+        const clause = statement.importClause;
+        const names: string[] = [];
+        if (clause && !clause.isTypeOnly) {
+          if (clause.name) names.push("default");
+          if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+            for (const element of clause.namedBindings.elements) {
+              if (!element.isTypeOnly) names.push((element.propertyName ?? element.name).text);
+            }
+          }
+        }
+        const markdownLine = markdown.slice(0, fence.index).split("\n").length;
+        const sourceLine = sourceFile.getLineAndCharacterOfPosition(statement.getStart()).line + 1;
+        imports.push({ file, line: markdownLine + sourceLine, specifier, names });
+      }
+    }
+  }
+  return imports;
+};
+
 describe("DX helpers", () => {
+  it("resolves every tachyon-dom import in public Markdown", async () => {
+    const manifest = JSON.parse(await readFile("package.json", "utf8")) as {
+      exports: Record<string, { import?: string }>;
+    };
+    const markdownFiles = ["README.md", ...(await collectMarkdownFiles("docs"))];
+    const imports = await collectPublicMarkdownImports(markdownFiles);
+
+    for (const imported of imports) {
+      const exportKey = imported.specifier === "tachyon-dom" ? "." : `.${imported.specifier.slice("tachyon-dom".length)}`;
+      const target = manifest.exports[exportKey]?.import;
+      expect(target, `${imported.file}:${imported.line}: ${imported.specifier} is not exported`).toBeDefined();
+      if (!target) continue;
+      const exports = (await import(pathToFileURL(path.resolve(target)).href)) as Record<string, unknown>;
+      for (const name of imported.names) {
+        expect(exports, `${imported.file}:${imported.line}: ${name} is not exported by ${imported.specifier}`).toHaveProperty(
+          name,
+        );
+      }
+    }
+  });
+
   it("keeps template and HTML tag whitespace policy types distinct", () => {
     expectTypeOf<TemplateWhitespacePolicy>().not.toEqualTypeOf<HtmlWhitespacePolicy>();
   });
@@ -154,6 +225,20 @@ describe("DX helpers", () => {
     expect(map.sourcesContent).toEqual(["<main></main>"]);
   });
 
+  it.each([
+    [{ command: "build", mode: "production" }, false],
+    [{ command: "build", mode: "staging" }, false],
+    [{ command: "build", mode: "test" }, false],
+    [{ command: "build" }, false],
+    [{ command: "serve", mode: "development" }, true],
+    [{ command: "build", mode: "production", sourcemap: true }, true],
+    [{ command: "build", mode: "production", productionSourceMap: true }, true],
+    [{ command: "serve", mode: "development", sourcemap: false }, false],
+    [{ command: "build", mode: "production", sourcemap: false, productionSourceMap: true }, false],
+  ] as const)("resolves secure source-map defaults for %o", (context, expected) => {
+    expect(shouldEmitSourceMap(context)).toBe(expected);
+  });
+
   it("keeps template scope types available to TypeScript users", () => {
     const typed = defineTemplate<PanelScope, `<h1>{title}</h1>`>(`<h1>{title}</h1>`);
     const scoped = templateScope<PanelScope>().define(`<button>{count}</button>`);
@@ -223,6 +308,27 @@ describe("DX helpers", () => {
     expect(packageJson.exports).toHaveProperty("./router");
   });
 
+  it("keeps compiler tooling out of runtime dependencies", async () => {
+    const manifest = JSON.parse(await readFile("package.json", "utf8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+    };
+    for (const name of [
+      "typescript",
+      "oxc-parser",
+      "vscode-languageserver",
+      "vscode-languageserver-textdocument",
+    ]) {
+      expect(manifest.dependencies?.[name], `${name} must not be a runtime dependency`).toBeUndefined();
+      expect(manifest.devDependencies?.[name], `${name} must remain available to repository development`).toBeDefined();
+      expect(manifest.peerDependencies?.[name], `${name} must declare its consumer-compatible range`).toBeDefined();
+      expect(manifest.peerDependenciesMeta?.[name]).toEqual({ optional: true });
+    }
+    expect(manifest.dependencies?.parse5).toBeDefined();
+  });
+
   it("declares npm release metadata for public package discovery", async () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
       description?: string;
@@ -241,12 +347,14 @@ describe("DX helpers", () => {
     expect(packageJson.engines?.node).toBe(">=24");
     expect(packageJson.publishConfig).toEqual({ access: "public" });
 
-    const createPackageJson = JSON.parse(
-      await readFile("packages/create-tachyon-dom/package.json", "utf8"),
-    ) as { repository?: { type?: string; url?: string }; publishConfig?: { access?: string } };
+    const createPackageJson = JSON.parse(await readFile("packages/create-tachyon-dom/package.json", "utf8")) as {
+      repository?: { type?: string; url?: string; directory?: string };
+      publishConfig?: { access?: string };
+    };
     expect(createPackageJson.repository).toEqual({
       type: "git",
       url: "git+https://github.com/t-k/tachyon-dom.git",
+      directory: "packages/create-tachyon-dom",
     });
     expect(createPackageJson.publishConfig).toEqual({ access: "public" });
   });
@@ -266,8 +374,8 @@ describe("DX helpers", () => {
 
     expect(verifier).toContain("rootPackage.version");
     expect(verifier).toContain("createPackage.version");
-    expect(verifier).not.toContain('tachyon-dom-0.1.1.tgz');
-    expect(verifier).not.toContain('create-tachyon-dom-0.1.1.tgz');
+    expect(verifier).not.toContain("tachyon-dom-0.1.1.tgz");
+    expect(verifier).not.toContain("create-tachyon-dom-0.1.1.tgz");
   });
 
   it("documents the recommended application shape", async () => {
@@ -405,6 +513,64 @@ describe("DX helpers", () => {
     expect(appViteDocs).toContain("new Response(String(body)");
     expect(appViteDocs).not.toContain("new Response(`<main>Hello ${user}</main><script");
     expect(readme).toContain("Events are attached once per created target");
+  });
+
+  it("documents the raw-text interpolation security contract", async () => {
+    const syntax = await readFile("docs/syntax-spec.md", "utf8");
+
+    expect(syntax).toContain("Expressions inside `script` and `style` are rejected");
+    expect(syntax).toContain("serializeHydrationState(id, state)");
+    expect(syntax).toContain("`textarea` and `title` remain RCDATA");
+  });
+
+  it("documents the trusted forwarded protocol contract", async () => {
+    const adapters = await readFile("docs/adapters.md", "utf8");
+
+    expect(adapters).toContain("exactly one `http` or `https` value");
+    expect(adapters).toContain("Missing, invalid, and comma-separated values return `400 Bad Request`");
+    expect(adapters).toContain("A configured `origin` takes precedence over forwarded protocol metadata");
+  });
+
+  it("documents contextual escaping for the server HTML helper", async () => {
+    const security = await readFile("docs/security.md", "utf8");
+
+    expect(security).toContain("Quote the complete attribute value when a template contains a prefix or suffix");
+    expect(security).toContain("Direct `name=${value}` interpolation is quoted automatically");
+    expect(security).toContain("`rawHtml()` is accepted only in text context");
+  });
+
+  it("documents the shared dangerous attribute policy", async () => {
+    const security = await readFile("docs/security.md", "utf8");
+
+    expect(security).toContain("Native `on*`, `srcdoc`, `innerhtml`, and `outerhtml` attributes are rejected");
+    expect(security).toContain("Use `on:event={handler}` for compiler-managed event listeners");
+    expect(security).toContain("compiler, client runtime, and direct server HTML helpers");
+  });
+
+  it("documents contextual URL safety and origin semantics", async () => {
+    const security = await readFile("docs/security.md", "utf8");
+
+    expect(security).toContain("sanitizeUrlAttribute(context)");
+    expect(security).toContain("document-navigation`, `subresource`, or `form-submission`");
+    expect(security).toContain("Omitting `allowedOrigins` accepts HTTP(S) origins");
+    expect(security).toContain("Passing an empty `allowedOrigins` array rejects absolute HTTP(S) URLs");
+    expect(security).toContain("HTML escaping does not make an active URL scheme safe");
+  });
+
+  it("documents secure session cookie option merging and prefix constraints", async () => {
+    const routing = await readFile("docs/routing.md", "utf8");
+
+    expect(routing).toContain("Partial cookie options are merged with these secure defaults");
+    expect(routing).toContain("`__Host-` requires `Secure`, `Path=/`, and no `Domain`");
+    expect(routing).toContain("Use a prefix-free cookie name when explicitly setting `secure: false`");
+  });
+
+  it("documents byte-preserving native middleware responses", async () => {
+    const routing = await readFile("docs/routing.md", "utf8");
+
+    expect(routing).toContain("Native `Response` bodies remain byte-for-byte unchanged");
+    expect(routing).toContain("does not decode binary bodies through text");
+    expect(routing).toContain("Workers, Node, and Lambda adapters");
   });
 
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
@@ -566,6 +732,83 @@ export const scope = (input: Partial<AppState> = {}) => ({
       expect(dts).toContain(`export declare const mount:`);
       expect(dts).toContain(`export type AppTemplateScope = __TachyonAssertScope<ReturnType<typeof scope>>;`);
       expect(dts).toContain(`export declare const bind:`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves template scripts after a leading SFC setup block", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-template-script-"));
+    try {
+      const input = path.join(dir, "page.td");
+      const output = path.join(dir, "page.js");
+      await writeFile(
+        input,
+        `<!-- leading -->
+<script>export const scope = () => ({ title: "Page" });</script>
+<main><script type="application/ld+json">[]</script><h1>{title}</h1></main>`,
+      );
+
+      const result = await compileFile({ input, output, target: "server", reactive: false, sourcemap: false });
+
+      expect(result.ok).toBe(true);
+      const code = await readFile(output, "utf8");
+      expect(code).toContain('type=\\"application/ld+json\\"');
+      expect(code).toContain(`[]`);
+      expect(code).toContain(`const __tachyonSfcScope = () => ({ title: "Page" })`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    `<main><script src="/client.js"></script></main>`,
+    `<script type="application/ld+json">[]</script>`,
+  ])("keeps a non-component script in the template: %s", async (source) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-nested-script-"));
+    try {
+      const input = path.join(dir, "page.td");
+      const output = path.join(dir, "page.js");
+      await writeFile(input, source);
+
+      const result = await compileFile({ input, output, target: "server", reactive: false, sourcemap: false });
+
+      expect(result.ok).toBe(true);
+      const code = await readFile(output, "utf8");
+      expect(code).toContain("<script");
+      expect(code).toContain(source.includes("client.js") ? "/client.js" : "application/ld+json");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports invalid plain JavaScript in a leading SFC script", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-invalid-js-"));
+    try {
+      const input = path.join(dir, "page.td");
+      await writeFile(input, `<script>\nconst broken = ;\n</script>\n<main>Page</main>`);
+
+      const result = await compileFile({ input, target: "server", reactive: false, sourcemap: false });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected JavaScript diagnostic.");
+      expect(result.error).toContain(":2:16: Expression expected.");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not parse a plain SFC script as TypeScript", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-js-language-"));
+    try {
+      const input = path.join(dir, "page.td");
+      await writeFile(input, `<script>\nconst count: number = 1;\n</script>\n<main>{count}</main>`);
+
+      const result = await compileFile({ input, target: "server", reactive: false, sourcemap: false });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected JavaScript diagnostic.");
+      expect(result.error).toContain("Type annotations can only be used in TypeScript files");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -894,6 +1137,7 @@ export default { selected: false };
       expect(smokeTest).toContain("renders the starter page");
       expect(tsconfig.compilerOptions?.types).toEqual(["vite/client", "node", "tachyon-dom/td-modules"]);
       expect(packageJson.devDependencies?.["@types/node"]).toBe("^24.0.3");
+      expect(packageJson.devDependencies).toHaveProperty("oxc-parser");
       expect(readme).toContain("Edit `src/routes/index/page.td`");
       expect(readme).toContain("Route registration");
       expect(readme).toContain("Do not put application code in `public/client/main.js`");
@@ -1078,6 +1322,7 @@ export default { selected: false };
     expect(packageJson.name).toBe("create-tachyon-dom");
     expect(packageJson.bin).toEqual({ "create-tachyon-dom": "./dist/index.js" });
     expect(packageJson.dependencies).toHaveProperty("tachyon-dom");
+    expect(packageJson.dependencies).toHaveProperty("typescript");
     expect(entry).toContain(`runCli(process.argv.slice(2), "create-tachyon-dom")`);
     expect(readme).toContain("npm create tachyon-dom@latest my-app");
     expect(readme).toContain("pnpm create tachyon-dom my-app");
@@ -1903,10 +2148,9 @@ void chunks;
     }
   });
 
-  it("can disable production source maps and expose artifacts for upload hooks", async () => {
+  it("omits production source maps by default and exposes artifacts for upload hooks", async () => {
     const uploaded: string[] = [];
     const plugin = tachyonDom({
-      productionSourceMap: false,
       onSourceMap: ({ id }) => {
         uploaded.push(id);
       },
@@ -1934,7 +2178,104 @@ void chunks;
     expect(uploaded).toEqual(["/src/button.tachyon.html"]);
     expect(
       shouldEmitSourceMap({ sourcemap: true, productionSourceMap: false, command: "build", mode: "production" }),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it.each(["staging", "test"])("omits source maps from complete %s build transforms by default", async (mode) => {
+    const source = `<button>{label}</button>`;
+    const uploaded: string[] = [];
+    const plugin = tachyonDom({
+      onSourceMap: ({ id }) => {
+        uploaded.push(id);
+      },
+    });
+    if (typeof plugin.configResolved === "function") {
+      await plugin.configResolved.call({} as never, { command: "build", mode } as never);
+    } else if (plugin.configResolved) {
+      await plugin.configResolved.handler.call({} as never, { command: "build", mode } as never);
+    }
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+
+    const result = await plugin.transform.call(
+      {
+        error(error: string): never {
+          throw new Error(error);
+        },
+      } as never,
+      source,
+      `/src/${mode}.tachyon.html`,
+    );
+    const code = typeof result === "object" && result?.code ? String(result.code) : "";
+
+    expect(code).not.toContain("sourceMappingURL");
+    expect(code).not.toContain(source);
+    expect(uploaded).toEqual([`/src/${mode}.tachyon.html`]);
+  });
+
+  it("embeds production source only after explicit opt-in", async () => {
+    const source = `<button>{label}</button>`;
+    const plugin = tachyonDom({ productionSourceMap: true });
+    if (typeof plugin.configResolved === "function") {
+      await plugin.configResolved.call({} as never, { command: "build", mode: "production" } as never);
+    } else if (plugin.configResolved) {
+      await plugin.configResolved.handler.call({} as never, { command: "build", mode: "production" } as never);
+    }
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+
+    const result = await plugin.transform.call(
+      {
+        error(error: string): never {
+          throw new Error(error);
+        },
+      } as never,
+      source,
+      "/src/button.tachyon.html",
+    );
+    const code = typeof result === "object" && result?.code ? String(result.code) : "";
+    const encoded = code.split("base64,")[1]?.trim();
+    if (!encoded) throw new Error("Missing production source map.");
+    const map = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as SourceMap;
+
+    expect(map.sourcesContent).toEqual([source]);
+  });
+
+  it("keeps source-map upload hooks independent from inline emission", async () => {
+    const uploaded: string[] = [];
+    const plugin = tachyonDom({
+      sourcemap: false,
+      onSourceMap: ({ id }) => {
+        uploaded.push(id);
+      },
+    });
+    if (typeof plugin.configResolved === "function") {
+      await plugin.configResolved.call({} as never, { command: "build", mode: "production" } as never);
+    } else if (plugin.configResolved) {
+      await plugin.configResolved.handler.call({} as never, { command: "build", mode: "production" } as never);
+    }
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+
+    const result = await plugin.transform.call(
+      {
+        error: (error: string): never => {
+          throw new Error(error);
+        },
+      } as never,
+      `<button>{label}</button>`,
+      "/src/button.tachyon.html",
+    );
+
+    expect(typeof result === "object" && result?.code).not.toContain("sourceMappingURL");
+    expect(uploaded).toEqual(["/src/button.tachyon.html"]);
+  });
+
+  it("documents production source-map defaults and precedence", async () => {
+    const appVite = await readFile("docs/app-vite.md", "utf8");
+
+    expect(appVite).toContain("All build commands omit inline source maps by default");
+    expect(appVite).toContain("custom modes such as `staging` and `test`");
+    expect(appVite).toContain("`sourcemap` has highest precedence");
+    expect(appVite).toContain("`productionSourceMap: true`");
+    expect(appVite).toContain("`onSourceMap` still receives the map when inline emission is disabled");
   });
 
   it("generates a virtual route manifest with lazy route modules", async () => {
