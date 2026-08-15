@@ -241,23 +241,19 @@ describe("router security helpers", () => {
         },
       };
 
-      const result = await renderRoute(
-        [route],
-        new Request("https://x.test/mutate", { method }),
-        {
-          csrf: {
-            verify: () => {
-              calls.verify += 1;
-              return false;
-            },
-          },
-          hooks: {
-            onMatch: () => {
-              calls.onMatch += 1;
-            },
+      const result = await renderRoute([route], new Request("https://x.test/mutate", { method }), {
+        csrf: {
+          verify: () => {
+            calls.verify += 1;
+            return false;
           },
         },
-      );
+        hooks: {
+          onMatch: () => {
+            calls.onMatch += 1;
+          },
+        },
+      });
 
       expect(result.ok && result.value.status, method).toBe(403);
       expect(calls, method).toEqual({ verify: 1, onMatch: 0, loader: 0, action: 0, render: 0 });
@@ -266,8 +262,19 @@ describe("router security helpers", () => {
 
   it.each(["GET", "HEAD", "OPTIONS"])("does not run CSRF verification for the safe %s method", async (method) => {
     let verifyCalls = 0;
+    let actionCalls = 0;
     const result = await renderRoute(
-      [{ path: "/read", loader: () => "loaded", action: () => "acted", render: () => "ok" }],
+      [
+        {
+          path: "/read",
+          loader: () => "loaded",
+          action: () => {
+            actionCalls += 1;
+            return "acted";
+          },
+          render: () => "ok",
+        },
+      ],
       new Request("https://x.test/read", { method }),
       {
         csrf: {
@@ -281,6 +288,7 @@ describe("router security helpers", () => {
 
     expect(result.ok && result.value.status).toBe(200);
     expect(verifyCalls).toBe(0);
+    expect(actionCalls).toBe(0);
   });
 
   it("rejects a CSRF token resolved for a different session", async () => {

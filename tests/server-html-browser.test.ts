@@ -1,6 +1,6 @@
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { html } from "../src/server/html";
+import { attr, html } from "../src/server/html";
 
 let browser: Browser | undefined;
 
@@ -42,6 +42,25 @@ describe("server HTML browser security", () => {
       expect(await page.locator("#subject").evaluate((element) => element.getAttributeNames())).toEqual(["id", "href"]);
       expect(await page.locator("#subject").getAttribute("href")).toBe("/safe onclick=globalThis.__tachyonXss = true");
       expect(await page.evaluate(() => "__tachyonXss" in globalThis)).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("rejects static and fragment-built active URLs before browser navigation", async () => {
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      await page.setContent(`<a id="subject" href="/safe">safe</a>`);
+      expect(() => html`<a href="jav&#x61;script:globalThis.__tachyonStaticXss = true">unsafe</a>`).toThrow(
+        "Unsafe URL for href",
+      );
+      expect(() => html`<meta http-equiv="refresh" ${attr("content", "0;url=//evil.example")} />`).toThrow(
+        "Unsafe URL for content",
+      );
+      await page.locator("#subject").click();
+
+      expect(await page.evaluate(() => "__tachyonStaticXss" in globalThis)).toBe(false);
     } finally {
       await page.close();
     }

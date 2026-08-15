@@ -118,6 +118,7 @@ export type MatchedRoute = {
 
 export type RouteRenderResult = {
   status: number;
+  bodyKind: "route" | "pass-through" | "bodyless";
   html: string;
   headHtml: string;
   resourceHints: string;
@@ -134,18 +135,19 @@ export type RouteRenderResult = {
 
 const bodylessStatuses = new Set([204, 205, 304]);
 
-const normalizeBodylessRouteResult = (result: RouteRenderResult): RouteRenderResult => {
-  if (!bodylessStatuses.has(result.status)) {
+const normalizeBodylessRouteResult = (result: RouteRenderResult, forceBodyless = false): RouteRenderResult => {
+  if (!forceBodyless && !bodylessStatuses.has(result.status)) {
     return result;
   }
   const headers = new Headers(result.headers);
-  if (result.status !== 304 || !result.webResponse?.headers.has("content-length")) {
+  if (result.status !== 304) {
     headers.delete("content-length");
   }
   headers.delete("transfer-encoding");
   const { responseBody: _responseBody, responseChunks: _responseChunks, webResponse, ...rest } = result;
   return {
     ...rest,
+    bodyKind: "bodyless",
     html: "",
     headers,
     ...(webResponse
@@ -486,6 +488,7 @@ const csrfSafeMethods = new Set(["GET", "HEAD", "OPTIONS"]);
 
 const payloadTooLargeResult = (match: MatchedRoute): RouteRenderResult => ({
   status: 413,
+  bodyKind: "route",
   html: "<h1>Payload Too Large</h1>",
   headHtml: "",
   resourceHints: "",
@@ -680,6 +683,7 @@ export const routeFromModule = <Data = unknown, ActionResult = unknown>(
   ...(module.cache ? { cache: module.cache } : {}),
   ...(module.fallback ? { fallback: module.fallback } : {}),
   ...(module.stream ? { stream: module.stream } : {}),
+  ...(module.streamLayout ? { streamLayout: module.streamLayout } : {}),
   ...(module.ErrorBoundary ? { error: module.ErrorBoundary } : {}),
   ...(module.NotFound ? { notFound: module.NotFound } : {}),
   render: module.render ?? module.template ?? (() => ""),
@@ -1255,6 +1259,7 @@ const renderRouteInternal = async (
   });
   const routeResponseResult = (response: RouteResponse, match = emptyMatch()): RouteRenderResult => ({
     status: response.status,
+    bodyKind: "pass-through",
     html: response.headers.get("content-type")?.startsWith("text/html") ? response.body : "",
     responseBody: response.body,
     headHtml: "",
@@ -1267,6 +1272,7 @@ const renderRouteInternal = async (
   });
   const webResponseResult = (response: Response, match = emptyMatch()): RouteRenderResult => ({
     status: response.status,
+    bodyKind: "pass-through",
     html: "",
     webResponse: response,
     headHtml: "",
@@ -1279,7 +1285,7 @@ const renderRouteInternal = async (
   });
   const finish = (result: RouteRenderResult): Result<RouteRenderResult, RouteError> => {
     releaseRequestSnapshot(request);
-    return ok(normalizeBodylessRouteResult(result));
+    return ok(normalizeBodylessRouteResult(result, request.method === "HEAD"));
   };
   if (options.maxActionBodyBytes !== undefined) {
     const limitedRequest = await requestWithinBodyLimit(request, options.maxActionBodyBytes);
@@ -1386,6 +1392,7 @@ const renderRouteInternal = async (
   if (options.allowedMethods && !options.allowedMethods.includes(request.method)) {
     return finish({
       status: 405,
+      bodyKind: "route",
       html: "<h1>Method Not Allowed</h1>",
       headHtml: "",
       resourceHints: "",
@@ -1401,6 +1408,7 @@ const renderRouteInternal = async (
     if (match.error.status === 400) {
       return finish({
         status: 400,
+        bodyKind: "route",
         html: "<h1>Bad Request</h1>",
         headHtml: "",
         resourceHints: "",
@@ -1420,6 +1428,7 @@ const renderRouteInternal = async (
         : `<h1>Not Found</h1>`;
     return finish({
       status: 404,
+      bodyKind: "route",
       html,
       headHtml: "",
       resourceHints: "",
@@ -1439,6 +1448,7 @@ const renderRouteInternal = async (
     ) {
       return finish({
         status: 403,
+        bodyKind: "route",
         html: "<h1>Forbidden</h1>",
         headHtml: "",
         resourceHints: "",
@@ -1459,7 +1469,7 @@ const renderRouteInternal = async (
     }
     let actionResult: unknown;
     const loaderData: Record<string, unknown> = {};
-    if (request.method !== "GET" && request.method !== "HEAD" && match.value.route.action) {
+    if (!csrfSafeMethods.has(request.method) && match.value.route.action) {
       actionResult = await match.value.route.action({
         request,
         url,
@@ -1563,7 +1573,12 @@ const renderRouteInternal = async (
             segments = validateStreamLayoutSegments(await entry.route.streamLayout(context));
           } else {
             const marker = createProgressiveOutletMarker();
-            const rendered = await entry.route.render({ ...context, outlet: marker });
+            let rendered: string;
+            try {
+              rendered = await entry.route.render({ ...context, outlet: marker });
+            } catch {
+              throw new TypeError("A progressive ancestor layout failed while rendering.");
+            }
             segments = legacyStreamLayoutSegments(rendered, marker);
           }
           responseChunks = await composeSingleOutlet(responseChunks as AsyncIterable<string>, segments);
@@ -1619,6 +1634,7 @@ const renderRouteInternal = async (
     }
     const result: RouteRenderResult = {
       status: 200,
+      bodyKind: "route",
       html: outlet,
       headHtml: renderHead(mergeHead(heads), options.cspNonce === undefined ? {} : { nonce: options.cspNonce }),
       resourceHints: renderResourceHints(
@@ -1657,6 +1673,7 @@ const renderRouteInternal = async (
     const html = boundary ? await boundary({ request, url, error }) : `<h1>Internal Server Error</h1>`;
     return finish({
       status: 500,
+      bodyKind: "route",
       html,
       headHtml: "",
       resourceHints: "",
@@ -1702,13 +1719,8 @@ const renderRouteStreamInternal = async (
   streamingOptions.progressiveBody = true;
   const rendered = await renderRouteInternal(routes, request, streamingOptions);
   if (!rendered.ok) return err(rendered.error);
-  const body = rendered.value.responseBody ?? rendered.value.html;
-  const bodyKind =
-    request.method === "HEAD" || bodylessStatuses.has(rendered.value.status)
-      ? "bodyless"
-      : rendered.value.responseBody !== undefined || rendered.value.webResponse
-        ? "pass-through"
-        : "route";
+  const body = rendered.value.bodyKind === "pass-through" ? (rendered.value.responseBody ?? "") : rendered.value.html;
+  const bodyKind = request.method === "HEAD" ? "bodyless" : rendered.value.bodyKind;
   const final = {
     status: rendered.value.status,
     headHtml: rendered.value.headHtml,

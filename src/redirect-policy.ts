@@ -30,11 +30,8 @@ const isApprovedExternalRedirect = (location: string, allowedOrigins: readonly s
   }
 };
 
-export const validateRedirectTarget = (
-  location: string,
-  options: RedirectPolicyOptions = {},
-): Result<void, string> =>
+export const validateRedirectTarget = (location: string, options: RedirectPolicyOptions = {}): Result<void, string> =>
   isSafePathRedirect(location) ||
   (options.allowExternal && isApprovedExternalRedirect(location, options.allowedOrigins))
     ? ok(undefined)
-    : err(`Unsafe redirect target: ${location}`);
+    : err("Unsafe redirect target.");

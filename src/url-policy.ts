@@ -222,14 +222,24 @@ export const sanitizeMetaRefreshContent = (
 ): Result<string, UnsafeUrlError> => {
   if (hasControlCharacter(value)) return err(new UnsafeUrlError("content"));
   const urlTokens = value.match(/\burl\s*=/gi) ?? [];
-  const match = /^\s*\d+(?:\.\d+)?\s*(?:;\s*url\s*=\s*(?:"([^"]*)"|'([^']*)'|([^;]*?))\s*)?$/i.exec(value);
+  const match = /^\s*\d+(?:\.\d+)?\s*(?:;\s*url\s*=\s*(.*))?$/i.exec(value);
   if (!match || urlTokens.length > 1) return err(new UnsafeUrlError("content"));
-  const target = match[1] ?? match[2] ?? match[3];
-  if (target === undefined) return ok(value.trim());
+  const rawTarget = match[1]?.trim();
+  if (rawTarget === undefined) return ok(value.trim());
+  let target = rawTarget;
+  if (rawTarget.startsWith('"') || rawTarget.startsWith("'")) {
+    const quote = rawTarget[0] as '"' | "'";
+    if (rawTarget.length < 2 || !rawTarget.endsWith(quote) || rawTarget.slice(1, -1).includes(quote)) {
+      return err(new UnsafeUrlError("content"));
+    }
+    target = rawTarget.slice(1, -1);
+  } else if (rawTarget.includes('"') || rawTarget.includes("'")) {
+    return err(new UnsafeUrlError("content"));
+  }
   const decision = decideSingleUrl({
     attribute: "content",
     purpose: "document-navigation",
-    value: target.trim(),
+    value: target,
     ...(allowedOrigins === undefined ? {} : { allowedOrigins }),
   });
   return decision.ok ? ok(value.trim()) : err(new UnsafeUrlError("content", decision.message));

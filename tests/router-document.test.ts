@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { renderRoute, renderRouteStream, type RouteDefinition } from "../src/router";
+import { json, renderRoute, renderRouteStream, type RouteDefinition } from "../src/router";
+import { composeStreamingDocument } from "../src/router-document";
 
 const collect = async (chunks: AsyncIterable<string>): Promise<string> => {
   let output = "";
@@ -25,6 +26,76 @@ const trackedChunks = (...values: string[]) => {
 };
 
 describe("route document and progressive layout composition", () => {
+  it("closes an unpulled child exactly once when the document composer rejects", async () => {
+    const tracked = trackedChunks("child");
+
+    await expect(
+      composeStreamingDocument(tracked.chunks, { headHtml: "", resourceHints: "", stateScript: "" }, () => {
+        throw new Error("composer failed");
+      }),
+    ).rejects.toThrow("composer failed");
+
+    expect(tracked.next).not.toHaveBeenCalled();
+    expect(tracked.returnIterator).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not expose a legacy progressive outlet token to error hooks or boundaries", async () => {
+    let hookError = "";
+    let boundaryError = "";
+    const routes: RouteDefinition[] = [
+      {
+        path: "/",
+        render: ({ outlet }) => {
+          throw new Error(`layout failed: ${outlet}`);
+        },
+        error: ({ error }) => {
+          boundaryError = String(error);
+          return "<h1>Contained</h1>";
+        },
+        children: [
+          {
+            path: "child",
+            render: () => "buffered",
+            stream: async function* () {
+              yield "child";
+            },
+          },
+        ],
+      },
+    ];
+
+    const result = await renderRouteStream(routes, "https://example.test/child", {
+      hooks: {
+        onError: ({ error }) => {
+          hookError = String(error);
+        },
+      },
+    });
+    if (!result.ok) throw new Error(result.error.message);
+
+    expect(await collect(result.value.chunks)).toBe("<h1>Contained</h1>");
+    expect(hookError).toBe("TypeError: A progressive ancestor layout failed while rendering.");
+    expect(boundaryError).toBe(hookError);
+    expect(hookError).not.toContain("__tachyon_progressive_outlet_");
+  });
+
+  it("reports an explicit body kind for buffered route, pass-through, and bodyless results", async () => {
+    const route = await renderRoute([{ path: "/", render: () => "route" }], "https://example.test/");
+    const passThrough = await renderRoute(
+      [{ path: "/", loader: () => json({ native: true }), render: () => "unused" }],
+      "https://example.test/",
+    );
+    const bodyless = await renderRoute(
+      [{ path: "/", render: () => "route" }],
+      new Request("https://example.test/", { method: "HEAD" }),
+    );
+    if (!route.ok || !passThrough.ok || !bodyless.ok) throw new Error("Expected successful renders.");
+
+    expect(route.value.bodyKind).toBe("route");
+    expect(passThrough.value.bodyKind).toBe("pass-through");
+    expect(bodyless.value.bodyKind).toBe("bodyless");
+  });
+
   it("streams a nested child at the exact legacy outlet with buffered structural parity", async () => {
     const parentRender = vi.fn(({ outlet }: { outlet: string }) => `<main>${outlet}</main>`);
     const observedHeadOutlets: string[] = [];

@@ -77,6 +77,9 @@ describe("URL attribute policy", () => {
     expect(sanitizeMetaRefreshContent("5")).toEqual({ ok: true, value: "5" });
     expect(sanitizeMetaRefreshContent("0; URL=javascript:alert(1)").ok).toBe(false);
     expect(sanitizeMetaRefreshContent("0; url=/safe; url=//evil.example").ok).toBe(false);
+    expect(sanitizeMetaRefreshContent("0;url='javascript:alert(1)'junk").ok).toBe(false);
+    expect(sanitizeMetaRefreshContent('0;url="https://example.test/path"junk').ok).toBe(false);
+    expect(sanitizeMetaRefreshContent("0;url='https://example.test/path").ok).toBe(false);
 
     const safe = sanitizeElementUrlAttributes("meta", { "http-equiv": " Refresh ", content: "0;url=/safe" });
     const unsafe = sanitizeElementUrlAttributes("meta", {

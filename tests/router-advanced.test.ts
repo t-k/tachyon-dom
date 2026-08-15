@@ -110,7 +110,7 @@ describe("advanced router features", () => {
     expect(buffered.ok && buffered.value.status).toBe(status);
     expect(buffered.ok && buffered.value.html).toBe("");
     expect(buffered.ok && buffered.value.responseBody).toBeUndefined();
-    expect(buffered.ok && buffered.value.headers.get("content-length")).toBeNull();
+    expect(buffered.ok && buffered.value.headers.get("content-length")).toBe(status === 304 ? "19" : null);
     expect(buffered.ok && buffered.value.headers.get("transfer-encoding")).toBeNull();
     expect(buffered.ok && buffered.value.headers.get("x-kept")).toBe("yes");
     expect(streamed.ok && streamed.value.status).toBe(status);
@@ -183,6 +183,7 @@ describe("advanced router features", () => {
       path: "/users/:id",
       loader: ({ params }) => ({ name: `User ${params.id}` }),
       head: ({ data }) => ({ title: (data as { name: string }).name }),
+      streamLayout: () => ({ before: "<main>", after: "</main>", outlet: "once" }),
       template: ({ data }) => `<h1>${(data as { name: string }).name}</h1>`,
       ErrorBoundary: ({ error }) => `<h1>${error instanceof Error ? error.message : "error"}</h1>`,
       NotFound: ({ url }) => `<h1>Missing ${url.pathname}</h1>`,
@@ -191,6 +192,7 @@ describe("advanced router features", () => {
     const result = await renderRoute([route], "https://example.com/users/1");
 
     expect(result.ok && result.value.html).toBe(`<h1>User 1</h1>`);
+    expect(route.streamLayout).toBe(module.streamLayout);
     expect(
       route.error?.({
         error: new Error("boom"),

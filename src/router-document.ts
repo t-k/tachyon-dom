@@ -1,4 +1,4 @@
-import { composeSingleOutlet, type SingleOutletSegments } from "./stream-segments.js";
+import { closeAsyncIterable, composeSingleOutlet, type SingleOutletSegments } from "./stream-segments.js";
 
 export type RouteDocumentMetadata = {
   headHtml: string;
@@ -62,4 +62,15 @@ export const composeStreamingDocument = async (
   body: AsyncIterable<string>,
   metadata: RouteDocumentMetadata,
   composer: RouteDocumentComposer = fragmentDocument,
-): Promise<AsyncIterable<string>> => composeSingleOutlet(body, validateSegments(await composer(metadata)));
+): Promise<AsyncIterable<string>> => {
+  try {
+    return await composeSingleOutlet(body, validateSegments(await composer(metadata)));
+  } catch (error) {
+    try {
+      await closeAsyncIterable(body);
+    } catch {
+      // Preserve the composer or validation failure after best-effort source cleanup.
+    }
+    throw error;
+  }
+};

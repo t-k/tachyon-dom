@@ -435,6 +435,30 @@ describe("server adapters", () => {
   });
 
   it.each([false, true])(
+    "removes stale route content length after document composition with streaming=$streaming",
+    async (streaming) => {
+      const response = await createWorkersHandler({
+        routes: [
+          {
+            path: "/",
+            headers: { "content-length": "1" },
+            render: () => "x",
+            stream: async function* () {
+              yield "x";
+            },
+          },
+        ],
+        streaming,
+        document: htmlDocument(),
+      }).fetch(new Request("https://example.test/"));
+      const bytes = new Uint8Array(await response.arrayBuffer());
+
+      expect(response.headers.get("content-length")).toBeNull();
+      expect(bytes.byteLength).toBeGreaterThan(1);
+    },
+  );
+
+  it.each([false, true])(
     "bypasses document composition for pass-through bodies with streaming=$streaming",
     async (streaming) => {
       const documentComposer = vi.fn(() => {
@@ -480,7 +504,7 @@ describe("server adapters", () => {
       );
       expect(workers.status).toBe(status);
       expect(new Uint8Array(await workers.arrayBuffer())).toHaveLength(0);
-      expect(workers.headers.get("content-length")).toBeNull();
+      expect(workers.headers.get("content-length")).toBe(status === 304 ? "19" : null);
       expect(workers.headers.get("transfer-encoding")).toBeNull();
       expect(workers.headers.get("x-kept")).toBe("yes");
 
@@ -492,7 +516,7 @@ describe("server adapters", () => {
       );
       expect(lambda.statusCode).toBe(status);
       expect(lambda.body).toBe("");
-      expect(lambda.headers["content-length"]).toBeUndefined();
+      expect(lambda.headers["content-length"]).toBe(status === 304 ? "19" : undefined);
       expect(lambda.headers["transfer-encoding"]).toBeUndefined();
       expect(lambda.headers["x-kept"]).toBe("yes");
 
@@ -518,7 +542,11 @@ describe("server adapters", () => {
       await createNodeHandler({ routes, streaming })(nodeRequest as never, nodeResponse as never);
       expect(nodeResponse.statusCode).toBe(status);
       expect(Buffer.concat(nodeBytes)).toHaveLength(0);
-      expect(nodeResponse.setHeader).not.toHaveBeenCalledWith("content-length", expect.anything());
+      if (status === 304) {
+        expect(nodeResponse.setHeader).toHaveBeenCalledWith("content-length", "19");
+      } else {
+        expect(nodeResponse.setHeader).not.toHaveBeenCalledWith("content-length", expect.anything());
+      }
       expect(nodeResponse.setHeader).not.toHaveBeenCalledWith("transfer-encoding", expect.anything());
       expect(nodeResponse.setHeader).toHaveBeenCalledWith("x-kept", "yes");
     }
@@ -1816,6 +1844,7 @@ describe("server adapters", () => {
       );
       expect(workers.headers.get("cache-control")).toBe("no-store");
       expect(workers.headers.get("vary")).toBe("Cookie");
+      expect(workers.body).toBeNull();
       expect(await workers.text()).toBe("");
 
       const nodeChunks: string[] = [];

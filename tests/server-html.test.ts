@@ -226,4 +226,23 @@ describe("server html helper", () => {
     expect(() => attr("data", unsafe)).toThrow("Unsafe URL for data");
     expect(() => attr("srcset", `/safe.jpg 1x, ${unsafe} 2x`)).toThrow("Unsafe URL for srcset");
   });
+
+  it("validates static and attribute-fragment URLs after HTML character-reference decoding", () => {
+    expect(() => html`<a href="javascript:alert(1)">unsafe</a>`).toThrow("Unsafe URL for href");
+    expect(() => html`<a href="jav&#x61;script:alert(1)">unsafe</a>`).toThrow("Unsafe URL for href");
+    expect(() => html`<meta http-equiv="refresh" ${attr("content", "0;url=//evil.example")} />`).toThrow(
+      "Unsafe URL for content",
+    );
+    expect(String(html`<a href="/safe?value=%">safe</a>`)).toBe(`<a href="/safe?value=%">safe</a>`);
+  });
+
+  it("rejects trusted fragments that leave an HTML token or raw-text element unfinished", () => {
+    expect(() => html`${rawHtml("<svg onlo")}ad="${"globalThis.xss = true"}"></svg>`).toThrow(
+      "Trusted HTML fragments must end in text context",
+    );
+    const strings = ["", "--<script></script>`; globalThis.xss = true</script>"] as unknown as TemplateStringsArray;
+    expect(() => html(strings, rawHtml("<script>const marker = `<!-"))).toThrow(
+      "Trusted HTML fragments must end in text context",
+    );
+  });
 });

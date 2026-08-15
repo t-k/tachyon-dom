@@ -20,7 +20,12 @@ import {
   type RouteDocumentComposer,
 } from "../router-document.js";
 
-const bodylessStatuses = new Set([204, 205, 304]);
+const headersAfterDocumentComposition = (headers: Headers): Headers => {
+  const composed = new Headers(headers);
+  composed.delete("content-length");
+  composed.delete("transfer-encoding");
+  return composed;
+};
 
 export type WorkersAssetsBinding = {
   fetch: (request: Request) => Response | Promise<Response>;
@@ -503,10 +508,14 @@ const responseFor = async <Env>(
               options.document ?? fragmentDocument,
             )
           : result.value.chunks;
-      const stream = bodylessStatuses.has(result.value.status) ? null : workersStreamFromChunks(composedChunks);
+      const stream = result.value.bodyKind === "bodyless" ? null : workersStreamFromChunks(composedChunks);
+      const headers =
+        result.value.bodyKind === "route"
+          ? headersAfterDocumentComposition(result.value.headers)
+          : result.value.headers;
       const response = new Response(stream, {
         status: result.value.status,
-        headers: mergeHeaders(result.value.headers, options.securityHeaders),
+        headers: mergeHeaders(headers, options.securityHeaders),
       });
       await emitResponse(options.observability, state, response, state.routeId === undefined);
       return response;
@@ -535,10 +544,10 @@ const responseFor = async <Env>(
       return response;
     }
     const body =
-      request.method === "HEAD" || bodylessStatuses.has(result.value.status)
+      result.value.bodyKind === "bodyless"
         ? null
-        : result.value.responseBody !== undefined
-          ? result.value.responseBody
+        : result.value.bodyKind === "pass-through"
+          ? (result.value.responseBody ?? "")
           : await composeBufferedDocument(
               result.value.html,
               {
@@ -548,9 +557,11 @@ const responseFor = async <Env>(
               },
               options.document ?? fragmentDocument,
             );
+    const headers =
+      result.value.bodyKind === "route" ? headersAfterDocumentComposition(result.value.headers) : result.value.headers;
     const response = new Response(body, {
       status: result.value.status,
-      headers: mergeHeaders(result.value.headers, options.securityHeaders),
+      headers: mergeHeaders(headers, options.securityHeaders),
     });
     await emitResponse(options.observability, state, response, state.routeId === undefined);
     return response;

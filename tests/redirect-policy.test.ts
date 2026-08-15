@@ -31,8 +31,8 @@ describe("shared redirect policy", () => {
       expect(routeCall).not.toThrow();
       expect(formCall).not.toThrow();
     } else {
-      expect(routeCall).toThrow(`Unsafe redirect target: ${location}`);
-      expect(formCall).toThrow(`Unsafe redirect target: ${location}`);
+      expect(routeCall).toThrow("Unsafe redirect target.");
+      expect(formCall).toThrow("Unsafe redirect target.");
     }
   });
 });
