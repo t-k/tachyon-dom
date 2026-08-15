@@ -189,6 +189,44 @@ describe("signal runtime", () => {
     expect(seen).toEqual([11, 22]);
   });
 
+  it("drains sibling effects before reporting an unhandled failure", () => {
+    const source = createSignal(0);
+    const calls: string[] = [];
+    effect(() => {
+      const value = source();
+      calls.push(`thrower:${value}`);
+      if (value === 1) throw new Error("first");
+    });
+    effect(() => {
+      calls.push(`sibling:${source()}`);
+    });
+    calls.length = 0;
+
+    expect(() => batch(() => source.set(1))).toThrow("first");
+
+    expect(calls).toEqual(["thrower:1", "sibling:1"]);
+  });
+
+  it("reports multiple unhandled reactive failures in queue order", () => {
+    const source = createSignal(0);
+    effect(() => {
+      if (source() === 1) throw new Error("first");
+    });
+    effect(() => {
+      if (source() === 1) throw new Error("second");
+    });
+    let thrown: unknown;
+
+    try {
+      batch(() => source.set(1));
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect((thrown as AggregateError).errors).toEqual([new Error("first"), new Error("second")]);
+  });
+
   it("memoizes computed values and prevents diamond dependency glitches", () => {
     const count = createSignal(1);
     const doubled = createMemo(() => count() * 2);

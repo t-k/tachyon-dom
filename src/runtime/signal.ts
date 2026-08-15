@@ -6,7 +6,15 @@ type EffectRunner = {
   dependencies: Set<SubscriberSet>;
   children: Set<EffectRunner>;
   parent: EffectRunner | undefined;
+  errorOwner: ReactiveErrorOwner | undefined;
   run: () => void;
+};
+
+type ReactiveErrorOwner = {
+  disposed: boolean;
+  parent: ReactiveErrorOwner | undefined;
+  handle: (error: unknown) => void;
+  runners: Set<EffectRunner>;
 };
 
 type Owner = {
@@ -18,6 +26,7 @@ const signalBrand = Symbol("tachyon.signal");
 
 let activeEffect: EffectRunner | undefined;
 let currentOwner: Owner | undefined;
+let currentErrorOwner: ReactiveErrorOwner | undefined;
 let batchDepth = 0;
 let flushing = false;
 const pendingComputedEffects = new Set<EffectRunner>();
@@ -27,6 +36,39 @@ export const onCleanup = (cleanup: () => void): void => {
   if (currentOwner && !currentOwner.disposed) {
     currentOwner.cleanups.push(cleanup);
   }
+};
+
+export type ReactiveErrorScope = {
+  run: <T>(fn: () => T) => T;
+  dispose: () => void;
+};
+
+export const createReactiveErrorScope = (handle: (error: unknown) => void): ReactiveErrorScope => {
+  const owner: ReactiveErrorOwner = {
+    disposed: false,
+    parent: currentErrorOwner,
+    handle,
+    runners: new Set(),
+  };
+  const scope: ReactiveErrorScope = {
+    run: (fn) => {
+      const previous = currentErrorOwner;
+      currentErrorOwner = owner;
+      try {
+        return fn();
+      } finally {
+        currentErrorOwner = previous;
+      }
+    },
+    dispose: () => {
+      if (owner.disposed) return;
+      owner.disposed = true;
+      for (const runner of Array.from(owner.runners)) disposeRunner(runner);
+      owner.runners.clear();
+    },
+  };
+  onCleanup(scope.dispose);
+  return scope;
 };
 
 export const createRoot = <T>(fn: (dispose: () => void) => T): T => {
@@ -85,8 +127,11 @@ const disposeRunner = (runner: EffectRunner): void => {
     return;
   }
   runner.disposed = true;
+  pendingComputedEffects.delete(runner);
+  pendingEffects.delete(runner);
   cleanup(runner);
   runner.parent?.children.delete(runner);
+  runner.errorOwner?.runners.delete(runner);
 };
 
 const track = (subscribers: SubscriberSet): void => {
@@ -96,11 +141,33 @@ const track = (subscribers: SubscriberSet): void => {
   }
 };
 
+const deliverError = (
+  initialOwner: ReactiveErrorOwner | undefined,
+  initialError: unknown,
+): { handled: true } | { handled: false; error: unknown } => {
+  let error = initialError;
+  for (let owner = initialOwner; owner; owner = owner.parent) {
+    if (owner.disposed) continue;
+    const previous = currentErrorOwner;
+    currentErrorOwner = owner;
+    try {
+      owner.handle(error);
+      return { handled: true };
+    } catch (nextError) {
+      error = nextError;
+    } finally {
+      currentErrorOwner = previous;
+    }
+  }
+  return { handled: false, error };
+};
+
 const flushPendingEffects = (): void => {
   if (flushing) {
     return;
   }
   flushing = true;
+  const unhandled: unknown[] = [];
   try {
     while (pendingComputedEffects.size > 0 || pendingEffects.size > 0) {
       const runner = pendingComputedEffects.values().next().value ?? pendingEffects.values().next().value;
@@ -112,11 +179,18 @@ const flushPendingEffects = (): void => {
       } else {
         pendingEffects.delete(runner);
       }
-      runner.run();
+      try {
+        runner.run();
+      } catch (error) {
+        const delivered = deliverError(runner.errorOwner, error);
+        if (!delivered.handled) unhandled.push(delivered.error);
+      }
     }
   } finally {
     flushing = false;
   }
+  if (unhandled.length === 1) throw unhandled[0];
+  if (unhandled.length > 1) throw new AggregateError(unhandled, "Reactive effects failed.");
 };
 
 const scheduleFlush = (): void => {
@@ -233,23 +307,28 @@ export const createStore = <T extends Record<PropertyKey, unknown>>(initial: T):
 
 const createEffect = (fn: () => void, computed: boolean): (() => void) => {
   const parent = activeEffect && !activeEffect.disposed ? activeEffect : undefined;
+  const errorOwner = currentErrorOwner;
   const runner: EffectRunner = {
     disposed: false,
     computed,
     dependencies: new Set(),
     children: new Set(),
     parent,
+    errorOwner,
     run: () => {
       if (runner.disposed) {
         return;
       }
       cleanup(runner);
       const previous = activeEffect;
+      const previousErrorOwner = currentErrorOwner;
       activeEffect = runner;
+      currentErrorOwner = runner.errorOwner;
       try {
         fn();
       } finally {
         activeEffect = previous;
+        currentErrorOwner = previousErrorOwner;
         if (!previous) {
           scheduleFlush();
         }
@@ -257,11 +336,15 @@ const createEffect = (fn: () => void, computed: boolean): (() => void) => {
     },
   };
   parent?.children.add(runner);
+  errorOwner?.runners.add(runner);
   try {
     runner.run();
   } catch (error) {
-    disposeRunner(runner);
-    throw error;
+    const delivered = deliverError(runner.errorOwner, error);
+    if (!delivered.handled) {
+      disposeRunner(runner);
+      throw delivered.error;
+    }
   }
   const dispose = (): void => disposeRunner(runner);
   onCleanup(dispose);
