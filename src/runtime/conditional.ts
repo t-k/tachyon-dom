@@ -104,6 +104,7 @@ type ConditionalState = {
   signature: string;
   nodes: Node[];
   cleanups: Array<() => void>;
+  refCleanups: Map<number, () => void>;
   scope: Record<string, unknown>;
 };
 
@@ -170,6 +171,8 @@ const cleanup = (state: ConditionalState): void => {
     cleanupFn();
   }
   state.cleanups.length = 0;
+  for (const cleanupRef of state.refCleanups.values()) cleanupRef();
+  state.refCleanups.clear();
   for (const node of state.nodes) {
     node.parentNode?.removeChild(node);
   }
@@ -199,7 +202,7 @@ const bindNodes = (
   if (!firstElement) {
     return;
   }
-  for (const binding of options.bindings) {
+  for (const [bindingIndex, binding] of options.bindings.entries()) {
     if (binding.kind === "text") {
       setText(nodeAtState(state, binding.path) as Text, readBinding(scope, binding));
     } else if (binding.kind === "class") {
@@ -209,7 +212,11 @@ const bindNodes = (
     } else if (binding.kind === "style") {
       setStyleValue(nodeAtState(state, binding.path) as Element, binding.name, readBinding(scope, binding));
     } else if (binding.kind === "ref") {
-      setRef(scope, binding.expression, nodeAtState(state, binding.path) as Element);
+      state.refCleanups.get(bindingIndex)?.();
+      state.refCleanups.set(
+        bindingIndex,
+        setRef(scope, binding.expression, nodeAtState(state, binding.path) as Element),
+      );
     } else if (binding.kind === "model") {
       setControlValue(
         nodeAtState(state, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
@@ -292,6 +299,7 @@ export const mountConditional = (
           signature,
           nodes: createNodes(options.templateHtml),
           cleanups: [],
+          refCleanups: new Map<number, () => void>(),
           scope,
         };
   states.set(anchor, state);

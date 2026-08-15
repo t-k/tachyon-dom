@@ -79,6 +79,18 @@ describe("attribute and form runtime helpers", () => {
     expect(input.value).toBe("");
   });
 
+  it("clears only the element currently held by a ref", () => {
+    const scope = { refs: {} as { panel?: Element } };
+    const first = document.createElement("div");
+    const cleanup = setRef(scope, "refs.panel", first);
+    const replacement = document.createElement("span");
+    scope.refs.panel = replacement;
+
+    cleanup();
+
+    expect(scope.refs.panel).toBe(replacement);
+  });
+
   it.each(["onclick", "ONLOAD", "srcdoc", "innerhtml", "outerhtml"])(
     "rejects dangerous attribute %s before mutating the DOM",
     (name) => {

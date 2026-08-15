@@ -114,6 +114,7 @@ type RowRecord = {
   nodes: Node[];
   scope: Record<string, unknown>;
   cleanups: Array<() => void>;
+  refCleanups: Map<number, () => void>;
   lastValues: unknown[];
   item: unknown;
   revision: Signal<number>;
@@ -286,6 +287,8 @@ const cleanupRecord = (record: RowRecord): void => {
     cleanup();
   }
   record.cleanups.length = 0;
+  for (const cleanupRef of record.refCleanups.values()) cleanupRef();
+  record.refCleanups.clear();
   for (const node of record.nodes) {
     cleanupNestedListStates(node);
     node.parentNode?.removeChild(node);
@@ -329,7 +332,8 @@ const applyRowBinding = (
       setStyleValue(nodeAtRecord(record, binding.path) as Element, binding.name, value);
     }
   } else if (binding.kind === "ref") {
-    setRef(scope, binding.expression, nodeAtRecord(record, binding.path) as Element);
+    record.refCleanups.get(index)?.();
+    record.refCleanups.set(index, setRef(scope, binding.expression, nodeAtRecord(record, binding.path) as Element));
   } else if (binding.kind === "model") {
     const value = readBinding(scope, binding);
     if (shouldApplyValue(record, index, value)) {
@@ -471,6 +475,7 @@ const createRecord = (
     nodes,
     scope,
     cleanups: [],
+    refCleanups: new Map<number, () => void>(),
     lastValues: [],
     item,
     revision: createSignal(0),

@@ -14,6 +14,25 @@ afterEach(() => {
 });
 
 describe("mountKeyedList", () => {
+  it("clears a row ref when its keyed row is removed", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const item: { id: number; ref?: Element } = { id: 1 };
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li></li>`,
+      bindings: [{ kind: "ref" as const, path: [], expression: "item.ref" }],
+    };
+
+    mountKeyedList(root, [], [item], options);
+    expect(item.ref).toBe(root.querySelector("li"));
+    mountKeyedList(root, [], [], options);
+
+    expect(item.ref).toBeUndefined();
+  });
+
   it("disposes bindings for rows appended after root creation", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

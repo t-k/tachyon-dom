@@ -361,6 +361,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   );
   const needsModel = bindings.some((binding) => binding.kind === "model");
   const needsEvent = bindings.some((binding) => binding.kind === "event");
+  const needsRef = bindings.some((binding) => binding.kind === "ref");
   const needsList = bindings.some((binding) => binding.kind === "list");
   const needsConditional = bindings.some((binding) => binding.kind === "if");
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
@@ -437,7 +438,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       .join(", ");
     lines.push(`  const state = ${runtimeNames.createStore}({ ...scope, ${fields} });`);
   }
-  if (reactive || needsEvent || needsModel || hasDefaultScope) {
+  if (reactive || needsEvent || needsModel || needsRef || hasDefaultScope) {
     lines.push(`  const cleanups = [];`);
   }
   let listIndex = 0;
@@ -501,7 +502,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       }
     } else if (binding.kind === "ref") {
       lines.push(
-        `  ${runtimeNames.setRef}(${sourceName}, ${JSON.stringify(binding.expression)}, ${elementExpression(binding.path)});`,
+        `  cleanups.push(${runtimeNames.setRef}(${sourceName}, ${JSON.stringify(binding.expression)}, ${elementExpression(binding.path)}));`,
       );
     } else if (binding.kind === "model") {
       const target = elementExpression(binding.path);
@@ -528,7 +529,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       lines.push(emitConditionalBinding(binding, reactive, sourceName, conditionalIndex++, targetName));
     }
   }
-  if (reactive || needsEvent || needsModel || hasDefaultScope) {
+  if (reactive || needsEvent || needsModel || needsRef || hasDefaultScope) {
     lines.push(`  return () => {`);
     lines.push(`    let __tachyonCleanupError;`);
     lines.push(`    let __tachyonCleanupFailed = false;`);

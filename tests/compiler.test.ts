@@ -716,7 +716,7 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`from "tachyon-dom/runtime/form"`);
     expect(code).toContain(`__tachyonSetAttributeValue(root, "data-count", (scope.count + 1));`);
     expect(code).toContain(`__tachyonSetStyleValue(root, "width", (scope.size + "px"));`);
-    expect(code).toContain(`__tachyonSetRef(scope, "refs.panel", root);`);
+    expect(code).toContain(`cleanups.push(__tachyonSetRef(scope, "refs.panel", root));`);
     expect(code).toContain(`__tachyonBindControl(__tachyonElementAt(root, [0]), "value"`);
     expect(code).toContain(`__tachyonBindControl(__tachyonElementAt(root, [1,0]), "checked"`);
   });

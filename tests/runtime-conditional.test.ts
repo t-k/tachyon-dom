@@ -2,6 +2,27 @@ import { describe, expect, it, vi } from "vitest";
 import { mountConditional } from "../src/runtime/conditional";
 
 describe("mountConditional", () => {
+  it("clears and replaces refs when conditional content is unmounted", () => {
+    document.body.innerHTML = `<section><!----></section>`;
+    const root = document.querySelector("section");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const scope = { refs: {} as { panel?: Element } };
+    const options = {
+      templateHtml: `<div></div>`,
+      bindings: [{ kind: "ref" as const, path: [], expression: "refs.panel" }],
+    };
+
+    mountConditional(root, [0], true, scope, options);
+    const first = scope.refs.panel;
+    expect(first).toBe(root.querySelector("div"));
+    mountConditional(root, [0], false, scope, options);
+    expect(scope.refs.panel).toBeUndefined();
+
+    mountConditional(root, [0], true, scope, options);
+    expect(scope.refs.panel).toBe(root.querySelector("div"));
+    expect(scope.refs.panel).not.toBe(first);
+  });
+
   it("mounts, updates, and unmounts conditional content at a comment anchor", () => {
     document.body.innerHTML = `<section><!----></section>`;
     const root = document.querySelector("section");

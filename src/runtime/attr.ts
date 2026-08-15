@@ -54,18 +54,21 @@ export const setStyleValue = (element: Element, name: string, value: unknown): v
   element.style.setProperty(name, value == null || value === false ? "" : String(value));
 };
 
-export const setRef = (scope: Record<string, unknown>, expression: string, element: Element): void => {
+export const setRef = (scope: Record<string, unknown>, expression: string, element: Element): (() => void) => {
   const parts = expression.split(".");
   let current: Record<string, unknown> = scope;
   for (const part of parts.slice(0, -1)) {
     const next = current[part];
     if (next == null || typeof next !== "object") {
-      return;
+      return () => undefined;
     }
     current = next as Record<string, unknown>;
   }
   const last = parts.at(-1);
-  if (last) {
-    current[last] = element;
-  }
+  if (!last) return () => undefined;
+  current[last] = element;
+  const target = current;
+  return () => {
+    if (target[last] === element) target[last] = undefined;
+  };
 };
