@@ -55,6 +55,10 @@ void env.value.publicEnv.PUBLIC_APP_NAME;
 void env.value.env.SESSION_SECRET;
 ```
 
+## Virtualized Lists
+
+`createVirtualizedList()` renders a fixed-height visible window with overscan. Provide `getKey(item, index)` to preserve row elements across scrolling and `update()` calls. Duplicate keys are rejected before the current window changes. When new objects reuse an existing key, use `updateItem(element, item, index)` to refresh their visible content without replacing the element; omitting it intentionally preserves local DOM state such as an edited input value. Without `getKey`, list identity remains index-based.
+
 ## Hydration Strategies
 
 `scheduleHydration(handle, options)` supports:

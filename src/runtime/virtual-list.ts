@@ -3,6 +3,7 @@ export type VirtualizedListOptions<T> = {
   items: readonly T[];
   itemHeight: number;
   renderItem: (item: T, index: number) => Element;
+  updateItem?: (element: Element, item: T, index: number) => void;
   getKey?: (item: T, index: number) => PropertyKey;
   viewportHeight?: number | (() => number);
   overscan?: number;
@@ -25,7 +26,18 @@ const clamp = (value: number, min: number, max: number): number => Math.max(min,
 
 export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): VirtualizedList<T> => {
   const overscan = options.overscan ?? 3;
-  let items = [...options.items];
+  const validateItems = (nextItems: readonly T[]): T[] => {
+    const copy = [...nextItems];
+    if (!options.getKey) return copy;
+    const keys = new Set<PropertyKey>();
+    for (let index = 0; index < copy.length; index++) {
+      const key = options.getKey(copy[index] as T, index);
+      if (keys.has(key)) throw new Error(`Duplicate virtual list key: ${String(key)}`);
+      keys.add(key);
+    }
+    return copy;
+  };
+  let items = validateItems(options.items);
   let rendered = new Map<PropertyKey, Element>();
   let lastRangeKey = "";
   let animationFrame: number | undefined;
@@ -36,6 +48,22 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
   windowEl.style.insetInline = "0";
   windowEl.style.insetBlockStart = "0";
   options.scroller.replaceChildren(spacer);
+
+  const reconcileWindow = (elements: readonly Element[]): void => {
+    let cursor = windowEl.firstElementChild;
+    for (const element of elements) {
+      if (element === cursor) {
+        cursor = cursor.nextElementSibling;
+      } else {
+        windowEl.insertBefore(element, cursor);
+      }
+    }
+    while (cursor) {
+      const next = cursor.nextElementSibling;
+      cursor.remove();
+      cursor = next;
+    }
+  };
 
   const renderWindow = (force = false): void => {
     const viewportHeight = viewportHeightFor(options);
@@ -54,7 +82,9 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
     for (let index = start; index < end; index++) {
       const item = items[index] as T;
       const key = options.getKey?.(item, index) ?? index;
-      const element = rendered.get(key) ?? options.renderItem(item, index);
+      const existing = rendered.get(key);
+      const element = existing ?? options.renderItem(item, index);
+      if (existing) options.updateItem?.(element, item, index);
       element.setAttribute("data-tachyon-virtual-item", String(key));
       element.setAttribute("aria-posinset", String(index + 1));
       element.setAttribute("aria-setsize", String(items.length));
@@ -62,7 +92,7 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
       nextElements.push(element);
     }
     rendered = nextRendered;
-    windowEl.replaceChildren(...nextElements);
+    reconcileWindow(nextElements);
     if (!windowEl.parentNode) {
       spacer.appendChild(windowEl);
     }
@@ -90,8 +120,7 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
 
   return {
     update: (nextItems) => {
-      items = [...nextItems];
-      rendered = new Map();
+      items = validateItems(nextItems);
       lastRangeKey = "";
       renderWindow(true);
     },

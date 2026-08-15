@@ -6,6 +6,110 @@ describe("virtualized list runtime", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps keyed elements and refreshes their content on update", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const list = createVirtualizedList({
+      scroller,
+      items: [{ id: "a", label: "A" }],
+      itemHeight: 24,
+      viewportHeight: 48,
+      getKey: (item) => item.id,
+      renderItem: (item) => {
+        const row = document.createElement("button");
+        row.textContent = item.label;
+        return row;
+      },
+      updateItem: (element, item) => {
+        element.textContent = item.label;
+      },
+    });
+    const before = scroller.querySelector("button");
+
+    list.update([{ id: "a", label: "B" }]);
+
+    expect(scroller.querySelector("button")).toBe(before);
+    expect(before?.textContent).toBe("B");
+    list.destroy();
+  });
+
+  it("renders only added keys and removes missing keys on update", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    let renders = 0;
+    const list = createVirtualizedList({
+      scroller,
+      items: [{ id: "a" }, { id: "b" }],
+      itemHeight: 20,
+      viewportHeight: 100,
+      getKey: (item) => item.id,
+      renderItem: (item) => {
+        renders++;
+        const row = document.createElement("div");
+        row.textContent = item.id;
+        return row;
+      },
+    });
+    const retained = scroller.querySelector(`[data-tachyon-virtual-item="b"]`);
+
+    list.update([{ id: "b" }, { id: "c" }]);
+
+    expect(renders).toBe(3);
+    expect(scroller.querySelector(`[data-tachyon-virtual-item="a"]`)).toBeNull();
+    expect(scroller.querySelector(`[data-tachyon-virtual-item="b"]`)).toBe(retained);
+    expect(scroller.textContent).toBe("bc");
+    list.destroy();
+  });
+
+  it("preserves focused input state for unchanged keys", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const list = createVirtualizedList({
+      scroller,
+      items: [{ id: "a" }],
+      itemHeight: 20,
+      viewportHeight: 100,
+      getKey: (item) => item.id,
+      renderItem: () => document.createElement("input"),
+    });
+    const input = scroller.querySelector("input");
+    if (!(input instanceof HTMLInputElement)) throw new Error("Missing input.");
+    input.value = "draft";
+    input.focus();
+
+    list.update([{ id: "a" }]);
+
+    expect(scroller.querySelector("input")).toBe(input);
+    expect(input.value).toBe("draft");
+    expect(document.activeElement).toBe(input);
+    list.destroy();
+  });
+
+  it("rejects duplicate keys before replacing the current window", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const list = createVirtualizedList({
+      scroller,
+      items: [{ id: "a" }],
+      itemHeight: 20,
+      viewportHeight: 100,
+      getKey: (item) => item.id,
+      renderItem: (item) => {
+        const row = document.createElement("div");
+        row.textContent = item.id;
+        return row;
+      },
+    });
+
+    expect(() => list.update([{ id: "a" }, { id: "a" }])).toThrow("Duplicate virtual list key: a");
+    expect(scroller.textContent).toBe("a");
+    list.destroy();
+  });
+
   it("renders only the visible item window and preserves total scroll space", () => {
     document.body.innerHTML = `<div id="scroller"></div>`;
     const scroller = document.querySelector("#scroller");
