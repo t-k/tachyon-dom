@@ -26,14 +26,26 @@ const trackedChunks = (...values: string[]) => {
 };
 
 describe("route document and progressive layout composition", () => {
-  it("closes an unpulled child exactly once when the document composer rejects", async () => {
+  it.each([
+    [
+      "synchronous throw",
+      () => {
+        throw new Error("composer failed");
+      },
+      "composer failed",
+    ],
+    ["asynchronous rejection", async () => Promise.reject(new Error("composer rejected")), "composer rejected"],
+    [
+      "invalid segments",
+      () => ({ before: "<main>", after: "</main>", outlet: "many" }) as never,
+      "must return bounded before/after segments",
+    ],
+  ])("closes an unpulled child exactly once after %s", async (_case, composer, message) => {
     const tracked = trackedChunks("child");
 
     await expect(
-      composeStreamingDocument(tracked.chunks, { headHtml: "", resourceHints: "", stateScript: "" }, () => {
-        throw new Error("composer failed");
-      }),
-    ).rejects.toThrow("composer failed");
+      composeStreamingDocument(tracked.chunks, { headHtml: "", resourceHints: "", stateScript: "" }, composer),
+    ).rejects.toThrow(message);
 
     expect(tracked.next).not.toHaveBeenCalled();
     expect(tracked.returnIterator).toHaveBeenCalledTimes(1);
