@@ -209,6 +209,80 @@ describe("router security helpers", () => {
     expect(result.ok && result.value).toMatchObject({ status: 403, html: "<h1>Forbidden</h1>" });
   });
 
+  it.each([
+    { label: "loader only", loader: true, action: false },
+    { label: "action only", loader: false, action: true },
+    { label: "loader and action", loader: true, action: true },
+    { label: "render only", loader: false, action: false },
+  ])("gates every unsafe method before callbacks for a $label route", async ({ loader, action }) => {
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      const calls = { verify: 0, onMatch: 0, loader: 0, action: 0, render: 0 };
+      const route: RouteDefinition = {
+        path: "/mutate",
+        ...(loader
+          ? {
+              loader: () => {
+                calls.loader += 1;
+                return "loaded";
+              },
+            }
+          : {}),
+        ...(action
+          ? {
+              action: () => {
+                calls.action += 1;
+                return "acted";
+              },
+            }
+          : {}),
+        render: () => {
+          calls.render += 1;
+          return "ok";
+        },
+      };
+
+      const result = await renderRoute(
+        [route],
+        new Request("https://x.test/mutate", { method }),
+        {
+          csrf: {
+            verify: () => {
+              calls.verify += 1;
+              return false;
+            },
+          },
+          hooks: {
+            onMatch: () => {
+              calls.onMatch += 1;
+            },
+          },
+        },
+      );
+
+      expect(result.ok && result.value.status, method).toBe(403);
+      expect(calls, method).toEqual({ verify: 1, onMatch: 0, loader: 0, action: 0, render: 0 });
+    }
+  });
+
+  it.each(["GET", "HEAD", "OPTIONS"])("does not run CSRF verification for the safe %s method", async (method) => {
+    let verifyCalls = 0;
+    const result = await renderRoute(
+      [{ path: "/read", loader: () => "loaded", action: () => "acted", render: () => "ok" }],
+      new Request("https://x.test/read", { method }),
+      {
+        csrf: {
+          verify: () => {
+            verifyCalls += 1;
+            return false;
+          },
+        },
+      },
+    );
+
+    expect(result.ok && result.value.status).toBe(200);
+    expect(verifyCalls).toBe(0);
+  });
+
   it("rejects a CSRF token resolved for a different session", async () => {
     const routes: RouteDefinition[] = [{ path: "/action", action: () => ({ ok: true }), render: () => "ok" }];
     const options = {

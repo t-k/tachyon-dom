@@ -13,17 +13,18 @@ const digest = async (value: string): Promise<Uint8Array | undefined> => {
   if (!globalThis.crypto?.subtle) {
     return undefined;
   }
-  return new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", encoder.encode(value)));
+  try {
+    return new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", encoder.encode(value)));
+  } catch {
+    return undefined;
+  }
 };
 
-export const timingSafeEqual = async (left: unknown, right: string): Promise<boolean> => {
-  if (typeof left !== "string") {
+export const timingSafeEqual = async (left: unknown, right: unknown): Promise<boolean> => {
+  if (typeof left !== "string" || typeof right !== "string") {
     return false;
   }
-  const leftDigest = await digest(left);
-  const rightDigest = await digest(right);
-  if (leftDigest && rightDigest) {
-    return xorEqual(leftDigest, rightDigest);
-  }
-  return xorEqual(encoder.encode(left), encoder.encode(right));
+  const [leftDigest, rightDigest] = await Promise.all([digest(left), digest(right)]);
+  // Fixed-length digests remove the input-length-dependent raw-byte loop. A missing or failed digest is fail-closed.
+  return leftDigest && rightDigest ? xorEqual(leftDigest, rightDigest) : false;
 };

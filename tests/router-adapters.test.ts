@@ -1498,6 +1498,58 @@ describe("server adapters", () => {
     expect(verifierBindings).toBe(bindings);
   });
 
+  it("gates loader-only unsafe requests across Workers, Node, and Lambda", async () => {
+    let loaderCalls = 0;
+    let verifyCalls = 0;
+    const routes: RouteDefinition[] = [
+      {
+        path: "/mutate",
+        loader: () => {
+          loaderCalls += 1;
+          return "loaded";
+        },
+        render: () => "ok",
+      },
+    ];
+    const csrf = {
+      verify: () => {
+        verifyCalls += 1;
+        return false;
+      },
+    };
+
+    const workers = await createWorkersHandler({ routes, csrf }).fetch(
+      new Request("https://example.com/mutate", { method: "POST" }),
+    );
+    const lambda = await createLambdaHandler({ routes, csrf })(
+      lambdaEvent({
+        rawPath: "/mutate",
+        requestContext: { domainName: "lambda.example", http: { method: "POST", path: "/mutate" } },
+      }),
+    );
+    const request = Object.assign(Readable.from([]), {
+      method: "POST",
+      url: "/mutate",
+      headers: { host: "example.com" },
+    });
+    const chunks: string[] = [];
+    const response = {
+      statusCode: 200,
+      setHeader: () => undefined,
+      end: (chunk?: string) => {
+        if (chunk) chunks.push(chunk);
+      },
+    };
+    await createNodeHandler({ routes, csrf })(request as never, response as never);
+
+    expect(workers.status).toBe(403);
+    expect(lambda.statusCode).toBe(403);
+    expect(response.statusCode).toBe(403);
+    expect(chunks.join("")).toBe("<h1>Forbidden</h1>");
+    expect(verifyCalls).toBe(3);
+    expect(loaderCalls).toBe(0);
+  });
+
   it("preserves authoritative streaming metadata and delayed CSRF commit policies through Node and Lambda", async () => {
     const action = vi.fn(() => "saved");
     const routes: RouteDefinition[] = [

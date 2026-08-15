@@ -55,7 +55,9 @@ The Lambda adapter uses `event.requestContext.domainName` and falls back to `Hos
 
 ## Forms and CSRF
 
-`tachyon-dom/server/form-action` standardizes `FormData` parsing, safe value preservation, accessible error attributes, and path-relative redirects. Direct `formAction()` handlers do not add method, CSRF, or Origin checks. Enforce them before invoking the handler. Router actions can use the router-level `csrf` option.
+`tachyon-dom/server/form-action` standardizes `FormData` parsing, safe value preservation, accessible error attributes, and path-relative redirects. Direct `formAction()` handlers do not add method, CSRF, or Origin checks. Enforce them before invoking the handler.
+
+The router-level `csrf` option verifies every matched request whose method is not `GET`, `HEAD`, or `OPTIONS`, including loader-only and render-only routes. Verification runs before route lifecycle hooks, actions, loaders, head/resource callbacks, and rendering. Match-time middleware and `onRequest` run outside this gate, so protect any side effects there independently. A missing Web Crypto implementation or failed digest makes built-in token and signed-cookie comparisons fail closed rather than falling back to raw-byte comparison.
 
 ## Security Tests
 

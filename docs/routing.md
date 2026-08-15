@@ -129,7 +129,7 @@ await renderRoute(routes, request, { cspNonce: nonce });
 
 - `allowedMethods`
 - `maxActionBodyBytes`, enforced from both `Content-Length` and the actual action body bytes read by the router
-- `csrf: { verify }` for action requests. `verify` receives an isolated snapshot of the current request, URL, and configured environment, so it can read the body without consuming the action request and compare a submitted token with the current session without shared mutable handler state.
+- `csrf: { verify }` for every matched request whose method is not `GET`, `HEAD`, or `OPTIONS`, including loader-only and render-only routes. Verification runs before route lifecycle hooks and route callbacks. `verify` receives an isolated snapshot of the current request, URL, and configured environment, so it can read the body without consuming the route request and compare a submitted token with the current session without shared mutable handler state. Middleware and `onRequest` run before matching and remain outside this gate.
 - `middleware`
 - `hooks`
 

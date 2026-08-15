@@ -474,6 +474,8 @@ const verifyCsrf = async (
   }
 };
 
+const csrfSafeMethods = new Set(["GET", "HEAD", "OPTIONS"]);
+
 const payloadTooLargeResult = (match: MatchedRoute): RouteRenderResult => ({
   status: 413,
   html: "<h1>Payload Too Large</h1>",
@@ -1422,6 +1424,23 @@ const renderRouteInternal = async (
     });
   }
   try {
+    if (
+      options.csrf &&
+      !csrfSafeMethods.has(request.method) &&
+      !(await verifyCsrf(request, url, env, bindings, options.csrf))
+    ) {
+      return finish({
+        status: 403,
+        html: "<h1>Forbidden</h1>",
+        headHtml: "",
+        resourceHints: "",
+        stateScript: "",
+        loaderData: {},
+        actionResult: undefined,
+        headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+        match: match.value,
+      });
+    }
     if (options.hooks?.onMatch) {
       const hookRequest = callbackRequestSnapshot(request);
       try {
@@ -1433,19 +1452,6 @@ const renderRouteInternal = async (
     let actionResult: unknown;
     const loaderData: Record<string, unknown> = {};
     if (request.method !== "GET" && request.method !== "HEAD" && match.value.route.action) {
-      if (options.csrf && !(await verifyCsrf(request, url, env, bindings, options.csrf))) {
-        return finish({
-          status: 403,
-          html: "<h1>Forbidden</h1>",
-          headHtml: "",
-          resourceHints: "",
-          stateScript: "",
-          loaderData: {},
-          actionResult: undefined,
-          headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
-          match: match.value,
-        });
-      }
       actionResult = await match.value.route.action({
         request,
         url,
