@@ -54,6 +54,104 @@ describe("runtime form and HMR helpers", () => {
     cleanup();
   });
 
+  it("accepts only the first valid submission while pending and restores disabled states", async () => {
+    document.body.innerHTML = `<form action="/save" method="post"><button id="enabled">Save</button><button id="disabled" disabled>Unavailable</button></form>`;
+    const form = document.querySelector("form");
+    const enabled = document.querySelector("#enabled");
+    const disabled = document.querySelector("#disabled");
+    if (
+      !(form instanceof HTMLFormElement) ||
+      !(enabled instanceof HTMLButtonElement) ||
+      !(disabled instanceof HTMLButtonElement)
+    ) {
+      throw new Error("Missing form controls.");
+    }
+    let resolveSubmission: ((response: Response) => void) | undefined;
+    let submitCalls = 0;
+    let successCalls = 0;
+    const cleanup = enhanceForm(form, {
+      submit: () => {
+        submitCalls++;
+        return new Promise<Response>((resolve) => {
+          resolveSubmission = resolve;
+        });
+      },
+      onSuccess: () => {
+        successCalls++;
+      },
+    });
+
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: enabled }));
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: enabled }));
+    await Promise.resolve();
+
+    expect(submitCalls).toBe(1);
+    expect(enabled.disabled).toBe(true);
+    expect(disabled.disabled).toBe(true);
+
+    resolveSubmission?.(new Response("ok"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(successCalls).toBe(1);
+    expect(enabled.disabled).toBe(false);
+    expect(disabled.disabled).toBe(true);
+    cleanup();
+  });
+
+  it("unlocks after custom validation rejects a submission", async () => {
+    document.body.innerHTML = `<form action="/save" method="post"><button>Save</button></form>`;
+    const form = document.querySelector("form");
+    if (!(form instanceof HTMLFormElement)) throw new Error("Missing form.");
+    let validations = 0;
+    let submits = 0;
+    const cleanup = enhanceForm(form, {
+      validate: () => (++validations === 1 ? { ok: false, errors: {} } : { ok: true, values: {} }),
+      submit: () => {
+        submits++;
+        return new Response("ok");
+      },
+    });
+
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(validations).toBe(2);
+    expect(submits).toBe(1);
+    cleanup();
+  });
+
+  it("ignores a pending completion after enhancement cleanup", async () => {
+    document.body.innerHTML = `<form action="/save" method="post"><button>Save</button></form>`;
+    const form = document.querySelector("form");
+    const button = document.querySelector("button");
+    if (!(form instanceof HTMLFormElement) || !(button instanceof HTMLButtonElement)) {
+      throw new Error("Missing form.");
+    }
+    let resolveSubmission: ((response: Response) => void) | undefined;
+    let successes = 0;
+    const cleanup = enhanceForm(form, {
+      submit: () =>
+        new Promise<Response>((resolve) => {
+          resolveSubmission = resolve;
+        }),
+      onSuccess: () => {
+        successes++;
+      },
+    });
+
+    form.dispatchEvent(new SubmitEvent("submit", { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+    expect(button.disabled).toBe(true);
+    cleanup();
+    expect(button.disabled).toBe(false);
+    resolveSubmission?.(new Response("ok"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(successes).toBe(0);
+  });
+
   it("reads action and method attributes when form properties are clobbered", async () => {
     document.body.innerHTML = `<form action="/save" method="post"><input name="action" value="/clobbered"><input name="method" value="get"></form>`;
     const form = document.querySelector("form");

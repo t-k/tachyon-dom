@@ -75,6 +75,8 @@ The compiler records hydration boundaries with `hydrate:id={id}`. Runtime schedu
 
 `enhanceForm(form, options)` intercepts submit events only when JavaScript is running, builds a `Request` from the existing form markup, and calls `fetch()` or a custom `submit()` callback. Without JavaScript, the same form remains a normal browser form.
 
+After native validation succeeds, the first submission owns the form until its custom validation and request lifecycle settle. Further submit events are ignored during that interval. Submit buttons are disabled only while the request is pending and each control's original disabled state is restored after success, failure, or cleanup. Disposing the enhancement prevents a late response from navigating or invoking success and error callbacks.
+
 `enhanceForm()` also supports:
 
 - `validate(context)` returning `FormValidationResult`.
