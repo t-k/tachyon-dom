@@ -241,9 +241,10 @@ describe("DX helpers", () => {
     expect(packageJson.engines?.node).toBe(">=24");
     expect(packageJson.publishConfig).toEqual({ access: "public" });
 
-    const createPackageJson = JSON.parse(
-      await readFile("packages/create-tachyon-dom/package.json", "utf8"),
-    ) as { repository?: { type?: string; url?: string }; publishConfig?: { access?: string } };
+    const createPackageJson = JSON.parse(await readFile("packages/create-tachyon-dom/package.json", "utf8")) as {
+      repository?: { type?: string; url?: string };
+      publishConfig?: { access?: string };
+    };
     expect(createPackageJson.repository).toEqual({
       type: "git",
       url: "git+https://github.com/t-k/tachyon-dom.git",
@@ -266,8 +267,8 @@ describe("DX helpers", () => {
 
     expect(verifier).toContain("rootPackage.version");
     expect(verifier).toContain("createPackage.version");
-    expect(verifier).not.toContain('tachyon-dom-0.1.1.tgz');
-    expect(verifier).not.toContain('create-tachyon-dom-0.1.1.tgz');
+    expect(verifier).not.toContain("tachyon-dom-0.1.1.tgz");
+    expect(verifier).not.toContain("create-tachyon-dom-0.1.1.tgz");
   });
 
   it("documents the recommended application shape", async () => {
@@ -416,6 +417,14 @@ describe("DX helpers", () => {
     expect(security).toContain("Quote the complete attribute value when a template contains a prefix or suffix");
     expect(security).toContain("Direct `name=${value}` interpolation is quoted automatically");
     expect(security).toContain("`rawHtml()` is accepted only in text context");
+  });
+
+  it("documents secure session cookie option merging and prefix constraints", async () => {
+    const routing = await readFile("docs/routing.md", "utf8");
+
+    expect(routing).toContain("Partial cookie options are merged with these secure defaults");
+    expect(routing).toContain("`__Host-` requires `Secure`, `Path=/`, and no `Domain`");
+    expect(routing).toContain("Use a prefix-free cookie name when explicitly setting `secure: false`");
   });
 
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {

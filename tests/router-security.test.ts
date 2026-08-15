@@ -5,6 +5,7 @@ import {
   parseCookies,
   serializeCookie,
   signCookieValue,
+  type CookieOptions,
   verifySignedCookieValue,
 } from "../src/cookies";
 import { createCsrfToken, createHtmlSanitizer, csrfInput, sanitizeHtml, verifyCsrfRequest } from "../src/security";
@@ -580,7 +581,10 @@ describe("router security helpers", () => {
 
   it("regenerates a known memory session ID for a privilege change", async () => {
     const ids = ["before-login", "after-login"];
-    const storage = createMemorySessionStorage<{ userId?: string }>({ cookieName: "sid", id: () => ids.shift() ?? "extra" });
+    const storage = createMemorySessionStorage<{ userId?: string }>({
+      cookieName: "sid",
+      id: () => ids.shift() ?? "extra",
+    });
     const beforeLogin = await storage.createSession({});
     const afterLogin = await storage.regenerateSession(beforeLogin);
     afterLogin.data.userId = "victim";
@@ -593,7 +597,10 @@ describe("router security helpers", () => {
 
   it("destroys memory sessions and treats the last duplicate cookie as untrusted", async () => {
     const ids = ["known", "rotated"];
-    const storage = createMemorySessionStorage<{ userId?: string }>({ cookieName: "sid", id: () => ids.shift() ?? "extra" });
+    const storage = createMemorySessionStorage<{ userId?: string }>({
+      cookieName: "sid",
+      id: () => ids.shift() ?? "extra",
+    });
     const session = await storage.createSession({ userId: "u1" });
     await storage.destroySession(session);
     await expect(storage.getSession("sid=known")).resolves.toEqual({ id: "known", data: {} });
@@ -628,6 +635,76 @@ describe("router security helpers", () => {
       id: () => "s1",
     });
     await expect(cookieStorage.commitSession({ id: "s1", data: {} })).rejects.toThrow("Invalid cookie Domain");
+  });
+
+  it.each([
+    ["memory", () => createMemorySessionStorage({ cookieName: "sid", cookie: { maxAge: 60 }, id: () => "s1" })],
+    [
+      "signed",
+      () =>
+        createCookieSessionStorage({
+          secret: sessionSecret,
+          cookieName: "sid",
+          cookie: { maxAge: 60 },
+          id: () => "s1",
+        }),
+    ],
+  ] as const)(
+    "merges secure session cookie defaults for %s storage commit and destroy",
+    async (_kind, createStorage) => {
+      const storage = createStorage();
+      const session = await storage.createSession({});
+
+      const committed = await storage.commitSession(session);
+      const destroyed = await storage.destroySession(session);
+
+      for (const cookie of [committed, destroyed]) {
+        expect(cookie).toContain("Path=/");
+        expect(cookie).toContain("HttpOnly");
+        expect(cookie).toContain("Secure");
+        expect(cookie).toContain("SameSite=Lax");
+      }
+      expect(committed).toContain("Max-Age=60");
+      expect(destroyed).toContain("Max-Age=0");
+    },
+  );
+
+  it("retains explicit session cookie overrides while filling unspecified secure defaults", async () => {
+    const storage = createMemorySessionStorage({
+      cookieName: "sid",
+      cookie: { maxAge: undefined, sameSite: "Strict" } as unknown as CookieOptions,
+      id: () => "s1",
+    });
+
+    const cookie = await storage.commitSession(await storage.createSession({}));
+
+    expect(cookie).toBe("sid=s1; Path=/; HttpOnly; Secure; SameSite=Strict");
+  });
+
+  it("enforces __Host- and __Secure- session cookie prefix requirements", async () => {
+    expect(() => createCookieSessionStorage({ secret: sessionSecret, cookie: { secure: false } })).toThrow(
+      "__Host- cookies require Secure, Path=/, and no Domain",
+    );
+    expect(() => createCookieSessionStorage({ secret: sessionSecret, cookie: { path: "/app" } })).toThrow(
+      "__Host- cookies require Secure, Path=/, and no Domain",
+    );
+    expect(() => createCookieSessionStorage({ secret: sessionSecret, cookie: { domain: "example.test" } })).toThrow(
+      "__Host- cookies require Secure, Path=/, and no Domain",
+    );
+    expect(() =>
+      createCookieSessionStorage({ secret: sessionSecret, cookieName: "__Secure-session", cookie: { secure: false } }),
+    ).toThrow("__Secure- cookies require Secure");
+
+    const localStorage = createCookieSessionStorage({
+      secret: sessionSecret,
+      cookieName: "sid",
+      cookie: { secure: false },
+      id: () => "s1",
+    });
+    const localCookie = await localStorage.commitSession({ id: "s1", data: {} });
+
+    expect(localCookie).toContain("Path=/; HttpOnly; SameSite=Lax");
+    expect(localCookie).not.toContain("Secure");
   });
 
   it("rejects CSP options that can inject directives or source expressions", () => {
@@ -709,8 +786,15 @@ describe("router security helpers", () => {
   });
 
   it("rejects a legacy signed session without an expiry when expiry is required", async () => {
-    const legacy = serializeCookie("sid", signCookieValue(JSON.stringify({ id: "s1", data: { userId: "u1" } }), sessionSecret));
-    const storage = createCookieSessionStorage<{ userId: string }>({ secret: sessionSecret, cookieName: "sid", maxAgeMs: 100 });
+    const legacy = serializeCookie(
+      "sid",
+      signCookieValue(JSON.stringify({ id: "s1", data: { userId: "u1" } }), sessionSecret),
+    );
+    const storage = createCookieSessionStorage<{ userId: string }>({
+      secret: sessionSecret,
+      cookieName: "sid",
+      maxAgeMs: 100,
+    });
 
     await expect(storage.getSession(legacy)).resolves.toEqual({ id: "", data: {} });
   });
@@ -781,8 +865,7 @@ describe("router security helpers", () => {
           requireUser(({ request: guardedRequest }) =>
             guardedRequest.headers.get("cookie") === "sid=attacker" ? { id: "attacker" } : undefined,
           ),
-          ({ request: authorizedRequest }) =>
-            new Request(authorizedRequest, { headers: { cookie: "sid=victim" } }),
+          ({ request: authorizedRequest }) => new Request(authorizedRequest, { headers: { cookie: "sid=victim" } }),
         ],
       }),
     ).rejects.toThrow("Middleware cannot replace the request after requireUser has authorized it");
@@ -822,8 +905,7 @@ describe("router security helpers", () => {
               }
               wrapperContinued = true;
             },
-            ({ request: authorizedRequest }) =>
-              new Request(authorizedRequest, { headers: { cookie: "sid=victim" } }),
+            ({ request: authorizedRequest }) => new Request(authorizedRequest, { headers: { cookie: "sid=victim" } }),
           ],
         },
       ),
@@ -907,15 +989,9 @@ describe("router security helpers", () => {
   it("preserves denial responses from cloned guard wrappers", async () => {
     const { requireUser } = await import("../src/router");
     const guard = requireUser(() => undefined, { redirectTo: "/login" });
-    const result = await renderRoute(
-      [{ path: "/admin", render: () => "ok" }],
-      new Request("https://x.test/admin"),
-      {
-        middleware: [
-          (context) => guard({ ...context, request: context.request.clone() }),
-        ],
-      },
-    );
+    const result = await renderRoute([{ path: "/admin", render: () => "ok" }], new Request("https://x.test/admin"), {
+      middleware: [(context) => guard({ ...context, request: context.request.clone() })],
+    });
 
     expect(result.ok && result.value.status).toBe(302);
     expect(result.ok && result.value.headers.get("location")).toBe("/login");
@@ -984,10 +1060,8 @@ describe("router security helpers", () => {
     ];
     const options = {
       middleware: [
-        (context: Parameters<typeof guard>[0]) =>
-          guard({ ...context, request: context.request.clone() }),
-        ({ request }: Parameters<typeof guard>[0]) =>
-          new Request(request, { headers: { cookie: "sid=replaced" } }),
+        (context: Parameters<typeof guard>[0]) => guard({ ...context, request: context.request.clone() }),
+        ({ request }: Parameters<typeof guard>[0]) => new Request(request, { headers: { cookie: "sid=replaced" } }),
       ],
     };
 
@@ -1000,11 +1074,7 @@ describe("router security helpers", () => {
         }),
         options,
       ),
-      renderRoute(
-        routes,
-        new Request("https://x.test/admin", { method: "POST" }),
-        options,
-      ),
+      renderRoute(routes, new Request("https://x.test/admin", { method: "POST" }), options),
     ]);
 
     expect(authorized.status).toBe("rejected");

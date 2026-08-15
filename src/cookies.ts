@@ -122,6 +122,25 @@ const constantTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
 
 const defaultSessionCookie = (): CookieOptions => ({ httpOnly: true, path: "/", sameSite: "Lax", secure: true });
 
+const resolveSessionCookieOptions = (cookieName: string, overrides: CookieOptions | undefined): CookieOptions => {
+  const definedOverrides = Object.fromEntries(
+    Object.entries(overrides ?? {}).filter(([, value]) => value !== undefined),
+  ) as CookieOptions;
+  const resolved = { ...defaultSessionCookie(), ...definedOverrides };
+
+  if (
+    cookieName.startsWith("__Host-") &&
+    (!resolved.secure || resolved.path !== "/" || resolved.domain !== undefined)
+  ) {
+    throw new Error("__Host- cookies require Secure, Path=/, and no Domain.");
+  }
+  if (cookieName.startsWith("__Secure-") && !resolved.secure) {
+    throw new Error("__Secure- cookies require Secure.");
+  }
+
+  return resolved;
+};
+
 export const signCookieValue = (value: string, secret: string): string => {
   const payload = base64UrlEncode(value);
   return `${payload}.${signatureFor(payload, secret)}`;
@@ -217,7 +236,7 @@ export const createMemorySessionStorage = <Data extends Record<string, unknown> 
   options: MemorySessionStorageOptions = {},
 ) => {
   const cookieName = options.cookieName ?? "tachyon_session";
-  const cookieOptions = options.cookie ?? defaultSessionCookie();
+  const cookieOptions = resolveSessionCookieOptions(cookieName, options.cookie);
   const sessions = new Map<string, Data>();
   const createId = options.id ?? sessionId;
 
@@ -267,7 +286,7 @@ export const createCookieSessionStorage = <Data extends Record<string, unknown> 
     }
   }
   const cookieName = options.cookieName ?? "__Host-tachyon_session";
-  const cookieOptions = options.cookie ?? defaultSessionCookie();
+  const cookieOptions = resolveSessionCookieOptions(cookieName, options.cookie);
   const maxAgeMs = options.maxAgeMs;
   if (maxAgeMs !== undefined && (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0)) {
     throw new Error("Cookie session maxAgeMs must be a positive finite number.");
@@ -280,7 +299,9 @@ export const createCookieSessionStorage = <Data extends Record<string, unknown> 
     createSession: async (data: Data): Promise<Session<Data>> => ({ id: createId(), data }),
     getSession: async (cookieHeader: string | null | undefined): Promise<Session<Data>> => {
       const signed = ownCookieValue(cookieHeader, cookieName);
-      const verified = secrets.map((secret) => verifySignedCookieValue(signed, secret)).find((value) => value !== undefined);
+      const verified = secrets
+        .map((secret) => verifySignedCookieValue(signed, secret))
+        .find((value) => value !== undefined);
       if (!verified) {
         return { id: "", data: {} as Data };
       }
