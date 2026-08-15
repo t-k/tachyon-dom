@@ -11,9 +11,9 @@ export type UrlAttributeContext = {
   value: string;
 };
 
-type UrlPolicyDecision = { ok: true; value: string } | { ok: false; message: string };
+export type UrlPolicyDecision = { ok: true; value: string } | { ok: false; message: string };
 
-const decideUrlAttribute = (context: {
+export const decideUrlAttribute = (context: {
   element: string;
   attribute: string;
   purpose: string;
@@ -130,18 +130,13 @@ export const sanitizeUrlAttributeValue = (
 ): string => {
   const purpose = urlPurposeForAttribute(element, attribute);
   if (!purpose) return value;
-  const result = sanitizeUrlAttribute({
+  const decision = decideUrlAttribute({
     element,
-    attribute: attribute.toLowerCase() as UrlAttributeName,
+    attribute,
     purpose,
     value,
     ...(allowedOrigins === undefined ? {} : { allowedOrigins }),
   });
-  if (!result.ok) throw result.error;
-  return result.value;
+  if (!decision.ok) throw new TypeError(decision.message);
+  return decision.value;
 };
-
-export const generatedUrlAttributeHelperLines = [
-  `const __tachyonDecideUrlAttribute = ${decideUrlAttribute.toString()};`,
-  `const __tachyonSafeUrlAttribute = (element, attribute, value) => { const normalizedElement = element.toLowerCase(); const normalizedAttribute = attribute.toLowerCase(); const purpose = normalizedAttribute === "src" || ((normalizedAttribute === "href" || normalizedAttribute === "xlink:href") && ["link", "script", "use", "image"].includes(normalizedElement)) ? "subresource" : normalizedAttribute === "action" || normalizedAttribute === "formaction" ? "form-submission" : "document-navigation"; const result = __tachyonDecideUrlAttribute({ element: normalizedElement, attribute: normalizedAttribute, purpose, value: String(value) }); if (!result.ok) throw new TypeError(result.message); return result.value; };`,
-] as const;

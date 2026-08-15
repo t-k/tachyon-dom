@@ -1,11 +1,8 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
 import { emptyTextMarker } from "../../text-marker.js";
-import {
-  generatedUrlAttributeHelperLines,
-  sanitizeUrlAttributeValue,
-  urlPurposeForAttribute,
-} from "../../url-policy.js";
+import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../../url-policy.js";
+import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
 import {
   attrExpression,
   attrString,
