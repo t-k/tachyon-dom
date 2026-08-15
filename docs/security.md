@@ -6,6 +6,12 @@
 - Configure public origins and trusted proxy/host behavior explicitly.
 - Apply method and CSRF/Origin checks before direct form actions.
 
+## Static Dispatch Authorization Boundary
+
+Static routes and assets are outside route middleware authorization. Adapters resolve configured `staticRoutes` first, then static assets, and only then run route middleware and route matching. Keep protected content out of these public static sources; `requireUser()` and other route middleware do not guard them.
+
+Use a narrow asset `basePath`. With Workers asset bindings, an omitted asset base path matches every request path before middleware, although configured fallthrough responses such as 404 continue to the dynamic router. Node static assets mounted at `/` have the same broad public trust boundary.
+
 ## Escaping and Trusted HTML
 
 `tachyon-dom/server/html` escapes interpolated text and values created with `attr()`. It is an escaping helper, not an arbitrary HTML sanitizer. Use `rawHtml()` only for trusted framework or application output.

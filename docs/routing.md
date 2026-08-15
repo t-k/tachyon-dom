@@ -59,6 +59,10 @@ Actions run for non-GET/HEAD requests before loaders. Loaders run from parent to
 
 `middleware` runs before route matching and can rewrite the incoming `Request` or return a short-circuit `Response`. A returned request is copied into router-owned state, so mutating it after the middleware returns does not affect later authorization, actions, or loaders. `hooks` expose isolated request, match, loader, action, render, and error observations for tracing and metrics.
 
+Configured static routes and assets are resolved before route middleware. The adapter dispatch order is `staticRoutes -> assets -> route middleware and route matching -> NotFound`. An asset response configured to fall through, such as the default 404 from a Workers asset binding without `basePath`, continues to middleware exactly once.
+
+This order is an authorization boundary: route middleware must not be used to authorize static content. Do not place protected content in `staticRoutes`, a Node static asset root, or a Workers asset binding. Omitting an asset `basePath` lets the binding inspect every request path before route middleware, so prefer a narrow public base path whenever possible.
+
 Native `Response` bodies remain byte-for-byte unchanged when middleware short-circuits routing. The router transfers the body stream directly and does not decode binary bodies through text; Workers, Node, and Lambda adapters preserve the status, headers, and bytes. `HEAD` requests retain response metadata without emitting the body.
 
 `requireUser(getUser, options)` creates route middleware for protected routes. It redirects to `/login` by default, can use a custom redirect target, or can return a custom forbidden response.

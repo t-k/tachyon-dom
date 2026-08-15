@@ -1225,6 +1225,69 @@ describe("server adapters", () => {
     expect(await response.text()).toBe("<h1>Static</h1>");
   });
 
+  it("locks static dispatch before route middleware across adapters", async () => {
+    const middleware = vi.fn(() => new Response("denied", { status: 403 }));
+    const routes: RouteDefinition[] = [{ path: "/admin", render: () => "dynamic" }];
+    const staticRoutes = [{ path: "/admin", body: "static" }];
+
+    const workers = await createWorkersHandler({ routes, staticRoutes, middleware: [middleware] }).fetch(
+      new Request("https://example.com/admin"),
+    );
+    const lambda = await createLambdaHandler({ routes, staticRoutes, middleware: [middleware] })(
+      lambdaEvent({ rawPath: "/admin", requestContext: { http: { method: "GET", path: "/admin" } } }),
+    );
+    const nodeRequest = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    nodeRequest.method = "GET";
+    nodeRequest.url = "/admin";
+    nodeRequest.headers = { host: "example.com" };
+    const nodeChunks: string[] = [];
+    const nodeResponse = { statusCode: 200, setHeader: vi.fn(), end: (chunk?: string) => nodeChunks.push(chunk ?? "") };
+    await createNodeHandler({ routes, staticRoutes, middleware: [middleware] })(
+      nodeRequest as never,
+      nodeResponse as never,
+    );
+
+    expect(await workers.text()).toBe("static");
+    expect(lambda).toMatchObject({ statusCode: 200, body: "static" });
+    expect(nodeChunks.join("")).toBe("static");
+    expect(middleware).not.toHaveBeenCalled();
+  });
+
+  it("runs route middleware only after configured asset sources fall through", async () => {
+    const middleware = vi.fn(() => new Response("denied", { status: 403 }));
+    const routes: RouteDefinition[] = [{ path: "/admin", render: () => "dynamic" }];
+    const assetHit = await createWorkersHandler({
+      routes,
+      middleware: [middleware],
+      assets: { binding: { fetch: () => new Response("asset") } },
+    }).fetch(new Request("https://example.com/admin"));
+    const assetMiss = await createWorkersHandler({
+      routes,
+      middleware: [middleware],
+      assets: { binding: { fetch: () => new Response("missing", { status: 404 }) } },
+    }).fetch(new Request("https://example.com/admin"));
+
+    expect(await assetHit.text()).toBe("asset");
+    expect(assetMiss.status).toBe(403);
+    expect(await assetMiss.text()).toBe("denied");
+    expect(middleware).toHaveBeenCalledTimes(1);
+  });
+
+  it("documents the static dispatch trust boundary", async () => {
+    const routing = await readFile("docs/routing.md", "utf8");
+    const security = await readFile("docs/security.md", "utf8");
+
+    expect(routing).toContain("static routes and assets are resolved before route middleware");
+    expect(routing).toContain("route middleware must not be used to authorize static content");
+    expect(routing).toContain("staticRoutes -> assets -> route middleware and route matching -> NotFound");
+    expect(security).toContain("Static routes and assets are outside route middleware authorization");
+    expect(security).toContain("an omitted asset base path matches every request path");
+  });
+
   it("preserves streaming redirects through Workers responses", async () => {
     const handler = createWorkersHandler({
       routes: [
