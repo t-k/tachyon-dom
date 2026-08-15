@@ -1,6 +1,7 @@
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { compileTemplate, renderServerTemplate } from "../src/compiler";
+import { compileTachyonSfc } from "../src/compiler/sfc";
 import { setText, textAt } from "../src/runtime/text";
 
 let browser: Browser | undefined;
@@ -39,6 +40,23 @@ describe("open issue browser regressions", () => {
       );
 
       expect(result).toEqual({ initial: "ab", updated: "aZb", nodeType: 3 });
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("preserves a data script after the leading SFC component script", async () => {
+    const source = `<script>export const scope = () => ({ title: "Page" });</script><main><script type="application/ld+json">[]</script><h1>{title}</h1></main>`;
+    const result = compileTachyonSfc(source);
+    if (!result.ok) throw new Error(result.error.message);
+    const markup = renderServerTemplate(result.value.template, { title: "Page" });
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      await page.setContent(markup);
+
+      expect(await page.locator('script[type="application/ld+json"]').textContent()).toBe("[]");
+      expect(await page.locator("h1").textContent()).toBe("Page");
     } finally {
       await page.close();
     }

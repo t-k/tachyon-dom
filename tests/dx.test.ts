@@ -631,6 +631,83 @@ export const scope = (input: Partial<AppState> = {}) => ({
     }
   });
 
+  it("preserves template scripts after a leading SFC setup block", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-template-script-"));
+    try {
+      const input = path.join(dir, "page.td");
+      const output = path.join(dir, "page.js");
+      await writeFile(
+        input,
+        `<!-- leading -->
+<script>export const scope = () => ({ title: "Page" });</script>
+<main><script type="application/ld+json">[]</script><h1>{title}</h1></main>`,
+      );
+
+      const result = await compileFile({ input, output, target: "server", reactive: false, sourcemap: false });
+
+      expect(result.ok).toBe(true);
+      const code = await readFile(output, "utf8");
+      expect(code).toContain('type=\\"application/ld+json\\"');
+      expect(code).toContain(`[]`);
+      expect(code).toContain(`const __tachyonSfcScope = () => ({ title: "Page" })`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    `<main><script src="/client.js"></script></main>`,
+    `<script type="application/ld+json">[]</script>`,
+  ])("keeps a non-component script in the template: %s", async (source) => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-nested-script-"));
+    try {
+      const input = path.join(dir, "page.td");
+      const output = path.join(dir, "page.js");
+      await writeFile(input, source);
+
+      const result = await compileFile({ input, output, target: "server", reactive: false, sourcemap: false });
+
+      expect(result.ok).toBe(true);
+      const code = await readFile(output, "utf8");
+      expect(code).toContain("<script");
+      expect(code).toContain(source.includes("client.js") ? "/client.js" : "application/ld+json");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports invalid plain JavaScript in a leading SFC script", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-invalid-js-"));
+    try {
+      const input = path.join(dir, "page.td");
+      await writeFile(input, `<script>\nconst broken = ;\n</script>\n<main>Page</main>`);
+
+      const result = await compileFile({ input, target: "server", reactive: false, sourcemap: false });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected JavaScript diagnostic.");
+      expect(result.error).toContain(":2:16: Expression expected.");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not parse a plain SFC script as TypeScript", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-js-language-"));
+    try {
+      const input = path.join(dir, "page.td");
+      await writeFile(input, `<script>\nconst count: number = 1;\n</script>\n<main>{count}</main>`);
+
+      const result = await compileFile({ input, target: "server", reactive: false, sourcemap: false });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected JavaScript diagnostic.");
+      expect(result.error).toContain("Type annotations can only be used in TypeScript files");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("supports script setup bindings and auto-imported Tachyon helpers", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-setup-"));
     try {
