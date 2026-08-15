@@ -1,10 +1,15 @@
 import { validateAttributeName } from "../attribute-policy.js";
 import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
+import { setClassValue } from "./class.js";
 
 export const setAttributeValue = (element: Element, name: string, value: unknown): void => {
   const validatedName = validateAttributeName(name);
   if (!validatedName.ok) {
     throw validatedName.error;
+  }
+  if (name.toLowerCase() === "class") {
+    setClassValue(element, value);
+    return;
   }
   if (value == null || value === false) {
     element.removeAttribute(name);

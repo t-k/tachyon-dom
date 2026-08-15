@@ -161,7 +161,11 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
       continue;
     }
     if (attr.name === "class" && attr.value !== true) {
-      classes.push(attr.value);
+      const expression = readExpressionAttribute(attr.value);
+      const value = expression ? readPath(scope, expression) : attr.value;
+      if (value != null && value !== false) {
+        classes.push(String(value));
+      }
       continue;
     }
     const expression = readExpressionAttribute(attr.value);
@@ -252,6 +256,7 @@ const foldStaticExpressionParts = (parts: string[]): string[] => {
 export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<string>): string => {
   const parts: string[] = [jsString(`<${node.tagName}`)];
   const staticClasses: string[] = [];
+  const dynamicBaseClasses: string[] = [];
   const dynamicClasses: string[] = [];
   const dynamicStyles: string[] = [];
 
@@ -284,7 +289,13 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
       continue;
     }
     if (attr.name === "class" && attr.value !== true) {
-      staticClasses.push(attr.value);
+      const expression = readExpressionAttribute(attr.value);
+      if (expression) {
+        const value = expressionToScopeAccess(expression, locals);
+        dynamicBaseClasses.push(`(${value} == null || ${value} === false ? "" : " " + String(${value}))`);
+      } else {
+        staticClasses.push(attr.value);
+      }
       continue;
     }
     const expression = readExpressionAttribute(attr.value);
@@ -301,16 +312,18 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
     parts.push(jsString(serializeStaticAttr(attr)));
   }
 
-  if (staticClasses.length > 0 || dynamicClasses.length > 0) {
+  if (staticClasses.length > 0 || dynamicBaseClasses.length > 0 || dynamicClasses.length > 0) {
     const classExpression = `${jsString(staticClasses.join(" "))}${
+      dynamicBaseClasses.length > 0 ? ` + ${dynamicBaseClasses.join(" + ")}` : ""
+    }${
       dynamicClasses.length > 0 ? ` + ${dynamicClasses.join(" + ")}` : ""
     }`;
     parts.splice(
       1,
       0,
-      dynamicClasses.length === 0
+      dynamicBaseClasses.length === 0 && dynamicClasses.length === 0
         ? jsString(` class="${staticClasses.join(" ")}"`)
-        : `(${classExpression} ? ${jsString(` class="`)} + (${classExpression}).trim() + ${jsString(`"`)} : "")`,
+        : `((value) => value ? ${jsString(` class="`)} + escapeHtml(value.trim()) + ${jsString(`"`)} : "")(${classExpression})`,
     );
   }
   if (dynamicStyles.length > 0) {

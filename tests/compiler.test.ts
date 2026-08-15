@@ -610,6 +610,31 @@ describe("HTML-first compiler", () => {
     ).toBe(`<button class="btn danger" title="&lt;Save &amp; close&gt;">&lt;Save &amp; close&gt;</button>`);
   });
 
+  it("renders a dynamic base class with directive classes safely across server targets", async () => {
+    const result = compileTemplate(`<div class={base} class:active={active}></div>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const scope = { base: `card" data-x="1`, active: true };
+    const expected = `<div class="card&quot; data-x=&quot;1 active"></div>`;
+
+    expect(renderServerTemplate(result.value, scope)).toBe(expected);
+    expect(result.value.client.bindings).toEqual([
+      { kind: "attr", path: [], name: "class", expression: "base" },
+      { kind: "class", path: [], className: "active", expression: "active" },
+    ]);
+
+    const serverModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerModule(result.value)).toString("base64")}`
+    )) as { render(scope: Record<string, unknown>): string };
+    expect(serverModule.render(scope)).toBe(expected);
+
+    const streamModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerStreamModule(result.value)).toString("base64")}`
+    )) as { stream(scope: Record<string, unknown>): AsyncIterable<string> };
+    const chunks: string[] = [];
+    for await (const chunk of streamModule.stream(scope)) chunks.push(chunk);
+    expect(chunks.join("")).toBe(expected);
+  });
+
   it("accepts expression syntax in text and braced attributes", () => {
     const result = compileTemplate(
       `<section data-count={count + 1} title={format(label)}><p>{selected ? label : "none"}</p></section>`,

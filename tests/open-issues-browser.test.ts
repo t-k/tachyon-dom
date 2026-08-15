@@ -1,4 +1,7 @@
+// @vitest-environment node
+
 import { chromium, type Browser } from "playwright";
+import { build } from "esbuild";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { compileTemplate, renderServerTemplate } from "../src/compiler";
 import { compileTachyonSfc } from "../src/compiler/sfc";
@@ -88,6 +91,46 @@ describe("open issue browser regressions", () => {
       );
 
       expect(observed).toEqual({ childName: "TBODY", text: "B" });
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("retains directive classes after a dynamic base class update in a real DOM", async () => {
+    const bundle = await build({
+      stdin: {
+        contents: `export { setAttributeValue } from "./src/runtime/attr.ts"; export { setClassPresence } from "./src/runtime/class.ts";`,
+        resolveDir: process.cwd(),
+      },
+      bundle: true,
+      format: "iife",
+      globalName: "TDClassFixture",
+      platform: "browser",
+      write: false,
+    });
+    const script = bundle.outputFiles[0]?.text;
+    if (!script) throw new Error("Missing class runtime bundle.");
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      await page.setContent("<div id=subject></div>");
+      await page.addScriptTag({ content: script });
+      const className = await page.evaluate(() => {
+        const runtime = (globalThis as unknown as {
+          TDClassFixture: {
+            setAttributeValue: (element: Element, name: string, value: unknown) => void;
+            setClassPresence: (element: Element, name: string, value: unknown) => void;
+          };
+        }).TDClassFixture;
+        const element = document.querySelector("#subject");
+        if (!(element instanceof HTMLDivElement)) throw new Error("Missing class subject.");
+        runtime.setAttributeValue(element, "class", "one");
+        runtime.setClassPresence(element, "active", true);
+        runtime.setAttributeValue(element, "class", "two");
+        return element.className;
+      });
+
+      expect(className).toBe("two active");
     } finally {
       await page.close();
     }

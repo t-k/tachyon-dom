@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { setAttributeValue, setRef, setStyleValue } from "../src/runtime/attr";
+import { setClassPresence } from "../src/runtime/class";
 import { bindControl, setControlValue } from "../src/runtime/form";
 
 describe("attribute and form runtime helpers", () => {
+  it("retains directive classes when a dynamic base class changes", () => {
+    document.body.innerHTML = `<div></div>`;
+    const element = document.body.firstElementChild;
+    if (!(element instanceof HTMLDivElement)) throw new Error("Missing element.");
+
+    setAttributeValue(element, "class", "one");
+    setClassPresence(element, "active", true);
+    setAttributeValue(element, "class", "two");
+    expect(element.className).toBe("two active");
+
+    setClassPresence(element, "active", false);
+    expect(element.className).toBe("two");
+    setAttributeValue(element, "class", null);
+    expect(element.hasAttribute("class")).toBe(false);
+  });
+
   it("sets DOM attributes, reflected properties, styles, and refs", () => {
     document.body.innerHTML = `<button></button>`;
     const button = document.querySelector("button");

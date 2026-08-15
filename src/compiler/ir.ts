@@ -121,7 +121,7 @@ const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError
     }
   }
   for (const attr of node.attrs) {
-    if (attr.name === "class" || attr.name === "name") {
+    if (attr.name === "name") {
       continue;
     }
     const expression = readExpressionAttribute(attr.value);
