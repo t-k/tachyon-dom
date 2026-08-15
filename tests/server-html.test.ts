@@ -116,6 +116,16 @@ describe("server html helper", () => {
     },
   );
 
+  it("rejects dangerous literal attributes after an earlier interpolation and after a slash", () => {
+    expect(() => html`<img src=${"/missing"} onerror=${"alert(1)"}>`).toThrow(
+      "Dangerous attribute is not supported: onerror",
+    );
+    expect(() => html`<iframe data-x=${"safe"} srcdoc=${"<script>alert(1)</script>"}></iframe>`).toThrow(
+      "Dangerous attribute is not supported: srcdoc",
+    );
+    expect(() => html`<img/onerror=${"alert(1)"}>`).toThrow("Dangerous attribute is not supported: onerror");
+  });
+
   it.each(activeUrlCorpus)("rejects active URL %j in direct HTML attributes", (value) => {
     for (const name of ["href", "src", "action", "formaction", "xlink:href"]) {
       expect(() => attr(name, value)).toThrow(`Unsafe URL for ${name}`);

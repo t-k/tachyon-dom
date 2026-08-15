@@ -78,4 +78,24 @@ describe("server HTML browser security", () => {
       await page.close();
     }
   });
+
+  it("rejects dangerous literal attributes after interpolation and slash syntax before execution", async () => {
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      await page.setContent("<img id=subject src=/missing>");
+      expect(() => html`<img src=${"/missing"} onerror=${"globalThis.__tachyonChainedXss = true"}>`).toThrow(
+        "Dangerous attribute is not supported: onerror",
+      );
+      expect(() => html`<img/onerror=${"globalThis.__tachyonSlashXss = true"}>`).toThrow(
+        "Dangerous attribute is not supported: onerror",
+      );
+      await page.waitForTimeout(25);
+
+      expect(await page.evaluate(() => "__tachyonChainedXss" in globalThis)).toBe(false);
+      expect(await page.evaluate(() => "__tachyonSlashXss" in globalThis)).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
 });

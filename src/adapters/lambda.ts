@@ -77,7 +77,7 @@ export type LambdaContextMetadata = {
   logStreamName?: string;
 };
 
-const textDecoder = new TextDecoder();
+const textDecoder = new TextDecoder("utf-8", { fatal: true });
 
 const headerValue = (headers: Record<string, string | undefined> | undefined, name: string): string | undefined => {
   const lowerName = name.toLowerCase();
@@ -200,7 +200,7 @@ const isTextResponse = (headers: Headers): boolean => {
   }
   const contentType = headers.get("content-type")?.toLowerCase();
   if (!contentType) {
-    return true;
+    return false;
   }
   return (
     contentType.startsWith("text/") ||
@@ -213,13 +213,23 @@ const isTextResponse = (headers: Headers): boolean => {
 
 export const lambdaResponseFromWebResponse = async (response: Response): Promise<LambdaProxyResponseV2> => {
   const buffer = Buffer.from(await response.arrayBuffer());
-  const textBody = isTextResponse(response.headers);
+  let decodedBody: string | undefined;
+  if (isTextResponse(response.headers)) {
+    try {
+      const decoded = textDecoder.decode(buffer);
+      if (Buffer.from(decoded, "utf8").equals(buffer)) {
+        decodedBody = decoded;
+      }
+    } catch {
+      // Invalid UTF-8 must use the byte-preserving base64 representation.
+    }
+  }
   const cookies = getSetCookies(response.headers);
   return {
     statusCode: response.status,
     headers: responseHeaders(response.headers),
-    body: textBody ? textDecoder.decode(buffer) : buffer.toString("base64"),
-    isBase64Encoded: !textBody,
+    body: decodedBody ?? buffer.toString("base64"),
+    isBase64Encoded: decodedBody === undefined,
     ...(cookies.length > 0 ? { cookies } : {}),
   };
 };

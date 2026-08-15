@@ -94,7 +94,8 @@ const validateLiteralAttributeNames = (strings: TemplateStringsArray): void => {
     }
     token = "";
   };
-  for (const input of strings) {
+  for (let stringIndex = 0; stringIndex < strings.length; stringIndex += 1) {
+    const input = strings[stringIndex] ?? "";
     for (let index = 0; index < input.length; index += 1) {
       const char = input[index] as string;
       if (state === "comment") {
@@ -154,9 +155,14 @@ const validateLiteralAttributeNames = (strings: TemplateStringsArray): void => {
         state = "before-attribute-value";
       } else if (isHtmlWhitespace(char)) {
         finishToken();
-      } else if (char !== "/" || token) {
+      } else if (char === "/") {
+        finishToken();
+      } else {
         token += char;
       }
+    }
+    if (stringIndex < strings.length - 1 && state === "before-attribute-value") {
+      state = "tag";
     }
   }
   if (state === "tag") finishToken();

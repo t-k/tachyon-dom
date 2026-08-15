@@ -890,6 +890,54 @@ describe("server adapters", () => {
     expect(Buffer.concat(lambdaBytes)).toEqual(Buffer.from(expected));
   });
 
+  it.each([
+    ["missing content type", undefined],
+    ["invalid UTF-8 under a textual content type", "text/plain; charset=utf-8"],
+  ])("base64-encodes native Lambda bytes with %s", async (_label, contentType) => {
+    const expected = Uint8Array.from([0, 255, 254, 195, 40, 137, 80, 78, 71]);
+    const response = new Response(expected.slice(), {
+      headers: contentType ? { "content-type": contentType } : undefined,
+    });
+
+    const lambda = await lambdaResponseFromWebResponse(response);
+
+    expect(lambda.isBase64Encoded).toBe(true);
+    expect(Uint8Array.from(Buffer.from(lambda.body, "base64"))).toEqual(expected);
+  });
+
+  it("preserves native 304 representation length across adapters", async () => {
+    const routes: RouteDefinition[] = [{ path: "/cached", render: () => "unused" }];
+    const middleware = [() => new Response(null, { status: 304, headers: { "content-length": "123" } })];
+
+    const core = await createWorkersHandler({ routes, middleware }).fetch(new Request("https://example.test/cached"));
+    const lambda = await createLambdaHandler({ routes, middleware })(
+      lambdaEvent({ rawPath: "/cached", requestContext: { http: { method: "GET", path: "/cached" } } }),
+    );
+    const nodeRequest = Object.assign(Readable.from([]), {
+      method: "GET",
+      url: "/cached",
+      headers: { host: "example.test" },
+    });
+    const nodeHeaders = new Map<string, string | number | readonly string[]>();
+    const nodeChunks: string[] = [];
+    const nodeResponse = {
+      statusCode: 200,
+      setHeader: (name: string, value: string | number | readonly string[]) => nodeHeaders.set(name, value),
+      end: (chunk?: string) => nodeChunks.push(chunk ?? ""),
+    };
+    await createNodeHandler({ routes, middleware })(nodeRequest as never, nodeResponse as never);
+
+    expect(core.status).toBe(304);
+    expect(core.headers.get("content-length")).toBe("123");
+    expect(await core.text()).toBe("");
+    expect(lambda.statusCode).toBe(304);
+    expect(lambda.headers["content-length"]).toBe("123");
+    expect(lambda.body).toBe("");
+    expect(nodeResponse.statusCode).toBe(304);
+    expect(nodeHeaders.get("content-length")).toBe("123");
+    expect(nodeChunks.join("")).toBe("");
+  });
+
   it("preserves multiple Set-Cookie headers in Node fetch responses", async () => {
     const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
       method: string;

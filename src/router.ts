@@ -131,7 +131,9 @@ const normalizeBodylessRouteResult = (result: RouteRenderResult): RouteRenderRes
     return result;
   }
   const headers = new Headers(result.headers);
-  headers.delete("content-length");
+  if (result.status !== 304 || !result.webResponse?.headers.has("content-length")) {
+    headers.delete("content-length");
+  }
   headers.delete("transfer-encoding");
   const { responseBody: _responseBody, responseChunks: _responseChunks, webResponse, ...rest } = result;
   return {
