@@ -62,12 +62,13 @@ describe("router compatibility matrix", () => {
       },
     ];
     const response = await createWorkersHandler({ routes, streaming }).fetch(new Request("https://x.test/"));
+    const expected = `<h1>Home</h1><script type="application/json" data-tachyon-state="route:home">{"title":"Home"}</script>`;
 
     expect(response.status).toBe(200);
     if (streaming && response.body) {
-      expect((await readTextStreamChunks(response.body)).join("")).toBe("<h1>Home</h1>");
+      expect((await readTextStreamChunks(response.body)).join("")).toBe(expected);
     } else {
-      await expect(response.text()).resolves.toBe("<h1>Home</h1>");
+      await expect(response.text()).resolves.toBe(expected);
     }
   });
 
