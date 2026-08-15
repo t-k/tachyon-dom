@@ -3,7 +3,7 @@ import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
 import { setText } from "./text.js";
 import { bindControl, setControlValue } from "./form.js";
 import { mountConditional } from "./conditional.js";
-import { createSignal, effect, untrack, type Signal } from "./signal.js";
+import { createSignal, effect, onCleanup, untrack, type Signal } from "./signal.js";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void;
@@ -128,6 +128,7 @@ type ListState = {
   template: HTMLTemplateElement;
   elementIndices: number[];
   cleanups: Array<() => void>;
+  ownerCleanupRegistered: boolean;
 };
 
 type MoveBeforeElement = Element & {
@@ -265,8 +266,18 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
     template,
     elementIndices,
     cleanups: [] as Array<() => void>,
+    ownerCleanupRegistered: current?.ownerCleanupRegistered ?? false,
   };
   listStates.set(container, next);
+  if (!next.ownerCleanupRegistered) {
+    next.ownerCleanupRegistered = true;
+    onCleanup(() => {
+      const ownedState = listStates.get(container);
+      if (!ownedState) return;
+      cleanupListState(ownedState);
+      listStates.delete(container);
+    });
+  }
   return next;
 };
 
