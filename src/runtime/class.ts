@@ -25,7 +25,6 @@ const applyClassState = (element: Element, state: ManagedClassState): void => {
   const tokens = new Set(state.base.trim().split(/\s+/).filter(Boolean));
   for (const [className, enabled] of state.directives) {
     if (enabled) tokens.add(className);
-    else tokens.delete(className);
   }
   const value = Array.from(tokens).join(" ");
   if (value) element.setAttribute("class", value);

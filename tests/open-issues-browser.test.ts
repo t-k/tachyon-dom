@@ -115,7 +115,7 @@ describe("open issue browser regressions", () => {
     try {
       await page.setContent("<div id=subject></div>");
       await page.addScriptTag({ content: script });
-      const className = await page.evaluate(() => {
+      const classNames = await page.evaluate(() => {
         const runtime = (globalThis as unknown as {
           TDClassFixture: {
             setAttributeValue: (element: Element, name: string, value: unknown) => void;
@@ -127,10 +127,15 @@ describe("open issue browser regressions", () => {
         runtime.setAttributeValue(element, "class", "one");
         runtime.setClassPresence(element, "active", true);
         runtime.setAttributeValue(element, "class", "two");
-        return element.className;
+        const enabled = element.className;
+        runtime.setAttributeValue(element, "class", "two active");
+        runtime.setClassPresence(element, "active", false);
+        const collidingDisabled = element.className;
+        runtime.setAttributeValue(element, "class", "active selected");
+        return [enabled, collidingDisabled, element.className];
       });
 
-      expect(className).toBe("two active");
+      expect(classNames).toEqual(["two active", "two active", "active selected"]);
     } finally {
       await page.close();
     }

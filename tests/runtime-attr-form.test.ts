@@ -20,6 +20,22 @@ describe("attribute and form runtime helpers", () => {
     expect(element.hasAttribute("class")).toBe(false);
   });
 
+  it("does not remove a base class token when the matching directive is false", () => {
+    document.body.innerHTML = `<div></div>`;
+    const element = document.body.firstElementChild;
+    if (!(element instanceof HTMLDivElement)) throw new Error("Missing element.");
+
+    setAttributeValue(element, "class", "card active");
+    setClassPresence(element, "active", false);
+    expect(element.className).toBe("card active");
+
+    setClassPresence(element, "active", true);
+    expect(element.className).toBe("card active");
+    setClassPresence(element, "active", false);
+    setAttributeValue(element, "class", "active selected");
+    expect(element.className).toBe("active selected");
+  });
+
   it("sets DOM attributes, reflected properties, styles, and refs", () => {
     document.body.innerHTML = `<button></button>`;
     const button = document.querySelector("button");

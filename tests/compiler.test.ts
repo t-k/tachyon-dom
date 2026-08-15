@@ -633,6 +633,14 @@ describe("HTML-first compiler", () => {
     const chunks: string[] = [];
     for await (const chunk of streamModule.stream(scope)) chunks.push(chunk);
     expect(chunks.join("")).toBe(expected);
+
+    const collidingScope = { base: "card active", active: false };
+    const collidingExpected = `<div class="card active"></div>`;
+    expect(renderServerTemplate(result.value, collidingScope)).toBe(collidingExpected);
+    expect(serverModule.render(collidingScope)).toBe(collidingExpected);
+    const collidingChunks: string[] = [];
+    for await (const chunk of streamModule.stream(collidingScope)) collidingChunks.push(chunk);
+    expect(collidingChunks.join("")).toBe(collidingExpected);
   });
 
   it("accepts expression syntax in text and braced attributes", () => {
