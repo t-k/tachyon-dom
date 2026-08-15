@@ -1443,7 +1443,7 @@ const renderRouteInternal = async (
       stateScript: "",
       loaderData: {},
       actionResult: undefined,
-      headers: new Headers(),
+      headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
       match: emptyMatch(),
     });
   }

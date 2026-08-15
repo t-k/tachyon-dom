@@ -215,6 +215,23 @@ describe("advanced router features", () => {
     expect(result.ok && result.value).toMatchObject({ status: 404, html: "<h1>Missing /users/missing</h1>" });
   });
 
+  it("marks every not-found rendering path as HTML", async () => {
+    const boundary = await renderRoute(
+      [{ path: "/users", notFound: () => "<h1>Boundary missing</h1>", render: () => "users" }],
+      "https://example.com/users/missing",
+    );
+    const custom = await renderRoute([], "https://example.com/missing", {
+      notFound: () => "<h1>Custom missing</h1>",
+    });
+    const fallback = await renderRoute([], "https://example.com/missing");
+
+    for (const result of [boundary, custom, fallback]) {
+      expect(result.ok).toBe(true);
+      expect(result.ok && result.value.status).toBe(404);
+      expect(result.ok && result.value.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    }
+  });
+
   it("selects the deepest dynamic not-found boundary for an unmatched nested descendant", async () => {
     const routes: RouteDefinition[] = [
       {

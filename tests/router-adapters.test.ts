@@ -255,10 +255,12 @@ describe("server adapters", () => {
     ];
     const workersResponse = await createWorkersHandler({ routes }).fetch(new Request("https://example.com/missing"));
     expect(workersResponse.status).toBe(404);
+    expect(workersResponse.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(await workersResponse.text()).toBe("<h1>Missing /missing</h1>");
 
     const lambdaResponse = await createLambdaHandler({ routes })(lambdaEvent({ rawPath: "/missing" }));
     expect(lambdaResponse.statusCode).toBe(404);
+    expect(lambdaResponse.headers?.["content-type"]).toBe("text/html; charset=utf-8");
     expect(lambdaResponse.body).toBe("<h1>Missing /missing</h1>");
 
     const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
@@ -279,6 +281,7 @@ describe("server adapters", () => {
     };
     await createNodeHandler({ routes })(req as never, res as never);
     expect(res.statusCode).toBe(404);
+    expect(res.setHeader).toHaveBeenCalledWith("content-type", "text/html; charset=utf-8");
     expect(chunks.join("")).toBe("<h1>Missing /missing</h1>");
   });
 
