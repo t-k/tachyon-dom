@@ -1,7 +1,27 @@
-import * as ts from "typescript";
+import type { BindingName, Diagnostic, Expression, Identifier, Node, PropertyName, SourceFile } from "typescript";
+import { optionalPeerError } from "../optional-peer.js";
 import { err, ok, type Result } from "../result.js";
 import { compileTemplate } from "./index.js";
 import type { CompiledTemplate, CompilerError, CompileTemplateOptions } from "./types.js";
+
+type TypeScriptModule = typeof import("typescript");
+
+let loadedTypeScript: TypeScriptModule | undefined;
+let typeScriptLoadError: unknown;
+try {
+  loadedTypeScript = await import("typescript");
+} catch (cause) {
+  typeScriptLoadError = cause;
+}
+
+const ts = new Proxy({} as TypeScriptModule, {
+  get: (_target, property) => {
+    if (!loadedTypeScript) {
+      throw optionalPeerError("typescript", "Tachyon SFC compilation", typeScriptLoadError);
+    }
+    return Reflect.get(loadedTypeScript, property);
+  },
+});
 
 export const sfcDefaultScopeName = "__tachyonSfcDefaultScope";
 export const sfcNamedScopeName = "__tachyonSfcScope";
@@ -198,21 +218,21 @@ export const sfcScriptLanguage = (script: TachyonSfcScript | undefined): "js" | 
 export const isSfcSetupScript = (script: TachyonSfcScript | undefined): boolean =>
   hasBooleanAttr(script?.attrs ?? "", "setup");
 
-const unwrapStaticExpression = (node: ts.Expression): ts.Expression => {
+const unwrapStaticExpression = (node: Expression): Expression => {
   if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
     return unwrapStaticExpression(node.expression);
   }
   return node;
 };
 
-const staticPropertyName = (name: ts.PropertyName): string | undefined => {
+const staticPropertyName = (name: PropertyName): string | undefined => {
   if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
     return name.text;
   }
   return undefined;
 };
 
-const staticExpressionValue = (input: ts.Expression): Result<unknown, string> => {
+const staticExpressionValue = (input: Expression): Result<unknown, string> => {
   const node = unwrapStaticExpression(input);
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return ok(node.text);
   if (ts.isNumericLiteral(node)) return ok(Number(node.text));
@@ -264,7 +284,7 @@ export const extractStaticSfcScope = (source: string): Result<Record<string, unk
       if (!ts.isArrowFunction(initializer) && !ts.isFunctionExpression(initializer)) {
         return err("SFC scope must be a function returning a static object or be supplied explicitly by defineApp().");
       }
-      let returned: ts.Expression | undefined;
+      let returned: Expression | undefined;
       if (ts.isBlock(initializer.body)) {
         const returnStatement = initializer.body.statements.find(ts.isReturnStatement);
         returned = returnStatement?.expression;
@@ -283,7 +303,7 @@ export const extractStaticSfcScope = (source: string): Result<Record<string, unk
   return ok(undefined);
 };
 
-const sourceFileFor = (source: string, script: TachyonSfcScript | undefined): ts.SourceFile =>
+const sourceFileFor = (source: string, script: TachyonSfcScript | undefined): SourceFile =>
   ts.createSourceFile(
     sfcScriptLanguage(script) === "ts" ? "component.td.ts" : "component.td.js",
     source,
@@ -292,7 +312,7 @@ const sourceFileFor = (source: string, script: TachyonSfcScript | undefined): ts
     sfcScriptLanguage(script) === "ts" ? ts.ScriptKind.TS : ts.ScriptKind.JS,
   );
 
-const compilerErrorFromDiagnostic = (diagnostic: ts.Diagnostic, script: TachyonSfcScript): CompilerError => {
+const compilerErrorFromDiagnostic = (diagnostic: Diagnostic, script: TachyonSfcScript): CompilerError => {
   const message = ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n");
   return {
     message,
@@ -325,7 +345,7 @@ const transpileScriptContent = (script: TachyonSfcScript): Result<string, Compil
   return ok(result.outputText.trim());
 };
 
-const addBindingNames = (name: ts.BindingName, names: Set<string>): void => {
+const addBindingNames = (name: BindingName, names: Set<string>): void => {
   if (ts.isIdentifier(name)) {
     names.add(name.text);
     return;
@@ -357,7 +377,7 @@ const topLevelBindings = (script: TachyonSfcScript | undefined): string[] => {
   return Array.from(names).sort();
 };
 
-const isDeclarationName = (node: ts.Identifier): boolean => {
+const isDeclarationName = (node: Identifier): boolean => {
   const parent = node.parent;
   return (
     (ts.isVariableDeclaration(parent) && parent.name === node) ||
@@ -380,7 +400,7 @@ const collectScriptIdentifiers = (
   const declared = new Set<string>();
   const referenced = new Set<string>();
   const sourceFile = sourceFileFor(source, script);
-  const visit = (node: ts.Node): void => {
+  const visit = (node: Node): void => {
     if (ts.isImportDeclaration(node)) {
       const clause = node.importClause;
       if (clause?.name) {

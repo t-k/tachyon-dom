@@ -530,7 +530,12 @@ const loadOxcParser = (): OxcParserModule | undefined => {
     | CreateRequireModule
     | undefined;
   const require = moduleApi?.createRequire?.(import.meta.url);
-  const loaded = require?.("oxc-parser") as OxcParserModule | undefined;
+  let loaded: OxcParserModule | undefined;
+  try {
+    loaded = require?.("oxc-parser") as OxcParserModule | undefined;
+  } catch {
+    return undefined;
+  }
   if (loaded?.parseSync) {
     cachedOxcParser = loaded;
   }
@@ -688,7 +693,9 @@ const oxcExpressionToNode = (node: OxcExpression): Result<ExpressionNode, Compil
 const parseOxcExpression = (source: string): Result<ExpressionNode, CompilerError> => {
   const parser = loadOxcParser();
   if (!parser) {
-    return expressionError("OXC parser backend is unavailable in this runtime.");
+    return expressionError(
+      'Tachyon expression compilation requires the optional peer dependency "oxc-parser". Install it with "pnpm add oxc-parser".',
+    );
   }
   const wrapped = `const __tachyon_expr = (${source});`;
   try {

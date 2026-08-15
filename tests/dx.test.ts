@@ -308,6 +308,27 @@ describe("DX helpers", () => {
     expect(packageJson.exports).toHaveProperty("./router");
   });
 
+  it("keeps compiler tooling out of runtime dependencies", async () => {
+    const manifest = JSON.parse(await readFile("package.json", "utf8")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      peerDependenciesMeta?: Record<string, { optional?: boolean }>;
+    };
+    for (const name of [
+      "typescript",
+      "oxc-parser",
+      "parse5",
+      "vscode-languageserver",
+      "vscode-languageserver-textdocument",
+    ]) {
+      expect(manifest.dependencies?.[name], `${name} must not be a runtime dependency`).toBeUndefined();
+      expect(manifest.devDependencies?.[name], `${name} must remain available to repository development`).toBeDefined();
+      expect(manifest.peerDependencies?.[name], `${name} must declare its consumer-compatible range`).toBeDefined();
+      expect(manifest.peerDependenciesMeta?.[name]).toEqual({ optional: true });
+    }
+  });
+
   it("declares npm release metadata for public package discovery", async () => {
     const packageJson = JSON.parse(await readFile("package.json", "utf8")) as {
       description?: string;

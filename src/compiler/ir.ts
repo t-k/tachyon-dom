@@ -81,6 +81,9 @@ const componentStores = (node: ElementNode): StoreDefinition[] => {
 const validateExpression = (expression: string, context: string, span: SourceSpan): Result<void, CompilerError> => {
   const parsed = parseExpression(expression);
   if (!parsed.ok) {
+    if (parsed.error.message.includes("optional peer dependency")) {
+      return semanticError(parsed.error.message, span);
+    }
     return semanticError(`Invalid ${context} expression: ${expression}.`, span);
   }
   return ok(undefined);

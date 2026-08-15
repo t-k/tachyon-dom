@@ -1,15 +1,24 @@
-import {
-  createConnection,
-  DiagnosticSeverity,
-  ProposedFeatures,
-  TextDocumentSyncKind,
-  TextDocuments,
-  type Connection,
-  type Diagnostic,
-  type InitializeResult,
-} from "vscode-languageserver/node";
-import { TextDocument } from "vscode-languageserver-textdocument";
+import type { Connection, Diagnostic, InitializeResult } from "vscode-languageserver/node";
 import { diagnoseTachyonSfc } from "./diagnostics.js";
+import { optionalPeerError } from "./optional-peer.js";
+
+type LanguageServerModule = typeof import("vscode-languageserver/node");
+type TextDocumentModule = typeof import("vscode-languageserver-textdocument");
+
+let loadedLanguageServer: LanguageServerModule | undefined;
+let languageServerLoadError: unknown;
+let loadedTextDocument: TextDocumentModule | undefined;
+let textDocumentLoadError: unknown;
+try {
+  loadedLanguageServer = await import("vscode-languageserver/node");
+} catch (cause) {
+  languageServerLoadError = cause;
+}
+try {
+  loadedTextDocument = await import("vscode-languageserver-textdocument");
+} catch (cause) {
+  textDocumentLoadError = cause;
+}
 
 const source = "tachyon-dom";
 type DiagnosticDocument = {
@@ -39,7 +48,7 @@ export const diagnosticsForTachyonDocument = (text: string): Diagnostic[] => {
         start: { line, character },
         end: { line: endLine, character: endCharacter },
       },
-      severity: DiagnosticSeverity.Error,
+      severity: 1,
       source,
     },
   ];
@@ -85,7 +94,16 @@ export const createDiagnosticsScheduler = (
   };
 };
 
-export const startLanguageServer = (connection: Connection = createConnection(ProposedFeatures.all)): void => {
+export const startLanguageServer = (providedConnection?: Connection): void => {
+  if (!loadedLanguageServer) {
+    throw optionalPeerError("vscode-languageserver", "The Tachyon language server", languageServerLoadError);
+  }
+  if (!loadedTextDocument) {
+    throw optionalPeerError("vscode-languageserver-textdocument", "The Tachyon language server", textDocumentLoadError);
+  }
+  const { createConnection, ProposedFeatures, TextDocumentSyncKind, TextDocuments } = loadedLanguageServer;
+  const { TextDocument } = loadedTextDocument;
+  const connection = providedConnection ?? createConnection(ProposedFeatures.all);
   const documents = new TextDocuments(TextDocument);
   const diagnostics = createDiagnosticsScheduler((payload) => connection.sendDiagnostics(payload));
 
