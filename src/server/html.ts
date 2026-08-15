@@ -74,6 +74,94 @@ const assertAttributeName = (name: string): void => {
   }
 };
 
+const assertSafeLiteralAttributeName = (name: string): void => {
+  const validatedName = validateAttributeName(name);
+  if (!validatedName.ok) {
+    throw validatedName.error;
+  }
+};
+
+const validateLiteralAttributeNames = (strings: TemplateStringsArray): void => {
+  let state: HtmlState = "text";
+  let tagNameSeen = false;
+  let token = "";
+  const finishToken = (): void => {
+    if (!token) return;
+    if (tagNameSeen) {
+      assertSafeLiteralAttributeName(token);
+    } else {
+      tagNameSeen = true;
+    }
+    token = "";
+  };
+  for (const input of strings) {
+    for (let index = 0; index < input.length; index += 1) {
+      const char = input[index] as string;
+      if (state === "comment") {
+        if (input.startsWith("-->", index)) {
+          state = "text";
+          index += 2;
+        }
+        continue;
+      }
+      if (state === "text") {
+        if (input.startsWith("<!--", index)) {
+          state = "comment";
+          index += 3;
+        } else if (char === "<") {
+          state = "tag";
+          tagNameSeen = false;
+          token = "";
+        }
+        continue;
+      }
+      if (state === "double-quoted-attribute") {
+        if (char === '"') state = "tag";
+        continue;
+      }
+      if (state === "single-quoted-attribute") {
+        if (char === "'") state = "tag";
+        continue;
+      }
+      if (state === "before-attribute-value") {
+        if (isHtmlWhitespace(char)) {
+          continue;
+        }
+        if (char === '"') {
+          state = "double-quoted-attribute";
+        } else if (char === "'") {
+          state = "single-quoted-attribute";
+        } else if (char === ">") {
+          state = "text";
+        } else {
+          state = "unquoted-attribute";
+        }
+        continue;
+      }
+      if (state === "unquoted-attribute") {
+        if (isHtmlWhitespace(char)) {
+          state = "tag";
+        } else if (char === ">") {
+          state = "text";
+        }
+        continue;
+      }
+      if (char === ">") {
+        finishToken();
+        state = "text";
+      } else if (char === "=") {
+        finishToken();
+        state = "before-attribute-value";
+      } else if (isHtmlWhitespace(char)) {
+        finishToken();
+      } else if (char !== "/" || token) {
+        token += char;
+      }
+    }
+  }
+  if (state === "tag") finishToken();
+};
+
 const renderTextValue = (value: HtmlValue): string => {
   if (value == null || value === false) {
     return "";
@@ -298,6 +386,7 @@ export const classList = (...values: readonly ClassValue[]): string => {
 };
 
 export const html = (strings: TemplateStringsArray, ...values: readonly HtmlValue[]): HtmlFragment => {
+  validateLiteralAttributeNames(strings);
   let output = "";
   let state: HtmlState = "text";
   for (let index = 0; index < strings.length; index += 1) {

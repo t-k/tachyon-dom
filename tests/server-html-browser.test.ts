@@ -46,4 +46,36 @@ describe("server HTML browser security", () => {
       await page.close();
     }
   });
+
+  it("rejects literal event handler interpolation before it can execute", async () => {
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      await page.setContent("<button id=subject>subject</button>");
+      expect(() => html`<button onclick=${"globalThis.__tachyonEventXss = true"}>subject</button>`).toThrow(
+        "Dangerous attribute is not supported: onclick",
+      );
+      await page.locator("#subject").click();
+
+      expect(await page.evaluate(() => "__tachyonEventXss" in globalThis)).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("rejects literal srcdoc interpolation before iframe scripts can execute", async () => {
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      await page.setContent("<iframe id=subject></iframe>");
+      expect(() => html`<iframe SRCDOC=${"<script>parent.__tachyonSrcdocXss = true</script>"}></iframe>`).toThrow(
+        "Dangerous attribute is not supported: SRCDOC",
+      );
+      await page.waitForTimeout(25);
+
+      expect(await page.evaluate(() => "__tachyonSrcdocXss" in globalThis)).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
 });

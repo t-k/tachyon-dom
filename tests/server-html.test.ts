@@ -92,6 +92,30 @@ describe("server html helper", () => {
     },
   );
 
+  it.each(["onclick", "OnClick", "SRCDOC", "innerHTML", "outerHtml"])(
+    "rejects dangerous literal attribute %s around direct interpolation",
+    (name) => {
+      for (const value of ["value", null, false, true]) {
+        const unquoted = [`<div ${name}=`, `></div>`] as unknown as TemplateStringsArray;
+        const doubleQuoted = [`<div ${name}="`, `"></div>`] as unknown as TemplateStringsArray;
+        const singleQuoted = [`<div ${name}='`, `'></div>`] as unknown as TemplateStringsArray;
+
+        expect(() => html(unquoted, value)).toThrow(`Dangerous attribute is not supported: ${name}`);
+        expect(() => html(doubleQuoted, value)).toThrow(`Dangerous attribute is not supported: ${name}`);
+        expect(() => html(singleQuoted, value)).toThrow(`Dangerous attribute is not supported: ${name}`);
+      }
+    },
+  );
+
+  it.each(["onclick", "OnClick", "srcdoc", "SRCDOC", "innerHTML", "outerHtml"])(
+    "rejects fully static dangerous literal attribute %s",
+    (name) => {
+      const strings = [`<div ${name}="value"></div>`] as unknown as TemplateStringsArray;
+
+      expect(() => html(strings)).toThrow(`Dangerous attribute is not supported: ${name}`);
+    },
+  );
+
   it.each(activeUrlCorpus)("rejects active URL %j in direct HTML attributes", (value) => {
     for (const name of ["href", "src", "action", "formaction", "xlink:href"]) {
       expect(() => attr(name, value)).toThrow(`Unsafe URL for ${name}`);
