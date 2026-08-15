@@ -896,7 +896,7 @@ describe("server adapters", () => {
   ])("base64-encodes native Lambda bytes with %s", async (_label, contentType) => {
     const expected = Uint8Array.from([0, 255, 254, 195, 40, 137, 80, 78, 71]);
     const response = new Response(expected.slice(), {
-      headers: contentType ? { "content-type": contentType } : undefined,
+      ...(contentType ? { headers: { "content-type": contentType } } : {}),
     });
 
     const lambda = await lambdaResponseFromWebResponse(response);
