@@ -301,6 +301,7 @@ const scopeName = (usesStore: boolean): string => (usesStore ? "state" : "scope"
 
 const runtimeNames = {
   bindControl: "__tachyonBindControl",
+  cleanupTextKeyedList: "__tachyonCleanupTextKeyedList",
   createStore: "__tachyonCreateStore",
   createRoot: "__tachyonCreateRoot",
   delegate: "__tachyonDelegate",
@@ -308,6 +309,7 @@ const runtimeNames = {
   elementAt: "__tachyonElementAt",
   mountConditional: "__tachyonMountConditional",
   mountKeyedList: "__tachyonMountKeyedList",
+  mountTextKeyedList: "__tachyonMountTextKeyedList",
   nodeAt: "__tachyonNodeAt",
   read: "__tachyonRead",
   setAttributeValue: "__tachyonSetAttributeValue",
@@ -337,6 +339,9 @@ const runtimeValueExpression = (expression: string, reactive: boolean, sourceNam
   return reactive ? `${runtimeNames.read}(${value})` : value;
 };
 
+const isTextOnlyList = (binding: ListBinding): boolean =>
+  binding.bindings.length > 0 && binding.bindings.every((child) => child.kind === "text");
+
 const clientModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
 
 const clientModuleCacheKey = (options: GenerateClientModuleOptions): string =>
@@ -362,10 +367,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsModel = bindings.some((binding) => binding.kind === "model");
   const needsEvent = bindings.some((binding) => binding.kind === "event");
   const needsRef = bindings.some((binding) => binding.kind === "ref");
-  const needsList = bindings.some((binding) => binding.kind === "list");
+  const needsList = bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding));
+  const needsTextList = bindings.some((binding) => binding.kind === "list" && isTextOnlyList(binding));
   const needsConditional = bindings.some((binding) => binding.kind === "if");
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
-  const needsElementAt = needsClass || needsAttr || needsModel || (reactive && needsList);
+  const needsElementAt = needsClass || needsAttr || needsModel || needsTextList || (reactive && needsList);
   const needsNodeAt = reactive && needsConditional;
   const lines: string[] = [];
   if (needsText) {
@@ -395,6 +401,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (needsList) {
     lines.push(`import { mountKeyedList as ${runtimeNames.mountKeyedList} } from "tachyon-dom/runtime/list";`);
+  }
+  if (needsTextList) {
+    lines.push(
+      `import { cleanupTextKeyedList as ${runtimeNames.cleanupTextKeyedList}, mountTextKeyedList as ${runtimeNames.mountTextKeyedList} } from "tachyon-dom/runtime/list-text";`,
+    );
   }
   if (needsConditional) {
     lines.push(
@@ -438,7 +449,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       .join(", ");
     lines.push(`  const state = ${runtimeNames.createStore}({ ...scope, ${fields} });`);
   }
-  if (reactive || needsEvent || needsModel || needsRef || hasDefaultScope) {
+  if (reactive || needsEvent || needsModel || needsRef || needsTextList || hasDefaultScope) {
     lines.push(`  const cleanups = [];`);
   }
   let listIndex = 0;
@@ -522,14 +533,14 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         );
       }
     } else if (binding.kind === "list") {
-      const targetName = reactive ? `__tachyonTarget${targetIndex++}` : undefined;
+      const targetName = reactive || isTextOnlyList(binding) ? `__tachyonTarget${targetIndex++}` : undefined;
       lines.push(emitListBinding(binding, reactive, sourceName, listIndex++, targetName));
     } else {
       const targetName = reactive ? `__tachyonTarget${targetIndex++}` : undefined;
       lines.push(emitConditionalBinding(binding, reactive, sourceName, conditionalIndex++, targetName));
     }
   }
-  if (reactive || needsEvent || needsModel || needsRef || hasDefaultScope) {
+  if (reactive || needsEvent || needsModel || needsRef || needsTextList || hasDefaultScope) {
     lines.push(`  return () => {`);
     lines.push(`    let __tachyonCleanupError;`);
     lines.push(`    let __tachyonCleanupFailed = false;`);
@@ -657,10 +668,14 @@ const emitListBinding = (
   ].join("\n");
   const target = targetName ?? "root";
   const path = targetName ? [] : binding.path;
-  const statement = `${runtimeNames.mountKeyedList}(${target}, ${JSON.stringify(path)}, ${runtimeValueExpression(binding.each, reactive, sourceName)}, ${optionsName})`;
-  return reactive
-    ? `  const ${targetName} = ${elementExpression(binding.path)};\n${listOptions}\n  cleanups.push(${runtimeNames.effect}(() => ${statement}));`
-    : `${listOptions}\n  ${statement};`;
+  const mount = isTextOnlyList(binding) ? runtimeNames.mountTextKeyedList : runtimeNames.mountKeyedList;
+  const statement = `${mount}(${target}, ${JSON.stringify(path)}, ${runtimeValueExpression(binding.each, reactive, sourceName)}, ${optionsName})`;
+  const targetDeclaration = targetName ? `  const ${targetName} = ${elementExpression(binding.path)};\n` : "";
+  const invocation = reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`;
+  const output = `${targetDeclaration}${listOptions}\n${invocation}`;
+  return isTextOnlyList(binding)
+    ? `${output}\n  cleanups.push(() => ${runtimeNames.cleanupTextKeyedList}(${target}, ${JSON.stringify(path)}));`
+    : output;
 };
 
 const emitConditionalBinding = (

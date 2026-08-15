@@ -28,7 +28,7 @@ const packages = (version = "1.2.3", dependency = version) => ({
 });
 
 describe("npm release identity", () => {
-  it.each(["0.1.1", "0.1.2", "0.1.3", "0.1.4"])("contains a changelog entry for release %s", async (version) => {
+  it.each(["0.1.1", "0.1.2", "0.1.3", "0.1.4", "0.1.5"])("contains a changelog entry for release %s", async (version) => {
     const changelog = await readFile("CHANGELOG.md", "utf8");
     expect(changelog).toMatch(new RegExp(`^## \\[${version.replaceAll(".", "\\.")}\\]`, "m"));
   });

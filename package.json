@@ -1,6 +1,6 @@
 {
   "name": "tachyon-dom",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": false,
   "description": "A small TypeScript UI runtime and HTML-first compiler.",
   "keywords": [
@@ -143,6 +143,10 @@
     "./runtime/list": {
       "types": "./dist/runtime/list.d.ts",
       "import": "./dist/runtime/list.js"
+    },
+    "./runtime/list-text": {
+      "types": "./dist/runtime/list-text.d.ts",
+      "import": "./dist/runtime/list-text.js"
     },
     "./runtime/keyed-rows": {
       "types": "./dist/runtime/keyed-rows.d.ts",
@@ -533,6 +537,14 @@
         "@size-limit/esbuild"
       ],
       "limit": "16 KB"
+    },
+    {
+      "name": "runtime/list-text",
+      "path": "dist/runtime/list-text.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "8 KB"
     },
     {
       "name": "runtime/keyed-rows",

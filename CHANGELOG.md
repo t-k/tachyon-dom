@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-15
+
+### Added
+
+- Added bounded progressive route layout and document composition with explicit `streamLayout()`, `fragmentDocument`, and `htmlDocument()` contracts across Workers, Node, and Lambda adapters.
+- Added shared subtree ownership cleanup for nested conditional and keyed-list lifecycles, plus blocking clean-consumer and generated URL-policy release verification.
+
+### Changed
+
+- Unified URL attribute, head synchronization, meta refresh, redirect, and generated-code policy across compiler, server, client runtime, and built artifacts.
+- Made buffered and streaming route results expose an explicit body kind while preserving pass-through and bodyless response metadata.
+- Specialized generated text-only keyed lists so simple clients no longer bundle unused attribute, form, conditional, or URL-policy code.
+
+### Fixed
+
+- Preserved ancestor layouts, head/resource metadata, hydration state, backpressure, cancellation, HEAD/304 representation headers, HTML 404 content types, and trusted localhost handling across adapters.
+- Accepted safe malformed-percent URLs, disposed nested reactive state in post-order, and contained bounded cleanup failures without masking primary route errors.
+
+### Security
+
+- Rejected script/style raw-text interpolation and incomplete trusted HTML fragments across server and compiler paths, including browser tokenizer edge cases and completed-fragment URL validation.
+- Applied CSRF verification before unsafe route callbacks, aligned safe-method action dispatch, expanded URL/srcset/meta-refresh coverage, and made constant-time comparison fail closed when Web Crypto is unavailable.
+
 ## [0.1.4] - 2026-08-15
 
 ### Added
@@ -83,7 +106,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Initial public release of the experimental HTML-first compiler, fine-grained runtime, SSR and streaming targets, router, adapters, Vite integration, CLI, and project initializer.
 
-[Unreleased]: https://github.com/t-k/tachyon-dom/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/t-k/tachyon-dom/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/t-k/tachyon-dom/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/t-k/tachyon-dom/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/t-k/tachyon-dom/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/t-k/tachyon-dom/compare/v0.1.1...v0.1.2

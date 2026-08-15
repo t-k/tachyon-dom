@@ -848,7 +848,7 @@ describe("HTML-first compiler", () => {
       `cleanups.push(__tachyonEffect(() => __tachyonSetText(__tachyonTarget0, __tachyonRead(scope.title))));`,
     );
     expect(code).toContain(
-      `cleanups.push(__tachyonEffect(() => __tachyonMountKeyedList(__tachyonTarget1, [], __tachyonRead(scope.rows)`,
+      `cleanups.push(__tachyonEffect(() => __tachyonMountTextKeyedList(__tachyonTarget1, [], __tachyonRead(scope.rows)`,
     );
     expect(code).toContain(`return () => {`);
   });
@@ -1236,7 +1236,7 @@ describe("HTML-first compiler", () => {
     ).toBe(`<tbody><tr><td>1</td><td>One</td></tr><tr class="danger"><td>2</td><td>&lt;Two&gt;</td></tr></tbody>`);
   });
 
-  it("keeps list runtime imports modular", () => {
+  it("uses the text-only list runtime when every row binding is text", () => {
     const result = compileTemplate(`<tbody><for each={rows} key={row.id}><tr><td>{row.id}</td></tr></for></tbody>`);
     if (!result.ok) {
       throw new Error(result.error.message);
@@ -1244,10 +1244,70 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value);
 
-    expect(code).toContain(`from "tachyon-dom/runtime/list"`);
-    expect(code).toContain(`__tachyonMountKeyedList(root, [], scope.rows`);
+    expect(code).toContain(`mountTextKeyedList as __tachyonMountTextKeyedList`);
+    expect(code).toContain(`cleanupTextKeyedList as __tachyonCleanupTextKeyedList`);
+    expect(code).toContain(`from "tachyon-dom/runtime/list-text"`);
+    expect(code).not.toContain(`from "tachyon-dom/runtime/list"`);
+    expect(code).toContain(`const __tachyonTarget0 = root;`);
+    expect(code).toContain(`__tachyonMountTextKeyedList(__tachyonTarget0, [], scope.rows`);
+    expect(code).toContain(`cleanups.push(() => __tachyonCleanupTextKeyedList(__tachyonTarget0, []))`);
     expect(code).toContain(`key: "row.id"`);
     expect(code).toContain(`itemName: "row"`);
+  });
+
+  it("keeps mixed row bindings on the generic list runtime", () => {
+    const result = compileTemplate(
+      `<ul><for each={rows} key={row.id}><li title={row.label}>{row.label}</li></for></ul>`,
+    );
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const code = generateClientModule(result.value);
+
+    expect(code).toContain(`mountKeyedList as __tachyonMountKeyedList`);
+    expect(code).toContain(`from "tachyon-dom/runtime/list"`);
+    expect(code).not.toContain(`from "tachyon-dom/runtime/list-text"`);
+    expect(code).toContain(`__tachyonMountKeyedList(root, [], scope.rows`);
+  });
+
+  it.each([
+    ["dynamic href", `<ul><for each={rows} key={row.id}><li><a href={row.url}>{row.label}</a></li></for></ul>`],
+    ["dynamic srcset", `<ul><for each={rows} key={row.id}><li><img srcset={row.sources}></li></for></ul>`],
+    [
+      "dynamic formaction",
+      `<ul><for each={rows} key={row.id}><li><button formaction={row.action}>{row.label}</button></li></for></ul>`,
+    ],
+    [
+      "nested list",
+      `<ul><for each={groups} key={group.id}><li>{group.label}<ul><for each={group.rows} key={row.id}><li>{row.label}</li></for></ul></li></for></ul>`,
+    ],
+    [
+      "nested conditional",
+      `<ul><for each={rows} key={row.id}><li>{row.label}<if test={row.visible}><span>{row.note}</span></if></li></for></ul>`,
+    ],
+  ])("keeps %s row bindings on the security-aware generic runtime", (_name, source) => {
+    const result = compileTemplate(source);
+    if (!result.ok) throw new Error(result.error.message);
+
+    const code = generateClientModule(result.value);
+
+    expect(code).toContain(`from "tachyon-dom/runtime/list"`);
+    expect(code).not.toContain(`from "tachyon-dom/runtime/list-text"`);
+  });
+
+  it("captures a nested text-only list container for cleanup after DOM removal", () => {
+    const result = compileTemplate(
+      `<main><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></main>`,
+    );
+    if (!result.ok) throw new Error(result.error.message);
+
+    const code = generateClientModule(result.value);
+
+    expect(code).toContain(`const __tachyonTarget0 = __tachyonElementAt(root, [0]);`);
+    expect(code).toContain(`__tachyonMountTextKeyedList(__tachyonTarget0, [], scope.rows`);
+    expect(code).toContain(`__tachyonCleanupTextKeyedList(__tachyonTarget0, [])`);
+    expect(code).not.toContain(`__tachyonCleanupTextKeyedList(root, [0])`);
   });
 
   it("generates item-direct key readers for simple list keys", () => {
@@ -1276,7 +1336,7 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`keyRead: (scope) => ((__tachyonObject, __tachyonProperty) =>`);
     expect(code).toContain(`__tachyonObject[__tachyonProperty])(scope.row.ids, 0)`);
     expect(code).toContain(`read: (scope) => (scope.row.profile?.name ?? scope.row.name)`);
-    expect(code).toContain(`__tachyonMountKeyedList(root, [], scope.rows, listOptions0)`);
+    expect(code).toContain(`__tachyonMountTextKeyedList(__tachyonTarget0, [], scope.rows, listOptions0)`);
   });
 
   it("caches reactive list containers and conditional anchors before effects", () => {
@@ -1291,10 +1351,10 @@ describe("HTML-first compiler", () => {
 
     expect(code).toContain(`nodeAt as __tachyonNodeAt`);
     expect(code).toContain(`const __tachyonTarget`);
-    expect(code).toContain(`__tachyonMountKeyedList(__tachyonTarget`);
+    expect(code).toContain(`__tachyonMountTextKeyedList(__tachyonTarget`);
     expect(code).toContain(`__tachyonMountConditional(__tachyonTarget`);
     expect(code).toContain(`, [], __tachyonRead(scope.active), scope, conditionalOptions`);
-    expect(code).not.toContain(`__tachyonMountKeyedList(root, [0]`);
+    expect(code).not.toContain(`__tachyonMountTextKeyedList(root, [0]`);
     expect(code).not.toContain(`__tachyonMountConditional(root, [1]`);
   });
 

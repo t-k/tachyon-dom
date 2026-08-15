@@ -21,7 +21,8 @@ describe("README landing page", () => {
     expect(readme).toContain('<for each={rows} key={row.id}>');
     expect(readme).toContain("## What the Compiler Emits");
     expect(readme).toContain("__tachyonTextAt");
-    expect(readme).toContain("__tachyonMountKeyedList");
+    expect(readme).toContain("__tachyonMountTextKeyedList");
+    expect(readme).toContain("__tachyonCleanupTextKeyedList");
     expect(readme).toContain("## Measured Size");
     expect(readme).toContain("pnpm check:browser-entry");
     const sizes = JSON.parse(await readFile("scripts/browser-bundle-sizes.json", "utf8")) as {

@@ -1356,7 +1356,7 @@ export default { selected: false };
       console.log = originalLog;
     }
 
-    expect(messages[0]).toBe("0.1.4");
+    expect(messages[0]).toBe("0.1.5");
     expect(messages[1]).toContain("tachyon-dom compile <input>");
     expect(messages[1]).toContain("--target client|server|stream");
     expect(messages[2]).toContain("tachyon-dom dev");
@@ -1489,11 +1489,14 @@ export const bindRows = (root, rows, options) => effect(() => {
     const code = typeof result === "object" ? result?.code : "";
     expect(code).toContain(`import { mountKeyedList } from "tachyon-dom/runtime/list";`);
     expect(code).toContain(`import { effect } from "tachyon-dom/runtime/signal";`);
-    expect(code).toContain(`import { mountKeyedList as __tachyonMountKeyedList } from "tachyon-dom/runtime/list";`);
+    expect(code).toContain(
+      `import { cleanupTextKeyedList as __tachyonCleanupTextKeyedList, mountTextKeyedList as __tachyonMountTextKeyedList } from "tachyon-dom/runtime/list-text";`,
+    );
     expect(code).toContain(
       `import { effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
     );
-    expect(code).toContain(`__tachyonMountKeyedList(__tachyonTarget0, [], __tachyonRead(scope.rows)`);
+    expect(code).toContain(`__tachyonMountTextKeyedList(__tachyonTarget0, [], __tachyonRead(scope.rows)`);
+    expect(code).toContain(`__tachyonCleanupTextKeyedList(__tachyonTarget0, [])`);
   });
 
   it("transforms target-specific .td query modules", async () => {
@@ -1922,7 +1925,7 @@ void chunks;
     expect(workflow).toContain("ea165f8d65b6e75b540449e92b4886f43607fa02");
     expect(workflow).toContain("d3f86a106a0bac45b974a628896c90dbdf5c8093");
     expect(createPackage.files).toContain("LICENSE");
-    expect(createPackage.dependencies?.["tachyon-dom"]).toBe("0.1.4");
+    expect(createPackage.dependencies?.["tachyon-dom"]).toBe("0.1.5");
   });
 
   it("packages a Cloudflare Pages worker with copied assets and ASSETS fallback", async () => {

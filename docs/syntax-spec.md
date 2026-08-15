@@ -34,7 +34,7 @@ Expressions inside `script` and `style` are rejected because ordinary HTML escap
 
 ## Keyed Lists
 
-`<for each={items} key={item.id}>...</for>` creates a keyed list boundary. The first identifier in `key` becomes the item binding name. The client target lowers it to `runtime/list`; the server targets render the array in order.
+`<for each={items} key={item.id}>...</for>` creates a keyed list boundary. The first identifier in `key` becomes the item binding name. The client target lowers rows containing only text bindings to `runtime/list-text`; rows with attributes, events, models, styles, refs, or nested control flow use `runtime/list`. The server targets render the array in order.
 
 ```html
 <ul>
