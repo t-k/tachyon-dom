@@ -116,7 +116,7 @@ Each enhancement runs once per element/name pair. A single element can opt into 
 
 ## Server HTML and Form Actions
 
-`tachyon-dom/server/html` provides a dependency-free SSR string helper. `html` escapes text interpolation by default, escapes direct interpolation after an attribute assignment, and only renders trusted markup through `rawHtml()`. Use `attr()`, `booleanAttr()`, `classList()`, and `join()` for optional attributes, boolean attributes, class composition, and lists.
+`tachyon-dom/server/html` provides an SSR string helper. `html` escapes text interpolation by default, escapes direct interpolation after an attribute assignment, and only renders trusted markup through `rawHtml()`. Use `attr()`, `booleanAttr()`, `classList()`, and `join()` for optional attributes, boolean attributes, class composition, and lists.
 
 ```ts
 import { attr, booleanAttr, html, rawHtml } from "tachyon-dom/server/html";
@@ -131,7 +131,7 @@ const view = html`<label for=${fieldId}>${"Email"}</label>
   >`;
 ```
 
-This helper escapes values; it is not an arbitrary HTML sanitizer. Do not pass user-generated HTML to `rawHtml()`. For untrusted HTML, sanitize before rendering and keep the sanitizer choice explicit at the application boundary.
+This helper escapes values; it is not an arbitrary HTML sanitizer. Do not pass user-generated HTML to `rawHtml()`. A trusted fragment must be a complete text-context fragment rather than a partial tag, attribute, comment, or raw-text element. The completed template still applies dangerous-attribute and URL policy checks across trusted-fragment boundaries. For untrusted HTML, sanitize before rendering and keep the sanitizer choice explicit at the application boundary.
 
 `tachyon-dom/server/form-action` provides a small SSR form round-trip convention. `formAction()` parses `Request.formData()`, routes success and error branches, and keeps the validation library choice in userland. `preserveFormValues()` preserves submitted values while excluding common password fields by default. `formField()` returns stable input attributes and accessible error markup with `aria-invalid`, `aria-describedby`, and a deterministic error id. `redirectResponse()` accepts path-relative redirects by default; external redirects require `allowExternal: true` and an explicit `allowedOrigins` entry.
 
