@@ -504,6 +504,34 @@ describe("server adapters", () => {
     expect(cancel).toHaveBeenCalledTimes(1);
   });
 
+  it("does not disturb a user-locked native HEAD body", async () => {
+    const cancel = vi.fn();
+    const native = new Response(new ReadableStream({ cancel }));
+    const reader = native.body?.getReader();
+    const response = await createWorkersHandler({
+      routes: [{ path: "/", render: () => "unused" }],
+      middleware: [() => native],
+    }).fetch(new Request("https://example.test/", { method: "HEAD" }));
+
+    expect(response.status).toBe(200);
+    expect(response.body).toBeNull();
+    expect(cancel).not.toHaveBeenCalled();
+    reader?.releaseLock();
+  });
+
+  it("contains a rejected best-effort native HEAD body cancellation", async () => {
+    const cancel = vi.fn(async () => Promise.reject(new Error("cancel failed")));
+    const native = new Response(new ReadableStream({ cancel }));
+    const response = await createWorkersHandler({
+      routes: [{ path: "/", render: () => "unused" }],
+      middleware: [() => native],
+    }).fetch(new Request("https://example.test/", { method: "HEAD" }));
+
+    expect(response.status).toBe(200);
+    expect(response.body).toBeNull();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it.each([204, 205, 304])("removes bodies and transfer headers for status %i across adapters", async (status) => {
     const routes: RouteDefinition[] = [
       {

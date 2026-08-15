@@ -1331,8 +1331,8 @@ const renderRouteInternal = async (
       return finish(routeResponseResult(result));
     }
     if (isWebResponse(result)) {
-      if (request.method === "HEAD" && result.body) {
-        await result.body.cancel();
+      if (request.method === "HEAD" && result.body && !result.body.locked) {
+        void result.body.cancel().catch(() => undefined);
       }
       const rendered = webResponseResult(result);
       releaseRequestSnapshot(middlewareRequest);
