@@ -1,4 +1,5 @@
 import { err, ok, type Result } from "../result.js";
+import { isDangerousAttributeName } from "../attribute-policy.js";
 import { isAssignableExpression, parseExpression } from "./expression.js";
 import type {
   CompilerError,
@@ -140,6 +141,14 @@ const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError
 };
 
 const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => {
+  for (const attr of node.attrs) {
+    if (!attr.name.startsWith("on:") && isDangerousAttributeName(attr.name)) {
+      return semanticError(`Dangerous attribute is not supported: ${attr.name}.`, {
+        start: attr.nameStart,
+        end: attr.nameEnd,
+      });
+    }
+  }
   if (node.tagName === "for") {
     const each = attrExpression(node, "each");
     const key = attrExpression(node, "key");

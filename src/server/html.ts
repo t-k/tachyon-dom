@@ -1,4 +1,5 @@
 import { escapeHtml as escapeText } from "../html-escape.js";
+import { validateAttributeName } from "../attribute-policy.js";
 
 const htmlFragmentBrand = Symbol("tachyon.htmlFragment");
 const htmlAttributeBrand = Symbol("tachyon.htmlAttribute");
@@ -65,6 +66,10 @@ const escapeAttribute = (value: unknown): string => {
 const assertAttributeName = (name: string): void => {
   if (!attributeNamePattern.test(name)) {
     throw new Error(`Invalid attribute name: ${name}`);
+  }
+  const validatedName = validateAttributeName(name);
+  if (!validatedName.ok) {
+    throw validatedName.error;
   }
 };
 

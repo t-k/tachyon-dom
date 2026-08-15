@@ -46,7 +46,24 @@ describe("attribute and form runtime helpers", () => {
     expect(input.value).toBe("");
   });
 
-  it("does not reflect dangerous attribute names into executable DOM properties", () => {
+  it.each(["onclick", "ONLOAD", "srcdoc", "innerhtml", "outerhtml"])(
+    "rejects dangerous attribute %s before mutating the DOM",
+    (name) => {
+      document.body.innerHTML = `<div></div>`;
+      const element = document.body.firstElementChild;
+      if (!(element instanceof HTMLDivElement)) {
+        throw new Error("Missing element.");
+      }
+
+      for (const value of ["unsafe", null, false, true]) {
+        expect(() => setAttributeValue(element, name, value)).toThrow(`Dangerous attribute is not supported: ${name}`);
+      }
+      expect(element.getAttributeNames()).toEqual([]);
+      expect(element.childElementCount).toBe(0);
+    },
+  );
+
+  it("rejects dangerous attribute names instead of reflecting executable DOM properties", () => {
     document.body.innerHTML = `<div></div><iframe></iframe><button></button>`;
     const div = document.querySelector("div");
     const iframe = document.querySelector("iframe");
@@ -59,9 +76,13 @@ describe("attribute and form runtime helpers", () => {
       throw new Error("Missing elements.");
     }
 
-    setAttributeValue(div, "innerHTML", `<img src=x onerror="alert(1)">`);
-    setAttributeValue(iframe, "srcdoc", `<script>alert(1)</script>`);
-    setAttributeValue(button, "onclick", "alert(1)");
+    expect(() => setAttributeValue(div, "innerHTML", `<img src=x onerror="alert(1)">`)).toThrow(
+      "Dangerous attribute is not supported",
+    );
+    expect(() => setAttributeValue(iframe, "srcdoc", `<script>alert(1)</script>`)).toThrow(
+      "Dangerous attribute is not supported",
+    );
+    expect(() => setAttributeValue(button, "onclick", "alert(1)")).toThrow("Dangerous attribute is not supported");
 
     expect(div.childElementCount).toBe(0);
     expect(div.hasAttribute("innerHTML")).toBe(false);

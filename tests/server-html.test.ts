@@ -71,4 +71,16 @@ describe("server html helper", () => {
   it("rejects unsafe attribute names", () => {
     expect(() => attr(`onload="alert(1)`, "x")).toThrow("Invalid attribute name");
   });
+
+  it.each(["onclick", "ONLOAD", "srcdoc", "innerhtml", "outerhtml"])(
+    "rejects dangerous attribute %s in direct HTML helpers",
+    (name) => {
+      for (const value of ["value", null, false, true]) {
+        expect(() => attr(name, value)).toThrow(`Dangerous attribute is not supported: ${name}`);
+      }
+      for (const enabled of [false, true]) {
+        expect(() => booleanAttr(name, enabled)).toThrow(`Dangerous attribute is not supported: ${name}`);
+      }
+    },
+  );
 });

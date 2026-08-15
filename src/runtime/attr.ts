@@ -1,15 +1,13 @@
-const dangerousPropertyNames = new Set(["innerhtml", "outerhtml", "srcdoc"]);
-
-const shouldReflectProperty = (name: string): boolean => {
-  const normalized = name.toLowerCase();
-  return !normalized.startsWith("on") && !dangerousPropertyNames.has(normalized);
-};
+import { validateAttributeName } from "../attribute-policy.js";
 
 export const setAttributeValue = (element: Element, name: string, value: unknown): void => {
-  const reflectProperty = shouldReflectProperty(name);
+  const validatedName = validateAttributeName(name);
+  if (!validatedName.ok) {
+    throw validatedName.error;
+  }
   if (value == null || value === false) {
     element.removeAttribute(name);
-    if (reflectProperty && name in element) {
+    if (name in element) {
       try {
         const properties = element as unknown as Record<string, unknown>;
         const current = properties[name];
@@ -22,10 +20,6 @@ export const setAttributeValue = (element: Element, name: string, value: unknown
         // Some readonly DOM properties throw on assignment.
       }
     }
-    return;
-  }
-  if (!reflectProperty) {
-    element.removeAttribute(name);
     return;
   }
   if (value === true) {

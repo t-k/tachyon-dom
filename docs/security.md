@@ -12,6 +12,8 @@
 
 Direct `name=${value}` interpolation is quoted automatically. Quote the complete attribute value when a template contains a prefix or suffix, such as `src="/assets/${file}.png"`; interpolation into an unquoted value is rejected. `rawHtml()` is accepted only in text context, while fragments returned by `attr()` and `booleanAttr()` are accepted only between attributes inside an opening tag.
 
+Native `on*`, `srcdoc`, `innerhtml`, and `outerhtml` attributes are rejected by the compiler, client runtime, and direct server HTML helpers, regardless of case or whether their value is static, dynamic, empty, or disabled. Use `on:event={handler}` for compiler-managed event listeners. This directive is compiled into listener registration and is not emitted as an executable HTML attribute.
+
 `sanitizeHtml(markup)` has a small allowlist for constrained, already-simple backend HTML. For user-generated or third-party markup, pass a vetted adapter through `createHtmlSanitizer()` or `sanitizeHtml(..., { adapter })`, such as a DOMPurify-backed implementation in the target runtime.
 
 Progressive route `stream()` strings are trusted raw HTML. Node, Workers, and Lambda adapters do not escape or sanitize chunks. Escape text before branding a chunk:

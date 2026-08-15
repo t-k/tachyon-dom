@@ -182,6 +182,30 @@ describe("HTML-first compiler", () => {
     expect(result.ok).toBe(true);
   });
 
+  it.each(["onclick", "ONLOAD", "srcdoc", "innerhtml", "outerhtml"])(
+    "rejects dangerous attribute %s before lowering every compiler target",
+    (name) => {
+      for (const value of ['"static"', "{value}"]) {
+        const source = `<iframe ${name}=${value}></iframe>`;
+        const result = compileTemplate(source);
+
+        expect(result.ok).toBe(false);
+        if (result.ok) throw new Error("Expected dangerous attribute diagnostic.");
+        expect(result.error).toMatchObject({
+          message: `Dangerous attribute is not supported: ${name}.`,
+          offset: source.indexOf(name),
+          endOffset: source.indexOf(name) + name.length,
+        });
+      }
+    },
+  );
+
+  it("keeps framework event directives and ordinary attributes available", () => {
+    const result = compileTemplate(`<button on:click={save} aria-label="Save" data-kind={kind}></button>`);
+
+    expect(result.ok).toBe(true);
+  });
+
   it.each([
     ["svg", `<svg xml:space="preserve"><text>line one\n    line two</text></svg>`],
     ["math", `<math xml:space="preserve"><mtext>line one\n    line two</mtext></math>`],
@@ -446,7 +470,7 @@ describe("HTML-first compiler", () => {
   });
 
   it.each([
-    ['<div title={format(`a}b`)}></div>', 'format(`a}b`)'],
+    ["<div title={format(`a}b`)}></div>", "format(`a}b`)"],
     ['<div title={`a${value ? `b}c` : "d"}`}></div>', '`a${value ? `b}c` : "d"}`'],
     ["<div title={value /* } */}></div>", "value /* } */"],
     ["<div title={value // }\n + 1}></div>", "value // }\n + 1"],
@@ -564,7 +588,9 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(
       `import { createRoot as __tachyonCreateRoot, effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
     );
-    expect(code).toContain(`export const bind = (root, inputScope = {}) => __tachyonCreateRoot((__tachyonDisposeRoot) => {`);
+    expect(code).toContain(
+      `export const bind = (root, inputScope = {}) => __tachyonCreateRoot((__tachyonDisposeRoot) => {`,
+    );
     expect(code.indexOf(`const scope = __tachyonCreateScope(inputScope);`)).toBeGreaterThan(
       code.indexOf(`__tachyonCreateRoot((__tachyonDisposeRoot) => {`),
     );

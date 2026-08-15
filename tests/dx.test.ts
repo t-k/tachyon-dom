@@ -419,6 +419,14 @@ describe("DX helpers", () => {
     expect(security).toContain("`rawHtml()` is accepted only in text context");
   });
 
+  it("documents the shared dangerous attribute policy", async () => {
+    const security = await readFile("docs/security.md", "utf8");
+
+    expect(security).toContain("Native `on*`, `srcdoc`, `innerhtml`, and `outerhtml` attributes are rejected");
+    expect(security).toContain("Use `on:event={handler}` for compiler-managed event listeners");
+    expect(security).toContain("compiler, client runtime, and direct server HTML helpers");
+  });
+
   it("documents secure session cookie option merging and prefix constraints", async () => {
     const routing = await readFile("docs/routing.md", "utf8");
 
