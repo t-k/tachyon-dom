@@ -310,6 +310,17 @@ const isTrustedHost = (host: string, trustedHosts: readonly string[] | undefined
 
 const badRequestResponse = (message: string): Response => new Response(message, { status: 400 });
 
+const trustedForwardedProtocol = (value: string | string[] | undefined): "http" | "https" | Response => {
+  if (typeof value !== "string" || value.includes(",")) {
+    return badRequestResponse("Invalid X-Forwarded-Proto header");
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized !== "http" && normalized !== "https") {
+    return badRequestResponse("Invalid X-Forwarded-Proto header");
+  }
+  return normalized;
+};
+
 const requestUrl = (request: IncomingMessage, options: RequestUrlOptions = {}): string | Response => {
   const host = firstHeaderValue(request.headers.host) ?? "localhost";
   const hasTrustedHosts = options.trustedHosts !== undefined && options.trustedHosts.length > 0;
@@ -317,13 +328,17 @@ const requestUrl = (request: IncomingMessage, options: RequestUrlOptions = {}): 
   if (hasTrustedHosts && trustedHost === "localhost") {
     return badRequestResponse("Untrusted Host header");
   }
-  const protocol = options.trustProxy
-    ? (firstHeaderValue(request.headers["x-forwarded-proto"]) ?? "http").split(",")[0]?.trim() || "http"
-    : "http";
-  const origin = options.origin
+  const configuredOrigin = options.origin
     ? normalizeOrigin(typeof options.origin === "function" ? options.origin(request) : options.origin)
-    : `${protocol}://${trustedHost}`;
-  return `${origin}${request.url ?? "/"}`;
+    : undefined;
+  if (configuredOrigin) {
+    return `${configuredOrigin}${request.url ?? "/"}`;
+  }
+  const protocol = options.trustProxy ? trustedForwardedProtocol(request.headers["x-forwarded-proto"]) : "http";
+  if (protocol instanceof Response) {
+    return protocol;
+  }
+  return `${protocol}://${trustedHost}${request.url ?? "/"}`;
 };
 
 const requestAbortSignal = (request: IncomingMessage, response?: ServerResponse): AbortSignal => {

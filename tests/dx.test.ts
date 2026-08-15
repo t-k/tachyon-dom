@@ -402,6 +402,14 @@ describe("DX helpers", () => {
     expect(syntax).toContain("`textarea` and `title` remain RCDATA");
   });
 
+  it("documents the trusted forwarded protocol contract", async () => {
+    const adapters = await readFile("docs/adapters.md", "utf8");
+
+    expect(adapters).toContain("exactly one `http` or `https` value");
+    expect(adapters).toContain("Missing, invalid, and comma-separated values return `400 Bad Request`");
+    expect(adapters).toContain("A configured `origin` takes precedence over forwarded protocol metadata");
+  });
+
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
     const files = await collectTypeScriptFiles(path.join(process.cwd(), "src"));
     const extensionlessSpecifiers: string[] = [];

@@ -749,6 +749,94 @@ describe("server adapters", () => {
     expect(seenUrls.at(-1)).toBe("https://app.example/account");
   });
 
+  it.each([undefined, "", "javascript", "file", "https://evil.example/#", "http,https"])(
+    "rejects invalid trusted forwarded protocol %j",
+    async (forwardedProtocol) => {
+      const seenUrls: string[] = [];
+      const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+        method: string;
+        url: string;
+        headers: Record<string, string | undefined>;
+      };
+      req.method = "GET";
+      req.url = "/admin";
+      req.headers = { host: "app.example", "x-forwarded-proto": forwardedProtocol };
+      const res = {
+        statusCode: 200,
+        setHeader: vi.fn(),
+        end: vi.fn(),
+      };
+
+      await createNodeFetchHandler({
+        trustProxy: true,
+        trustedHosts: ["app.example"],
+        fetch: (request) => {
+          seenUrls.push(request.url);
+          return new Response("ok");
+        },
+      })(req as never, res as never);
+
+      expect(res.statusCode).toBe(400);
+      expect(seenUrls).toEqual([]);
+    },
+  );
+
+  it("normalizes a valid trusted forwarded protocol without changing the request path", async () => {
+    const seenUrls: string[] = [];
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/admin?mode=edit";
+    req.headers = { host: "app.example", "x-forwarded-proto": " HTTPS " };
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    };
+
+    await createNodeFetchHandler({
+      trustProxy: true,
+      trustedHosts: ["app.example"],
+      fetch: (request) => {
+        seenUrls.push(request.url);
+        return new Response("ok");
+      },
+    })(req as never, res as never);
+
+    expect(seenUrls).toEqual(["https://app.example/admin?mode=edit"]);
+  });
+
+  it("uses a fixed Node origin without reading forwarded protocol metadata", async () => {
+    const seenUrls: string[] = [];
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/admin";
+    req.headers = { host: "evil.example", "x-forwarded-proto": "javascript" };
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    };
+
+    await createNodeFetchHandler({
+      origin: "https://fixed.example",
+      trustProxy: true,
+      fetch: (request) => {
+        seenUrls.push(request.url);
+        return new Response("ok");
+      },
+    })(req as never, res as never);
+
+    expect(seenUrls).toEqual(["https://fixed.example/admin"]);
+  });
+
   it("does not derive Node request origins from Host unless trust is explicit", async () => {
     const seenUrls: string[] = [];
     const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
