@@ -709,6 +709,84 @@ describe("server adapters", () => {
     expect(Buffer.concat(lambdaBytes).toString("utf8")).toBe(expected);
   });
 
+  it("preserves middleware Response bytes through Workers, Node, Lambda proxy, and Lambda streaming", async () => {
+    const expected = Uint8Array.from([0, 255, 254, 195, 40, 137, 80, 78, 71]);
+    const routes: RouteDefinition[] = [{ path: "/binary", render: () => "unused" }];
+    const middleware = [
+      () =>
+        new Response(expected.slice(), {
+          status: 206,
+          headers: { "content-type": "application/octet-stream", "x-binary": "yes" },
+        }),
+    ];
+
+    const workers = await createWorkersHandler({ routes, middleware }).fetch(
+      new Request("https://example.test/binary"),
+    );
+    expect(workers.status).toBe(206);
+    expect(workers.headers.get("x-binary")).toBe("yes");
+    expect(new Uint8Array(await workers.arrayBuffer())).toEqual(expected);
+
+    const nodeBytes: Uint8Array[] = [];
+    const nodeRequest = Object.assign(Readable.from([]), {
+      method: "GET",
+      url: "/binary",
+      headers: { host: "example.test" },
+    });
+    const nodeResponse = Object.assign(new EventEmitter(), {
+      statusCode: 200,
+      writableEnded: false,
+      setHeader: vi.fn(),
+      write: (chunk: Uint8Array) => {
+        nodeBytes.push(Buffer.from(chunk));
+        return true;
+      },
+      end: (chunk?: Uint8Array) => {
+        if (chunk) nodeBytes.push(Buffer.from(chunk));
+        nodeResponse.writableEnded = true;
+      },
+    });
+    await createNodeHandler({ routes, middleware })(nodeRequest as never, nodeResponse as never);
+    expect(nodeResponse.statusCode).toBe(206);
+    expect(Buffer.concat(nodeBytes)).toEqual(Buffer.from(expected));
+
+    const lambdaProxy = await createLambdaHandler({ routes, middleware })(
+      lambdaEvent({
+        rawPath: "/binary",
+        requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/binary" } },
+      }),
+    );
+    expect(lambdaProxy.statusCode).toBe(206);
+    expect(lambdaProxy.isBase64Encoded).toBe(true);
+    expect(lambdaProxy.body).toBe(Buffer.from(expected).toString("base64"));
+
+    const lambdaBytes: Uint8Array[] = [];
+    const responseStream = new Writable({
+      write(chunk, _encoding, callback) {
+        lambdaBytes.push(Buffer.from(chunk));
+        callback();
+      },
+    });
+    const runtime = {
+      streamifyResponse: vi.fn((handler) => handler),
+      HttpResponseStream: { from: vi.fn((stream: Writable) => stream) },
+    };
+    const lambdaStreaming = createLambdaStreamingHandler({ routes, middleware, streaming: true }, runtime) as (
+      event: ReturnType<typeof lambdaEvent>,
+      stream: Writable,
+      context: unknown,
+    ) => Promise<void>;
+    await lambdaStreaming(
+      lambdaEvent({
+        rawPath: "/binary",
+        requestContext: { domainName: "lambda.example", http: { method: "GET", path: "/binary" } },
+      }),
+      responseStream,
+      {},
+    );
+    expect(Buffer.concat(lambdaBytes)).toEqual(Buffer.from(expected));
+  });
+
   it("preserves multiple Set-Cookie headers in Node fetch responses", async () => {
     const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
       method: string;

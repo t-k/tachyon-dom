@@ -120,6 +120,7 @@ export type RouteRenderResult = {
   headers: Headers;
   responseBody?: string;
   responseChunks?: AsyncIterable<string>;
+  webResponse?: Response;
 };
 
 type RouteRenderOptionsBase = {
@@ -1247,21 +1248,18 @@ const renderRouteInternal = async (
     headers: response.headers,
     match,
   });
-  const webResponseResult = async (response: Response, match = emptyMatch()): Promise<RouteRenderResult> => {
-    const body = await response.text();
-    return {
-      status: response.status,
-      html: response.headers.get("content-type")?.startsWith("text/html") ? body : "",
-      responseBody: body,
-      headHtml: "",
-      resourceHints: "",
-      stateScript: "",
-      loaderData: {},
-      actionResult: undefined,
-      headers: response.headers,
-      match,
-    };
-  };
+  const webResponseResult = (response: Response, match = emptyMatch()): RouteRenderResult => ({
+    status: response.status,
+    html: "",
+    webResponse: response,
+    headHtml: "",
+    resourceHints: "",
+    stateScript: "",
+    loaderData: {},
+    actionResult: undefined,
+    headers: new Headers(response.headers),
+    match,
+  });
   const finish = (result: RouteRenderResult): Result<RouteRenderResult, RouteError> => {
     releaseRequestSnapshot(request);
     return ok(result);
@@ -1310,7 +1308,7 @@ const renderRouteInternal = async (
       return finish(routeResponseResult(result));
     }
     if (isWebResponse(result)) {
-      const rendered = await webResponseResult(result);
+      const rendered = webResponseResult(result);
       releaseRequestSnapshot(middlewareRequest);
       return finish(rendered);
     }
@@ -1631,6 +1629,7 @@ export type RouteStreamResult = {
   resourceHints: string;
   stateScript: string;
   headers: Headers;
+  webResponse?: Response;
   final: Promise<Pick<RouteRenderResult, "headHtml" | "resourceHints" | "stateScript" | "headers" | "status">>;
 };
 
@@ -1655,11 +1654,13 @@ const renderRouteStreamInternal = async (
   };
   return ok({
     ...final,
-    chunks:
-      rendered.value.responseChunks ??
-      (async function* () {
-        if (request.method !== "HEAD" && body) yield body;
-      })(),
+    ...(rendered.value.webResponse ? { webResponse: rendered.value.webResponse } : {}),
+    chunks: rendered.value.webResponse
+      ? (async function* () {})()
+      : (rendered.value.responseChunks ??
+        (async function* () {
+          if (request.method !== "HEAD" && body) yield body;
+        })()),
     final: Promise.resolve(final),
   });
 };

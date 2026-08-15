@@ -430,6 +430,25 @@ describe("router security helpers", () => {
     expect(forbidden.bodyUsed).toBe(true);
   });
 
+  it("preserves native middleware Response bytes in the core result", async () => {
+    const bytes = Uint8Array.from([0, 255, 254, 195, 40, 137, 80, 78, 71]);
+    const result = await renderRoute([{ path: "/binary", render: () => "unused" }], "https://x.test/binary", {
+      middleware: [
+        () =>
+          new Response(bytes.slice(), {
+            status: 206,
+            headers: { "content-type": "application/octet-stream", "x-binary": "yes" },
+          }),
+      ],
+    });
+
+    expect(result.ok && result.value.status).toBe(206);
+    expect(result.ok && result.value.responseBody).toBeUndefined();
+    expect(result.ok && result.value.webResponse).toBeInstanceOf(Response);
+    if (!result.ok || !result.value.webResponse) throw new Error("Missing native response.");
+    expect(new Uint8Array(await result.value.webResponse.arrayBuffer())).toEqual(bytes);
+  });
+
   it("releases request bodies on method, not-found, and CSRF rejection responses", async () => {
     const methodRejected = new Request("https://x.test/upload", { method: "POST", body: "payload" });
     const notFound = new Request("https://x.test/missing", { method: "POST", body: "payload" });

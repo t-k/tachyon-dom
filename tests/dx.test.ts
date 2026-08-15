@@ -456,6 +456,14 @@ describe("DX helpers", () => {
     expect(routing).toContain("Use a prefix-free cookie name when explicitly setting `secure: false`");
   });
 
+  it("documents byte-preserving native middleware responses", async () => {
+    const routing = await readFile("docs/routing.md", "utf8");
+
+    expect(routing).toContain("Native `Response` bodies remain byte-for-byte unchanged");
+    expect(routing).toContain("does not decode binary bodies through text");
+    expect(routing).toContain("Workers, Node, and Lambda adapters");
+  });
+
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
     const files = await collectTypeScriptFiles(path.join(process.cwd(), "src"));
     const extensionlessSpecifiers: string[] = [];

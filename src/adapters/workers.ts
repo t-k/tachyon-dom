@@ -464,6 +464,19 @@ const responseFor = async <Env>(
         await emitResponse(options.observability, state, response, true);
         return response;
       }
+      if (result.value.webResponse) {
+        const nativeResponse =
+          request.method === "HEAD"
+            ? new Response(null, {
+                status: result.value.webResponse.status,
+                statusText: result.value.webResponse.statusText,
+                headers: result.value.webResponse.headers,
+              })
+            : result.value.webResponse;
+        const response = withExtraHeaders(nativeResponse, options.securityHeaders);
+        await emitResponse(options.observability, state, response, state.routeId === undefined);
+        return response;
+      }
       const stream = workersStreamFromChunks(result.value.chunks);
       const response = new Response(stream, {
         status: result.value.status,
@@ -480,6 +493,19 @@ const responseFor = async <Env>(
     if (!result.ok) {
       const response = new Response(result.error.message, { status: result.error.status });
       await emitResponse(options.observability, state, response, true);
+      return response;
+    }
+    if (result.value.webResponse) {
+      const nativeResponse =
+        request.method === "HEAD"
+          ? new Response(null, {
+              status: result.value.webResponse.status,
+              statusText: result.value.webResponse.statusText,
+              headers: result.value.webResponse.headers,
+            })
+          : result.value.webResponse;
+      const response = withExtraHeaders(nativeResponse, options.securityHeaders);
+      await emitResponse(options.observability, state, response, state.routeId === undefined);
       return response;
     }
     const response = new Response(request.method === "HEAD" ? null : (result.value.responseBody ?? result.value.html), {
