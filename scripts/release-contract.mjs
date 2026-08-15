@@ -17,6 +17,11 @@ const expectedRepository = {
 
 const failure = (error) => ({ ok: false, error });
 
+export const verifyChangelogVersion = (changelog, version) =>
+  new RegExp(`^## \\[${version.replaceAll(".", "\\.")}\\]`, "m").test(changelog)
+    ? { ok: true }
+    : failure(`CHANGELOG.md must contain a ${version} release heading.`);
+
 const hasExpectedRepository = (packageJson) =>
   packageJson?.repository?.type === expectedRepository.type && packageJson.repository.url === expectedRepository.url;
 
@@ -181,6 +186,8 @@ export const prepareReleaseArtifacts = async ({ rootDir, artifactDir, tag }) => 
     createPackage: await readPackageJson(createDir),
   });
   if (!identity.ok) return identity;
+  const changelog = verifyChangelogVersion(await readFile(path.join(rootDir, "CHANGELOG.md"), "utf8"), identity.version);
+  if (!changelog.ok) return changelog;
   await mkdir(artifactDir, { recursive: true });
   const [rootPack, createPack] = await Promise.all([
     packPackage({ packageDir: rootDir, artifactDir }),

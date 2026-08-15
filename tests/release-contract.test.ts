@@ -32,6 +32,21 @@ const packages = (version = "1.2.3", dependency = version) => ({
 });
 
 describe("npm release identity", () => {
+  it.each(["0.1.1", "0.1.2", "0.1.3"])("contains a changelog entry for release %s", async (version) => {
+    const changelog = await readFile("CHANGELOG.md", "utf8");
+    expect(changelog).toMatch(new RegExp(`^## \\[${version.replaceAll(".", "\\.")}\\]`, "m"));
+  });
+
+  it("requires the current release version in CHANGELOG", () => {
+    expect((releaseContract as any).verifyChangelogVersion("# Changelog\n", "0.2.0")).toEqual({
+      ok: false,
+      error: "CHANGELOG.md must contain a 0.2.0 release heading.",
+    });
+    expect((releaseContract as any).verifyChangelogVersion("## [0.2.0] - 2026-08-15\n", "0.2.0")).toEqual({
+      ok: true,
+    });
+  });
+
   it.each([
     ["v1.2.3", "1.2.3", "latest"],
     ["v1.2.3-beta.1", "1.2.3-beta.1", "next"],
@@ -162,6 +177,7 @@ describe("initializer package artifacts", () => {
       const license = "MIT License\n\nfixture text\n";
       await writeFile(path.join(rootDir, "LICENSE"), license);
       await writeFile(path.join(rootDir, "README.md"), "# root\n");
+      await writeFile(path.join(rootDir, "CHANGELOG.md"), "# Changelog\n\n## [1.2.3] - 2026-08-15\n");
       await writeFile(path.join(rootDir, "dist", "cli.js"), "#!/usr/bin/env node\n");
       await writeFile(
         path.join(rootDir, "package.json"),
