@@ -1021,6 +1021,68 @@ describe("server adapters", () => {
     expect(seenUrls.at(-1)).toBe("https://app.example/account");
   });
 
+  it.each([
+    { trustedHosts: ["localhost"], host: "localhost", expectedStatus: 200 },
+    { trustedHosts: ["localhost"], host: "evil.example", expectedStatus: 400 },
+    { trustedHosts: ["127.0.0.1"], host: "127.0.0.1", expectedStatus: 200 },
+    { trustedHosts: ["app.example:8080"], host: "app.example:8080", expectedStatus: 200 },
+    { trustedHosts: ["app.example"], host: "APP.EXAMPLE:8080", expectedStatus: 200 },
+  ])("checks Node Host $host against $trustedHosts", async ({ trustedHosts, host, expectedStatus }) => {
+    const seenUrls: string[] = [];
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/health";
+    req.headers = { host };
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    };
+
+    await createNodeFetchHandler({
+      trustedHosts,
+      fetch: (request) => {
+        seenUrls.push(request.url);
+        return new Response("ok");
+      },
+    })(req as never, res as never);
+
+    expect(res.statusCode).toBe(expectedStatus);
+    expect(seenUrls).toHaveLength(expectedStatus === 200 ? 1 : 0);
+  });
+
+  it("rejects a missing Node Host when trusted hosts are configured", async () => {
+    const seenUrls: string[] = [];
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/health";
+    req.headers = {};
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn(),
+    };
+
+    await createNodeFetchHandler({
+      trustedHosts: ["localhost"],
+      fetch: (request) => {
+        seenUrls.push(request.url);
+        return new Response("ok");
+      },
+    })(req as never, res as never);
+
+    expect(res.statusCode).toBe(400);
+    expect(seenUrls).toEqual([]);
+  });
+
   it.each([undefined, "", "javascript", "file", "https://evil.example/#", "http,https"])(
     "rejects invalid trusted forwarded protocol %j",
     async (forwardedProtocol) => {

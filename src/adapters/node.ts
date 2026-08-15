@@ -343,12 +343,13 @@ const trustedForwardedProtocol = (value: string | string[] | undefined): "http" 
 };
 
 const requestUrl = (request: IncomingMessage, options: RequestUrlOptions = {}): string | Response => {
-  const host = firstHeaderValue(request.headers.host) ?? "localhost";
+  const host = firstHeaderValue(request.headers.host);
   const hasTrustedHosts = options.trustedHosts !== undefined && options.trustedHosts.length > 0;
-  const trustedHost = isTrustedHost(host, options.trustedHosts) ? host : "localhost";
-  if (hasTrustedHosts && trustedHost === "localhost") {
+  const trusted = host !== undefined && isTrustedHost(host, options.trustedHosts);
+  if (hasTrustedHosts && !trusted) {
     return badRequestResponse("Untrusted Host header");
   }
+  const trustedHost = trusted ? host : "localhost";
   const configuredOrigin = options.origin
     ? normalizeOrigin(typeof options.origin === "function" ? options.origin(request) : options.origin)
     : undefined;
