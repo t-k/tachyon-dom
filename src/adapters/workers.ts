@@ -11,7 +11,14 @@ import {
   type RouteHooks,
   type RouteMiddlewareContext,
   type RouteRenderOptions,
+  type StreamLayoutSegments,
 } from "../router.js";
+import {
+  composeBufferedDocument,
+  composeStreamingDocument,
+  fragmentDocument,
+  type RouteDocumentComposer,
+} from "../router-document.js";
 
 const bodylessStatuses = new Set([204, 205, 304]);
 
@@ -108,7 +115,7 @@ export type WorkersRouteContext<Env, Data = unknown, ActionResult = unknown> = O
 
 export type WorkersRouteDefinition<Env, Data = unknown, ActionResult = unknown> = Omit<
   RouteDefinition<Data, ActionResult>,
-  "action" | "cache" | "children" | "head" | "headers" | "loader" | "render" | "resources" | "stream"
+  "action" | "cache" | "children" | "head" | "headers" | "loader" | "render" | "resources" | "stream" | "streamLayout"
 > & {
   loader?: (context: Omit<WorkersRouteContext<Env, Data, ActionResult>, "data" | "outlet">) => Data | Promise<Data>;
   action?: (
@@ -126,6 +133,9 @@ export type WorkersRouteDefinition<Env, Data = unknown, ActionResult = unknown> 
     | ((context: WorkersRouteContext<Env, Data, ActionResult>) => RouteCachePolicy | Promise<RouteCachePolicy>);
   render: (context: WorkersRouteContext<Env, Data, ActionResult>) => string | Promise<string>;
   stream?: (context: WorkersRouteContext<Env, Data, ActionResult>) => AsyncIterable<string>;
+  streamLayout?: (
+    context: WorkersRouteContext<Env, Data, ActionResult>,
+  ) => StreamLayoutSegments | Promise<StreamLayoutSegments>;
   children?: WorkersRouteDefinition<Env>[];
 };
 
@@ -146,6 +156,7 @@ export type WorkersHandlerOptions<Env = Record<string, unknown>> = Omit<RouteRen
   staticRoutes?: readonly StaticRouteDefinition[];
   assets?: WorkersAssetOptions<Env>;
   observability?: AdapterObservabilityHooks | undefined;
+  document?: RouteDocumentComposer;
 };
 
 export type RouteAdapterHandlerOptions = RouteRenderOptions & {
@@ -155,6 +166,7 @@ export type RouteAdapterHandlerOptions = RouteRenderOptions & {
   staticRoutes?: readonly StaticRouteDefinition[];
   assets?: WorkersAssetOptions<Record<string, unknown>>;
   observability?: AdapterObservabilityHooks | undefined;
+  document?: RouteDocumentComposer;
 };
 
 export type WorkersFetchHandlerOptions<Env = Record<string, unknown>> = {
@@ -479,7 +491,19 @@ const responseFor = async <Env>(
         await emitResponse(options.observability, state, response, state.routeId === undefined);
         return response;
       }
-      const stream = bodylessStatuses.has(result.value.status) ? null : workersStreamFromChunks(result.value.chunks);
+      const composedChunks =
+        result.value.bodyKind === "route"
+          ? await composeStreamingDocument(
+              result.value.chunks,
+              {
+                headHtml: result.value.headHtml,
+                resourceHints: result.value.resourceHints,
+                stateScript: result.value.stateScript,
+              },
+              options.document ?? fragmentDocument,
+            )
+          : result.value.chunks;
+      const stream = bodylessStatuses.has(result.value.status) ? null : workersStreamFromChunks(composedChunks);
       const response = new Response(stream, {
         status: result.value.status,
         headers: mergeHeaders(result.value.headers, options.securityHeaders),
@@ -510,15 +534,24 @@ const responseFor = async <Env>(
       await emitResponse(options.observability, state, response, state.routeId === undefined);
       return response;
     }
-    const response = new Response(
+    const body =
       request.method === "HEAD" || bodylessStatuses.has(result.value.status)
         ? null
-        : (result.value.responseBody ?? result.value.html),
-      {
+        : result.value.responseBody !== undefined
+          ? result.value.responseBody
+          : await composeBufferedDocument(
+              result.value.html,
+              {
+                headHtml: result.value.headHtml,
+                resourceHints: result.value.resourceHints,
+                stateScript: result.value.stateScript,
+              },
+              options.document ?? fragmentDocument,
+            );
+    const response = new Response(body, {
       status: result.value.status,
       headers: mergeHeaders(result.value.headers, options.securityHeaders),
-      },
-    );
+    });
     await emitResponse(options.observability, state, response, state.routeId === undefined);
     return response;
   } catch (error) {

@@ -4,6 +4,10 @@ import { serializeHydrationState } from "./runtime/hydrate.js";
 import { applyHtmlWhitespace, resolveHtmlWhitespacePolicy, type HtmlWhitespacePolicy } from "./html-whitespace.js";
 import { validateRedirectTarget } from "./redirect-policy.js";
 import { sanitizeHeadAttributes } from "./head-policy.js";
+import { closeAsyncIterable, composeSingleOutlet, type SingleOutletSegments } from "./stream-segments.js";
+
+export { fragmentDocument, htmlDocument } from "./router-document.js";
+export type { HtmlDocumentOptions, RouteDocumentComposer, RouteDocumentMetadata } from "./router-document.js";
 
 export type RouteParams = Record<string, string>;
 
@@ -50,6 +54,8 @@ export type RouteContext<Data = unknown, ActionResult = unknown> = {
   outlet: string;
 };
 
+export type StreamLayoutSegments = SingleOutletSegments;
+
 export type RouteEnvironment = Record<string, string | undefined>;
 
 export type RouteCachePolicy = {
@@ -85,6 +91,7 @@ export type RouteDefinition<Data = unknown, ActionResult = unknown> = {
    * followed by trustedHtmlChunk() for intentionally accepted markup.
    */
   stream?: (context: RouteContext<Data, ActionResult>) => AsyncIterable<string>;
+  streamLayout?: (context: RouteContext<Data, ActionResult>) => StreamLayoutSegments | Promise<StreamLayoutSegments>;
   render: (context: RouteContext<Data, ActionResult>) => string | Promise<string>;
   children?: RouteDefinition[];
 };
@@ -187,6 +194,7 @@ export type RouteModule<Data = unknown, ActionResult = unknown> = {
   cache?: RouteDefinition<Data, ActionResult>["cache"];
   fallback?: string;
   stream?: RouteDefinition<Data, ActionResult>["stream"];
+  streamLayout?: RouteDefinition<Data, ActionResult>["streamLayout"];
   template?: RouteDefinition<Data, ActionResult>["render"];
   render?: RouteDefinition<Data, ActionResult>["render"];
   ErrorBoundary?: (context: { request: Request; url: URL; error: unknown }) => string | Promise<string>;
@@ -1165,6 +1173,35 @@ const ownAsyncIterable = (source: AsyncIterable<string>, onClose: () => void = (
   return iterator;
 };
 
+const createProgressiveOutletMarker = (): string => `__tachyon_progressive_outlet_${globalThis.crypto.randomUUID()}__`;
+
+const legacyStreamLayoutSegments = (rendered: string, marker: string): StreamLayoutSegments => {
+  const first = rendered.indexOf(marker);
+  if (first < 0 || first !== rendered.lastIndexOf(marker)) {
+    throw new TypeError(
+      "A progressive ancestor layout must preserve exactly one outlet; use streamLayout for explicit composition.",
+    );
+  }
+  return {
+    before: rendered.slice(0, first),
+    after: rendered.slice(first + marker.length),
+    outlet: "once",
+  };
+};
+
+const validateStreamLayoutSegments = (value: StreamLayoutSegments): StreamLayoutSegments => {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    typeof value.before !== "string" ||
+    typeof value.after !== "string" ||
+    (value.outlet !== "once" && value.outlet !== "omit")
+  ) {
+    throw new TypeError("streamLayout must return string before/after segments and one bounded outlet mode.");
+  }
+  return value;
+};
+
 const nearestNotFoundBoundary = (
   routes: readonly RouteDefinition[],
   pathname: string,
@@ -1393,6 +1430,7 @@ const renderRouteInternal = async (
       match: emptyMatch(),
     });
   }
+  let progressiveBodyToClose: AsyncIterable<string> | undefined;
   try {
     if (
       options.csrf &&
@@ -1481,9 +1519,28 @@ const renderRouteInternal = async (
         }
       }
     }
-    const progressive = options.progressiveBody === true && request.method !== "HEAD" && match.value.route.stream;
+    const progressiveStream =
+      options.progressiveBody === true && request.method !== "HEAD" ? match.value.route.stream : undefined;
     let outlet = "";
     const heads: RouteHeadDescriptor[] = [];
+    const deepestEntry = match.value.branch.at(-1);
+    const progressiveContext = {
+      request,
+      url,
+      params: match.value.params,
+      route: match.value.route,
+      env,
+      bindings,
+      data: deepestEntry ? loaderData[routeId(deepestEntry.route, deepestEntry.path)] : undefined,
+      loaderData,
+      actionResult,
+      outlet: "",
+    };
+    let responseChunks: AsyncIterable<string> | undefined;
+    if (progressiveStream) {
+      responseChunks = ownAsyncIterable(progressiveStream(progressiveContext), () => releaseRequestSnapshot(request));
+      progressiveBodyToClose = responseChunks;
+    }
     for (const entry of [...match.value.branch].reverse()) {
       const id = routeId(entry.route, entry.path);
       const data = loaderData[id];
@@ -1497,9 +1554,24 @@ const renderRouteInternal = async (
         data,
         loaderData,
         actionResult,
-        outlet,
+        outlet: progressiveStream ? "" : outlet,
       };
-      if (!progressive) outlet = await entry.route.render(context);
+      if (progressiveStream) {
+        if (entry.route !== match.value.route) {
+          let segments: StreamLayoutSegments;
+          if (entry.route.streamLayout) {
+            segments = validateStreamLayoutSegments(await entry.route.streamLayout(context));
+          } else {
+            const marker = createProgressiveOutletMarker();
+            const rendered = await entry.route.render({ ...context, outlet: marker });
+            segments = legacyStreamLayoutSegments(rendered, marker);
+          }
+          responseChunks = await composeSingleOutlet(responseChunks as AsyncIterable<string>, segments);
+          progressiveBodyToClose = responseChunks;
+        }
+      } else {
+        outlet = await entry.route.render(context);
+      }
       if (entry.route.head) {
         heads.unshift(await entry.route.head(context));
       }
@@ -1519,7 +1591,6 @@ const renderRouteInternal = async (
       )
       .join("");
     const headers = new Headers({ "content-type": "text/html; charset=utf-8" });
-    const deepestEntry = match.value.branch.at(-1);
     const deepestContext = {
       request,
       url,
@@ -1530,7 +1601,7 @@ const renderRouteInternal = async (
       data: deepestEntry ? loaderData[routeId(deepestEntry.route, deepestEntry.path)] : undefined,
       loaderData,
       actionResult,
-      outlet,
+      outlet: progressiveStream ? "" : outlet,
     };
     for (const entry of match.value.branch) {
       const id = routeId(entry.route, entry.path);
@@ -1545,10 +1616,6 @@ const renderRouteInternal = async (
         const policy = typeof entry.route.cache === "function" ? await entry.route.cache(context) : entry.route.cache;
         applyHeaders(headers, cacheControl(policy));
       }
-    }
-    let responseChunks: AsyncIterable<string> | undefined;
-    if (progressive) {
-      responseChunks = ownAsyncIterable(progressive(deepestContext), () => releaseRequestSnapshot(request));
     }
     const result: RouteRenderResult = {
       status: 200,
@@ -1574,6 +1641,10 @@ const renderRouteInternal = async (
     };
     return responseChunks ? ok(normalizeBodylessRouteResult(result)) : finish(result);
   } catch (error) {
+    if (progressiveBodyToClose) {
+      await closeAsyncIterable(progressiveBodyToClose);
+      progressiveBodyToClose = undefined;
+    }
     if (options.hooks?.onError) {
       const hookRequest = callbackRequestSnapshot(request);
       try {
@@ -1610,6 +1681,7 @@ export const renderRouteWithBindings = renderRouteInternal;
 export type RouteStreamResult = {
   status: number;
   chunks: AsyncIterable<string>;
+  bodyKind: "route" | "pass-through" | "bodyless";
   headHtml: string;
   resourceHints: string;
   stateScript: string;
@@ -1631,6 +1703,12 @@ const renderRouteStreamInternal = async (
   const rendered = await renderRouteInternal(routes, request, streamingOptions);
   if (!rendered.ok) return err(rendered.error);
   const body = rendered.value.responseBody ?? rendered.value.html;
+  const bodyKind =
+    request.method === "HEAD" || bodylessStatuses.has(rendered.value.status)
+      ? "bodyless"
+      : rendered.value.responseBody !== undefined || rendered.value.webResponse
+        ? "pass-through"
+        : "route";
   const final = {
     status: rendered.value.status,
     headHtml: rendered.value.headHtml,
@@ -1640,6 +1718,7 @@ const renderRouteStreamInternal = async (
   };
   return ok({
     ...final,
+    bodyKind,
     ...(rendered.value.webResponse ? { webResponse: rendered.value.webResponse } : {}),
     ...(rendered.value.error ? { error: rendered.value.error } : {}),
     chunks: rendered.value.webResponse

@@ -1,4 +1,4 @@
-import { createServer, get, type ServerResponse } from "node:http";
+import { createServer, get, type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { collectBenchmarkProvenance, collectDependencyVersions } from "./provenance.js";
 import { prepareStreamingBenchmarkAdapter, writeVerifiedBenchmarkArtifact } from "./streaming-subject.js";
@@ -36,8 +36,10 @@ try {
   if (subject.git.available !== true || subject.git.commit !== adapterIdentity.commit || subject.git.dirty !== false) {
     throw new Error("Benchmark subject provenance changed after the adapter snapshot was pinned.");
   }
-  const { writeNodeResponse } = await adapterIdentity.importAdapter<{
-    writeNodeResponse: (response: Response, destination: ServerResponse) => Promise<void>;
+  const { createNodeHandler } = await adapterIdentity.importAdapter<{
+    createNodeHandler: (
+      options: Record<string, unknown>,
+    ) => (request: IncomingMessage, response: ServerResponse) => Promise<void>;
   }>();
 
   let sourcePullCount = 0;
@@ -46,30 +48,43 @@ try {
   const startingRssBytes = peakRssBytes;
   const activeResponses = new Set<ServerResponse>();
 
+  const payload = "x".repeat(chunkBytes);
+  const routeHandler = createNodeHandler({
+    streaming: true,
+    routes: [
+      {
+        path: "/",
+        head: () => ({ title: "Backpressure" }),
+        render: ({ outlet }: { outlet: string }) => `<main>${outlet}</main>`,
+        children: [
+          {
+            id: "stream",
+            path: "stream",
+            loader: () => ({ ready: true }),
+            render: () => "",
+            stream: () => ({
+              [Symbol.asyncIterator]: () => {
+                let emitted = 0;
+                return {
+                  next: async () => {
+                    sourcePullCount += 1;
+                    if (emitted >= chunksPerConnection) return { done: true as const, value: undefined };
+                    emitted += 1;
+                    return { done: false as const, value: payload };
+                  },
+                };
+              },
+            }),
+          },
+        ],
+      },
+    ],
+  });
+
   const server = createServer((request, response) => {
-    if (request.url !== "/stream") {
-      response.statusCode = 404;
-      response.end("Not Found");
-      return;
-    }
     activeResponses.add(response);
     response.once("close", () => activeResponses.delete(response));
-    let emitted = 0;
-    const body = new ReadableStream<Uint8Array>(
-      {
-        pull(controller) {
-          sourcePullCount += 1;
-          if (emitted >= chunksPerConnection) {
-            controller.close();
-            return;
-          }
-          emitted += 1;
-          controller.enqueue(new Uint8Array(chunkBytes));
-        },
-      },
-      { highWaterMark: 0 },
-    );
-    void writeNodeResponse(new Response(body), response).catch((error) => response.destroy(error));
+    void routeHandler(request, response).catch((error) => response.destroy(error));
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -127,6 +142,7 @@ try {
       chunksPerConnection,
       chunkBytes,
       drainDelayMs,
+      routeDocumentComposition: true,
       adapterModule: adapterIdentity.adapterModule,
       adapter: {
         relativePath: adapterIdentity.relativePath,

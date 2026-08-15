@@ -1,5 +1,6 @@
 import { defineEnvSchema, readEnv } from "../src/env";
-import { renderRoute, type RouteDefinition } from "../src/router";
+import { createWorkersHandler } from "../src/adapters/workers";
+import { htmlDocument, type RouteDefinition } from "../src/router";
 
 const envSchema = defineEnvSchema({
   PUBLIC_APP_NAME: { default: "Tachyon Router Example", public: true },
@@ -10,7 +11,7 @@ const routes: RouteDefinition[] = [
     id: "app",
     path: "/app",
     head: () => ({ links: [{ rel: "modulepreload", href: "/app.js" }] }),
-    render: ({ outlet }) => `<!doctype html><html><head></head><body><main>${outlet}</main></body></html>`,
+    render: ({ outlet }) => `<main>${outlet}</main>`,
     children: [
       {
         id: "user",
@@ -28,16 +29,10 @@ export const renderRouterExample = async (): Promise<string> => {
   if (!env.ok) {
     throw new Error(env.error.map((error) => error.message).join("\n"));
   }
-  const result = await renderRoute(routes, "https://example.com/app/users/42");
-  if (!result.ok) {
-    throw new Error(result.error.message);
-  }
-  return (
-    `<!-- ${env.value.publicEnv.PUBLIC_APP_NAME} -->` +
-    result.value.html +
-    result.value.headHtml +
-    result.value.stateScript
+  const response = await createWorkersHandler({ routes, document: htmlDocument({ lang: "en" }) }).fetch(
+    new Request("https://example.com/app/users/42"),
   );
+  return `<!-- ${env.value.publicEnv.PUBLIC_APP_NAME} -->${await response.text()}`;
 };
 
 if (import.meta.url === `file://${process.argv[1]}`) {

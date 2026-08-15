@@ -6,6 +6,8 @@ Tachyon DOM exposes compatibility exports at `tachyon-dom/adapters` and runtime-
 
 Adapters compose static assets with a fetch-style application handler. Buffered routes return complete responses; streaming routes commit status and headers before forwarding chunks. A stream iteration failure terminates the body without injecting error markup, and consumer cancellation closes the source iterator.
 
+Route handlers compose `headHtml`, resource hints, the route body, and hydration state through one shared document boundary. The default fragment document places metadata before and after the body without parsing it. Configure `document: htmlDocument(...)` when the adapter should own a complete HTML document with correct `head` and `body` placement. Node, Workers, Lambda proxy, and Lambda response streaming share this behavior. User-supplied `RouteResponse` and native `Response` values, static or middleware short circuits, `HEAD`, and bodyless statuses bypass composition.
+
 Configure public origins, trusted hosts, and proxy behavior explicitly. See [Security](security.md) before deploying an adapter.
 
 ## Cloudflare Workers

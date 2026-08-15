@@ -14,7 +14,8 @@ import {
 } from "../src/adapters/lambda";
 import { createNodeFetchHandler, createNodeHandler, writeNodeResponse } from "../src/adapters/node";
 import { createWorkersFetchHandler, createWorkersHandler, workersStreamFromChunks } from "../src/adapters/workers";
-import { createSecurityHeaders, json, redirect, type RouteDefinition } from "../src/router";
+import { createSecurityHeaders, htmlDocument, json, redirect, type RouteDefinition } from "../src/router";
+import { readHydrationState } from "../src/runtime/hydrate";
 
 const lambdaEvent = (overrides: Record<string, unknown> = {}) => ({
   version: "2.0",
@@ -327,6 +328,136 @@ describe("server adapters", () => {
     expect(renderCalls).toBe(0);
   });
 
+  it.each([false, true])(
+    "composes route metadata and hydration state across adapters with streaming=$streaming",
+    async (streaming) => {
+      const routes: RouteDefinition[] = [
+        {
+          id: "home",
+          path: "/",
+          loader: () => ({ n: 42 }),
+          head: () => ({
+            title: "Dashboard",
+            links: [{ rel: "stylesheet", href: "/app.css" }],
+          }),
+          resources: [{ rel: "modulepreload", href: "/app.js" }],
+          render: ({ data }) => `<main>${(data as { n: number }).n}</main>`,
+          stream: async function* ({ data }) {
+            yield `<main>${(data as { n: number }).n}</main>`;
+          },
+        },
+      ];
+
+      const workers = await createWorkersHandler({ routes, streaming }).fetch(new Request("https://example.test/"));
+      const workersBody = await workers.text();
+      const lambda = await createLambdaHandler({ routes, streaming })(lambdaEvent());
+
+      const nodeBytes: Uint8Array[] = [];
+      const nodeRequest = Object.assign(Readable.from([]), {
+        method: "GET",
+        url: "/",
+        headers: { host: "example.test" },
+      });
+      const nodeResponse = Object.assign(new EventEmitter(), {
+        statusCode: 200,
+        headersSent: false,
+        writableEnded: false,
+        setHeader: vi.fn(),
+        write: (chunk: Uint8Array | string) => {
+          nodeBytes.push(Buffer.from(chunk));
+          return true;
+        },
+        end: (chunk?: Uint8Array | string) => {
+          if (chunk) nodeBytes.push(Buffer.from(chunk));
+          nodeResponse.writableEnded = true;
+        },
+      });
+      await createNodeHandler({ routes, streaming })(nodeRequest as never, nodeResponse as never);
+      const nodeBody = Buffer.concat(nodeBytes).toString();
+
+      let lambdaStreamingBody: string | undefined;
+      if (streaming) {
+        const lambdaStreamingChunks: Uint8Array[] = [];
+        const responseStream = new Writable({
+          write(chunk, _encoding, callback) {
+            lambdaStreamingChunks.push(Buffer.from(chunk));
+            callback();
+          },
+        });
+        const runtime = {
+          streamifyResponse: vi.fn((handler) => handler),
+          HttpResponseStream: { from: (stream: Writable) => stream },
+        };
+        const handler = createLambdaStreamingHandler({ routes, streaming: true }, runtime) as (
+          event: ReturnType<typeof lambdaEvent>,
+          stream: Writable,
+          context: unknown,
+        ) => Promise<void>;
+        await handler(lambdaEvent(), responseStream, {});
+        lambdaStreamingBody = Buffer.concat(lambdaStreamingChunks).toString();
+      }
+
+      expect(lambda.body).toBe(workersBody);
+      expect(nodeBody).toBe(workersBody);
+      if (streaming) expect(lambdaStreamingBody).toBe(workersBody);
+      expect(workersBody).toContain(`<title>Dashboard</title>`);
+      expect(workersBody).toContain(`<link rel="stylesheet" href="/app.css">`);
+      expect(workersBody).toContain(`<link rel="modulepreload" href="/app.js">`);
+      expect(workersBody).toContain(`<main>42</main>`);
+      const parsed = document.implementation.createHTMLDocument();
+      parsed.documentElement.innerHTML = workersBody;
+      expect(readHydrationState<{ n: number }>(parsed, "route:home")).toEqual({ ok: true, value: { n: 42 } });
+    },
+  );
+
+  it("builds an explicit full document without parsing the route fragment", async () => {
+    const response = await createWorkersHandler({
+      routes: [
+        {
+          id: "page",
+          path: "/",
+          loader: () => ({ ready: true }),
+          head: () => ({ title: "Page" }),
+          render: () => `<main>Ready</main>`,
+        },
+      ],
+      document: htmlDocument({ lang: "en", head: `<meta charset="utf-8">` }),
+    }).fetch(new Request("https://example.test/"));
+    const body = await response.text();
+    const parsed = document.implementation.createHTMLDocument();
+    parsed.documentElement.innerHTML = body.replace(/^<!doctype html>/i, "");
+
+    expect(body.startsWith(`<!doctype html><html lang="en"><head>`)).toBe(true);
+    expect(parsed.head.querySelector("meta")?.getAttribute("charset")).toBe("utf-8");
+    expect(parsed.head.querySelector("title")?.textContent).toBe("Page");
+    expect(parsed.body.querySelector("main")?.textContent).toBe("Ready");
+    expect(readHydrationState(parsed, "route:page").ok).toBe(true);
+  });
+
+  it.each([false, true])(
+    "bypasses document composition for pass-through bodies with streaming=$streaming",
+    async (streaming) => {
+      const documentComposer = vi.fn(() => {
+        throw new Error("Document composer must not run.");
+      });
+      const routeResponse = await createWorkersHandler({
+        routes: [{ path: "/", loader: () => json({ ok: true }), render: () => "unused" }],
+        streaming,
+        document: documentComposer,
+      }).fetch(new Request("https://example.test/"));
+      const nativeResponse = await createWorkersHandler({
+        routes: [{ path: "/", render: () => "unused" }],
+        middleware: [() => new Response(Uint8Array.from([0, 255, 1]), { status: 201 })],
+        streaming,
+        document: documentComposer,
+      }).fetch(new Request("https://example.test/"));
+
+      expect(await routeResponse.text()).toBe(`{"ok":true}`);
+      expect(new Uint8Array(await nativeResponse.arrayBuffer())).toEqual(Uint8Array.from([0, 255, 1]));
+      expect(documentComposer).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([204, 205, 304])("removes bodies and transfer headers for status %i across adapters", async (status) => {
     const routes: RouteDefinition[] = [
       {
@@ -419,7 +550,11 @@ describe("server adapters", () => {
     await expect(
       createNodeHandler({
         routes: [{ path: "/failure", render: () => "unused" }],
-        middleware: [() => { throw new Error("private failure detail"); }],
+        middleware: [
+          () => {
+            throw new Error("private failure detail");
+          },
+        ],
         securityHeaders: createSecurityHeaders(),
       })(request as never, response as never),
     ).resolves.toBeUndefined();
@@ -1451,7 +1586,9 @@ describe("server adapters", () => {
     expect(response.headers.get("content-security-policy")).toBe("default-src 'self'");
     expect(response.headers.getSetCookie()).toEqual(["sid=updated; Path=/; HttpOnly", "theme=dark; Path=/"]);
     expect(response.headers.get("vary")).toBe("Cookie, Accept-Encoding");
-    expect(await response.text()).toBe("<h1>sid=a</h1>");
+    expect(await response.text()).toBe(
+      `<h1>sid=a</h1><script type="application/json" data-tachyon-state="route:/account">"sid=a"</script>`,
+    );
   });
 
   it("commits delayed streaming CSRF rejection before status and fallback", async () => {
@@ -1606,7 +1743,9 @@ describe("server adapters", () => {
     expect(nodeGet.headers.get("content-security-policy")).toBe("default-src 'self'");
     expect(nodeGet.headers.get("set-cookie")).toEqual(["sid=updated; Path=/; HttpOnly", "theme=dark; Path=/"]);
     expect(nodeGet.headers.get("vary")).toBe("Cookie, Accept-Encoding");
-    expect(nodeGet.chunks.join("")).toBe("<h1>private account</h1>");
+    expect(nodeGet.chunks.join("")).toBe(
+      `<h1>private account</h1><script type="application/json" data-tachyon-state="route:/account">"private account"</script>`,
+    );
 
     const nodePost = nodeResponse();
     await createNodeHandler({
@@ -1632,7 +1771,9 @@ describe("server adapters", () => {
     expect(lambdaGet.headers["content-security-policy"]).toBe("default-src 'self'");
     expect(lambdaGet.headers.vary).toBe("Cookie, Accept-Encoding");
     expect(lambdaGet.cookies).toEqual(["sid=updated; Path=/; HttpOnly", "theme=dark; Path=/"]);
-    expect(lambdaGet.body).toBe("<h1>private account</h1>");
+    expect(lambdaGet.body).toBe(
+      `<h1>private account</h1><script type="application/json" data-tachyon-state="route:/account">"private account"</script>`,
+    );
 
     const lambdaPost = await createLambdaHandler({
       routes,
@@ -1983,7 +2124,9 @@ describe("server adapters", () => {
 
     const response = await handler.fetch(new Request("https://example.com/", { method: "POST" }), bindings);
 
-    expect(await response.text()).toBe("<h1>KV title:saved</h1>");
+    expect(await response.text()).toBe(
+      `<title>edge</title><link rel="stylesheet" href="/edge.css"><h1>KV title:saved</h1><script type="application/json" data-tachyon-state="route:/">"KV title"</script>`,
+    );
     expect(response.headers.get("x-runtime")).toBe("edge");
     expect(response.headers.get("cache-control")).toBe("private");
     expect(seen).toEqual(
@@ -2280,7 +2423,9 @@ describe("server adapters", () => {
 
     expect(res.write).toHaveBeenCalled();
     expect(res.end).toHaveBeenCalledWith();
-    expect(chunks.join("")).toBe("<h1>Ready</h1>");
+    expect(chunks.join("")).toBe(
+      `<h1>Ready</h1><script type="application/json" data-tachyon-state="route:/">"Ready"</script>`,
+    );
   });
 
   it("creates a Node fetch handler that serves static assets before a standards fetch handler", async () => {
@@ -2597,7 +2742,9 @@ describe("server adapters", () => {
         }),
       }),
     );
-    expect(chunks.join("")).toBe("<h1>Ready</h1>");
+    expect(chunks.join("")).toBe(
+      `<h1>Ready</h1><script type="application/json" data-tachyon-state="route:/">"Ready"</script>`,
+    );
     expect(end).toHaveBeenCalledOnce();
   });
 
@@ -2671,7 +2818,9 @@ describe("server adapters", () => {
         multiValueHeaders: { "Set-Cookie": ["sid=updated; Path=/; HttpOnly", "theme=dark; Path=/"] },
       }),
     );
-    expect(chunks.join("")).toBe("<h1>private account</h1>");
+    expect(chunks.join("")).toBe(
+      `<h1>private account</h1><script type="application/json" data-tachyon-state="route:/account">"private account"</script>`,
+    );
 
     chunks.length = 0;
     await handler(
