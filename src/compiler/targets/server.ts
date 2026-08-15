@@ -1,5 +1,6 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
+import { emptyTextMarker } from "../../text-marker.js";
 import {
   generatedUrlAttributeHelperLines,
   sanitizeUrlAttributeValue,
@@ -73,7 +74,7 @@ const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
       continue;
     }
     separateTextNode();
-    output += escapeHtml(readPath(scope, segment.value));
+    output += escapeHtml(readPath(scope, segment.value)) || emptyTextMarker;
     lastEmittedWasText = true;
   }
   return output;
@@ -221,7 +222,7 @@ const renderTextExpression = (node: TextNode, locals: ReadonlySet<string> = new 
       continue;
     }
     separateTextNode();
-    parts.push(`escapeHtml(${expressionToScopeAccess(segment.value, locals)})`);
+    parts.push(`(escapeHtml(${expressionToScopeAccess(segment.value, locals)}) || ${jsString(emptyTextMarker)})`);
     lastEmittedWasText = true;
   }
   return parts.length > 0 ? parts.join(" + ") : `""`;

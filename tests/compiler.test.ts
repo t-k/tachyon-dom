@@ -443,6 +443,47 @@ describe("HTML-first compiler", () => {
     expect(generateServerStreamModule(result.value)).toContain(`__tachyonPush("<!---->");`);
   });
 
+  it.each(["", null, undefined])("preserves an empty text hydration anchor for %j across server targets", async (value) => {
+    const result = compileTemplate(`<p>a{value}b</p>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const scope = { value };
+    const expected = `<p>a<!----><!--td:text--><!---->b</p>`;
+
+    expect(renderServerTemplate(result.value, scope)).toBe(expected);
+
+    const serverModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerModule(result.value)).toString("base64")}`
+    )) as { render(scope: Record<string, unknown>): string };
+    expect(serverModule.render(scope)).toBe(expected);
+
+    const streamModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerStreamModule(result.value)).toString("base64")}`
+    )) as { stream(scope: Record<string, unknown>): AsyncIterable<string> };
+    const chunks: string[] = [];
+    for await (const chunk of streamModule.stream(scope)) chunks.push(chunk);
+    expect(chunks.join("")).toBe(expected);
+
+    document.body.innerHTML = expected;
+    const root = document.body.firstElementChild;
+    if (!(root instanceof HTMLElement)) throw new Error("Missing SSR root.");
+    const binding = result.value.client.bindings.find((candidate) => candidate.kind === "text");
+    if (!binding || binding.kind !== "text") throw new Error("Missing text binding.");
+    const target = textAt(root, binding.path);
+    expect(target).toBeInstanceOf(Text);
+    expect(root.textContent).toBe("ab");
+    setText(target, "Z");
+    expect(root.textContent).toBe("aZb");
+  });
+
+  it("throws when a text binding path is missing or resolves to a non-text node", () => {
+    document.body.innerHTML = `<p><span></span></p>`;
+    const root = document.body.firstElementChild;
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+
+    expect(() => textAt(root, [1])).toThrow("Missing text binding node at path 1");
+    expect(() => textAt(root, [0])).toThrow("Text binding path 0 resolved to SPAN instead of a Text node");
+  });
+
   it("omits closing tags for void elements in client and server targets", () => {
     const result = compileTemplate(`<div><br/>{label}<hr/></div>`);
     if (!result.ok) {
@@ -821,7 +862,7 @@ describe("HTML-first compiler", () => {
 
     expect(code).toContain(`export const stream = async function* (scope)`);
     expect(code).toContain(`for (const row of scope.rows)`);
-    expect(code).toContain(`__tachyonPush(escapeHtml(row.id));`);
+    expect(code).toContain(`__tachyonPush((escapeHtml(row.id) || "<!--td:text-->"));`);
     expect(code).not.toContain(`tachyon-dom/runtime`);
   });
 

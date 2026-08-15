@@ -1,5 +1,6 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
+import { emptyTextMarker } from "../../text-marker.js";
 import { generatedUrlAttributeHelperLines } from "../../url-policy.js";
 import {
   attrExpression,
@@ -35,7 +36,9 @@ const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, 
       continue;
     }
     separateTextNode();
-    statements.push(`${indent}yield escapeHtml(${expressionToScopeAccess(segment.value, locals)});`);
+    statements.push(
+      `${indent}yield (escapeHtml(${expressionToScopeAccess(segment.value, locals)}) || ${jsString(emptyTextMarker)});`,
+    );
     lastEmittedWasText = true;
   }
   return statements;

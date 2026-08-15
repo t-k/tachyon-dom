@@ -1,0 +1,46 @@
+import { chromium, type Browser } from "playwright";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { compileTemplate, renderServerTemplate } from "../src/compiler";
+import { setText, textAt } from "../src/runtime/text";
+
+let browser: Browser | undefined;
+
+describe("open issue browser regressions", () => {
+  beforeAll(async () => {
+    browser = await chromium.launch({ headless: true });
+  }, 30_000);
+
+  afterAll(async () => {
+    await browser?.close();
+  });
+
+  it.each(["", null, undefined])("hydrates empty text value %j without real DOM path drift", async (value) => {
+    const result = compileTemplate(`<p>a{value}b</p>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const markup = renderServerTemplate(result.value, { value });
+    const binding = result.value.client.bindings.find((candidate) => candidate.kind === "text");
+    if (!binding || binding.kind !== "text") throw new Error("Missing text binding.");
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      await page.setContent(markup);
+      const result = await page.evaluate(
+        ({ path, setTextSource, textAtSource }) => {
+          const resolveText = (0, eval)(`(${textAtSource})`) as typeof textAt;
+          const updateText = (0, eval)(`(${setTextSource})`) as typeof setText;
+          const root = document.querySelector("p");
+          if (!root) throw new Error("Missing browser root.");
+          const text = resolveText(root, path);
+          const initial = root.textContent;
+          updateText(text, "Z");
+          return { initial, updated: root.textContent, nodeType: text.nodeType };
+        },
+        { path: binding.path, setTextSource: setText.toString(), textAtSource: textAt.toString() },
+      );
+
+      expect(result).toEqual({ initial: "ab", updated: "aZb", nodeType: 3 });
+    } finally {
+      await page.close();
+    }
+  });
+});
