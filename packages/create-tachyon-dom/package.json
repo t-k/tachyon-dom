@@ -19,7 +19,8 @@
     "LICENSE"
   ],
   "dependencies": {
-    "tachyon-dom": "0.1.1"
+    "tachyon-dom": "0.1.1",
+    "typescript": "^5.8.3"
   },
   "devDependencies": {
     "@types/node": "^24.0.3",

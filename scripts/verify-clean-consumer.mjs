@@ -8,7 +8,6 @@ const execFileAsync = promisify(execFile);
 const optionalPeers = [
   "typescript",
   "oxc-parser",
-  "parse5",
   "vscode-languageserver",
   "vscode-languageserver-textdocument",
 ];
@@ -58,11 +57,8 @@ if (expression.ok || !expression.error.message.includes("pnpm add oxc-parser")) 
 }
 
 const { normalizeHtmlTagWhitespace } = await import("tachyon-dom/app");
-try {
-  normalizeHtmlTagWhitespace("<main  id=\\"app\\"></main>");
-  throw new Error("Missing parse5 did not fail.");
-} catch (error) {
-  if (!String(error).includes("pnpm add parse5")) throw error;
+if (normalizeHtmlTagWhitespace("<main  id=\\"app\\"></main>") !== '<main id="app"></main>') {
+  throw new Error("Cross-runtime whitespace normalization failed.");
 }
 
 const { startLanguageServer } = await import("tachyon-dom/language-server");

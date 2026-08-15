@@ -2,6 +2,7 @@ Issue: 012 optional compiler tooling dependencies
 Node: v24.13.0
 pnpm: 10.32.1
 Command: pnpm verify:clean-consumer
-Runtime consumer node_modules: 1824 KiB (du -sk)
-Optional tooling packages absent: typescript, oxc-parser, parse5, vscode-languageserver, vscode-languageserver-textdocument
+Runtime consumer node_modules: 3340 KiB (du -sk)
+Optional tooling packages absent: typescript, oxc-parser, vscode-languageserver, vscode-languageserver-textdocument
+Cross-runtime parse5 whitespace normalization: preserved
 Tooling consumer with explicit optional peers: passed

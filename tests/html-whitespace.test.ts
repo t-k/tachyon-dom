@@ -56,6 +56,16 @@ describe("safe HTML whitespace policy", () => {
     expect(minifyHtml(source)).toBe(expected);
   });
 
+  it("normalizes tags without a Node process global for Workers compatibility", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "process");
+    try {
+      Object.defineProperty(globalThis, "process", { configurable: true, value: undefined });
+      expect(normalizeHtmlTagWhitespace(`<main   id="app"   >ok</main>`)).toBe(`<main id="app">ok</main>`);
+    } finally {
+      if (descriptor) Object.defineProperty(globalThis, "process", descriptor);
+    }
+  });
+
   it("condenses document framing without changing body semantics or Tachyon anchors", () => {
     const source = `<!doctype html>
 <html>

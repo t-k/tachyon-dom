@@ -11,6 +11,9 @@ importers:
       '@noble/hashes':
         specifier: ^2.2.0
         version: 2.2.0
+      parse5:
+        specifier: ^7.3.0
+        version: 7.3.0
     devDependencies:
       '@arethetypeswrong/cli':
         specifier: 0.18.4
@@ -93,9 +96,6 @@ importers:
       oxlint:
         specifier: ^1.70.0
         version: 1.70.0
-      parse5:
-        specifier: ^7.3.0
-        version: 7.3.0
       playwright:
         specifier: ^1.61.0
         version: 1.61.0

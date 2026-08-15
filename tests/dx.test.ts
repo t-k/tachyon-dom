@@ -318,7 +318,6 @@ describe("DX helpers", () => {
     for (const name of [
       "typescript",
       "oxc-parser",
-      "parse5",
       "vscode-languageserver",
       "vscode-languageserver-textdocument",
     ]) {
@@ -327,6 +326,7 @@ describe("DX helpers", () => {
       expect(manifest.peerDependencies?.[name], `${name} must declare its consumer-compatible range`).toBeDefined();
       expect(manifest.peerDependenciesMeta?.[name]).toEqual({ optional: true });
     }
+    expect(manifest.dependencies?.parse5).toBeDefined();
   });
 
   it("declares npm release metadata for public package discovery", async () => {
@@ -1124,6 +1124,7 @@ export default { selected: false };
       expect(smokeTest).toContain("renders the starter page");
       expect(tsconfig.compilerOptions?.types).toEqual(["vite/client", "node", "tachyon-dom/td-modules"]);
       expect(packageJson.devDependencies?.["@types/node"]).toBe("^24.0.3");
+      expect(packageJson.devDependencies).toHaveProperty("oxc-parser");
       expect(readme).toContain("Edit `src/routes/index/page.td`");
       expect(readme).toContain("Route registration");
       expect(readme).toContain("Do not put application code in `public/client/main.js`");
@@ -1308,6 +1309,7 @@ export default { selected: false };
     expect(packageJson.name).toBe("create-tachyon-dom");
     expect(packageJson.bin).toEqual({ "create-tachyon-dom": "./dist/index.js" });
     expect(packageJson.dependencies).toHaveProperty("tachyon-dom");
+    expect(packageJson.dependencies).toHaveProperty("typescript");
     expect(entry).toContain(`runCli(process.argv.slice(2), "create-tachyon-dom")`);
     expect(readme).toContain("npm create tachyon-dom@latest my-app");
     expect(readme).toContain("pnpm create tachyon-dom my-app");

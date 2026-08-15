@@ -129,14 +129,14 @@ import { tachyonDom } from "tachyon-dom/vite";
 
 This boundary keeps TypeScript, parse5, language-server, app, and server graphs away from a browser consumer that only needs reactivity.
 
-Runtime-only consumers install no compiler tooling. Add the optional peers for the features you use:
+Runtime-only consumers do not install TypeScript, OXC, or language-server tooling. Add the optional peers for the features you use:
 
 ```sh
-pnpm add typescript oxc-parser parse5
+pnpm add typescript oxc-parser
 pnpm add vscode-languageserver vscode-languageserver-textdocument
 ```
 
-TypeScript powers SFC script transformation, OXC parses template expressions, and parse5 normalizes HTML tag whitespace. The second command is only needed for `tachyon-dom/language-server`. Missing peers fail at the relevant feature boundary with the package name and install command; importing the root runtime remains available without them.
+TypeScript powers SFC script transformation and OXC parses advanced template expressions. The second command is only needed for `tachyon-dom/language-server`. Missing peers fail at the relevant feature boundary with the package name and install command; importing the root runtime remains available without them. parse5 remains a normal dependency because the synchronous `normalize-tags` policy is supported in Workers as well as Node and Lambda.
 
 ## Documentation
 
