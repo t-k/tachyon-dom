@@ -27,6 +27,66 @@ import { scanFileRoutes } from "../src/router-node";
 import { renderRouteForTest } from "../src/testing";
 
 describe("advanced router features", () => {
+  it.each(["/items/%", "/items/%zz", "/items/%E0%A4%A"])(
+    "returns generic 400 for malformed path %s without invoking route callbacks",
+    async (pathname) => {
+      let callbackCalls = 0;
+      const routes: RouteDefinition[] = [
+        {
+          path: "/items/:id",
+          loader: () => {
+            callbackCalls += 1;
+          },
+          render: () => {
+            callbackCalls += 1;
+            return "item";
+          },
+          notFound: () => {
+            callbackCalls += 1;
+            return "custom missing";
+          },
+        },
+      ];
+
+      const buffered = await renderRoute(routes, `https://example.com${pathname}`, {
+        notFound: () => {
+          callbackCalls += 1;
+          return "global missing";
+        },
+      });
+      const streamed = await renderRouteStream(routes, `https://example.com${pathname}`);
+
+      expect(buffered.ok && buffered.value.status).toBe(400);
+      expect(buffered.ok && buffered.value.html).toBe("<h1>Bad Request</h1>");
+      expect(buffered.ok && buffered.value.headers.get("content-type")).toBe("text/html; charset=utf-8");
+      expect(streamed.ok && streamed.value.status).toBe(400);
+      expect(callbackCalls).toBe(0);
+    },
+  );
+
+  it.each([
+    ["nested", "/groups/:group/items/:id", "/groups/team/items/%zz"],
+    ["wildcard", "/files/*path", "/files/folder/%zz"],
+  ])("preserves 400 for malformed %s route parameters", async (_kind, routePath, pathname) => {
+    const result = await renderRoute(
+      [{ path: routePath, render: () => "unexpected" }],
+      `https://example.com${pathname}`,
+    );
+
+    expect(result.ok && result.value.status).toBe(400);
+    expect(result.ok && result.value.html).toBe("<h1>Bad Request</h1>");
+  });
+
+  it("continues to render valid percent-encoded route parameters", async () => {
+    const result = await renderRoute(
+      [{ path: "/items/:id", render: ({ params }) => params.id ?? "missing" }],
+      "https://example.com/items/part%2Fdetail",
+    );
+
+    expect(result.ok && result.value.status).toBe(200);
+    expect(result.ok && result.value.html).toBe("part/detail");
+  });
+
   it("creates file-based route manifests from route files", async () => {
     const files = [
       "/app/src/routes/index.tachyon.html",

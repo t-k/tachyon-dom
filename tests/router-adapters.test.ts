@@ -282,6 +282,48 @@ describe("server adapters", () => {
     expect(chunks.join("")).toBe("<h1>Missing /missing</h1>");
   });
 
+  it("preserves generic invalid path encoding 400 responses across server adapters", async () => {
+    let renderCalls = 0;
+    const routes: RouteDefinition[] = [
+      {
+        path: "/items/:id",
+        render: () => {
+          renderCalls += 1;
+          return "item";
+        },
+      },
+    ];
+    const workersResponse = await createWorkersHandler({ routes }).fetch(new Request("https://example.com/items/%zz"));
+    expect(workersResponse.status).toBe(400);
+    expect(await workersResponse.text()).toBe("<h1>Bad Request</h1>");
+
+    const lambdaResponse = await createLambdaHandler({ routes })(lambdaEvent({ rawPath: "/items/%zz" }));
+    expect(lambdaResponse.statusCode).toBe(400);
+    expect(lambdaResponse.body).toBe("<h1>Bad Request</h1>");
+
+    const req = Readable.from([]) as unknown as NodeJS.ReadableStream & {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    req.method = "GET";
+    req.url = "/items/%zz";
+    req.headers = { host: "example.com" };
+    const chunks: string[] = [];
+    const res = {
+      statusCode: 200,
+      setHeader: vi.fn(),
+      end: vi.fn((chunk?: string) => {
+        if (chunk) chunks.push(chunk);
+      }),
+    };
+    await createNodeHandler({ routes })(req as never, res as never);
+
+    expect(res.statusCode).toBe(400);
+    expect(chunks.join("")).toBe("<h1>Bad Request</h1>");
+    expect(renderCalls).toBe(0);
+  });
+
   it("aborts the Node fetch request signal when the client connection closes", async () => {
     const req = new Readable({ read() {} }) as Readable & {
       method: string;
@@ -1208,95 +1250,95 @@ describe("server adapters", () => {
   it.each([false, true])(
     "preserves delayed HEAD metadata without emitting bodies across adapters with streaming=$streaming",
     async (streaming) => {
-    const routes: RouteDefinition[] = [
-      {
-        path: "/head",
-        loader: async () => {
-          await delay(10);
-          return "ready";
+      const routes: RouteDefinition[] = [
+        {
+          path: "/head",
+          loader: async () => {
+            await delay(10);
+            return "ready";
+          },
+          cache: { mode: "no-store" },
+          headers: { vary: "Cookie" },
+          render: ({ data }) => `<h1>${data}</h1>`,
         },
-        cache: { mode: "no-store" },
-        headers: { vary: "Cookie" },
-        render: ({ data }) => `<h1>${data}</h1>`,
-      },
-    ];
+      ];
 
-    const workers = await createWorkersHandler({ routes, streaming }).fetch(
-      new Request("https://example.com/head", { method: "HEAD" }),
-    );
-    expect(workers.headers.get("cache-control")).toBe("no-store");
-    expect(workers.headers.get("vary")).toBe("Cookie");
-    expect(await workers.text()).toBe("");
+      const workers = await createWorkersHandler({ routes, streaming }).fetch(
+        new Request("https://example.com/head", { method: "HEAD" }),
+      );
+      expect(workers.headers.get("cache-control")).toBe("no-store");
+      expect(workers.headers.get("vary")).toBe("Cookie");
+      expect(await workers.text()).toBe("");
 
-    const nodeChunks: string[] = [];
-    const nodeRequest = Object.assign(Readable.from([]), {
-      method: "HEAD",
-      url: "/head",
-      headers: { host: "example.com" },
-    });
-    const nodeHeaders = new Map<string, string | number | readonly string[]>();
-    const nodeResponse = Object.assign(new EventEmitter(), {
-      statusCode: 200,
-      writableEnded: false,
-      setHeader: (name: string, value: string | number | readonly string[]) => nodeHeaders.set(name, value),
-      flushHeaders: () => undefined,
-      write: (chunk: Uint8Array) => {
-        nodeChunks.push(Buffer.from(chunk).toString("utf8"));
-        return true;
-      },
-      end: (chunk?: string) => {
-        if (chunk) nodeChunks.push(chunk);
-        nodeResponse.writableEnded = true;
-      },
-    });
-    await createNodeHandler({ routes, streaming })(nodeRequest as never, nodeResponse as never);
-    expect(nodeHeaders.get("cache-control")).toBe("no-store");
-    expect(nodeHeaders.get("vary")).toBe("Cookie");
-    expect(nodeChunks).toEqual([]);
+      const nodeChunks: string[] = [];
+      const nodeRequest = Object.assign(Readable.from([]), {
+        method: "HEAD",
+        url: "/head",
+        headers: { host: "example.com" },
+      });
+      const nodeHeaders = new Map<string, string | number | readonly string[]>();
+      const nodeResponse = Object.assign(new EventEmitter(), {
+        statusCode: 200,
+        writableEnded: false,
+        setHeader: (name: string, value: string | number | readonly string[]) => nodeHeaders.set(name, value),
+        flushHeaders: () => undefined,
+        write: (chunk: Uint8Array) => {
+          nodeChunks.push(Buffer.from(chunk).toString("utf8"));
+          return true;
+        },
+        end: (chunk?: string) => {
+          if (chunk) nodeChunks.push(chunk);
+          nodeResponse.writableEnded = true;
+        },
+      });
+      await createNodeHandler({ routes, streaming })(nodeRequest as never, nodeResponse as never);
+      expect(nodeHeaders.get("cache-control")).toBe("no-store");
+      expect(nodeHeaders.get("vary")).toBe("Cookie");
+      expect(nodeChunks).toEqual([]);
 
-    const lambda = await createLambdaHandler({ routes, streaming })(
-      lambdaEvent({
-        rawPath: "/head",
-        requestContext: { domainName: "lambda.example", http: { method: "HEAD", path: "/head" } },
-      }),
-    );
-    expect(lambda.headers["cache-control"]).toBe("no-store");
-    expect(lambda.headers.vary).toBe("Cookie");
-    expect(lambda.body).toBe("");
+      const lambda = await createLambdaHandler({ routes, streaming })(
+        lambdaEvent({
+          rawPath: "/head",
+          requestContext: { domainName: "lambda.example", http: { method: "HEAD", path: "/head" } },
+        }),
+      );
+      expect(lambda.headers["cache-control"]).toBe("no-store");
+      expect(lambda.headers.vary).toBe("Cookie");
+      expect(lambda.body).toBe("");
 
-    if (!streaming) {
-      return;
-    }
-    const metadata = vi.fn((stream: Writable) => stream);
-    const runtime = {
-      streamifyResponse: vi.fn((handler) => handler),
-      HttpResponseStream: { from: metadata },
-    };
-    const lambdaChunks: string[] = [];
-    const responseStream = new Writable({
-      write(chunk, _encoding, callback) {
-        lambdaChunks.push(Buffer.from(chunk).toString("utf8"));
-        callback();
-      },
-    });
-    const streamingHandler = createLambdaStreamingHandler({ routes, streaming: true }, runtime) as (
-      event: ReturnType<typeof lambdaEvent>,
-      responseStream: Writable,
-      context: unknown,
-    ) => Promise<void>;
-    await streamingHandler(
-      lambdaEvent({
-        rawPath: "/head",
-        requestContext: { domainName: "lambda.example", http: { method: "HEAD", path: "/head" } },
-      }),
-      responseStream,
-      {},
-    );
-    expect(metadata).toHaveBeenCalledWith(
-      responseStream,
-      expect.objectContaining({ headers: expect.objectContaining({ "cache-control": "no-store", vary: "Cookie" }) }),
-    );
-    expect(lambdaChunks).toEqual([]);
+      if (!streaming) {
+        return;
+      }
+      const metadata = vi.fn((stream: Writable) => stream);
+      const runtime = {
+        streamifyResponse: vi.fn((handler) => handler),
+        HttpResponseStream: { from: metadata },
+      };
+      const lambdaChunks: string[] = [];
+      const responseStream = new Writable({
+        write(chunk, _encoding, callback) {
+          lambdaChunks.push(Buffer.from(chunk).toString("utf8"));
+          callback();
+        },
+      });
+      const streamingHandler = createLambdaStreamingHandler({ routes, streaming: true }, runtime) as (
+        event: ReturnType<typeof lambdaEvent>,
+        responseStream: Writable,
+        context: unknown,
+      ) => Promise<void>;
+      await streamingHandler(
+        lambdaEvent({
+          rawPath: "/head",
+          requestContext: { domainName: "lambda.example", http: { method: "HEAD", path: "/head" } },
+        }),
+        responseStream,
+        {},
+      );
+      expect(metadata).toHaveBeenCalledWith(
+        responseStream,
+        expect.objectContaining({ headers: expect.objectContaining({ "cache-control": "no-store", vary: "Cookie" }) }),
+      );
+      expect(lambdaChunks).toEqual([]);
     },
   );
 

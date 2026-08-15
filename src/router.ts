@@ -1383,6 +1383,19 @@ const renderRouteInternal = async (
   }
   const match = matchRoute(routes, url);
   if (!match.ok) {
+    if (match.error.status === 400) {
+      return finish({
+        status: 400,
+        html: "<h1>Bad Request</h1>",
+        headHtml: "",
+        resourceHints: "",
+        stateScript: "",
+        loaderData: {},
+        actionResult: undefined,
+        headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
+        match: emptyMatch(),
+      });
+    }
     const boundary = nearestNotFoundBoundary(routes, url.pathname);
     const html = boundary
       ? await boundary({ request, url })
