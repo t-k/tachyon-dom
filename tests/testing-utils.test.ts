@@ -18,7 +18,7 @@ describe("testing utilities", () => {
     expect((await renderRouteForTest([route], "/")).html).toBe("<h1>Home</h1>");
     await expect(assertRouteParity([route], [{ path: "/", clientHtml: "<h1>Home</h1>" }])).resolves.toBeUndefined();
     await expect(assertRouteParity([route], [{ path: "/", clientHtml: "<h1>Other</h1>" }])).rejects.toThrow(
-      "Route parity mismatch",
+      "Route parity mismatch for /: expected <h1>Other</h1>, received <h1>Home</h1>",
     );
   });
 
