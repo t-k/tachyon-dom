@@ -4,6 +4,7 @@ import { setText } from "./text.js";
 import { bindControl, setControlValue } from "./form.js";
 import { mountConditional } from "./conditional.js";
 import { createSignal, effect, onCleanup, untrack, type Signal } from "./signal.js";
+import { cleanupOwnedSubtree, registerOwnedSubtree } from "./subtree.js";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void;
@@ -228,20 +229,6 @@ const cleanupListState = (state: ListState): void => {
   state.records.clear();
 };
 
-const cleanupNestedListStates = (node: Node): void => {
-  if (!(node instanceof Element)) {
-    return;
-  }
-  const state = listStates.get(node);
-  if (state) {
-    cleanupListState(state);
-    listStates.delete(node);
-  }
-  for (const child of Array.from(node.childNodes)) {
-    cleanupNestedListStates(child);
-  }
-};
-
 const getListState = (container: Element, options: KeyedListOptions): ListState => {
   const current = listStates.get(container);
   if (current && current.options === options) {
@@ -253,11 +240,12 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
     return current;
   }
   if (current) {
-    cleanupListState(current);
+    cleanupOwnedSubtree(container);
   }
   const template = createTemplate(options.templateHtml);
   const elementIndices = Array.from(template.content.childNodes).flatMap((node, index) =>
-    node instanceof Element ? [index] : []);
+    node instanceof Element ? [index] : [],
+  );
   const next = {
     signature,
     options,
@@ -270,13 +258,15 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
     ownerCleanupRegistered: current?.ownerCleanupRegistered ?? false,
   };
   listStates.set(container, next);
+  registerOwnedSubtree(container, () => {
+    if (listStates.get(container) !== next) return;
+    cleanupListState(next);
+    listStates.delete(container);
+  });
   if (!next.ownerCleanupRegistered) {
     next.ownerCleanupRegistered = true;
     onCleanup(() => {
-      const ownedState = listStates.get(container);
-      if (!ownedState) return;
-      cleanupListState(ownedState);
-      listStates.delete(container);
+      cleanupOwnedSubtree(container);
     });
   }
   return next;
@@ -290,7 +280,7 @@ const cleanupRecord = (record: RowRecord): void => {
   for (const cleanupRef of record.refCleanups.values()) cleanupRef();
   record.refCleanups.clear();
   for (const node of record.nodes) {
-    cleanupNestedListStates(node);
+    cleanupOwnedSubtree(node);
     node.parentNode?.removeChild(node);
   }
 };
@@ -598,9 +588,10 @@ export const mountKeyedList = (
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];
   const serverElements = Array.from(container.children);
-  const canAdoptServerRows = state.records.size === 0
-    && state.elementIndices.length > 0
-    && serverElements.length >= items.length * state.elementIndices.length;
+  const canAdoptServerRows =
+    state.records.size === 0 &&
+    state.elementIndices.length > 0 &&
+    serverElements.length >= items.length * state.elementIndices.length;
   const seenKeys = new Set<PropertyKey>();
   for (const item of items) {
     const key = keyFor(item, options);

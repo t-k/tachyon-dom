@@ -825,9 +825,7 @@ describe("mountKeyedList", () => {
 
     mountKeyedList(root, [], [{ id: 1, title: "One", visible: true, children: [{ id: 2, label: "Two" }] }], options);
 
-    expect(root.innerHTML).toBe(
-      `<h2>One</h2><section><ul><li>Two</li></ul><!----><em>visible</em></section>`,
-    );
+    expect(root.innerHTML).toBe(`<h2>One</h2><section><ul><li>Two</li></ul><!----><em>visible</em></section>`);
   });
 
   it("owns formatted separators while adopting, reordering, and removing server rows", () => {
@@ -842,8 +840,24 @@ describe("mountKeyedList", () => {
     };
 
     const existing = Array.from(root.querySelectorAll("li"));
-    mountKeyedList(root, [], [{ id: 1, label: "A" }, { id: 2, label: "B" }], options);
-    mountKeyedList(root, [], [{ id: 2, label: "B updated" }, { id: 1, label: "A updated" }], options);
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 1, label: "A" },
+        { id: 2, label: "B" },
+      ],
+      options,
+    );
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 2, label: "B updated" },
+        { id: 1, label: "A updated" },
+      ],
+      options,
+    );
 
     expect(root.querySelectorAll("li")[0]).toBe(existing[1]);
     expect(root.querySelectorAll("li")[1]).toBe(existing[0]);
@@ -867,14 +881,24 @@ describe("mountKeyedList", () => {
     };
     const existing = Array.from(root.children);
 
-    mountKeyedList(root, [], [
-      { id: 1, title: "A", body: "A body" },
-      { id: 2, title: "B", body: "B body" },
-    ], options);
-    mountKeyedList(root, [], [
-      { id: 2, title: "B updated", body: "B body updated" },
-      { id: 1, title: "A updated", body: "A body updated" },
-    ], options);
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 1, title: "A", body: "A body" },
+        { id: 2, title: "B", body: "B body" },
+      ],
+      options,
+    );
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 2, title: "B updated", body: "B body updated" },
+        { id: 1, title: "A updated", body: "A body updated" },
+      ],
+      options,
+    );
 
     expect(Array.from(root.children)).toEqual([existing[2], existing[3], existing[0], existing[1]]);
     expect(root.textContent).toBe(" B updatedB body updated  A updatedA body updated ");
@@ -1198,5 +1222,52 @@ describe("mountKeyedList", () => {
 
     expect(nestedReads).toBe(0);
     expect(root.innerHTML).toBe(`<ul id="groups"></ul>`);
+  });
+
+  it("clears nested conditional refs and listeners when a keyed row is removed", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const onClick = vi.fn();
+    const item: { id: number; visible: boolean; ref?: Element; onClick: () => void } = {
+      id: 1,
+      visible: true,
+      onClick,
+    };
+    const options = {
+      signature: "rows-with-owned-conditional",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><!----></li>`,
+      bindings: [
+        {
+          kind: "if" as const,
+          signature: "owned-conditional",
+          path: [0],
+          test: "item.visible",
+          templateHtml: `<button>Remove</button>`,
+          bindings: [
+            { kind: "ref" as const, path: [], expression: "item.ref" },
+            { kind: "event" as const, path: [], eventName: "click", handler: "item.onClick" },
+          ],
+        },
+      ],
+    };
+
+    mountKeyedList(root, [], [item], options);
+    const removedButton = item.ref;
+    expect(removedButton).toBe(root.querySelector("button"));
+
+    mountKeyedList(root, [], [], options);
+    removedButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(item.ref).toBeUndefined();
+    expect(onClick).not.toHaveBeenCalled();
+    expect(root.childElementCount).toBe(0);
+
+    item.visible = false;
+    mountKeyedList(root, [], [item], options);
+    expect(root.querySelector("button")).toBeNull();
+    expect(() => mountKeyedList(root, [], [], options)).not.toThrow();
   });
 });

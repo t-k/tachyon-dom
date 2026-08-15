@@ -3,6 +3,7 @@ import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
 import { delegate } from "./event.js";
 import { bindControl, setControlValue } from "./form.js";
 import { mountKeyedList } from "./list.js";
+import { cleanupOwnedSubtree, registerOwnedSubtree } from "./subtree.js";
 import { setText } from "./text.js";
 
 type TextBinding = {
@@ -174,6 +175,7 @@ const cleanup = (state: ConditionalState): void => {
   for (const cleanupRef of state.refCleanups.values()) cleanupRef();
   state.refCleanups.clear();
   for (const node of state.nodes) {
+    cleanupOwnedSubtree(node);
     node.parentNode?.removeChild(node);
   }
   state.nodes.length = 0;
@@ -233,7 +235,13 @@ const bindNodes = (
         { ...binding, scope },
       );
     } else if (binding.kind === "if") {
-      mountConditional(nodeAtState(state, binding.path), [], readExpression(scope, binding.test, binding.read), scope, binding);
+      mountConditional(
+        nodeAtState(state, binding.path),
+        [],
+        readExpression(scope, binding.test, binding.read),
+        scope,
+        binding,
+      );
     }
   }
   if (state.cleanups.length === 0) {
@@ -249,10 +257,7 @@ const bindNodes = (
         };
         state.cleanups.push(delegate(target, binding.eventName, [], listener));
       } else if (binding.kind === "model") {
-        const element = nodeAtState(state, binding.path) as
-          | HTMLInputElement
-          | HTMLSelectElement
-          | HTMLTextAreaElement;
+        const element = nodeAtState(state, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
         state.cleanups.push(
           bindControl(
             element,
@@ -284,13 +289,12 @@ export const mountConditional = (
   const current = states.get(anchor);
   if (!visible) {
     if (current) {
-      cleanup(current);
-      states.delete(anchor);
+      cleanupOwnedSubtree(anchor);
     }
     return;
   }
   if (current && current.signature !== signature) {
-    cleanup(current);
+    cleanupOwnedSubtree(anchor);
   }
   const state =
     current && current.signature === signature
@@ -303,5 +307,12 @@ export const mountConditional = (
           scope,
         };
   states.set(anchor, state);
+  if (state !== current) {
+    registerOwnedSubtree(anchor, () => {
+      if (states.get(anchor) !== state) return;
+      cleanup(state);
+      states.delete(anchor);
+    });
+  }
   bindNodes(anchor, state, scope, options);
 };
