@@ -895,9 +895,7 @@ describe("server adapters", () => {
     ["invalid UTF-8 under a textual content type", "text/plain; charset=utf-8"],
   ])("base64-encodes native Lambda bytes with %s", async (_label, contentType) => {
     const expected = Uint8Array.from([0, 255, 254, 195, 40, 137, 80, 78, 71]);
-    const response = new Response(expected.slice(), {
-      ...(contentType ? { headers: { "content-type": contentType } } : {}),
-    });
+    const response = new Response(expected.slice(), contentType ? { headers: { "content-type": contentType } } : {});
 
     const lambda = await lambdaResponseFromWebResponse(response);
 
