@@ -292,14 +292,17 @@ const renderTagValue = (value: HtmlValue): string => {
 const containsHtmlFragment = (value: HtmlValue): boolean =>
   isHtmlFragment(value) || (Array.isArray(value) && value.some(containsHtmlFragment));
 
-const renderPolicyTextValue = (value: HtmlValue): string => {
-  if (value == null || value === false) return "";
-  if (Array.isArray(value)) return value.map(renderPolicyTextValue).join("");
-  if (isHtmlAttribute(value)) {
-    throw new TypeError("Attribute fragments can only be interpolated inside an opening tag");
+const assertTrustedFragmentsComplete = (value: HtmlValue): void => {
+  if (Array.isArray(value)) {
+    for (const item of value) assertTrustedFragmentsComplete(item);
+    return;
   }
-  if (isHtmlFragment(value)) return "tachyon-trusted-fragment";
-  return escapeText(value);
+  if (!isHtmlFragment(value)) return;
+  const fragmentContext = createHtmlScanContext();
+  scanHtmlState(value.toString(), fragmentContext);
+  if (fragmentContext.state !== "text") {
+    throw new TypeError("Trusted HTML fragments must end in text context.");
+  }
 };
 
 type PolicyNode = {
@@ -310,12 +313,17 @@ type PolicyNode = {
 };
 
 const validateMarkupUrlAttributes = (markup: string): void => {
-  if (!/\b(?:href|src|action|formaction|xlink:href|data|poster|srcset|content|http-equiv)\s*=/i.test(markup)) {
+  if (
+    !/\b(?:on[A-Za-z0-9_.:-]*|srcdoc|href|src|action|formaction|xlink:href|data|poster|srcset|content|http-equiv)\s*=/i.test(
+      markup,
+    )
+  ) {
     return;
   }
   const root = (/<!doctype\b|<html\b/i.test(markup) ? parse(markup) : parseFragment(markup)) as PolicyNode;
   const visit = (node: PolicyNode): void => {
     if (node.tagName && node.attrs) {
+      for (const attribute of node.attrs) assertSafeLiteralAttributeName(attribute.name);
       const result = sanitizeElementUrlAttributes(
         node.tagName,
         Object.fromEntries(node.attrs.map((attr) => [attr.name, attr.value])),
@@ -569,12 +577,10 @@ export const classList = (...values: readonly ClassValue[]): string => {
 export const html = (strings: TemplateStringsArray, ...values: readonly HtmlValue[]): HtmlFragment => {
   validateLiteralAttributeNames(strings);
   let output = "";
-  let policyOutput = "";
   const context = createHtmlScanContext();
   for (let index = 0; index < strings.length; index += 1) {
     const literal = strings[index] ?? "";
     output += literal;
-    policyOutput += literal;
     scanHtmlState(literal, context);
     if (index < values.length) {
       const value = values[index];
@@ -630,9 +636,10 @@ export const html = (strings: TemplateStringsArray, ...values: readonly HtmlValu
         index === values.length - 1,
         context.rawTextTag,
       );
+      if (interpolationState === "text" && containsHtmlFragment(value)) {
+        assertTrustedFragmentsComplete(value);
+      }
       output += rendered;
-      policyOutput +=
-        interpolationState === "text" && containsHtmlFragment(value) ? renderPolicyTextValue(value) : rendered;
       if (interpolationState === "before-attribute-value") {
         context.state = "tag";
       } else if (interpolationState === "text" && containsHtmlFragment(value)) {
@@ -643,6 +650,9 @@ export const html = (strings: TemplateStringsArray, ...values: readonly HtmlValu
       }
     }
   }
-  validateMarkupUrlAttributes(policyOutput);
+  if (context.state !== "text") {
+    throw new TypeError("HTML templates must end in text context.");
+  }
+  validateMarkupUrlAttributes(output);
   return fragment(output);
 };

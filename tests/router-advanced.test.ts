@@ -111,7 +111,7 @@ describe("advanced router features", () => {
     expect(buffered.ok && buffered.value.html).toBe("");
     expect(buffered.ok && buffered.value.responseBody).toBeUndefined();
     expect(buffered.ok && buffered.value.headers.get("content-length")).toBe(status === 304 ? "19" : null);
-    expect(buffered.ok && buffered.value.headers.get("transfer-encoding")).toBeNull();
+    expect(buffered.ok && buffered.value.headers.get("transfer-encoding")).toBe(status === 304 ? "chunked" : null);
     expect(buffered.ok && buffered.value.headers.get("x-kept")).toBe("yes");
     expect(streamed.ok && streamed.value.status).toBe(status);
     if (!streamed.ok) throw new Error(streamed.error.message);

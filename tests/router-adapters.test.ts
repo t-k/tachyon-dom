@@ -482,6 +482,28 @@ describe("server adapters", () => {
     },
   );
 
+  it("cancels a discarded native response body for HEAD while preserving representation headers", async () => {
+    const cancel = vi.fn();
+    const native = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("body"));
+        },
+        cancel,
+      }),
+      { headers: { "content-length": "4", "transfer-encoding": "chunked" } },
+    );
+    const response = await createWorkersHandler({
+      routes: [{ path: "/", render: () => "unused" }],
+      middleware: [() => native],
+    }).fetch(new Request("https://example.test/", { method: "HEAD" }));
+
+    expect(response.body).toBeNull();
+    expect(response.headers.get("content-length")).toBe("4");
+    expect(response.headers.get("transfer-encoding")).toBe("chunked");
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it.each([204, 205, 304])("removes bodies and transfer headers for status %i across adapters", async (status) => {
     const routes: RouteDefinition[] = [
       {
@@ -505,7 +527,7 @@ describe("server adapters", () => {
       expect(workers.status).toBe(status);
       expect(new Uint8Array(await workers.arrayBuffer())).toHaveLength(0);
       expect(workers.headers.get("content-length")).toBe(status === 304 ? "19" : null);
-      expect(workers.headers.get("transfer-encoding")).toBeNull();
+      expect(workers.headers.get("transfer-encoding")).toBe(status === 304 ? "chunked" : null);
       expect(workers.headers.get("x-kept")).toBe("yes");
 
       const lambda = await createLambdaHandler({ routes, streaming })(
@@ -517,7 +539,7 @@ describe("server adapters", () => {
       expect(lambda.statusCode).toBe(status);
       expect(lambda.body).toBe("");
       expect(lambda.headers["content-length"]).toBe(status === 304 ? "19" : undefined);
-      expect(lambda.headers["transfer-encoding"]).toBeUndefined();
+      expect(lambda.headers["transfer-encoding"]).toBe(status === 304 ? "chunked" : undefined);
       expect(lambda.headers["x-kept"]).toBe("yes");
 
       const nodeBytes: Uint8Array[] = [];
@@ -547,7 +569,11 @@ describe("server adapters", () => {
       } else {
         expect(nodeResponse.setHeader).not.toHaveBeenCalledWith("content-length", expect.anything());
       }
-      expect(nodeResponse.setHeader).not.toHaveBeenCalledWith("transfer-encoding", expect.anything());
+      if (status === 304) {
+        expect(nodeResponse.setHeader).toHaveBeenCalledWith("transfer-encoding", "chunked");
+      } else {
+        expect(nodeResponse.setHeader).not.toHaveBeenCalledWith("transfer-encoding", expect.anything());
+      }
       expect(nodeResponse.setHeader).toHaveBeenCalledWith("x-kept", "yes");
     }
   });
@@ -1834,7 +1860,7 @@ describe("server adapters", () => {
             return "ready";
           },
           cache: { mode: "no-store" },
-          headers: { vary: "Cookie" },
+          headers: { vary: "Cookie", "content-length": "5", "transfer-encoding": "chunked" },
           render: ({ data }) => `<h1>${data}</h1>`,
         },
       ];
@@ -1844,6 +1870,8 @@ describe("server adapters", () => {
       );
       expect(workers.headers.get("cache-control")).toBe("no-store");
       expect(workers.headers.get("vary")).toBe("Cookie");
+      expect(workers.headers.get("content-length")).toBe("5");
+      expect(workers.headers.get("transfer-encoding")).toBe("chunked");
       expect(workers.body).toBeNull();
       expect(await workers.text()).toBe("");
 
@@ -1871,6 +1899,8 @@ describe("server adapters", () => {
       await createNodeHandler({ routes, streaming })(nodeRequest as never, nodeResponse as never);
       expect(nodeHeaders.get("cache-control")).toBe("no-store");
       expect(nodeHeaders.get("vary")).toBe("Cookie");
+      expect(nodeHeaders.get("content-length")).toBe("5");
+      expect(nodeHeaders.get("transfer-encoding")).toBe("chunked");
       expect(nodeChunks).toEqual([]);
 
       const lambda = await createLambdaHandler({ routes, streaming })(
@@ -1881,6 +1911,8 @@ describe("server adapters", () => {
       );
       expect(lambda.headers["cache-control"]).toBe("no-store");
       expect(lambda.headers.vary).toBe("Cookie");
+      expect(lambda.headers["content-length"]).toBe("5");
+      expect(lambda.headers["transfer-encoding"]).toBe("chunked");
       expect(lambda.body).toBe("");
 
       if (!streaming) {

@@ -140,10 +140,10 @@ const normalizeBodylessRouteResult = (result: RouteRenderResult, forceBodyless =
     return result;
   }
   const headers = new Headers(result.headers);
-  if (result.status !== 304) {
+  if (result.status === 204 || result.status === 205) {
     headers.delete("content-length");
+    headers.delete("transfer-encoding");
   }
-  headers.delete("transfer-encoding");
   const { responseBody: _responseBody, responseChunks: _responseChunks, webResponse, ...rest } = result;
   return {
     ...rest,
@@ -1331,6 +1331,9 @@ const renderRouteInternal = async (
       return finish(routeResponseResult(result));
     }
     if (isWebResponse(result)) {
+      if (request.method === "HEAD" && result.body) {
+        await result.body.cancel();
+      }
       const rendered = webResponseResult(result);
       releaseRequestSnapshot(middlewareRequest);
       return finish(rendered);

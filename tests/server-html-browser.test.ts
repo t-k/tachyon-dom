@@ -58,6 +58,9 @@ describe("server HTML browser security", () => {
       expect(() => html`<meta http-equiv="refresh" ${attr("content", "0;url=//evil.example")} />`).toThrow(
         "Unsafe URL for content",
       );
+      expect(
+        () => html`<textarea>${html`</textarea>`}<a href="javascript:globalThis.__tachyonStaticXss = true">unsafe</a>`,
+      ).toThrow("Unsafe URL for href");
       await page.locator("#subject").click();
 
       expect(await page.evaluate(() => "__tachyonStaticXss" in globalThis)).toBe(false);

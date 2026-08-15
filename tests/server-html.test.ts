@@ -244,5 +244,11 @@ describe("server html helper", () => {
     expect(() => html(strings, rawHtml("<script>const marker = `<!-"))).toThrow(
       "Trusted HTML fragments must end in text context",
     );
+    expect(() => html`<textarea>${rawHtml("</textarea>")}<a href="javascript:alert(1)">unsafe</a>`).toThrow(
+      "Unsafe URL for href",
+    );
+    expect(() => html`${[rawHtml("<svg on"), rawHtml("load=alert(1)></svg>")]}`).toThrow(
+      "Trusted HTML fragments must end in text context",
+    );
   });
 });
