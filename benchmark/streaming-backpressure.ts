@@ -19,6 +19,7 @@ const connections = numberArg("--connections", 6);
 const chunksPerConnection = numberArg("--chunks", 128);
 const chunkBytes = numberArg("--chunk-bytes", 32 * 1024);
 const drainDelayMs = numberArg("--drain-delay-ms", 2);
+const registeredPort = Number(process.env.PORT ?? 0);
 const label = stringArg("--label", "run");
 const subjectRoot = path.resolve(stringArg("--subject-root", projectRoot));
 const adapterModule = path.resolve(stringArg("--adapter-module", path.join(subjectRoot, "src/adapters/node.ts")));
@@ -89,7 +90,7 @@ try {
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
+    server.listen(Number.isInteger(registeredPort) && registeredPort > 0 ? registeredPort : 0, "127.0.0.1", resolve);
   });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Backpressure benchmark server has no TCP address.");
