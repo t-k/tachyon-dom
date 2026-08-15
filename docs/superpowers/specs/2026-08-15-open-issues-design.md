@@ -92,13 +92,13 @@ Existing entry points remain whenever they can become safe without ambiguity. `r
 
 | Area | Hard gate |
 | --- | --- |
-| Parser and XSS | Issues 002, 005, 013, and 014 use an HTML parser oracle, negative corpora, and target-parity assertions. |
-| Bytes and status | Issue 007 compares invalid UTF-8 and binary payloads byte for byte. Issue 008 verifies null bodies for 204, 205, and 304 across adapters. |
-| Real DOM | Issues 001, 009, 024, 025, and 029 use Playwright. Hydration tests observe initial SSR DOM and the post-hydration update separately. |
-| Clean installation | Issue 012 builds and packs the package, installs the tarball into an empty consumer, and verifies runtime-only and compiler modes independently. |
-| Runtime semantics | Issue 022 proves queue drain, boundary routing, retry, and unhandled reporting. Issue 024 proves rapid-submit and stale-completion behavior. Issue 025 proves identity and freshness independently. |
-| Resource bounds | Issue 017 proves deterministic LRU eviction and issue 025 measures render or update counts in addition to elapsed time. |
-| Release contract | Issues 011, 018, 021, and 028 add machine-checked documentation, release, size, and metadata contracts. |
+| Parser and XSS | Issues 002, 005, 013, and 014 use an HTML parser oracle, negative corpora, and target-parity assertions in the compiler and server HTML suites. |
+| Bytes and status | `tests/router-adapters.test.ts` compares invalid UTF-8 and binary payloads byte for byte for issue 007 and verifies null bodies for 204, 205, and 304 for issue 008. |
+| Real DOM | `tests/open-issues-browser.test.ts` uses Playwright for issues 001, 009, and 029. Issues 024 and 025 use jsdom in `tests/runtime-form-hmr.test.ts` and `tests/runtime-virtual-list.test.ts`: the form guard depends on event ordering rather than layout, while the virtual-list window is calculated from configured `scrollTop` and `itemHeight` values rather than layout measurements. Hydration tests observe initial SSR DOM and the post-hydration update separately. |
+| Clean installation | The blocking CI workflow runs `pnpm verify:clean-consumer`. It builds and packs issue 012's package, installs the tarball into isolated runtime-only and tooling consumers, and verifies optional-peer installation diagnostics. |
+| Runtime semantics | `tests/runtime-signal.test.ts` proves issue 022's queue drain, boundary routing, retry, and unhandled reporting. `tests/runtime-form-hmr.test.ts` proves issue 024's rapid-submit and stale-completion behavior. `tests/runtime-virtual-list.test.ts` proves issue 025's identity and freshness independently. |
+| Resource bounds | `tests/router-client.test.ts` proves issue 017's deterministic LRU eviction, while `tests/runtime-virtual-list.test.ts` measures issue 025's render or update counts in addition to elapsed time. |
+| Release contract | `tests/dx.test.ts`, `tests/release-contract.test.ts`, and the package verification scripts machine-check issues 011, 018, 021, and 028 across documentation, release, size, and metadata contracts. |
 
 Coverage may overlap because each scenario protects a different obligation. PICT, TLA+, Alloy, Dafny, property-based testing, and fuzzing are not required for the initial bounded parser corpus, adapter matrix, and lifecycle scenarios. If deterministic coverage exposes another input dimension, property-based testing will be proposed separately before adding a dependency.
 
