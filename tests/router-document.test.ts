@@ -91,6 +91,33 @@ describe("route document and progressive layout composition", () => {
     expect(hookError).not.toContain("__tachyon_progressive_outlet_");
   });
 
+  it("preserves the route failure when progressive source cleanup rejects", async () => {
+    const cleanup = vi.fn(async () => Promise.reject(new Error("cleanup failed")));
+    const chunks: AsyncIterable<string> = {
+      [Symbol.asyncIterator]: () => ({
+        next: vi.fn(async () => ({ done: false as const, value: "child" })),
+        return: cleanup,
+      }),
+    };
+    const result = await renderRouteStream(
+      [
+        {
+          path: "/",
+          render: () => {
+            throw new Error("route failed");
+          },
+          error: ({ error }) => `<h1>${error instanceof Error ? error.message : "unknown"}</h1>`,
+          children: [{ path: "child", render: () => "buffered", stream: () => chunks }],
+        },
+      ],
+      "https://example.test/child",
+    );
+    if (!result.ok) throw new Error(result.error.message);
+
+    expect(await collect(result.value.chunks)).toBe("<h1>A progressive ancestor layout failed while rendering.</h1>");
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
   it("reports an explicit body kind for buffered route, pass-through, and bodyless results", async () => {
     const route = await renderRoute([{ path: "/", render: () => "route" }], "https://example.test/");
     const passThrough = await renderRoute(

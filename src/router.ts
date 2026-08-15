@@ -485,6 +485,30 @@ const verifyCsrf = async (
 };
 
 const csrfSafeMethods = new Set(["GET", "HEAD", "OPTIONS"]);
+const cleanupGraceMs = 50;
+
+const settleBestEffortCleanup = async (cleanup: () => Promise<unknown>): Promise<void> => {
+  let cleanupPromise: Promise<void>;
+  try {
+    cleanupPromise = Promise.resolve(cleanup()).then(
+      () => undefined,
+      () => undefined,
+    );
+  } catch {
+    return;
+  }
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      cleanupPromise,
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, cleanupGraceMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+};
 
 const payloadTooLargeResult = (match: MatchedRoute): RouteRenderResult => ({
   status: 413,
@@ -509,17 +533,21 @@ const readLimitedRequest = async (request: Request, maxBytes: number): Promise<R
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
-  while (true) {
-    const result = await reader.read();
-    if (result.done) {
-      break;
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) {
+        break;
+      }
+      total += result.value.byteLength;
+      if (total > maxBytes) {
+        await settleBestEffortCleanup(() => reader.cancel());
+        return undefined;
+      }
+      chunks.push(result.value);
     }
-    total += result.value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(result.value);
+  } finally {
+    reader.releaseLock();
   }
   const body = new Uint8Array(total);
   let offset = 0;
@@ -1332,7 +1360,7 @@ const renderRouteInternal = async (
     }
     if (isWebResponse(result)) {
       if (request.method === "HEAD" && result.body && !result.body.locked) {
-        void result.body.cancel().catch(() => undefined);
+        await settleBestEffortCleanup(() => result.body?.cancel() ?? Promise.resolve());
       }
       const rendered = webResponseResult(result);
       releaseRequestSnapshot(middlewareRequest);
@@ -1661,7 +1689,7 @@ const renderRouteInternal = async (
     return responseChunks ? ok(normalizeBodylessRouteResult(result)) : finish(result);
   } catch (error) {
     if (progressiveBodyToClose) {
-      await closeAsyncIterable(progressiveBodyToClose);
+      await settleBestEffortCleanup(() => closeAsyncIterable(progressiveBodyToClose as AsyncIterable<string>));
       progressiveBodyToClose = undefined;
     }
     if (options.hooks?.onError) {

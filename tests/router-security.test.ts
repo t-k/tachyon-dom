@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createCookieSessionStorage,
   createMemorySessionStorage,
@@ -335,6 +335,28 @@ describe("router security helpers", () => {
     const result = await renderRoute(routes, request, { maxActionBodyBytes: 3 });
 
     expect(result.ok && result.value).toMatchObject({ status: 413, html: "<h1>Payload Too Large</h1>" });
+  });
+
+  it("contains request body cancellation failures while returning the byte-cap response", async () => {
+    const cancel = vi.fn(async () => Promise.reject(new Error("cancel failed")));
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("abcdef"));
+      },
+      cancel,
+    });
+    const request = new Request("https://x.test/upload", {
+      method: "POST",
+      body,
+      duplex: "half",
+    } as RequestInit & { duplex: "half" });
+
+    const result = await renderRoute([{ path: "/upload", action: () => "ok", render: () => "ok" }], request, {
+      maxActionBodyBytes: 3,
+    });
+
+    expect(result.ok && result.value.status).toBe(413);
+    expect(cancel).toHaveBeenCalledTimes(1);
   });
 
   it("applies the body byte cap before request hooks and middleware consume the stream", async () => {

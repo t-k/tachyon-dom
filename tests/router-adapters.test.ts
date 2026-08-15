@@ -532,6 +532,54 @@ describe("server adapters", () => {
     expect(cancel).toHaveBeenCalledTimes(1);
   });
 
+  it("waits for a promptly settling native HEAD body cancellation", async () => {
+    let resolveCancel: (() => void) | undefined;
+    let resolved = false;
+    const native = new Response(
+      new ReadableStream({
+        cancel: () =>
+          new Promise<void>((resolve) => {
+            resolveCancel = () => {
+              resolved = true;
+              resolve();
+            };
+          }),
+      }),
+    );
+    let headResolved = false;
+    const pending = createWorkersHandler({
+      routes: [{ path: "/", render: () => "unused" }],
+      middleware: [() => native],
+    })
+      .fetch(new Request("https://example.test/", { method: "HEAD" }))
+      .then((response) => {
+        headResolved = true;
+        return response;
+      });
+
+    await vi.waitFor(() => expect(resolveCancel).toBeTypeOf("function"));
+    expect(headResolved).toBe(false);
+    resolveCancel?.();
+    const response = await pending;
+
+    expect(resolved).toBe(true);
+    expect(response.body).toBeNull();
+  });
+
+  it("bounds a native HEAD body cancellation that never settles", async () => {
+    const cancel = vi.fn(() => new Promise<void>(() => undefined));
+    const native = new Response(new ReadableStream({ cancel }));
+    const startedAt = performance.now();
+    const response = await createWorkersHandler({
+      routes: [{ path: "/", render: () => "unused" }],
+      middleware: [() => native],
+    }).fetch(new Request("https://example.test/", { method: "HEAD" }));
+
+    expect(performance.now() - startedAt).toBeLessThan(500);
+    expect(response.body).toBeNull();
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it.each([204, 205, 304])("removes bodies and transfer headers for status %i across adapters", async (status) => {
     const routes: RouteDefinition[] = [
       {
