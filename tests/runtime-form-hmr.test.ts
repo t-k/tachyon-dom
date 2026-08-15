@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { applyDeferredDataChunk } from "../src/runtime/stream-client";
+import {
+  applyDeferredDataChunk,
+  readDeferredDataScript,
+  readDeferredDataScriptResult,
+} from "../src/runtime/stream-client";
 import { connectRouteHotReloader, createRouteHotReloader } from "../src/runtime/router";
 import { enhanceForm, validateFormData } from "../src/runtime/form";
 
@@ -218,5 +222,26 @@ describe("runtime form and HMR helpers", () => {
 
     expect(applied).toBe(true);
     expect(document.querySelector("output")?.textContent).toBe(`["A","B"]`);
+  });
+
+  it("distinguishes missing and invalid deferred data without throwing", () => {
+    document.body.innerHTML = `<script type="application/json" data-tachyon-deferred="broken">{</script>`;
+
+    expect(readDeferredDataScriptResult(document, "missing")).toEqual({
+      ok: false,
+      error: { kind: "missing", id: "missing" },
+    });
+    expect(readDeferredDataScriptResult(document, "broken")).toMatchObject({
+      ok: false,
+      error: { kind: "invalid", id: "broken" },
+    });
+    expect(() => readDeferredDataScript(document, "broken")).not.toThrow();
+    expect(readDeferredDataScript(document, "broken")).toBeUndefined();
+  });
+
+  it("reads valid null and selector-special deferred data identifiers", () => {
+    document.body.innerHTML = `<script type="application/json" data-tachyon-deferred='route:&quot;quoted&quot;'>null</script>`;
+    expect(readDeferredDataScriptResult(document, `route:"quoted"`)).toEqual({ ok: true, value: null });
+    expect(readDeferredDataScript(document, `route:"quoted"`)).toBeNull();
   });
 });

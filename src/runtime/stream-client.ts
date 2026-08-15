@@ -36,12 +36,30 @@ export const applyDeferredDataChunk = (root: ParentNode, chunk: DeferredDataChun
   return true;
 };
 
-export const readDeferredDataScript = <T = unknown>(root: ParentNode, id: string): T | undefined => {
+export type DeferredDataReadError =
+  | { kind: "missing"; id: string }
+  | { kind: "invalid"; id: string; cause: unknown };
+
+export const readDeferredDataScriptResult = <T = unknown>(
+  root: ParentNode,
+  id: string,
+): Result<T, DeferredDataReadError> => {
   const script = Array.from(root.querySelectorAll(`script[type="application/json"][data-tachyon-deferred]`)).find(
     (candidate) => candidate.getAttribute("data-tachyon-deferred") === id,
   );
   if (!script) {
-    return undefined;
+    return err({ kind: "missing", id });
   }
-  return JSON.parse(script.textContent ?? "null") as T;
+  try {
+    return ok(JSON.parse(script.textContent ?? "null") as T);
+  } catch (cause) {
+    return err({ kind: "invalid", id, cause });
+  }
 };
+
+/** @deprecated Use readDeferredDataScriptResult to distinguish missing and invalid data. */
+export const readDeferredDataScript = <T = unknown>(root: ParentNode, id: string): T | undefined => {
+  const result = readDeferredDataScriptResult<T>(root, id);
+  return result.ok ? result.value : undefined;
+};
+import { err, ok, type Result } from "../result.js";

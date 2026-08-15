@@ -16,7 +16,12 @@ export {
   untrack,
 } from "./runtime/signal.js";
 export { createStore } from "./runtime/store.js";
-export { readTextStreamChunks } from "./runtime/stream-client.js";
+export {
+  readDeferredDataScript,
+  readDeferredDataScriptResult,
+  readTextStreamChunks,
+} from "./runtime/stream-client.js";
+export type { DeferredDataReadError } from "./runtime/stream-client.js";
 export { err, ok };
 export { sanitizeUrlAttribute, UnsafeUrlError } from "./url-policy.js";
 export { textAt } from "./runtime/text.js";

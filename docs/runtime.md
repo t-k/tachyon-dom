@@ -200,4 +200,5 @@ Client action concurrency is latest-operation-wins. A newer submission or naviga
 
 - `readTextStreamChunks(stream)` to decode a `ReadableStream<Uint8Array>` into text chunks.
 - `applyDeferredDataChunk(root, chunk)` to write streamed deferred values into `[data-tachyon-deferred-target="id:key"]` elements.
-- `readDeferredDataScript(root, id)` to read server-emitted deferred data scripts.
+- `readDeferredDataScriptResult(root, id)` to read server-emitted deferred data scripts while distinguishing missing data from invalid JSON without throwing.
+- `readDeferredDataScript(root, id)` as a deprecated compatibility wrapper that returns `undefined` for both missing and invalid data.
