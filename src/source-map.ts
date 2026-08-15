@@ -28,10 +28,13 @@ export const createSourceMap = (
 });
 
 export const shouldEmitSourceMap = (context: SourceMapBuildContext = {}): boolean => {
-  if (context.productionSourceMap === false && context.command === "build" && context.mode === "production") {
-    return false;
+  if (context.sourcemap !== undefined) {
+    return context.sourcemap;
   }
-  return context.sourcemap !== false;
+  if (context.command === "build" && context.mode === "production") {
+    return context.productionSourceMap === true;
+  }
+  return true;
 };
 
 export const appendInlineSourceMap = (code: string, map: SourceMap): string => {

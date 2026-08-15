@@ -28,7 +28,7 @@ import {
 } from "../src/app";
 import type { TemplateWhitespacePolicy } from "../src/compiler/types";
 import { diagnoseTachyonSfc, diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
-import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap } from "../src/source-map";
+import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "../src/source-map";
 import { defineTemplate, templateScope, type TypedTemplate } from "../src/typed";
 import { verifyPackageArtifacts } from "../src/package-integrity";
 import { loadRouteApp, packageCloudflarePages, tachyonApp, tachyonDom, tachyonDomRoutes } from "../src/vite";
@@ -152,6 +152,17 @@ describe("DX helpers", () => {
     const map = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as { sourcesContent: string[] };
 
     expect(map.sourcesContent).toEqual(["<main></main>"]);
+  });
+
+  it.each([
+    [{ command: "build", mode: "production" }, false],
+    [{ command: "serve", mode: "development" }, true],
+    [{ command: "build", mode: "production", sourcemap: true }, true],
+    [{ command: "build", mode: "production", productionSourceMap: true }, true],
+    [{ command: "serve", mode: "development", sourcemap: false }, false],
+    [{ command: "build", mode: "production", sourcemap: false, productionSourceMap: true }, false],
+  ] as const)("resolves secure source-map defaults for %o", (context, expected) => {
+    expect(shouldEmitSourceMap(context)).toBe(expected);
   });
 
   it("keeps template scope types available to TypeScript users", () => {
@@ -1946,10 +1957,9 @@ void chunks;
     }
   });
 
-  it("can disable production source maps and expose artifacts for upload hooks", async () => {
+  it("omits production source maps by default and exposes artifacts for upload hooks", async () => {
     const uploaded: string[] = [];
     const plugin = tachyonDom({
-      productionSourceMap: false,
       onSourceMap: ({ id }) => {
         uploaded.push(id);
       },
@@ -1977,7 +1987,72 @@ void chunks;
     expect(uploaded).toEqual(["/src/button.tachyon.html"]);
     expect(
       shouldEmitSourceMap({ sourcemap: true, productionSourceMap: false, command: "build", mode: "production" }),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it("embeds production source only after explicit opt-in", async () => {
+    const source = `<button>{label}</button>`;
+    const plugin = tachyonDom({ productionSourceMap: true });
+    if (typeof plugin.configResolved === "function") {
+      await plugin.configResolved.call({} as never, { command: "build", mode: "production" } as never);
+    } else if (plugin.configResolved) {
+      await plugin.configResolved.handler.call({} as never, { command: "build", mode: "production" } as never);
+    }
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+
+    const result = await plugin.transform.call(
+      {
+        error(error: string): never {
+          throw new Error(error);
+        },
+      } as never,
+      source,
+      "/src/button.tachyon.html",
+    );
+    const code = typeof result === "object" && result?.code ? String(result.code) : "";
+    const encoded = code.split("base64,")[1]?.trim();
+    if (!encoded) throw new Error("Missing production source map.");
+    const map = JSON.parse(Buffer.from(encoded, "base64").toString("utf8")) as SourceMap;
+
+    expect(map.sourcesContent).toEqual([source]);
+  });
+
+  it("keeps source-map upload hooks independent from inline emission", async () => {
+    const uploaded: string[] = [];
+    const plugin = tachyonDom({
+      sourcemap: false,
+      onSourceMap: ({ id }) => {
+        uploaded.push(id);
+      },
+    });
+    if (typeof plugin.configResolved === "function") {
+      await plugin.configResolved.call({} as never, { command: "build", mode: "production" } as never);
+    } else if (plugin.configResolved) {
+      await plugin.configResolved.handler.call({} as never, { command: "build", mode: "production" } as never);
+    }
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+
+    const result = await plugin.transform.call(
+      {
+        error: (error: string): never => {
+          throw new Error(error);
+        },
+      } as never,
+      `<button>{label}</button>`,
+      "/src/button.tachyon.html",
+    );
+
+    expect(typeof result === "object" && result?.code).not.toContain("sourceMappingURL");
+    expect(uploaded).toEqual(["/src/button.tachyon.html"]);
+  });
+
+  it("documents production source-map defaults and precedence", async () => {
+    const appVite = await readFile("docs/app-vite.md", "utf8");
+
+    expect(appVite).toContain("Production builds omit inline source maps by default");
+    expect(appVite).toContain("`sourcemap` has highest precedence");
+    expect(appVite).toContain("`productionSourceMap: true`");
+    expect(appVite).toContain("`onSourceMap` still receives the map when inline emission is disabled");
   });
 
   it("generates a virtual route manifest with lazy route modules", async () => {

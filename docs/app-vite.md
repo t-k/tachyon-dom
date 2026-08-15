@@ -32,6 +32,12 @@ export default { plugins: [tachyonDom({ reactive: true }), tachyonApp(app)] };
 
 App document `htmlWhitespace` is a separate tag-syntax policy. Use `"preserve-tags"` or `"normalize-tags"`; it does not condense text-node indentation. See the [whitespace migration guide](migrations/whitespace.md) for compatibility behavior and boundary-specific failures.
 
+## Source Maps
+
+Production builds omit inline source maps by default so compiled template source is not embedded in deployment artifacts unintentionally. Development and non-production transforms continue to include inline maps. Set `productionSourceMap: true` to opt a production build in.
+
+`sourcemap` has highest precedence: `true` always emits an inline map and `false` always omits it. `productionSourceMap` only supplies the production default when `sourcemap` is unspecified. `onSourceMap` still receives the map when inline emission is disabled, including with `sourcemap: false`, so an upload hook can publish a private artifact without exposing it in generated code.
+
 ## Request Logging
 
 During Vite development, `tachyonDom()` logs request lines such as `GET / 200 4ms`. Query strings are omitted by default. Disable logs with `tachyonDom({ requestLog: false })`, provide `requestLog: { logger }` for a custom sink, or opt into query strings with `requestLog: { includeQuery: true }` only when their disclosure is acceptable.
@@ -55,7 +61,8 @@ export default defineConfig({
       clientScript,
       fetch: async (request, { clientScript }) => {
         const user = new URL(request.url).searchParams.get("user") ?? "Guest";
-        const body = html`<main>Hello ${user}</main><script type="module"${attr("src", clientScript ?? "")}></script>`;
+        const body = html`<main>Hello ${user}</main>
+          <script type="module" ${attr("src", clientScript ?? "")}></script>`;
         return new Response(String(body), {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
