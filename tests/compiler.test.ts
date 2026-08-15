@@ -484,6 +484,62 @@ describe("HTML-first compiler", () => {
     expect(() => textAt(root, [0])).toThrow("Text binding path 0 resolved to SPAN instead of a Text node");
   });
 
+  it.each([
+    ["implicit", `<table><tr><td>{value}</td></tr></table>`],
+    ["explicit", `<table><tbody><tr><td>{value}</td></tr></tbody></table>`],
+  ])("keeps %s tbody text bindings aligned with the parsed DOM", (_kind, source) => {
+    const result = compileTemplate(source);
+    if (!result.ok) throw new Error(result.error.message);
+
+    expect(result.value.client.templateHtml).toBe(`<table><tbody><tr><td> </td></tr></tbody></table>`);
+    const root = mountClientTextBindings(result.value.client.templateHtml, result.value.client.bindings, {
+      value: "Updated",
+    });
+    expect(root.querySelector("tbody td")?.textContent).toBe("Updated");
+    expect(renderServerTemplate(result.value, { value: "Server" })).toBe(
+      `<table><tbody><tr><td>Server</td></tr></tbody></table>`,
+    );
+  });
+
+  it("places table row list bindings inside a normalized tbody", () => {
+    const result = compileTemplate(
+      `<table><for each={rows} key={row.id}><tr><td>{row.label}</td></tr></for></table>`,
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    const list = result.value.client.bindings.find((binding) => binding.kind === "list");
+
+    expect(result.value.client.templateHtml).toBe(`<table><tbody></tbody></table>`);
+    expect(list).toMatchObject({ kind: "list", path: [0], templateHtml: `<tr><td> </td></tr>` });
+    expect(renderServerTemplate(result.value, { rows: [{ id: 1, label: "One" }] })).toBe(
+      `<table><tbody><tr><td>One</td></tr></tbody></table>`,
+    );
+  });
+
+  it("normalizes direct col children while preserving valid select and optgroup paths", () => {
+    const columns = compileTemplate(`<table><col><col></table>`);
+    const select = compileTemplate(`<select><optgroup label="Group"><option>{label}</option></optgroup></select>`);
+    if (!columns.ok) throw new Error(columns.error.message);
+    if (!select.ok) throw new Error(select.error.message);
+
+    expect(columns.value.client.templateHtml).toBe(`<table><colgroup><col><col></colgroup></table>`);
+    const root = mountClientTextBindings(select.value.client.templateHtml, select.value.client.bindings, {
+      label: "Choice",
+    });
+    expect(root.querySelector("optgroup option")?.textContent).toBe("Choice");
+  });
+
+  it.each([`<table><div>{value}</div></table>`, `<table>text<tr><td>x</td></tr></table>`, `<select><div>x</div></select>`])(
+    "reports unsupported HTML tree construction for %s",
+    (source) => {
+      const result = compileTemplate(source);
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected tree construction diagnostic.");
+      expect(result.error.message).toContain("Unsupported HTML tree construction");
+      expect(result.error.offset).toBeGreaterThanOrEqual(0);
+    },
+  );
+
   it("omits closing tags for void elements in client and server targets", () => {
     const result = compileTemplate(`<div><br/>{label}<hr/></div>`);
     if (!result.ok) {

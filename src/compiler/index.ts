@@ -5,6 +5,7 @@ import { lowerClientTemplate } from "./targets/client.js";
 import type { CompiledTemplate, CompilerError } from "./types.js";
 import type { CompileTemplateOptions, TemplateWhitespacePolicy } from "./types.js";
 import { applyTemplateWhitespace } from "./whitespace.js";
+import { normalizeHtmlTree } from "./html-tree.js";
 
 const compileCacheLimit = 128;
 const compileCache = new Map<string, Result<CompiledTemplate, CompilerError>>();
@@ -51,7 +52,11 @@ export const compileTemplate = (
   if (!rootResult.ok) {
     return rememberCompiledTemplate(cacheKey, err(rootResult.error));
   }
-  const root = applyTemplateWhitespace(rootResult.value, whitespace);
+  const normalized = normalizeHtmlTree(applyTemplateWhitespace(rootResult.value, whitespace));
+  if (!normalized.ok) {
+    return rememberCompiledTemplate(cacheKey, err(normalized.error));
+  }
+  const root = normalized.value;
   const irResult = createTemplateIr(root);
   if (!irResult.ok) {
     return rememberCompiledTemplate(cacheKey, err(irResult.error));

@@ -61,4 +61,35 @@ describe("open issue browser regressions", () => {
       await page.close();
     }
   });
+
+  it("normalizes implied table containers before real DOM binding paths are generated", async () => {
+    const result = compileTemplate(`<table><tr><td>{value}</td></tr></table>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const markup = renderServerTemplate(result.value, { value: "A" });
+    const binding = result.value.client.bindings.find((candidate) => candidate.kind === "text");
+    if (!binding || binding.kind !== "text") throw new Error("Missing table text binding.");
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      await page.setContent(markup);
+      const observed = await page.evaluate(
+        ({ path, textAtSource }) => {
+          const resolveText = (0, eval)(`(${textAtSource})`) as typeof textAt;
+          const table = document.querySelector("table");
+          if (!table) throw new Error("Missing table.");
+          const text = resolveText(table, path);
+          text.nodeValue = "B";
+          return {
+            childName: table.firstElementChild?.tagName,
+            text: table.querySelector("tbody td")?.textContent,
+          };
+        },
+        { path: binding.path, textAtSource: textAt.toString() },
+      );
+
+      expect(observed).toEqual({ childName: "TBODY", text: "B" });
+    } finally {
+      await page.close();
+    }
+  });
 });
