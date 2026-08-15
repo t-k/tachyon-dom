@@ -1,5 +1,5 @@
 import type { BindingName, Diagnostic, Expression, Identifier, Node, PropertyName, SourceFile } from "typescript";
-import { optionalPeerError } from "../optional-peer.js";
+import { requireOptionalPeer } from "../optional-peer.js";
 import { err, ok, type Result } from "../result.js";
 import { compileTemplate } from "./index.js";
 import type { CompiledTemplate, CompilerError, CompileTemplateOptions } from "./types.js";
@@ -7,18 +7,10 @@ import type { CompiledTemplate, CompilerError, CompileTemplateOptions } from "./
 type TypeScriptModule = typeof import("typescript");
 
 let loadedTypeScript: TypeScriptModule | undefined;
-let typeScriptLoadError: unknown;
-try {
-  loadedTypeScript = await import("typescript");
-} catch (cause) {
-  typeScriptLoadError = cause;
-}
 
 const ts = new Proxy({} as TypeScriptModule, {
   get: (_target, property) => {
-    if (!loadedTypeScript) {
-      throw optionalPeerError("typescript", "Tachyon SFC compilation", typeScriptLoadError);
-    }
+    loadedTypeScript ??= requireOptionalPeer<TypeScriptModule>("typescript", "Tachyon SFC compilation");
     return Reflect.get(loadedTypeScript, property);
   },
 });

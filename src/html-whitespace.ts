@@ -1,15 +1,9 @@
 import type { DefaultTreeAdapterMap } from "parse5";
-import { optionalPeerError } from "./optional-peer.js";
+import { requireOptionalPeer } from "./optional-peer.js";
 
 type Parse5Module = typeof import("parse5");
 
 let loadedParse5: Parse5Module | undefined;
-let parse5LoadError: unknown;
-try {
-  loadedParse5 = await import("parse5");
-} catch (cause) {
-  parse5LoadError = cause;
-}
 
 export type HtmlWhitespacePolicy = "preserve-tags" | "normalize-tags";
 
@@ -74,9 +68,7 @@ const collectTagRanges = (node: LocatedNode, ranges: SourceRange[]): void => {
 };
 
 export const normalizeHtmlTagWhitespace = (html: string): string => {
-  if (!loadedParse5) {
-    throw optionalPeerError("parse5", "HTML tag whitespace normalization", parse5LoadError);
-  }
+  loadedParse5 ??= requireOptionalPeer<Parse5Module>("parse5", "HTML tag whitespace normalization");
   const { parse, parseFragment } = loadedParse5;
   const errors: unknown[] = [];
   const options = {

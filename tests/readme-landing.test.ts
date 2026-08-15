@@ -24,7 +24,10 @@ describe("README landing page", () => {
     expect(readme).toContain("__tachyonMountKeyedList");
     expect(readme).toContain("## Measured Size");
     expect(readme).toContain("pnpm check:browser-entry");
-    expect(readme).toContain("600 bytes");
+    const sizes = JSON.parse(await readFile("scripts/browser-bundle-sizes.json", "utf8")) as {
+      browserEntryMinifiedBytes: number;
+    };
+    expect(readme).toContain(`${sizes.browserEntryMinifiedBytes} bytes`);
     expect(readme).toContain("pnpm check:quick-example-size");
     expect(readme).toMatch(/Quick example client bundle: \d+ bytes minified, \d+ bytes Brotli/);
     expect(readme).toContain("## Keyed List Benchmark");
