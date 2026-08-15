@@ -1,5 +1,6 @@
 import { err, ok, type Result } from "../result.js";
 import { isDangerousAttributeName } from "../attribute-policy.js";
+import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
 import { isAssignableExpression, parseExpression } from "./expression.js";
 import type {
   CompilerError,
@@ -147,6 +148,20 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
         start: attr.nameStart,
         end: attr.nameEnd,
       });
+    }
+    if (
+      attr.value !== true &&
+      !readExpressionAttribute(attr.value) &&
+      urlPurposeForAttribute(node.tagName, attr.name)
+    ) {
+      try {
+        sanitizeUrlAttributeValue(node.tagName, attr.name, attr.value);
+      } catch (error) {
+        return semanticError(error instanceof Error ? error.message : `Unsafe URL for ${attr.name}.`, {
+          start: attr.valueStart,
+          end: attr.valueEnd,
+        });
+      }
     }
   }
   if (node.tagName === "for") {

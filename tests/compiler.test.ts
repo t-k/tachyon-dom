@@ -31,6 +31,14 @@ const mountClientTextBindings = (
 };
 
 describe("HTML-first compiler", () => {
+  const activeUrlCorpus = [
+    "javascript:alert(1)",
+    " JAVASCRIPT:alert(1)",
+    "java\tscript:alert(1)",
+    "vbscript:msgbox(1)",
+    "data:text/html,<script>alert(1)</script>",
+  ];
+
   it("preserves element, attribute, and text source spans in parser nodes", () => {
     const result = parseTemplate(`<main>\n  <input bind:value={name}>text\n</main>`);
     if (!result.ok) throw new Error(result.error.message);
@@ -204,6 +212,65 @@ describe("HTML-first compiler", () => {
     const result = compileTemplate(`<button on:click={save} aria-label="Save" data-kind={kind}></button>`);
 
     expect(result.ok).toBe(true);
+  });
+
+  it.each(activeUrlCorpus)("rejects active URL %j before lowering every compiler target", (value) => {
+    for (const [tagName, attribute] of [
+      ["a", "href"],
+      ["img", "src"],
+      ["form", "action"],
+      ["button", "formaction"],
+      ["use", "xlink:href"],
+    ] as const) {
+      const source = `<${tagName} ${attribute}="${value}"></${tagName}>`;
+      const result = compileTemplate(source);
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected unsafe URL diagnostic.");
+      expect(result.error.message).toBe(`Unsafe URL for ${attribute}.`);
+    }
+  });
+
+  it("rejects active dynamic URLs in interpreted, generated server, and stream output", async () => {
+    const result = compileTemplate(`<a href={url}>link</a>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const scope = { url: "java\tscript:alert(1)" };
+
+    expect(() => renderServerTemplate(result.value, scope)).toThrow("Unsafe URL for href");
+
+    const serverCode = generateServerModule(result.value);
+    const serverModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(serverCode).toString("base64")}`
+    )) as {
+      render(scope: Record<string, unknown>): string;
+    };
+    expect(() => serverModule.render(scope)).toThrow("Unsafe URL for href");
+
+    const streamCode = generateServerStreamModule(result.value);
+    const streamModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(streamCode).toString("base64")}`
+    )) as {
+      stream(scope: Record<string, unknown>): AsyncIterable<string>;
+    };
+    const consumeStream = async (): Promise<void> => {
+      for await (const _chunk of streamModule.stream(scope)) {
+        // Consume every chunk so URL validation runs at the generated yield boundary.
+      }
+    };
+    await expect(consumeStream()).rejects.toThrow("Unsafe URL for href");
+  });
+
+  it("normalizes a mixed-case dynamic URL attribute consistently", async () => {
+    const result = compileTemplate(`<img SRC={url}>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const scope = { url: " \n/images/avatar.png " };
+
+    expect(renderServerTemplate(result.value, scope)).toBe(`<img SRC="/images/avatar.png">`);
+    const code = generateServerModule(result.value);
+    const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
+      render(scope: Record<string, unknown>): string;
+    };
+    expect(module.render(scope)).toBe(`<img SRC="/images/avatar.png">`);
   });
 
   it.each([

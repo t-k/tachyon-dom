@@ -2,6 +2,7 @@ import { escapeHtml } from "./html-escape.js";
 import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
 import { applyHtmlWhitespace, resolveHtmlWhitespacePolicy, type HtmlWhitespacePolicy } from "./html-whitespace.js";
+import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "./url-policy.js";
 
 export type RouteParams = Record<string, string>;
 
@@ -623,30 +624,29 @@ export const applySecurityHeaders = (response: Response, headers: Headers): Resp
   });
 };
 
-export const requireUser =
-  <User>(
-    getUser: (context: { request: Request; url: URL }) => User | undefined | null | Promise<User | undefined | null>,
-    options: UserGuardOptions<User> = {},
-  ): RouteMiddleware => {
-    const middleware: RouteMiddleware = async (context) => {
-      const authorizationState = (context as InternalRouteMiddlewareContext)[userGuardAuthorizationState];
-      if (!authorizationState) {
-        throw new TypeError("requireUser must receive the complete router-supplied middleware context.");
-      }
-      const { request, url } = context;
-      const user = await getUser({ request, url });
-      if (user) {
-        await options.onUser?.({ request, url, user });
-        authorizationState.authorized = true;
-        return;
-      }
-      if (options.forbidden) {
-        return options.forbidden({ request, url });
-      }
-      return redirect(options.getRedirect?.({ request, url }) ?? options.redirectTo ?? "/login");
-    };
-    return middleware;
+export const requireUser = <User>(
+  getUser: (context: { request: Request; url: URL }) => User | undefined | null | Promise<User | undefined | null>,
+  options: UserGuardOptions<User> = {},
+): RouteMiddleware => {
+  const middleware: RouteMiddleware = async (context) => {
+    const authorizationState = (context as InternalRouteMiddlewareContext)[userGuardAuthorizationState];
+    if (!authorizationState) {
+      throw new TypeError("requireUser must receive the complete router-supplied middleware context.");
+    }
+    const { request, url } = context;
+    const user = await getUser({ request, url });
+    if (user) {
+      await options.onUser?.({ request, url, user });
+      authorizationState.authorized = true;
+      return;
+    }
+    if (options.forbidden) {
+      return options.forbidden({ request, url });
+    }
+    return redirect(options.getRedirect?.({ request, url }) ?? options.redirectTo ?? "/login");
   };
+  return middleware;
+};
 
 export const defineRouteModule = <Data = unknown, ActionResult = unknown>(
   module: RouteModule<Data, ActionResult>,
@@ -1002,57 +1002,44 @@ const requestFor = (input: Request | URL | string): Request => {
 };
 
 const headAttributeNamePattern = /^[A-Za-z_:][A-Za-z0-9_.:-]*$/;
-const urlAttributeNames = new Set(["href", "src", "action", "formaction"]);
-
-const isSafeAttributeUrl = (value: string): boolean => {
-  const controlCharacterPattern = /[\u0000-\u001F\u007F]/;
-  if (controlCharacterPattern.test(value)) {
-    return false;
-  }
-  const trimmed = value.trim().toLowerCase();
-  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
-    try {
-      const decoded = decodeURIComponent(trimmed);
-      return !decoded.startsWith("//") && !decoded.includes("\\") && !controlCharacterPattern.test(decoded);
-    } catch {
-      return false;
-    }
-  }
-  if (trimmed.startsWith("#") || trimmed.startsWith("mailto:")) {
-    return true;
-  }
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:";
-  } catch {
-    return false;
-  }
-};
-
-const isSafeHeadAttribute = (name: string, value: string): boolean => {
+const safeHeadAttributeValue = (element: string, name: string, value: string): string | undefined => {
   const normalized = name.toLowerCase();
   if (!headAttributeNamePattern.test(name) || normalized.startsWith("on")) {
-    return false;
+    return undefined;
   }
-  return !urlAttributeNames.has(normalized) || isSafeAttributeUrl(value);
+  if (!urlPurposeForAttribute(element, normalized)) return value;
+  try {
+    return sanitizeUrlAttributeValue(element, normalized, value);
+  } catch {
+    return undefined;
+  }
 };
 
-const hasUnsafeUrlAttribute = (attrs: Record<string, string>): boolean =>
+const hasUnsafeUrlAttribute = (element: string, attrs: Record<string, string>): boolean =>
   Object.entries(attrs).some(([name, value]) => {
     const normalized = name.toLowerCase();
-    return urlAttributeNames.has(normalized) && !isSafeAttributeUrl(value);
+    if (!urlPurposeForAttribute(element, normalized)) return false;
+    try {
+      sanitizeUrlAttributeValue(element, normalized, value);
+      return false;
+    } catch {
+      return true;
+    }
   });
 
 const renderAttributes = (
+  element: string,
   attrs: Record<string, string>,
   options: { dropOnUnsafeUrl?: boolean } = {},
 ): string | undefined => {
-  if (options.dropOnUnsafeUrl && hasUnsafeUrlAttribute(attrs)) {
+  if (options.dropOnUnsafeUrl && hasUnsafeUrlAttribute(element, attrs)) {
     return undefined;
   }
   return Object.entries(attrs)
-    .filter(([name, value]) => isSafeHeadAttribute(name, value))
-    .map(([name, value]) => ` ${name}="${escapeHtml(value)}"`)
+    .flatMap(([name, value]) => {
+      const safeValue = safeHeadAttributeValue(element, name, value);
+      return safeValue === undefined ? [] : [` ${name}="${escapeHtml(safeValue)}"`];
+    })
     .join("");
 };
 
@@ -1062,17 +1049,17 @@ export const renderHead = (descriptor: RouteHeadDescriptor, options: { nonce?: s
     chunks.push(`<title>${escapeHtml(descriptor.title)}</title>`);
   }
   for (const meta of descriptor.metas ?? []) {
-    chunks.push(`<meta${renderAttributes(meta) ?? ""}>`);
+    chunks.push(`<meta${renderAttributes("meta", meta) ?? ""}>`);
   }
   for (const link of descriptor.links ?? []) {
-    const attrs = renderAttributes(link, { dropOnUnsafeUrl: true });
+    const attrs = renderAttributes("link", link, { dropOnUnsafeUrl: true });
     if (attrs !== undefined) {
       chunks.push(`<link${attrs}>`);
     }
   }
   for (const script of descriptor.scripts ?? []) {
     chunks.push(
-      `<script${renderAttributes({ ...script, ...(options.nonce && !script.nonce ? { nonce: options.nonce } : {}) }) ?? ""}></script>`,
+      `<script${renderAttributes("script", { ...script, ...(options.nonce && !script.nonce ? { nonce: options.nonce } : {}) }) ?? ""}></script>`,
     );
   }
   return chunks.join("");
@@ -1088,7 +1075,7 @@ export const renderResourceHints = (resources: readonly RouteResource[]): string
           attrs[name] = value;
         }
       }
-      const rendered = renderAttributes(attrs, { dropOnUnsafeUrl: true });
+      const rendered = renderAttributes("link", attrs, { dropOnUnsafeUrl: true });
       return rendered === undefined ? "" : `<link${rendered}>`;
     })
     .join("");

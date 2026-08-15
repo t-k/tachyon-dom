@@ -1,5 +1,9 @@
 import { unsafeHtml, type TrustedHtml } from "./router.js";
 import { timingSafeEqual } from "./constant-time.js";
+import { sanitizeUrlAttribute, urlPurposeForAttribute, type UrlAttributeName } from "./url-policy.js";
+
+export { sanitizeUrlAttribute, UnsafeUrlError } from "./url-policy.js";
+export type { UrlAttributeContext, UrlAttributeName, UrlPurpose } from "./url-policy.js";
 
 export type CsrfOptions = {
   token: string;
@@ -88,32 +92,8 @@ const escapeText = (value: string): string =>
     .replaceAll(`"`, "&quot;")
     .replaceAll("'", "&#39;");
 
-const isSafeUrl = (value: string, allowedOrigins: readonly string[] = []): boolean => {
-  const controlCharacterPattern = /[\u0000-\u001F\u007F]/;
-  if (controlCharacterPattern.test(value)) {
-    return false;
-  }
-  const trimmed = value.trim().toLowerCase();
-  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
-    try {
-      const decoded = decodeURIComponent(trimmed);
-      return !decoded.startsWith("//") && !decoded.includes("\\") && !controlCharacterPattern.test(decoded);
-    } catch {
-      return false;
-    }
-  }
-  if (trimmed.startsWith("#") || trimmed.startsWith("mailto:")) {
-    return true;
-  }
-  try {
-    const url = new URL(value);
-    return (url.protocol === "https:" || url.protocol === "http:") && allowedOrigins.includes(url.origin);
-  } catch {
-    return false;
-  }
-};
-
 const sanitizeAttributes = (
+  element: string,
   raw: string,
   allowedAttributes: Set<string>,
   allowedUrlOrigins: readonly string[],
@@ -125,10 +105,20 @@ const sanitizeAttributes = (
         return [];
       }
       const value = match[2] ?? match[3] ?? match[4] ?? "";
-      if ((name === "href" || name === "src" || name === "action") && value && !isSafeUrl(value, allowedUrlOrigins)) {
-        return [];
+      const purpose = urlPurposeForAttribute(element, name);
+      let safeValue = value;
+      if (purpose && value) {
+        const result = sanitizeUrlAttribute({
+          element,
+          attribute: name as UrlAttributeName,
+          purpose,
+          value,
+          allowedOrigins: allowedUrlOrigins,
+        });
+        if (!result.ok) return [];
+        safeValue = result.value;
       }
-      return value === "" ? [` ${name}`] : [` ${name}="${escapeAttribute(value)}"`];
+      return safeValue === "" ? [` ${name}`] : [` ${name}="${escapeAttribute(safeValue)}"`];
     })
     .join("");
 
@@ -163,7 +153,7 @@ export const sanitizeHtml = (markup: string, options: SanitizeHtmlOptions = {}):
     if (match[0].startsWith("</")) {
       sanitized += `</${name}>`;
     } else {
-      sanitized += `<${name}${sanitizeAttributes(rawAttributes, allowedAttributes, allowedUrlOrigins)}>`;
+      sanitized += `<${name}${sanitizeAttributes(name, rawAttributes, allowedAttributes, allowedUrlOrigins)}>`;
     }
   }
   sanitized += escapeText(withoutScripts.slice(lastIndex));

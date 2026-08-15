@@ -92,6 +92,28 @@ describe("attribute and form runtime helpers", () => {
     expect(button.onclick).toBeNull();
   });
 
+  it.each([
+    "javascript:alert(1)",
+    " JAVASCRIPT:alert(1)",
+    "java\tscript:alert(1)",
+    "vbscript:msgbox(1)",
+    "data:text/html,<script>alert(1)</script>",
+  ])("rejects active URL %j before mutating a client attribute", (value) => {
+    document.body.innerHTML = `<a></a><img><form></form><button></button><svg><use></use></svg>`;
+    const cases = [
+      [document.querySelector("a"), "href"],
+      [document.querySelector("img"), "src"],
+      [document.querySelector("form"), "action"],
+      [document.querySelector("button"), "formaction"],
+      [document.querySelector("use"), "xlink:href"],
+    ] as const;
+    for (const [element, attribute] of cases) {
+      if (!element) throw new Error(`Missing ${attribute} element.`);
+      expect(() => setAttributeValue(element, attribute, value)).toThrow(`Unsafe URL for ${attribute}`);
+      expect(element.hasAttribute(attribute)).toBe(false);
+    }
+  });
+
   it("binds text inputs and checkbox controls", () => {
     document.body.innerHTML = `<input id="name"><input id="active" type="checkbox">`;
     const name = document.querySelector("#name");

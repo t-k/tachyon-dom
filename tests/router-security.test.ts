@@ -54,6 +54,7 @@ describe("router security helpers", () => {
         allowedUrlOrigins: ["https://assets.example"],
       }).value,
     ).toBe(`<a href="https://assets.example/path">approved</a>`);
+    expect(sanitizeHtml(`<a href=" \n/safe ">normalized</a>`).value).toBe(`<a href="/safe">normalized</a>`);
   });
 
   it("escapes malformed or unclosed tags that the sanitizer cannot parse safely", () => {
@@ -480,6 +481,12 @@ describe("router security helpers", () => {
         scripts: [{ src: "javascript:alert(1)", type: "module", onload: "alert(1)" }],
       }),
     ).toBe(`<link rel="stylesheet" href="/app.css"><script type="module"></script>`);
+  });
+
+  it("emits the shared canonical URL from head descriptors", () => {
+    expect(renderHead({ links: [{ rel: "stylesheet", href: " \nhttps://assets.example/app.css " }] })).toBe(
+      `<link rel="stylesheet" href="https://assets.example/app.css">`,
+    );
   });
 
   it("parses cookies and commits in-memory sessions", async () => {

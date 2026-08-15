@@ -1,6 +1,11 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
 import {
+  generatedUrlAttributeHelperLines,
+  sanitizeUrlAttributeValue,
+  urlPurposeForAttribute,
+} from "../../url-policy.js";
+import {
   attrExpression,
   attrString,
   childPathEntries,
@@ -162,7 +167,10 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
     if (expression) {
       const value = readPath(scope, expression);
       if (value != null && value !== false) {
-        attrs.push(` ${attr.name}="${escapeHtml(value)}"`);
+        const safeValue = urlPurposeForAttribute(node.tagName, attr.name)
+          ? sanitizeUrlAttributeValue(node.tagName, attr.name, String(value))
+          : value;
+        attrs.push(` ${attr.name}="${escapeHtml(safeValue)}"`);
       }
       continue;
     }
@@ -281,8 +289,11 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
     const expression = readExpressionAttribute(attr.value);
     if (expression) {
       const value = expressionToScopeAccess(expression, locals);
+      const safeValue = urlPurposeForAttribute(node.tagName, attr.name)
+        ? `__tachyonSafeUrlAttribute(${jsString(node.tagName)}, ${jsString(attr.name)}, ${value})`
+        : value;
       parts.push(
-        `(${value} == null || ${value} === false ? "" : ${jsString(` ${attr.name}="`)} + escapeHtml(${value}) + ${jsString(`"`)} )`,
+        `(${value} == null || ${value} === false ? "" : ${jsString(` ${attr.name}="`)} + escapeHtml(${safeValue}) + ${jsString(`"`)} )`,
       );
       continue;
     }
@@ -433,6 +444,15 @@ const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string
 
 const serverModuleCache = new WeakMap<CompiledTemplate, string>();
 
+export const hasDynamicUrlAttribute = (node: TemplateNode): boolean =>
+  node.type === "element" &&
+  (node.attrs.some(
+    (attribute) =>
+      Boolean(readExpressionAttribute(attribute.value)) &&
+      urlPurposeForAttribute(node.tagName, attribute.name) !== undefined,
+  ) ||
+    node.children.some(hasDynamicUrlAttribute));
+
 export const generateServerModule = (template: CompiledTemplate): string => {
   const cached = serverModuleCache.get(template);
   if (cached) {
@@ -440,6 +460,7 @@ export const generateServerModule = (template: CompiledTemplate): string => {
   }
   const lines = [
     ...generatedEscapeHtmlHelperLines,
+    ...(hasDynamicUrlAttribute(template.root) ? generatedUrlAttributeHelperLines : []),
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll(">", "\\\\u003e");`,
     `const ATTRIBUTE_ESCAPE = { "&": "&amp;", '"': "&quot;", "<": "&lt;" };`,

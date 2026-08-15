@@ -35,6 +35,10 @@ const route: RouteDefinition = {
 
 ## URLs and Redirects
 
+HTML escaping does not make an active URL scheme safe. The compiler, client attribute runtime, generated server and stream renderers, and `attr()` reject `javascript:`, `vbscript:`, executable `data:`, control-obfuscated schemes, protocol-relative references, decoded backslashes, and malformed percent encoding in `href`, `src`, `action`, `formaction`, and `xlink:href`. Direct `html` URL interpolation must supply the complete attribute value; build prefixes and suffixes before interpolation so the final URL can be validated as one value.
+
+Use the public `sanitizeUrlAttribute(context)` Result API when validating a URL before it reaches one of those boundaries. The context must identify the element, attribute, value, and its `document-navigation`, `subresource`, or `form-submission` purpose. Omitting `allowedOrigins` accepts HTTP(S) origins after scheme validation, which is appropriate for author-controlled template and head URLs. Passing an empty `allowedOrigins` array rejects absolute HTTP(S) URLs; passing explicit origins accepts only exact matches. `mailto:` and `tel:` are limited to document navigation. Invalid attribute-purpose combinations return an `UnsafeUrlError` instead of falling back to a context-free boolean.
+
 The built-in sanitizer rejects protocol-relative URLs and removes absolute HTTP(S) URLs unless their origin appears in `allowedUrlOrigins`. `redirect()` accepts path-relative targets by default. External redirects require `allowExternal: true` and an explicit `allowedOrigins` entry.
 
 ## Hosts, Proxies, and Origins

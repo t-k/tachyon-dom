@@ -18,6 +18,8 @@ export {
 export { createStore } from "./runtime/store.js";
 export { readTextStreamChunks } from "./runtime/stream-client.js";
 export { err, ok };
+export { sanitizeUrlAttribute, UnsafeUrlError } from "./url-policy.js";
 export { textAt } from "./runtime/text.js";
 export type { KeyedRows, KeyedRowsOptions } from "./runtime/keyed-rows.js";
 export type { Err, Ok, Result } from "./result.js";
+export type { UrlAttributeContext, UrlAttributeName, UrlPurpose } from "./url-policy.js";

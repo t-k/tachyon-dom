@@ -1,5 +1,6 @@
 import { escapeHtml as escapeText } from "../html-escape.js";
 import { validateAttributeName } from "../attribute-policy.js";
+import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
 
 const htmlFragmentBrand = Symbol("tachyon.htmlFragment");
 const htmlAttributeBrand = Symbol("tachyon.htmlAttribute");
@@ -124,6 +125,32 @@ const renderTagValue = (value: HtmlValue): string => {
 const containsHtmlFragment = (value: HtmlValue): boolean =>
   isHtmlFragment(value) || (Array.isArray(value) && value.some(containsHtmlFragment));
 
+const plainAttributeValue = (value: HtmlValue): string => {
+  if (value == null || value === false) return "";
+  if (Array.isArray(value)) return value.map(plainAttributeValue).join("");
+  if (isHtmlFragment(value)) {
+    throw new TypeError("Trusted HTML fragments can only be interpolated in text context");
+  }
+  if (isHtmlAttribute(value)) {
+    throw new TypeError("Attribute fragments can only be interpolated inside an opening tag");
+  }
+  return String(value);
+};
+
+const currentUrlAttributeContext = (
+  output: string,
+): { element: string; attribute: string; prefix: string } | undefined => {
+  const tagStart = output.lastIndexOf("<");
+  if (tagStart < 0) return undefined;
+  const openTag = output.slice(tagStart);
+  const element = /^<\s*([A-Za-z][A-Za-z0-9:-]*)/.exec(openTag)?.[1];
+  const attributeMatch = /([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*(?:(["'])([^"']*)?)?$/.exec(openTag);
+  const attribute = attributeMatch?.[1];
+  return element && attribute && urlPurposeForAttribute(element, attribute)
+    ? { element, attribute, prefix: attributeMatch?.[3] ?? "" }
+    : undefined;
+};
+
 const isHtmlWhitespace = (char: string): boolean =>
   char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f";
 
@@ -230,7 +257,19 @@ export const attr = (name: string, value: unknown): HtmlAttribute => {
   if (value === true) {
     return attributeFragment(` ${name}`);
   }
-  return attributeFragment(` ${name}="${escapeAttribute(value)}"`);
+  const normalizedName = name.toLowerCase();
+  const defaultElement =
+    normalizedName === "src"
+      ? "img"
+      : normalizedName === "action"
+        ? "form"
+        : normalizedName === "formaction"
+          ? "button"
+          : "a";
+  const safeValue = urlPurposeForAttribute(defaultElement, normalizedName)
+    ? sanitizeUrlAttributeValue(defaultElement, normalizedName, String(value))
+    : value;
+  return attributeFragment(` ${name}="${escapeAttribute(safeValue)}"`);
 };
 
 export const booleanAttr = (name: string, enabled: boolean | null | undefined): HtmlAttribute => {
@@ -268,7 +307,22 @@ export const html = (strings: TemplateStringsArray, ...values: readonly HtmlValu
     if (index < values.length) {
       const value = values[index];
       const interpolationState = state;
-      const rendered = renderValue(value, state, strings[index + 1] ?? "", index === values.length - 1);
+      const urlContext =
+        state === "before-attribute-value" || state === "double-quoted-attribute" || state === "single-quoted-attribute"
+          ? currentUrlAttributeContext(output)
+          : undefined;
+      const nextLiteral = strings[index + 1] ?? "";
+      if (
+        urlContext &&
+        state !== "before-attribute-value" &&
+        (urlContext.prefix !== "" || !nextLiteral.startsWith(state === "double-quoted-attribute" ? '"' : "'"))
+      ) {
+        throw new TypeError("URL attribute interpolation must provide the complete value");
+      }
+      const safeValue = urlContext
+        ? sanitizeUrlAttributeValue(urlContext.element, urlContext.attribute, plainAttributeValue(value))
+        : value;
+      const rendered = renderValue(safeValue, state, nextLiteral, index === values.length - 1);
       output += rendered;
       if (interpolationState === "before-attribute-value") {
         state = "tag";

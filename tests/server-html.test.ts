@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { attr, booleanAttr, classList, html, join, rawHtml } from "../src/server/html";
 
 describe("server html helper", () => {
+  const activeUrlCorpus = [
+    "javascript:alert(1)",
+    " JAVASCRIPT:alert(1)",
+    "java\tscript:alert(1)",
+    "vbscript:msgbox(1)",
+    "data:text/html,<script>alert(1)</script>",
+  ];
+
   it("escapes text interpolation by default", () => {
     const view = html`<p>${`<Ada & "Grace">`}</p>`;
 
@@ -83,4 +91,28 @@ describe("server html helper", () => {
       }
     },
   );
+
+  it.each(activeUrlCorpus)("rejects active URL %j in direct HTML attributes", (value) => {
+    for (const name of ["href", "src", "action", "formaction", "xlink:href"]) {
+      expect(() => attr(name, value)).toThrow(`Unsafe URL for ${name}`);
+    }
+    expect(() => html`<a href=${value}>link</a>`).toThrow("Unsafe URL for href");
+    expect(() => html`<a href="${value}">link</a>`).toThrow("Unsafe URL for href");
+  });
+
+  it.each(["/relative", "#fragment", "mailto:user@example.test", "tel:+12025550123", "https://example.test/a"])(
+    "allows contextual navigation URL %j in direct HTML attributes",
+    (value) => {
+      expect(String(attr("href", value))).toContain(value);
+    },
+  );
+
+  it("requires direct URL interpolation to provide the complete attribute value", () => {
+    expect(() => html`<a href="/users/${"profile"}">profile</a>`).toThrow(
+      "URL attribute interpolation must provide the complete value",
+    );
+    expect(() => html`<a href="${"/users"}/profile">profile</a>`).toThrow(
+      "URL attribute interpolation must provide the complete value",
+    );
+  });
 });

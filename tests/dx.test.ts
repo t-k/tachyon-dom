@@ -427,6 +427,16 @@ describe("DX helpers", () => {
     expect(security).toContain("compiler, client runtime, and direct server HTML helpers");
   });
 
+  it("documents contextual URL safety and origin semantics", async () => {
+    const security = await readFile("docs/security.md", "utf8");
+
+    expect(security).toContain("sanitizeUrlAttribute(context)");
+    expect(security).toContain("document-navigation`, `subresource`, or `form-submission`");
+    expect(security).toContain("Omitting `allowedOrigins` accepts HTTP(S) origins");
+    expect(security).toContain("Passing an empty `allowedOrigins` array rejects absolute HTTP(S) URLs");
+    expect(security).toContain("HTML escaping does not make an active URL scheme safe");
+  });
+
   it("documents secure session cookie option merging and prefix constraints", async () => {
     const routing = await readFile("docs/routing.md", "utf8");
 

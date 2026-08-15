@@ -27,4 +27,23 @@ describe("server HTML browser security", () => {
       await page.close();
     }
   });
+
+  it("rejects active navigation schemes before browser parsing", async () => {
+    expect(() => html`<a href=${"java\tscript:globalThis.__tachyonXss = true"}>unsafe</a>`).toThrow(
+      "Unsafe URL for href",
+    );
+
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      const markup = String(html`<a id="subject" href=${"/safe onclick=globalThis.__tachyonXss = true"}>safe</a>`);
+      await page.setContent(markup);
+
+      expect(await page.locator("#subject").evaluate((element) => element.getAttributeNames())).toEqual(["id", "href"]);
+      expect(await page.locator("#subject").getAttribute("href")).toBe("/safe onclick=globalThis.__tachyonXss = true");
+      expect(await page.evaluate(() => "__tachyonXss" in globalThis)).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
 });

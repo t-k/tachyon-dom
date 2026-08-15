@@ -1,5 +1,6 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
+import { generatedUrlAttributeHelperLines } from "../../url-policy.js";
 import {
   attrExpression,
   attrString,
@@ -14,7 +15,7 @@ import {
   renderableChildren,
   textExpressionSegments,
 } from "../utils.js";
-import { renderOpenTagExpression } from "./server.js";
+import { hasDynamicUrlAttribute, renderOpenTagExpression } from "./server.js";
 
 const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, indent: string): string[] => {
   const statements: string[] = [];
@@ -237,6 +238,7 @@ export const generateServerStreamModule = (template: CompiledTemplate): string =
   });
   const lines = [
     ...generatedEscapeHtmlHelperLines,
+    ...(hasDynamicUrlAttribute(template.root) ? generatedUrlAttributeHelperLines : []),
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `export const stream = async function* (scope) {`,
     `  const __tachyonFlushBytes = 8192;`,

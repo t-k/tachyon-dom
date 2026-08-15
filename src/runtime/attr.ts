@@ -1,4 +1,5 @@
 import { validateAttributeName } from "../attribute-policy.js";
+import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
 
 export const setAttributeValue = (element: Element, name: string, value: unknown): void => {
   const validatedName = validateAttributeName(name);
@@ -22,14 +23,19 @@ export const setAttributeValue = (element: Element, name: string, value: unknown
     }
     return;
   }
+  let resolvedValue = value;
   if (value === true) {
     element.setAttribute(name, "");
   } else {
-    element.setAttribute(name, String(value));
+    const text = String(value);
+    resolvedValue = urlPurposeForAttribute(element.localName, name)
+      ? sanitizeUrlAttributeValue(element.localName, name, text)
+      : text;
+    element.setAttribute(name, String(resolvedValue));
   }
   if (name in element) {
     try {
-      (element as unknown as Record<string, unknown>)[name] = value;
+      (element as unknown as Record<string, unknown>)[name] = resolvedValue;
     } catch {
       // Some readonly DOM properties throw on assignment.
     }
