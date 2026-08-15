@@ -156,6 +156,9 @@ describe("DX helpers", () => {
 
   it.each([
     [{ command: "build", mode: "production" }, false],
+    [{ command: "build", mode: "staging" }, false],
+    [{ command: "build", mode: "test" }, false],
+    [{ command: "build" }, false],
     [{ command: "serve", mode: "development" }, true],
     [{ command: "build", mode: "production", sourcemap: true }, true],
     [{ command: "build", mode: "production", productionSourceMap: true }, true],
@@ -1998,6 +2001,37 @@ void chunks;
     ).toBe(true);
   });
 
+  it.each(["staging", "test"])("omits source maps from complete %s build transforms by default", async (mode) => {
+    const source = `<button>{label}</button>`;
+    const uploaded: string[] = [];
+    const plugin = tachyonDom({
+      onSourceMap: ({ id }) => {
+        uploaded.push(id);
+      },
+    });
+    if (typeof plugin.configResolved === "function") {
+      await plugin.configResolved.call({} as never, { command: "build", mode } as never);
+    } else if (plugin.configResolved) {
+      await plugin.configResolved.handler.call({} as never, { command: "build", mode } as never);
+    }
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+
+    const result = await plugin.transform.call(
+      {
+        error(error: string): never {
+          throw new Error(error);
+        },
+      } as never,
+      source,
+      `/src/${mode}.tachyon.html`,
+    );
+    const code = typeof result === "object" && result?.code ? String(result.code) : "";
+
+    expect(code).not.toContain("sourceMappingURL");
+    expect(code).not.toContain(source);
+    expect(uploaded).toEqual([`/src/${mode}.tachyon.html`]);
+  });
+
   it("embeds production source only after explicit opt-in", async () => {
     const source = `<button>{label}</button>`;
     const plugin = tachyonDom({ productionSourceMap: true });
@@ -2057,7 +2091,8 @@ void chunks;
   it("documents production source-map defaults and precedence", async () => {
     const appVite = await readFile("docs/app-vite.md", "utf8");
 
-    expect(appVite).toContain("Production builds omit inline source maps by default");
+    expect(appVite).toContain("All build commands omit inline source maps by default");
+    expect(appVite).toContain("custom modes such as `staging` and `test`");
     expect(appVite).toContain("`sourcemap` has highest precedence");
     expect(appVite).toContain("`productionSourceMap: true`");
     expect(appVite).toContain("`onSourceMap` still receives the map when inline emission is disabled");

@@ -31,7 +31,7 @@ export const shouldEmitSourceMap = (context: SourceMapBuildContext = {}): boolea
   if (context.sourcemap !== undefined) {
     return context.sourcemap;
   }
-  if (context.command === "build" && context.mode === "production") {
+  if (context.command === "build") {
     return context.productionSourceMap === true;
   }
   return true;
