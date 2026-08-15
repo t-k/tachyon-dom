@@ -645,7 +645,7 @@ const starterPackageJsonSource = (): string =>
         typecheck: "tsc --noEmit",
       },
       dependencies: {
-        "tachyon-dom": "^0.1.1",
+        "tachyon-dom": "^0.1.4",
       },
       devDependencies: {
         "@types/node": "^24.0.3",

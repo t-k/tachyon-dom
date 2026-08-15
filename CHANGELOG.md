@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-15
+
+### Added
+
+- Added safe deferred-data reads, bounded client loader caching, keyed virtual-list updates, and owner-aware reactive error boundaries.
+- Added package, release, browser, hydration, and security regression contracts covering all public compiler, runtime, router, and adapter paths.
+
+### Changed
+
+- Made TypeScript, OXC, and language-server tooling optional peers while preserving cross-runtime HTML normalization; runtime-only installation size drops from approximately 36 MiB to 3.3 MiB.
+- Made Brotli size validation tolerant of bounded encoder variation while retaining exact minified baselines and absolute budgets.
+
+### Fixed
+
+- Fixed hydration paths for empty text, implied table containers, SFC script elements, loop metadata, dynamic classes, refs, keyed rows, and virtualized rows.
+- Preserved middleware response bytes, bodyless status semantics, malformed-path 400 responses, route parity diagnostics, form submission locking, and loader cache freshness across Workers, Node, and Lambda adapters.
+- Restored public router examples, release history, and package repository metadata.
+
+### Security
+
+- Rejected unsafe raw-text interpolation, unquoted HTML interpolation, dangerous attributes, and unsafe URL schemes across compiler, client, buffered SSR, and streaming targets.
+- Hardened forwarded protocol validation, secure session-cookie defaults, static dispatch authorization documentation, production source-map defaults, and adapter error boundaries.
+
 ## [0.1.3] - 2026-07-26
 
 ### Fixed
@@ -60,7 +83,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Initial public release of the experimental HTML-first compiler, fine-grained runtime, SSR and streaming targets, router, adapters, Vite integration, CLI, and project initializer.
 
-[Unreleased]: https://github.com/t-k/tachyon-dom/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/t-k/tachyon-dom/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/t-k/tachyon-dom/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/t-k/tachyon-dom/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/t-k/tachyon-dom/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/t-k/tachyon-dom/compare/v0.1.0...v0.1.1
