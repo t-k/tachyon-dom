@@ -37,6 +37,8 @@ jobs:
 
       - run: pnpm verify:package
 
+      - run: pnpm verify:clean-consumer
+
       - run: pnpm verify:starters
 
       - run: pnpm check:exports

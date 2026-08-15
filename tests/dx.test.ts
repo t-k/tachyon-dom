@@ -441,6 +441,7 @@ describe("DX helpers", () => {
     expect(ci).toContain("pnpm check:exports");
     expect(ci).toContain("pnpm check:size");
     expect(ci).toContain("pnpm check:browser-entry");
+    expect(ci).toContain("pnpm verify:clean-consumer");
     expect(ci).toContain("pnpm verify:whitespace-types");
     expect(ci).toContain("github.event_name == 'workflow_dispatch'");
     expect(ci).toContain("pnpm bench:local:smoke");
