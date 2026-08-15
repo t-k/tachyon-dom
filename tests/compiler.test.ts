@@ -1083,6 +1083,31 @@ describe("HTML-first compiler", () => {
     ]);
   });
 
+  it.each([
+    `<ul><for each={rows} key={row.id}><li hydrate:idle>{row.label}</li></for></ul>`,
+    `<ul><for each={rows} key={row.id}><if test={row.visible}><li hydrate:id={row.id}>{row.label}</li></if></for></ul>`,
+    `<main><for each={rows} key={row.id}><component name="Row"><p>{row.label}</p></component></for></main>`,
+    `<main><for each={rows} key={row.id}><section><store value={row.value}/><p>{value}</p></section></for></main>`,
+  ])("rejects unsupported row-local hydration metadata in %s", (source) => {
+    const result = compileTemplate(source);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected row-local metadata diagnostic.");
+    expect(result.error.message).toContain("inside <for> is not supported");
+    expect(result.error.offset).toBeGreaterThan(0);
+  });
+
+  it("keeps ordinary list bindings and top-level hydration metadata supported", () => {
+    const result = compileTemplate(
+      `<main hydrate:idle><ul><for each={rows} key={row.id}><li on:click={select} ref={rowRef}>{row.label}</li></for></ul></main>`,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.client.hydrationBoundaries).toHaveLength(1);
+    expect(result.value.client.bindings.some((binding) => binding.kind === "list")).toBe(true);
+  });
+
   it("renders keyed lists on the server", () => {
     const result = compileTemplate(
       `<tbody><for each={rows} key={row.id}><tr class:danger={row.selected}><td>{row.id}</td><td>{row.label}</td></tr></for></tbody>`,

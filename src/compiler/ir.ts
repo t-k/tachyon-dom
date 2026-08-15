@@ -233,7 +233,11 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
   return ok(undefined);
 };
 
-const validateTree = (node: TemplateNode, hydrateIds: Set<string>): Result<void, CompilerError> => {
+const validateTree = (
+  node: TemplateNode,
+  hydrateIds: Set<string>,
+  insideFor = false,
+): Result<void, CompilerError> => {
   const expressionResult = validateTextExpressions(node);
   if (!expressionResult.ok) {
     return expressionResult;
@@ -246,14 +250,21 @@ const validateTree = (node: TemplateNode, hydrateIds: Set<string>): Result<void,
     return specialResult;
   }
   const hydrateBoundary = hydrationBoundaryFor(node, []);
+  if (insideFor && hydrateBoundary) {
+    return semanticError("Row-local hydration metadata inside <for> is not supported.", openingTagSpan(node));
+  }
+  if (insideFor && (node.tagName === "component" || node.tagName === "store")) {
+    return semanticError(`Row-local <${node.tagName}> metadata inside <for> is not supported.`, openingTagSpan(node));
+  }
   if (hydrateBoundary && hydrateBoundary.idKind !== "static") {
     if (hydrateIds.has(hydrateBoundary.id)) {
       return semanticError(`Duplicate hydrate boundary id expression: ${hydrateBoundary.id}.`, openingTagSpan(node));
     }
     hydrateIds.add(hydrateBoundary.id);
   }
+  const childInsideFor = insideFor || node.tagName === "for";
   for (const child of node.children) {
-    const result = validateTree(child, hydrateIds);
+    const result = validateTree(child, hydrateIds, childInsideFor);
     if (!result.ok) {
       return result;
     }

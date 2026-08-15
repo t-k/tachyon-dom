@@ -44,6 +44,8 @@ Expressions inside `script` and `style` are rejected because ordinary HTML escap
 </ul>
 ```
 
+Hydration boundaries, nested `<component>` boundaries, and `<store>` declarations are not supported inside `<for>`. Their row-local ownership metadata cannot yet be represented without duplicate hydration identities or leaked cleanup ownership, so the compiler reports a positioned error instead of silently dropping it. Ordinary text, attributes, events, models, styles, refs, and nested control flow remain supported in list rows.
+
 ## Stores
 
 `<store name={initial}/>` defines state without emitting a DOM node. The client target imports `runtime/store` only when a template declares stores.
