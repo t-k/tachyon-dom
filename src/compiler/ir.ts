@@ -84,6 +84,8 @@ const validateExpression = (expression: string, context: string, span: SourceSpa
   return ok(undefined);
 };
 
+const rawTextExpressionForbiddenTags = new Set(["script", "style"]);
+
 const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError> => {
   if (node.type === "text") {
     for (const segment of textExpressionSegments(node.value)) {
@@ -98,6 +100,23 @@ const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError
       }
     }
     return ok(undefined);
+  }
+  if (rawTextExpressionForbiddenTags.has(node.tagName.toLowerCase())) {
+    for (const child of node.children) {
+      if (child.type !== "text") {
+        continue;
+      }
+      const expression = textExpressionSegments(child.value).find((segment) => segment.kind === "expression");
+      if (expression) {
+        return semanticError(
+          `Expressions inside <${node.tagName}> are not supported; serialize data outside raw text.`,
+          {
+            start: (child.start ?? 0) + expression.start,
+            end: (child.start ?? 0) + expression.end,
+          },
+        );
+      }
+    }
   }
   for (const attr of node.attrs) {
     if (attr.name === "class" || attr.name === "name") {

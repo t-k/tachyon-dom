@@ -394,6 +394,14 @@ describe("DX helpers", () => {
     expect(readme).toContain("Events are attached once per created target");
   });
 
+  it("documents the raw-text interpolation security contract", async () => {
+    const syntax = await readFile("docs/syntax-spec.md", "utf8");
+
+    expect(syntax).toContain("Expressions inside `script` and `style` are rejected");
+    expect(syntax).toContain("serializeHydrationState(id, state)");
+    expect(syntax).toContain("`textarea` and `title` remain RCDATA");
+  });
+
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
     const files = await collectTypeScriptFiles(path.join(process.cwd(), "src"));
     const extensionlessSpecifiers: string[] = [];

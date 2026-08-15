@@ -162,6 +162,26 @@ describe("HTML-first compiler", () => {
     expect(generateServerStreamModule(result.value)).toContain("line one\\n    line two");
   });
 
+  it.each(["script", "style"])("rejects dynamic text inside the %s raw-text element", (tagName) => {
+    const source = `<main><${tagName}>{payload}</${tagName}></main>`;
+    const result = compileTemplate(source);
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        message: `Expressions inside <${tagName}> are not supported; serialize data outside raw text.`,
+        offset: source.indexOf("{payload}"),
+        endOffset: source.indexOf("{payload}") + "{payload}".length,
+      },
+    });
+  });
+
+  it.each(["textarea", "title"])("keeps dynamic text available inside the %s RCDATA element", (tagName) => {
+    const result = compileTemplate(`<${tagName}>{value}</${tagName}>`);
+
+    expect(result.ok).toBe(true);
+  });
+
   it.each([
     ["svg", `<svg xml:space="preserve"><text>line one\n    line two</text></svg>`],
     ["math", `<math xml:space="preserve"><mtext>line one\n    line two</mtext></math>`],
