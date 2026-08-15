@@ -123,6 +123,32 @@ export type RouteRenderResult = {
   webResponse?: Response;
 };
 
+const bodylessStatuses = new Set([204, 205, 304]);
+
+const normalizeBodylessRouteResult = (result: RouteRenderResult): RouteRenderResult => {
+  if (!bodylessStatuses.has(result.status)) {
+    return result;
+  }
+  const headers = new Headers(result.headers);
+  headers.delete("content-length");
+  headers.delete("transfer-encoding");
+  const { responseBody: _responseBody, responseChunks: _responseChunks, webResponse, ...rest } = result;
+  return {
+    ...rest,
+    html: "",
+    headers,
+    ...(webResponse
+      ? {
+          webResponse: new Response(null, {
+            status: webResponse.status,
+            statusText: webResponse.statusText,
+            headers,
+          }),
+        }
+      : {}),
+  };
+};
+
 type RouteRenderOptionsBase = {
   notFound?: (context: { request: Request; url: URL }) => string | Promise<string>;
   error?: (context: { request: Request; url: URL; error: unknown }) => string | Promise<string>;
@@ -1262,7 +1288,7 @@ const renderRouteInternal = async (
   });
   const finish = (result: RouteRenderResult): Result<RouteRenderResult, RouteError> => {
     releaseRequestSnapshot(request);
-    return ok(result);
+    return ok(normalizeBodylessRouteResult(result));
   };
   if (options.maxActionBodyBytes !== undefined) {
     const limitedRequest = await requestWithinBodyLimit(request, options.maxActionBodyBytes);
@@ -1587,7 +1613,7 @@ const renderRouteInternal = async (
       match: match.value,
       ...(responseChunks ? { responseChunks } : {}),
     };
-    return responseChunks ? ok(result) : finish(result);
+    return responseChunks ? ok(normalizeBodylessRouteResult(result)) : finish(result);
   } catch (error) {
     if (options.hooks?.onError) {
       const hookRequest = callbackRequestSnapshot(request);

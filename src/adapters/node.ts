@@ -122,6 +122,27 @@ const withSecurityHeaders = (response: Response, securityHeaders?: Headers): Res
   });
 };
 
+const containNodeHandlerFailure = async (
+  error: unknown,
+  response: ServerResponse,
+  securityHeaders?: Headers,
+): Promise<void> => {
+  if (response.headersSent || response.writableEnded) {
+    if (!response.writableEnded && typeof response.destroy === "function") {
+      response.destroy(error instanceof Error ? error : undefined);
+    }
+    return;
+  }
+  const internalError = withSecurityHeaders(
+    new Response("Internal Server Error", {
+      status: 500,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    }),
+    securityHeaders,
+  );
+  await writeNodeResponse(internalError, response);
+};
+
 const isFileSystemNotFound = (error: unknown): boolean => {
   const code = (error as { code?: unknown }).code;
   return code === "ENOENT" || code === "ENOTDIR";
@@ -391,38 +412,42 @@ const nodeObservability = (
 export const createNodeHandler =
   (options: NodeHandlerOptions) =>
   async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
-    const url = requestUrl(request, options);
-    if (url instanceof Response) {
-      await writeNodeResponse(url, response);
-      return;
-    }
-    const staticRoute = findStaticRoute(options.staticRoutes, request.method ?? "GET", new URL(url));
-    if (staticRoute) {
-      writeNodeStaticRoute(staticRoute, request, response, options.securityHeaders);
-      return;
-    }
-    const webRequest = webRequestFor(request, options, response);
-    if (webRequest instanceof Response) {
-      await writeNodeResponse(webRequest, response);
-      return;
-    }
-    if (options.staticAssets) {
-      const traversal = staticAssetTraversalResponse(request.url, options.staticAssets);
-      if (traversal) {
-        await writeNodeResponse(withSecurityHeaders(traversal, options.securityHeaders), response);
+    try {
+      const url = requestUrl(request, options);
+      if (url instanceof Response) {
+        await writeNodeResponse(url, response);
         return;
       }
-      const asset = await createStaticAssetHandler(options.staticAssets)(webRequest);
-      if (asset) {
-        await writeNodeResponse(withSecurityHeaders(asset, options.securityHeaders), response);
+      const staticRoute = findStaticRoute(options.staticRoutes, request.method ?? "GET", new URL(url));
+      if (staticRoute) {
+        writeNodeStaticRoute(staticRoute, request, response, options.securityHeaders);
         return;
       }
+      const webRequest = webRequestFor(request, options, response);
+      if (webRequest instanceof Response) {
+        await writeNodeResponse(webRequest, response);
+        return;
+      }
+      if (options.staticAssets) {
+        const traversal = staticAssetTraversalResponse(request.url, options.staticAssets);
+        if (traversal) {
+          await writeNodeResponse(withSecurityHeaders(traversal, options.securityHeaders), response);
+          return;
+        }
+        const asset = await createStaticAssetHandler(options.staticAssets)(webRequest);
+        if (asset) {
+          await writeNodeResponse(withSecurityHeaders(asset, options.securityHeaders), response);
+          return;
+        }
+      }
+      const webResponse = await createWorkersHandler({
+        ...options,
+        observability: nodeObservability(options.observability),
+      }).fetch(webRequest);
+      await writeNodeResponse(webResponse, response);
+    } catch (error) {
+      await containNodeHandlerFailure(error, response, options.securityHeaders);
     }
-    const webResponse = await createWorkersHandler({
-      ...options,
-      observability: nodeObservability(options.observability),
-    }).fetch(webRequest);
-    await writeNodeResponse(webResponse, response);
   };
 
 export const createNodeFetchHandler = (
@@ -438,19 +463,23 @@ export const createNodeFetchHandler = (
     },
   });
   return async (request, response) => {
-    const webRequest = webRequestFor(request, options, response);
-    if (webRequest instanceof Response) {
-      await writeNodeResponse(webRequest, response);
-      return;
-    }
-    if (options.staticAssets) {
-      const traversal = staticAssetTraversalResponse(request.url, options.staticAssets);
-      if (traversal) {
-        await writeNodeResponse(withSecurityHeaders(traversal, options.securityHeaders), response);
+    try {
+      const webRequest = webRequestFor(request, options, response);
+      if (webRequest instanceof Response) {
+        await writeNodeResponse(webRequest, response);
         return;
       }
+      if (options.staticAssets) {
+        const traversal = staticAssetTraversalResponse(request.url, options.staticAssets);
+        if (traversal) {
+          await writeNodeResponse(withSecurityHeaders(traversal, options.securityHeaders), response);
+          return;
+        }
+      }
+      const webResponse = await fetchHandler.fetch(webRequest);
+      await writeNodeResponse(webResponse, response);
+    } catch (error) {
+      await containNodeHandlerFailure(error, response, options.securityHeaders);
     }
-    const webResponse = await fetchHandler.fetch(webRequest);
-    await writeNodeResponse(webResponse, response);
   };
 };

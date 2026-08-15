@@ -13,6 +13,8 @@ import {
   type RouteRenderOptions,
 } from "../router.js";
 
+const bodylessStatuses = new Set([204, 205, 304]);
+
 export type WorkersAssetsBinding = {
   fetch: (request: Request) => Response | Promise<Response>;
 };
@@ -477,7 +479,7 @@ const responseFor = async <Env>(
         await emitResponse(options.observability, state, response, state.routeId === undefined);
         return response;
       }
-      const stream = workersStreamFromChunks(result.value.chunks);
+      const stream = bodylessStatuses.has(result.value.status) ? null : workersStreamFromChunks(result.value.chunks);
       const response = new Response(stream, {
         status: result.value.status,
         headers: mergeHeaders(result.value.headers, options.securityHeaders),
@@ -508,10 +510,15 @@ const responseFor = async <Env>(
       await emitResponse(options.observability, state, response, state.routeId === undefined);
       return response;
     }
-    const response = new Response(request.method === "HEAD" ? null : (result.value.responseBody ?? result.value.html), {
+    const response = new Response(
+      request.method === "HEAD" || bodylessStatuses.has(result.value.status)
+        ? null
+        : (result.value.responseBody ?? result.value.html),
+      {
       status: result.value.status,
       headers: mergeHeaders(result.value.headers, options.securityHeaders),
-    });
+      },
+    );
     await emitResponse(options.observability, state, response, state.routeId === undefined);
     return response;
   } catch (error) {

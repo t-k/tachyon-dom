@@ -14,7 +14,7 @@ import {
 } from "../src/adapters/lambda";
 import { createNodeFetchHandler, createNodeHandler, writeNodeResponse } from "../src/adapters/node";
 import { createWorkersFetchHandler, createWorkersHandler, workersStreamFromChunks } from "../src/adapters/workers";
-import { createSecurityHeaders, redirect, type RouteDefinition } from "../src/router";
+import { createSecurityHeaders, json, redirect, type RouteDefinition } from "../src/router";
 
 const lambdaEvent = (overrides: Record<string, unknown> = {}) => ({
   version: "2.0",
@@ -322,6 +322,109 @@ describe("server adapters", () => {
     expect(res.statusCode).toBe(400);
     expect(chunks.join("")).toBe("<h1>Bad Request</h1>");
     expect(renderCalls).toBe(0);
+  });
+
+  it.each([204, 205, 304])("removes bodies and transfer headers for status %i across adapters", async (status) => {
+    const routes: RouteDefinition[] = [
+      {
+        path: "/submit",
+        action: () =>
+          json(
+            { unexpected: true },
+            {
+              status,
+              headers: { "content-length": "19", "transfer-encoding": "chunked", "x-kept": "yes" },
+            },
+          ),
+        render: () => "unused",
+      },
+    ];
+
+    for (const streaming of [false, true]) {
+      const workers = await createWorkersHandler({ routes, streaming }).fetch(
+        new Request("https://example.com/submit", { method: "POST" }),
+      );
+      expect(workers.status).toBe(status);
+      expect(new Uint8Array(await workers.arrayBuffer())).toHaveLength(0);
+      expect(workers.headers.get("content-length")).toBeNull();
+      expect(workers.headers.get("transfer-encoding")).toBeNull();
+      expect(workers.headers.get("x-kept")).toBe("yes");
+
+      const lambda = await createLambdaHandler({ routes, streaming })(
+        lambdaEvent({
+          rawPath: "/submit",
+          requestContext: { domainName: "lambda.example", http: { method: "POST", path: "/submit" } },
+        }),
+      );
+      expect(lambda.statusCode).toBe(status);
+      expect(lambda.body).toBe("");
+      expect(lambda.headers["content-length"]).toBeUndefined();
+      expect(lambda.headers["transfer-encoding"]).toBeUndefined();
+      expect(lambda.headers["x-kept"]).toBe("yes");
+
+      const nodeBytes: Uint8Array[] = [];
+      const nodeRequest = Object.assign(Readable.from([]), {
+        method: "POST",
+        url: "/submit",
+        headers: { host: "example.test" },
+      });
+      const nodeResponse = Object.assign(new EventEmitter(), {
+        statusCode: 200,
+        writableEnded: false,
+        setHeader: vi.fn(),
+        write: (chunk: Uint8Array) => {
+          nodeBytes.push(Buffer.from(chunk));
+          return true;
+        },
+        end: (chunk?: Uint8Array) => {
+          if (chunk) nodeBytes.push(Buffer.from(chunk));
+          nodeResponse.writableEnded = true;
+        },
+      });
+      await createNodeHandler({ routes, streaming })(nodeRequest as never, nodeResponse as never);
+      expect(nodeResponse.statusCode).toBe(status);
+      expect(Buffer.concat(nodeBytes)).toHaveLength(0);
+      expect(nodeResponse.setHeader).not.toHaveBeenCalledWith("content-length", expect.anything());
+      expect(nodeResponse.setHeader).not.toHaveBeenCalledWith("transfer-encoding", expect.anything());
+      expect(nodeResponse.setHeader).toHaveBeenCalledWith("x-kept", "yes");
+    }
+  });
+
+  it("contains unexpected Node handler failures before headers are sent", async () => {
+    const request = Object.assign(Readable.from([]), {
+      method: "GET",
+      url: "/failure",
+      headers: { host: "example.test" },
+    });
+    const chunks: Uint8Array[] = [];
+    const response = Object.assign(new EventEmitter(), {
+      statusCode: 200,
+      headersSent: false,
+      writableEnded: false,
+      setHeader: vi.fn(),
+      write: (chunk: Uint8Array) => {
+        chunks.push(Buffer.from(chunk));
+        return true;
+      },
+      end: (chunk?: Uint8Array) => {
+        if (chunk) chunks.push(Buffer.from(chunk));
+        response.writableEnded = true;
+      },
+      destroy: vi.fn(),
+    });
+
+    await expect(
+      createNodeHandler({
+        routes: [{ path: "/failure", render: () => "unused" }],
+        middleware: [() => { throw new Error("private failure detail"); }],
+        securityHeaders: createSecurityHeaders(),
+      })(request as never, response as never),
+    ).resolves.toBeUndefined();
+
+    expect(response.statusCode).toBe(500);
+    expect(Buffer.concat(chunks).toString("utf8")).toBe("Internal Server Error");
+    expect(response.setHeader).toHaveBeenCalledWith("x-content-type-options", "nosniff");
+    expect(response.destroy).not.toHaveBeenCalled();
   });
 
   it("aborts the Node fetch request signal when the client connection closes", async () => {
