@@ -1,4 +1,5 @@
 import { err, ok, type Result } from "../result.js";
+import { scanRawText, type RawTextTag } from "../html-raw-text.js";
 import type { Attribute, CompilerError, ElementNode, TextNode } from "./types.js";
 import { voidElementNames } from "./utils.js";
 
@@ -63,8 +64,7 @@ const readQuotedValue = (parser: Parser): Result<string, CompilerError> => {
 
 const readBracedValue = (parser: Parser): Result<string, CompilerError> => {
   let depth = 0;
-  let mode: "code" | "single" | "double" | "template" | "line-comment" | "block-comment" | "regex" =
-    "code";
+  let mode: "code" | "single" | "double" | "template" | "line-comment" | "block-comment" | "regex" = "code";
   let escaped = false;
   let regexCharacterClass = false;
   let canStartRegex = true;
@@ -107,7 +107,7 @@ const readBracedValue = (parser: Parser): Result<string, CompilerError> => {
       continue;
     }
     if (mode === "template") {
-      if (!escaped && char === "`" ) {
+      if (!escaped && char === "`") {
         mode = "code";
         canStartRegex = false;
         parser.offset++;
@@ -246,17 +246,26 @@ const consumeComment = (parser: Parser): Result<void, CompilerError> => {
 };
 
 const consumeClosingTag = (parser: Parser, tagName: string): Result<void, CompilerError> => {
-  if (!startsWith(parser, `</${tagName}`)) {
+  const closingPrefix = `</${tagName}`;
+  if (
+    parser.source.slice(parser.offset, parser.offset + closingPrefix.length).toLowerCase() !==
+    closingPrefix.toLowerCase()
+  ) {
     return parserError(parser, `Missing closing tag for <${tagName}>.`);
   }
   parser.offset += tagName.length + 2;
   consumeWhitespace(parser);
+  if (peek(parser) === "/") {
+    parser.offset++;
+  }
   if (peek(parser) !== ">") {
     return parserError(parser, "Expected end of closing tag.");
   }
   parser.offset++;
   return ok(undefined);
 };
+
+const isRawTextElementName = (tagName: string): tagName is RawTextTag => tagName === "script" || tagName === "style";
 
 const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
   const start = parser.offset;
@@ -281,25 +290,81 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
   }
   if (startsWith(parser, "/>")) {
     parser.offset += 2;
-    return ok({ type: "element", start, end: parser.offset, openEnd: parser.offset, tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
+    return ok({
+      type: "element",
+      start,
+      end: parser.offset,
+      openEnd: parser.offset,
+      tagName: tagNameResult.value,
+      attrs: attrsResult.value,
+      children: [],
+    });
   }
   if (peek(parser) !== ">") {
     return parserError(parser, "Expected end of opening tag.");
   }
   parser.offset++;
   const openEnd = parser.offset;
-  if (voidElementNames.has(tagNameResult.value)) {
+  const normalizedTagName = tagNameResult.value.toLowerCase();
+  if (voidElementNames.has(normalizedTagName)) {
     if (startsWith(parser, `</${tagNameResult.value}`)) {
       const closing = consumeClosingTag(parser, tagNameResult.value);
       if (!closing.ok) {
         return err(closing.error);
       }
     }
-    return ok({ type: "element", start, end: parser.offset, openEnd, tagName: tagNameResult.value, attrs: attrsResult.value, children: [] });
+    return ok({
+      type: "element",
+      start,
+      end: parser.offset,
+      openEnd,
+      tagName: tagNameResult.value,
+      attrs: attrsResult.value,
+      children: [],
+    });
+  }
+
+  if (isRawTextElementName(normalizedTagName)) {
+    const closeStart = scanRawText(parser.source, parser.offset, {
+      tagName: normalizedTagName,
+      scriptState: "data",
+    }).closingTagStart;
+    if (closeStart === -1) {
+      return parserError(parser, `Missing closing tag for <${tagNameResult.value}>.`);
+    }
+    const children =
+      closeStart === parser.offset
+        ? []
+        : [
+            {
+              type: "text" as const,
+              value: parser.source.slice(parser.offset, closeStart),
+              start: parser.offset,
+              end: closeStart,
+            },
+          ];
+    parser.offset = closeStart;
+    const closing = consumeClosingTag(parser, tagNameResult.value);
+    if (!closing.ok) {
+      return err(closing.error);
+    }
+    return ok({
+      type: "element",
+      start,
+      end: parser.offset,
+      openEnd,
+      tagName: tagNameResult.value,
+      attrs: attrsResult.value,
+      children,
+    });
   }
 
   const children = [];
-  while (parser.offset < parser.source.length && !startsWith(parser, `</${tagNameResult.value}`)) {
+  while (
+    parser.offset < parser.source.length &&
+    parser.source.slice(parser.offset, parser.offset + tagNameResult.value.length + 2).toLowerCase() !==
+      `</${tagNameResult.value}`.toLowerCase()
+  ) {
     if (startsWith(parser, "<!--")) {
       const comment = consumeComment(parser);
       if (!comment.ok) {
@@ -320,7 +385,15 @@ const parseElement = (parser: Parser): Result<ElementNode, CompilerError> => {
   if (!closing.ok) {
     return err(closing.error);
   }
-  return ok({ type: "element", start, end: parser.offset, openEnd, tagName: tagNameResult.value, attrs: attrsResult.value, children });
+  return ok({
+    type: "element",
+    start,
+    end: parser.offset,
+    openEnd,
+    tagName: tagNameResult.value,
+    attrs: attrsResult.value,
+    children,
+  });
 };
 
 export const parseTemplate = (source: string): Result<ElementNode, CompilerError> => {

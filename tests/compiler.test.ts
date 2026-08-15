@@ -184,6 +184,58 @@ describe("HTML-first compiler", () => {
     });
   });
 
+  it.each([
+    `<script><if test={on}>{value}</if></script>`,
+    `<script><for each={items} key={item.id}>{item.value}</for></script>`,
+    `<script><b>{value}</b></script>`,
+    `<script><if test={on}><for each={items} key={item.id}><b>{item.value}</b></for></if></script>`,
+    `<style><if test={on}>@import url({href});</if></style>`,
+  ])("rejects raw-text descendant expressions before lowering %s", (source) => {
+    const result = compileTemplate(source);
+    const expressionStart = source.indexOf("{");
+    const expressionEnd = source.indexOf("}", expressionStart) + 1;
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected a raw-text expression diagnostic.");
+    expect(result.error).toMatchObject({
+      message: expect.stringMatching(/^Expressions inside <(?:script|style)> are not supported/),
+      offset: expressionStart,
+      endOffset: expressionEnd,
+    });
+  });
+
+  it.each(["script", "style"])("parses %s contents as one raw-text node", (tagName) => {
+    const result = parseTemplate(`<${tagName}><b>static</b></${tagName.toUpperCase()}>`);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.children).toEqual([expect.objectContaining({ type: "text", value: "<b>static</b>" })]);
+  });
+
+  it("keeps script double-escaped text inside the raw-text node", () => {
+    const source = `<script><!--<script>\n//</script>\n{payload}</script>`;
+    const parsed = parseTemplate(source);
+    const compiled = compileTemplate(source);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error(parsed.error.message);
+    expect(parsed.value.children).toEqual([
+      expect.objectContaining({ type: "text", value: "<!--<script>\n//</script>\n{payload}" }),
+    ]);
+    expect(compiled.ok).toBe(false);
+    if (compiled.ok) throw new Error("Expected a raw-text expression diagnostic.");
+    expect(compiled.error).toMatchObject({
+      offset: source.indexOf("{payload}"),
+      endOffset: source.indexOf("{payload}") + "{payload}".length,
+    });
+  });
+
+  it("recognizes a slash-delimited raw-text closing tag", () => {
+    const result = parseTemplate("<script>static</script/>");
+
+    expect(result.ok).toBe(true);
+  });
+
   it.each(["textarea", "title"])("keeps dynamic text available inside the %s RCDATA element", (tagName) => {
     const result = compileTemplate(`<${tagName}>{value}</${tagName}>`);
 

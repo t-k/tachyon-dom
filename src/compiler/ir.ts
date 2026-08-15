@@ -91,10 +91,19 @@ const validateExpression = (expression: string, context: string, span: SourceSpa
 
 const rawTextExpressionForbiddenTags = new Set(["script", "style"]);
 
-const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError> => {
+const validateTextExpressions = (node: TemplateNode, insideRawTextTag?: string): Result<void, CompilerError> => {
   if (node.type === "text") {
     for (const segment of textExpressionSegments(node.value)) {
       if (segment.kind === "expression") {
+        if (insideRawTextTag) {
+          return semanticError(
+            `Expressions inside <${insideRawTextTag}> are not supported; serialize data outside raw text.`,
+            {
+              start: (node.start ?? 0) + segment.start,
+              end: (node.start ?? 0) + segment.end,
+            },
+          );
+        }
         const result = validateExpression(segment.value, "text", {
           start: (node.start ?? 0) + segment.start,
           end: (node.start ?? 0) + segment.end,
@@ -106,23 +115,8 @@ const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError
     }
     return ok(undefined);
   }
-  if (rawTextExpressionForbiddenTags.has(node.tagName.toLowerCase())) {
-    for (const child of node.children) {
-      if (child.type !== "text") {
-        continue;
-      }
-      const expression = textExpressionSegments(child.value).find((segment) => segment.kind === "expression");
-      if (expression) {
-        return semanticError(
-          `Expressions inside <${node.tagName}> are not supported; serialize data outside raw text.`,
-          {
-            start: (child.start ?? 0) + expression.start,
-            end: (child.start ?? 0) + expression.end,
-          },
-        );
-      }
-    }
-  }
+  const rawTextTag =
+    insideRawTextTag ?? (rawTextExpressionForbiddenTags.has(node.tagName.toLowerCase()) ? node.tagName : undefined);
   for (const attr of node.attrs) {
     if (attr.name === "name") {
       continue;
@@ -136,7 +130,7 @@ const validateTextExpressions = (node: TemplateNode): Result<void, CompilerError
     }
   }
   for (const child of node.children) {
-    const result = validateTextExpressions(child);
+    const result = validateTextExpressions(child, rawTextTag);
     if (!result.ok) {
       return result;
     }

@@ -16,6 +16,66 @@ describe("server html helper", () => {
     expect(String(view)).toBe("<p>&lt;Ada &amp; &quot;Grace&quot;&gt;</p>");
   });
 
+  it.each([
+    ["script", "alert(document.domain)"],
+    ["style", "red; } * { display: none"],
+  ])("rejects interpolation inside the %s raw-text element", (tagName, payload) => {
+    const strings = [`<${tagName}>`, `</${tagName}>`] as unknown as TemplateStringsArray;
+
+    expect(() => html(strings, payload)).toThrow(
+      `Interpolation inside <${tagName}> raw text is not supported; serialize data outside raw text`,
+    );
+  });
+
+  it("tracks raw-text context across case, attributes, and template literal boundaries", () => {
+    expect(
+      () =>
+        html`<script type="module">
+          ${"alert(1)"};
+        </script>`,
+    ).toThrow("Interpolation inside <script> raw text is not supported");
+    expect(
+      () =>
+        html`<style media=${"screen"}>
+          ${"* { display: none }"}
+        </style>`,
+    ).toThrow("Interpolation inside <style> raw text is not supported");
+  });
+
+  it("keeps RCDATA interpolation and static raw text available", () => {
+    expect(String(html`<textarea>${"<unsafe>"}</textarea>`)).toBe("<textarea>&lt;unsafe&gt;</textarea>");
+    expect(String(html`<title>${"<unsafe>"}</title>`)).toBe("<title>&lt;unsafe&gt;</title>");
+    const script = ["<script>globalThis.ready = true;</script>"] as unknown as TemplateStringsArray;
+    const style = ["<style>.ready { display: block; }</style>"] as unknown as TemplateStringsArray;
+
+    expect(String(html(script))).toBe("<script>globalThis.ready = true;</script>");
+    expect(String(html(style))).toBe("<style>.ready { display: block; }</style>");
+  });
+
+  it("does not mistake a double-escaped script end tag for the real boundary", () => {
+    const strings = ["<script><!--<script>\n//</script>\n", "</script>"] as unknown as TemplateStringsArray;
+
+    expect(() => html(strings, "globalThis.__scannerProbe = 42;")).toThrow(
+      "Interpolation inside <script> raw text is not supported",
+    );
+  });
+
+  it("recognizes a slash-delimited raw-text end tag", () => {
+    const strings = ["<script>globalThis.ready = true;</script/><p>", "</p>"] as unknown as TemplateStringsArray;
+
+    expect(String(html(strings, "safe <text>"))).toBe(
+      "<script>globalThis.ready = true;</script/><p>safe &lt;text&gt;</p>",
+    );
+  });
+
+  it("revalidates caller-constructed mutable template arrays", () => {
+    const strings = ["<img alt=", ">"] as unknown as TemplateStringsArray;
+    expect(String(html(strings, "safe"))).toBe('<img alt="safe">');
+
+    (strings as unknown as string[])[0] = "<img onerror=";
+    expect(() => html(strings, "alert(1)")).toThrow("Dangerous attribute is not supported: onerror");
+  });
+
   it("escapes direct attribute interpolation in attribute context", () => {
     const view = html`<input value=${`"x" & <y>`} />`;
 
@@ -117,7 +177,7 @@ describe("server html helper", () => {
   );
 
   it("rejects dangerous literal attributes after an earlier interpolation and after a slash", () => {
-    expect(() => html`<img src=${"/missing"} onerror=${"alert(1)"}>`).toThrow(
+    expect(() => html`<img src=${"/missing"} onerror=${"alert(1)"} />`).toThrow(
       "Dangerous attribute is not supported: onerror",
     );
     expect(() => html`<iframe data-x=${"safe"} srcdoc=${"<script>alert(1)</script>"}></iframe>`).toThrow(

@@ -1,6 +1,7 @@
 import { escapeHtml as escapeText } from "../html-escape.js";
 import { validateAttributeName } from "../attribute-policy.js";
 import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
+import { scanRawText, type RawTextTag, type ScriptDataState } from "../html-raw-text.js";
 
 const htmlFragmentBrand = Symbol("tachyon.htmlFragment");
 const htmlAttributeBrand = Symbol("tachyon.htmlAttribute");
@@ -19,6 +20,7 @@ type HtmlValue = HtmlFragment | HtmlAttribute | readonly HtmlValue[] | string | 
 type ClassValue = string | number | false | null | undefined | readonly ClassValue[];
 
 const attributeNamePattern = /^[A-Za-z_:][A-Za-z0-9_.:-]*$/;
+const validatedLiteralTemplates = new WeakSet<TemplateStringsArray>();
 
 type HtmlState =
   | "text"
@@ -27,7 +29,26 @@ type HtmlState =
   | "double-quoted-attribute"
   | "single-quoted-attribute"
   | "unquoted-attribute"
-  | "comment";
+  | "comment"
+  | "raw-text";
+
+type HtmlScanContext = {
+  state: HtmlState;
+  tagName: string;
+  readingTagName: boolean;
+  closingTag: boolean;
+  rawTextTag: RawTextTag | undefined;
+  scriptDataState: ScriptDataState;
+};
+
+const createHtmlScanContext = (): HtmlScanContext => ({
+  state: "text",
+  tagName: "",
+  readingTagName: false,
+  closingTag: false,
+  rawTextTag: undefined,
+  scriptDataState: "data",
+});
 
 const fragment = (value: string): HtmlFragment => ({
   [htmlFragmentBrand]: true,
@@ -82,8 +103,13 @@ const assertSafeLiteralAttributeName = (name: string): void => {
 };
 
 const validateLiteralAttributeNames = (strings: TemplateStringsArray): void => {
+  if (validatedLiteralTemplates.has(strings)) return;
   let state: HtmlState = "text";
   let tagNameSeen = false;
+  let currentTagName = "";
+  let closingTag = false;
+  let rawTextTag: RawTextTag | undefined;
+  let scriptDataState: ScriptDataState = "data";
   let token = "";
   const finishToken = (): void => {
     if (!token) return;
@@ -91,6 +117,7 @@ const validateLiteralAttributeNames = (strings: TemplateStringsArray): void => {
       assertSafeLiteralAttributeName(token);
     } else {
       tagNameSeen = true;
+      currentTagName = token.toLowerCase();
     }
     token = "";
   };
@@ -98,6 +125,23 @@ const validateLiteralAttributeNames = (strings: TemplateStringsArray): void => {
     const input = strings[stringIndex] ?? "";
     for (let index = 0; index < input.length; index += 1) {
       const char = input[index] as string;
+      if (state === "raw-text") {
+        const scanned = scanRawText(input, index, {
+          tagName: rawTextTag ?? "script",
+          scriptState: scriptDataState,
+        });
+        scriptDataState = scanned.state.scriptState;
+        if (scanned.closingTagStart === -1) return;
+        const closingPrefix = `</${rawTextTag ?? "script"}`;
+        state = "tag";
+        closingTag = true;
+        tagNameSeen = true;
+        currentTagName = rawTextTag ?? "";
+        rawTextTag = undefined;
+        token = "";
+        index = scanned.closingTagStart + closingPrefix.length - 1;
+        continue;
+      }
       if (state === "comment") {
         if (input.startsWith("-->", index)) {
           state = "text";
@@ -112,6 +156,8 @@ const validateLiteralAttributeNames = (strings: TemplateStringsArray): void => {
         } else if (char === "<") {
           state = "tag";
           tagNameSeen = false;
+          currentTagName = "";
+          closingTag = false;
           token = "";
         }
         continue;
@@ -133,7 +179,13 @@ const validateLiteralAttributeNames = (strings: TemplateStringsArray): void => {
         } else if (char === "'") {
           state = "single-quoted-attribute";
         } else if (char === ">") {
-          state = "text";
+          if (!closingTag && (currentTagName === "script" || currentTagName === "style")) {
+            state = "raw-text";
+            rawTextTag = currentTagName;
+            scriptDataState = "data";
+          } else {
+            state = "text";
+          }
         } else {
           state = "unquoted-attribute";
         }
@@ -143,19 +195,33 @@ const validateLiteralAttributeNames = (strings: TemplateStringsArray): void => {
         if (isHtmlWhitespace(char)) {
           state = "tag";
         } else if (char === ">") {
-          state = "text";
+          if (!closingTag && (currentTagName === "script" || currentTagName === "style")) {
+            state = "raw-text";
+            rawTextTag = currentTagName;
+            scriptDataState = "data";
+          } else {
+            state = "text";
+          }
         }
         continue;
       }
       if (char === ">") {
         finishToken();
-        state = "text";
+        if (!closingTag && (currentTagName === "script" || currentTagName === "style")) {
+          state = "raw-text";
+          rawTextTag = currentTagName;
+          scriptDataState = "data";
+        } else {
+          state = "text";
+          rawTextTag = undefined;
+        }
       } else if (char === "=") {
         finishToken();
         state = "before-attribute-value";
       } else if (isHtmlWhitespace(char)) {
         finishToken();
       } else if (char === "/") {
+        if (!tagNameSeen && token === "") closingTag = true;
         finishToken();
       } else {
         token += char;
@@ -166,6 +232,7 @@ const validateLiteralAttributeNames = (strings: TemplateStringsArray): void => {
     }
   }
   if (state === "tag") finishToken();
+  if (Object.isFrozen(strings)) validatedLiteralTemplates.add(strings);
 };
 
 const renderTextValue = (value: HtmlValue): string => {
@@ -248,7 +315,13 @@ const currentUrlAttributeContext = (
 const isHtmlWhitespace = (char: string): boolean =>
   char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f";
 
-const renderValue = (value: HtmlValue, state: HtmlState, nextLiteral: string, isLastValue: boolean): string => {
+const renderValue = (
+  value: HtmlValue,
+  state: HtmlState,
+  nextLiteral: string,
+  isLastValue: boolean,
+  rawTextTag?: "script" | "style",
+): string => {
   if (state === "text") {
     return renderTextValue(value);
   }
@@ -264,6 +337,11 @@ const renderValue = (value: HtmlValue, state: HtmlState, nextLiteral: string, is
   if (state === "comment") {
     throw new TypeError("Interpolation inside an HTML comment is not supported");
   }
+  if (state === "raw-text") {
+    throw new TypeError(
+      `Interpolation inside <${rawTextTag ?? "script"}> raw text is not supported; serialize data outside raw text`,
+    );
+  }
   const nextStartsBoundary =
     nextLiteral === ""
       ? isLastValue
@@ -274,68 +352,110 @@ const renderValue = (value: HtmlValue, state: HtmlState, nextLiteral: string, is
   return `"${renderAttributeValue(value)}"`;
 };
 
-const scanHtmlState = (input: string, initialState: HtmlState): HtmlState => {
-  let state = initialState;
+const scanHtmlState = (input: string, context: HtmlScanContext): void => {
   for (let index = 0; index < input.length; index += 1) {
     const char = input[index] as string;
-    if (state === "comment") {
+    if (context.state === "raw-text") {
+      const scanned = scanRawText(input, index, {
+        tagName: context.rawTextTag ?? "script",
+        scriptState: context.scriptDataState,
+      });
+      context.scriptDataState = scanned.state.scriptState;
+      if (scanned.closingTagStart === -1) return;
+      const closingPrefix = `</${context.rawTextTag ?? "script"}`;
+      context.state = "tag";
+      context.tagName = context.rawTextTag ?? "";
+      context.readingTagName = false;
+      context.closingTag = true;
+      context.rawTextTag = undefined;
+      index = scanned.closingTagStart + closingPrefix.length - 1;
+      continue;
+    }
+    if (context.state === "comment") {
       if (input.startsWith("-->", index)) {
-        state = "text";
+        context.state = "text";
         index += 2;
       }
       continue;
     }
-    if (state === "text") {
+    if (context.state === "text") {
       if (input.startsWith("<!--", index)) {
-        state = "comment";
+        context.state = "comment";
         index += 3;
       } else if (char === "<") {
-        state = "tag";
+        context.state = "tag";
+        context.tagName = "";
+        context.readingTagName = true;
+        context.closingTag = false;
       }
       continue;
     }
-    if (state === "double-quoted-attribute") {
+    if (context.state === "double-quoted-attribute") {
       if (char === '"') {
-        state = "tag";
+        context.state = "tag";
       }
       continue;
     }
-    if (state === "single-quoted-attribute") {
+    if (context.state === "single-quoted-attribute") {
       if (char === "'") {
-        state = "tag";
+        context.state = "tag";
       }
       continue;
     }
-    if (state === "before-attribute-value") {
+    if (context.state === "before-attribute-value") {
       if (isHtmlWhitespace(char)) {
         continue;
       }
       if (char === '"') {
-        state = "double-quoted-attribute";
+        context.state = "double-quoted-attribute";
       } else if (char === "'") {
-        state = "single-quoted-attribute";
+        context.state = "single-quoted-attribute";
       } else if (char === ">") {
-        state = "text";
+        context.state =
+          !context.closingTag && (context.tagName === "script" || context.tagName === "style") ? "raw-text" : "text";
+        context.rawTextTag = context.state === "raw-text" ? (context.tagName as "script" | "style") : undefined;
+        if (context.state === "raw-text") context.scriptDataState = "data";
       } else {
-        state = "unquoted-attribute";
+        context.state = "unquoted-attribute";
       }
       continue;
     }
-    if (state === "unquoted-attribute") {
+    if (context.state === "unquoted-attribute") {
       if (isHtmlWhitespace(char)) {
-        state = "tag";
+        context.state = "tag";
       } else if (char === ">") {
-        state = "text";
+        context.state =
+          !context.closingTag && (context.tagName === "script" || context.tagName === "style") ? "raw-text" : "text";
+        context.rawTextTag = context.state === "raw-text" ? (context.tagName as "script" | "style") : undefined;
+        if (context.state === "raw-text") context.scriptDataState = "data";
       }
       continue;
+    }
+    if (context.readingTagName) {
+      if (context.tagName === "" && char === "/") {
+        context.closingTag = true;
+        continue;
+      }
+      if (isHtmlWhitespace(char) || char === "/" || char === ">") {
+        context.readingTagName = false;
+      } else {
+        context.tagName += char.toLowerCase();
+        continue;
+      }
     }
     if (char === ">") {
-      state = "text";
+      if (!context.closingTag && (context.tagName === "script" || context.tagName === "style")) {
+        context.state = "raw-text";
+        context.rawTextTag = context.tagName;
+        context.scriptDataState = "data";
+      } else {
+        context.state = "text";
+        context.rawTextTag = undefined;
+      }
     } else if (char === "=") {
-      state = "before-attribute-value";
+      context.state = "before-attribute-value";
     }
   }
-  return state;
 };
 
 export const rawHtml = (value: string): HtmlFragment => fragment(value);
@@ -394,35 +514,43 @@ export const classList = (...values: readonly ClassValue[]): string => {
 export const html = (strings: TemplateStringsArray, ...values: readonly HtmlValue[]): HtmlFragment => {
   validateLiteralAttributeNames(strings);
   let output = "";
-  let state: HtmlState = "text";
+  const context = createHtmlScanContext();
   for (let index = 0; index < strings.length; index += 1) {
     const literal = strings[index] ?? "";
     output += literal;
-    state = scanHtmlState(literal, state);
+    scanHtmlState(literal, context);
     if (index < values.length) {
       const value = values[index];
-      const interpolationState = state;
+      const interpolationState = context.state;
       const urlContext =
-        state === "before-attribute-value" || state === "double-quoted-attribute" || state === "single-quoted-attribute"
+        context.state === "before-attribute-value" ||
+        context.state === "double-quoted-attribute" ||
+        context.state === "single-quoted-attribute"
           ? currentUrlAttributeContext(output)
           : undefined;
       const nextLiteral = strings[index + 1] ?? "";
       if (
         urlContext &&
-        state !== "before-attribute-value" &&
-        (urlContext.prefix !== "" || !nextLiteral.startsWith(state === "double-quoted-attribute" ? '"' : "'"))
+        context.state !== "before-attribute-value" &&
+        (urlContext.prefix !== "" || !nextLiteral.startsWith(context.state === "double-quoted-attribute" ? '"' : "'"))
       ) {
         throw new TypeError("URL attribute interpolation must provide the complete value");
       }
       const safeValue = urlContext
         ? sanitizeUrlAttributeValue(urlContext.element, urlContext.attribute, plainAttributeValue(value))
         : value;
-      const rendered = renderValue(safeValue, state, nextLiteral, index === values.length - 1);
+      const rendered = renderValue(
+        safeValue,
+        context.state,
+        nextLiteral,
+        index === values.length - 1,
+        context.rawTextTag,
+      );
       output += rendered;
       if (interpolationState === "before-attribute-value") {
-        state = "tag";
+        context.state = "tag";
       } else if (interpolationState === "text" && containsHtmlFragment(value)) {
-        state = scanHtmlState(rendered, state);
+        scanHtmlState(rendered, context);
       }
     }
   }

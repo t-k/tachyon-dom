@@ -14,7 +14,7 @@ Use a narrow asset `basePath`. With Workers asset bindings, an omitted asset bas
 
 ## Escaping and Trusted HTML
 
-`tachyon-dom/server/html` escapes interpolated text and values created with `attr()`. It is an escaping helper, not an arbitrary HTML sanitizer. Use `rawHtml()` only for trusted framework or application output.
+`tachyon-dom/server/html` escapes interpolated text and values created with `attr()`. It is an escaping helper, not an arbitrary HTML sanitizer. Interpolation inside `script` and `style` raw-text elements is rejected because HTML escaping does not protect JavaScript or CSS source contexts. Keep those elements static, load external assets, or use the router's hydration-state serialization instead of hand-interpolating JSON into a script. Use `rawHtml()` only for trusted framework or application output.
 
 Direct `name=${value}` interpolation is quoted automatically. Quote the complete attribute value when a template contains a prefix or suffix, such as `src="/assets/${file}.png"`; interpolation into an unquoted value is rejected. `rawHtml()` is accepted only in text context, while fragments returned by `attr()` and `booleanAttr()` are accepted only between attributes inside an opening tag.
 

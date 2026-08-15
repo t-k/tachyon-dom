@@ -68,7 +68,8 @@ describe("server HTML browser security", () => {
     if (!page) throw new Error("Missing browser page.");
     try {
       await page.setContent("<iframe id=subject></iframe>");
-      expect(() => html`<iframe SRCDOC=${"<script>parent.__tachyonSrcdocXss = true</script>"}></iframe>`).toThrow(
+      const strings = ["<iframe SRCDOC=", "></iframe>"] as unknown as TemplateStringsArray;
+      expect(() => html(strings, "<script>parent.__tachyonSrcdocXss = true</script>")).toThrow(
         "Dangerous attribute is not supported: SRCDOC",
       );
       await page.waitForTimeout(25);
@@ -79,12 +80,37 @@ describe("server HTML browser security", () => {
     }
   });
 
+  it("rejects raw-text interpolation before browser parsing", async () => {
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      await page.setContent("<main id=subject>safe</main>");
+      expect(
+        () =>
+          html`<script>
+            ${"globalThis.__tachyonRawTextXss = true"};
+          </script>`,
+      ).toThrow("Interpolation inside <script> raw text is not supported");
+      expect(
+        () =>
+          html`<style>
+            ${"* { display: none }"}
+          </style>`,
+      ).toThrow("Interpolation inside <style> raw text is not supported");
+
+      expect(await page.evaluate(() => "__tachyonRawTextXss" in globalThis)).toBe(false);
+      expect(await page.locator("#subject").isVisible()).toBe(true);
+    } finally {
+      await page.close();
+    }
+  });
+
   it("rejects dangerous literal attributes after interpolation and slash syntax before execution", async () => {
     const page = await browser?.newPage();
     if (!page) throw new Error("Missing browser page.");
     try {
       await page.setContent("<img id=subject src=/missing>");
-      expect(() => html`<img src=${"/missing"} onerror=${"globalThis.__tachyonChainedXss = true"}>`).toThrow(
+      expect(() => html`<img src=${"/missing"} onerror=${"globalThis.__tachyonChainedXss = true"} />`).toThrow(
         "Dangerous attribute is not supported: onerror",
       );
       expect(() => html`<img/onerror=${"globalThis.__tachyonSlashXss = true"}>`).toThrow(
