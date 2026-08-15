@@ -18,6 +18,10 @@ Template routes may use `.td`, `.tachyon`, or `.tachyon.html` extensions. Route 
 
 `tachyon-dom/router/node` exports `scanFileRoutes(rootDir)` for Node-based tooling that should read the filesystem. The runtime `tachyon-dom/router` entry does not import Node built-ins, so it is suitable for Workers bundles.
 
+## Client Loader Cache
+
+`createClientRouter({ cache: true })` retains up to 100 loader results using least-recently-used eviction. Use `cache: { maxEntries }` to choose another bound; `maxEntries: 0`, `cache: false`, and an omitted option disable loader caching. Successful navigation, prefetch, and `initialCache` seeds share the same bound, and a cache hit refreshes its recency. Query strings are part of the cache key. `invalidate()` and `revalidate()` continue to remove selected entries or the whole cache.
+
 ## Route Modules
 
 Use `defineRouteModule()` for route modules:
