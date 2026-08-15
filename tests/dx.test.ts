@@ -299,6 +299,8 @@ describe("DX helpers", () => {
     expect(releasingDocs).toContain("npm publish --access public");
     expect(releasingDocs).toContain("Trusted Publisher");
     expect(releasingDocs).toContain("automatically generates provenance");
+    expect(releasingDocs).toContain("directly to the release dist-tag");
+    expect(releasingDocs).not.toContain("NPM_TOKEN");
     expect(releasingDocs).not.toContain("source repository is private");
   });
 
@@ -312,7 +314,7 @@ describe("DX helpers", () => {
     const release = await readFile(".github/workflows/release.yml", "utf8");
     const publisher = await readFile("scripts/publish-release-package.mjs", "utf8");
     const releaseContract = await readFile("scripts/release-contract.mjs", "utf8");
-    const finalizer = await readFile("scripts/finalize-release-tags.mjs", "utf8");
+    const registryState = await readFile("scripts/npm-registry-state.mjs", "utf8");
     const publicJsExportNames = Object.entries(packageJson.exports ?? {}).flatMap(([specifier, target]) => {
       if (!target.import) {
         return [];
@@ -347,12 +349,23 @@ describe("DX helpers", () => {
     expect(release).toContain("--package root");
     expect(release).toContain("--package create");
     expect(release).toContain("id-token: write");
+    expect(release).not.toContain("finalize-release-tags.mjs");
+    expect(release).not.toContain("NPM_TOKEN");
     expect(releaseContract).not.toContain('"--provenance"');
     expect(publisher).toMatch(
-      /"publish",\s*entry\.filename,\s*"--access",\s*"public",\s*"--tag",\s*stagingTagFor\(verified\.version\)/,
+      /"publish",\s*entry\.filename,\s*"--access",\s*"public",\s*"--tag",\s*verified\.npmTag/,
     );
+    expect(publisher).not.toContain("stagingTagFor");
     expect(publisher).toContain("if (confirmed.integrity !== entry.integrity) throw error");
-    expect(finalizer).toContain("await addDistTag(entry.name, verified.version, verified.npmTag)");
+    const artifactReverification = publisher.indexOf("const reverified = await verifyReleaseArtifacts");
+    const registryRecheck = publisher.indexOf("const confirmedRegistry = await readRegistryState", artifactReverification);
+    const npmPublish = publisher.indexOf('output = await execFile(', artifactReverification);
+    expect(artifactReverification).toBeGreaterThan(-1);
+    expect(registryRecheck).toBeGreaterThan(artifactReverification);
+    expect(registryRecheck).toBeLessThan(npmPublish);
+    expect(registryState).not.toContain("stagingTagFor");
+    expect(registryState).not.toContain("decideOwnedTagMutation");
+    await expect(readFile("scripts/finalize-release-tags.mjs", "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("pins CI actions and limits the job to repository reads", async () => {
@@ -1097,7 +1110,7 @@ export default { selected: false };
       console.log = originalLog;
     }
 
-    expect(messages[0]).toBe("0.1.1");
+    expect(messages[0]).toBe("0.1.3");
     expect(messages[1]).toContain("tachyon-dom compile <input>");
     expect(messages[1]).toContain("--target client|server|stream");
     expect(messages[2]).toContain("tachyon-dom dev");
@@ -1637,7 +1650,6 @@ void chunks;
     const preflight = workflow.indexOf("preflight-release-publication.mjs", artifactVerification);
     const rootPublish = workflow.indexOf("--package root", preflight);
     const createPublish = workflow.indexOf("--package create", rootPublish + 1);
-    const finalize = workflow.indexOf("finalize-release-tags.mjs", createPublish);
 
     expect(preparation).toBeGreaterThan(-1);
     for (const command of releaseGates) {
@@ -1652,23 +1664,19 @@ void chunks;
     expect(preflight).toBeGreaterThan(artifactVerification);
     expect(rootPublish).toBeGreaterThan(preflight);
     expect(createPublish).toBeGreaterThan(rootPublish);
-    expect(finalize).toBeGreaterThan(createPublish);
     expect(workflow).toContain("permissions: {}\n");
     expect(workflow).toContain("group: tachyon-dom-npm-release");
     expect(workflow).toContain("cancel-in-progress: false");
     expect(workflow).toMatch(
       /publish:\n\s+needs: verify[\s\S]+permissions:\n\s+contents: read\n\s+id-token: write\n\s+steps:/,
     );
-    expect(workflow).toContain("NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}");
-    const finalizerSection = workflow.slice(finalize);
-    const publishSection = workflow.slice(publishJob, finalize);
-    expect(publishSection).not.toContain("NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}");
-    expect(finalizerSection).toContain("NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}");
+    expect(workflow).not.toContain("finalize-release-tags.mjs");
+    expect(workflow).not.toContain("NPM_TOKEN");
     expect(workflow).toContain("34e114876b0b11c390a56381ad16ebd13914f8d5");
     expect(workflow).toContain("ea165f8d65b6e75b540449e92b4886f43607fa02");
     expect(workflow).toContain("d3f86a106a0bac45b974a628896c90dbdf5c8093");
     expect(createPackage.files).toContain("LICENSE");
-    expect(createPackage.dependencies?.["tachyon-dom"]).toBe("0.1.1");
+    expect(createPackage.dependencies?.["tachyon-dom"]).toBe("0.1.3");
   });
 
   it("packages a Cloudflare Pages worker with copied assets and ASSETS fallback", async () => {

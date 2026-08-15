@@ -51,18 +51,6 @@ export const decideDistTagTransition = ({ currentVersion, targetVersion }) => {
 
 export const npmRegistryUrl = "https://registry.npmjs.org/";
 
-export const stagingTagFor = (version) =>
-  `tachyon-staging-${createHash("sha256").update(version).digest("hex").slice(0, 16)}`;
-
-export const decideOwnedTagMutation = ({ currentVersion, expectedVersion, nextVersion }) => {
-  if (currentVersion === nextVersion) return { ok: true, action: "noop" };
-  if (currentVersion === expectedVersion) return { ok: true, action: nextVersion === undefined ? "remove" : "update" };
-  return {
-    ok: false,
-    error: `Dist-tag ownership changed from ${String(expectedVersion)} to ${String(currentVersion)}.`,
-  };
-};
-
 export const readRegistryState = async ({ registryUrl = npmRegistryUrl, name, version }) => {
   const response = await fetch(new URL(encodeURIComponent(name), registryUrl), { redirect: "error" });
   if (response.status === 404) return { integrity: null, distTags: {} };
@@ -101,4 +89,3 @@ export const readRegistryState = async ({ registryUrl = npmRegistryUrl, name, ve
   }
   return { integrity, distTags };
 };
-import { createHash } from "node:crypto";

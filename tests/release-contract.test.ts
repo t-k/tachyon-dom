@@ -5,13 +5,9 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import * as releaseContract from "../scripts/release-contract.mjs";
-import {
-  decideDistTagTransition,
-  decideOwnedTagMutation,
-  readRegistryState,
-  stagingTagFor,
-} from "../scripts/npm-registry-state.mjs";
+import { decideDistTagTransition, readRegistryState } from "../scripts/npm-registry-state.mjs";
 import { preflightReleasePublication } from "../scripts/preflight-release-publication.mjs";
+import * as releasePublisher from "../scripts/publish-release-package.mjs";
 
 const { verifyReleaseIdentity } = releaseContract;
 
@@ -266,6 +262,37 @@ describe("initializer package artifacts", () => {
 });
 
 describe("retryable npm publication", () => {
+  it("rejects a direct publish when the release tag advanced after preflight", () => {
+    const decideDirectPublication = (releasePublisher as any).decideDirectPublication;
+    expect(decideDirectPublication).toBeTypeOf("function");
+    if (typeof decideDirectPublication !== "function") return;
+
+    expect(
+      decideDirectPublication({
+        expectedIntegrity: "sha512-a",
+        publishedIntegrity: null,
+        currentTag: "1.2.4",
+        targetVersion: "1.2.3",
+      }),
+    ).toEqual({ ok: false, error: expect.stringMatching(/rollback/) });
+    expect(
+      decideDirectPublication({
+        expectedIntegrity: "sha512-a",
+        publishedIntegrity: "sha512-a",
+        currentTag: "1.2.2",
+        targetVersion: "1.2.3",
+      }),
+    ).toEqual({ ok: false, error: expect.stringMatching(/dist-tag/) });
+    expect(
+      decideDirectPublication({
+        expectedIntegrity: "sha512-a",
+        publishedIntegrity: "sha512-a",
+        currentTag: "1.2.3",
+        targetVersion: "1.2.3",
+      }),
+    ).toEqual({ ok: true, action: "skip" });
+  });
+
   it("publishes missing versions, skips identical versions, and rejects conflicts", () => {
     expect(
       (releaseContract as any).decidePublication({ expectedIntegrity: "sha512-a", publishedIntegrity: null }),
@@ -293,16 +320,6 @@ describe("retryable npm publication", () => {
       ok: false,
       error: expect.stringMatching(/rollback/),
     });
-  });
-
-  it("rejects stale forward updates and rollbacks after another release changes ownership", () => {
-    expect(decideOwnedTagMutation({ currentVersion: "1.2.4", expectedVersion: "1.2.2", nextVersion: "1.2.3" })).toEqual(
-      { ok: false, error: expect.stringMatching(/ownership changed/) },
-    );
-    expect(decideOwnedTagMutation({ currentVersion: "1.2.4", expectedVersion: "1.2.3", nextVersion: "1.2.2" })).toEqual(
-      { ok: false, error: expect.stringMatching(/ownership changed/) },
-    );
-    expect(stagingTagFor("1.2.3")).not.toBe(stagingTagFor("1.2.4"));
   });
 
   it("distinguishes registry absence from authentication and rate-limit failures", async () => {

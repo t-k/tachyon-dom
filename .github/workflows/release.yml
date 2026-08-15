@@ -92,7 +92,3 @@ jobs:
       - run: node scripts/publish-release-package.mjs --artifact-dir release-artifacts --tag "$GITHUB_REF_NAME" --package root
 
       - run: node scripts/publish-release-package.mjs --artifact-dir release-artifacts --tag "$GITHUB_REF_NAME" --package create
-
-      - run: node scripts/finalize-release-tags.mjs --artifact-dir release-artifacts --tag "$GITHUB_REF_NAME"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
