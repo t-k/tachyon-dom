@@ -120,6 +120,30 @@ describe("advanced router features", () => {
     expect(streamedBody).toBe("");
   });
 
+  it.each([
+    ["unmatched", [{ path: "/safe", render: () => "safe" }]],
+    ["static literal", [{ path: "/%zz", render: () => "unsafe" }]],
+  ] satisfies Array<[string, RouteDefinition[]]>)(
+    "rejects malformed encoding before %s route selection",
+    async (_kind, routes) => {
+      let notFoundCalls = 0;
+      const buffered = await renderRoute(routes, "https://example.com/%zz", {
+        notFound: () => {
+          notFoundCalls += 1;
+          return "missing";
+        },
+      });
+      const streamed = await renderRouteStream(routes, "https://example.com/%zz");
+
+      expect(buffered.ok && buffered.value.status).toBe(400);
+      expect(buffered.ok && buffered.value.html).toBe("<h1>Bad Request</h1>");
+      expect(buffered.ok && buffered.value.error).toEqual({ message: "Invalid path encoding.", status: 400 });
+      expect(streamed.ok && streamed.value.status).toBe(400);
+      expect(streamed.ok && streamed.value.error).toEqual({ message: "Invalid path encoding.", status: 400 });
+      expect(notFoundCalls).toBe(0);
+    },
+  );
+
   it("creates file-based route manifests from route files", async () => {
     const files = [
       "/app/src/routes/index.tachyon.html",

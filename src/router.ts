@@ -121,6 +121,7 @@ export type RouteRenderResult = {
   responseBody?: string;
   responseChunks?: AsyncIterable<string>;
   webResponse?: Response;
+  error?: RouteError;
 };
 
 const bodylessStatuses = new Set([204, 205, 304]);
@@ -996,6 +997,11 @@ export const matchRoute = (
 ): Result<MatchedRoute, RouteError> => {
   const url = typeof input === "string" ? new URL(input, "http://tachyon.local") : input;
   const pathname = url.pathname;
+  try {
+    decodeURIComponent(pathname);
+  } catch {
+    return err(routeError("Invalid path encoding.", 400));
+  }
   let fallback: MatchedRoute | undefined;
   for (const candidate of compiledRoutesFor(routes)) {
     const match = candidate.regex.exec(pathname);
@@ -1418,6 +1424,7 @@ const renderRouteInternal = async (
         actionResult: undefined,
         headers: new Headers({ "content-type": "text/html; charset=utf-8" }),
         match: emptyMatch(),
+        error: match.error,
       });
     }
     const boundary = nearestNotFoundBoundary(routes, url.pathname);
@@ -1656,6 +1663,7 @@ export type RouteStreamResult = {
   stateScript: string;
   headers: Headers;
   webResponse?: Response;
+  error?: RouteError;
   final: Promise<Pick<RouteRenderResult, "headHtml" | "resourceHints" | "stateScript" | "headers" | "status">>;
 };
 
@@ -1681,6 +1689,7 @@ const renderRouteStreamInternal = async (
   return ok({
     ...final,
     ...(rendered.value.webResponse ? { webResponse: rendered.value.webResponse } : {}),
+    ...(rendered.value.error ? { error: rendered.value.error } : {}),
     chunks: rendered.value.webResponse
       ? (async function* () {})()
       : (rendered.value.responseChunks ??

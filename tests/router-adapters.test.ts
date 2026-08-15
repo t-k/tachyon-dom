@@ -286,18 +286,18 @@ describe("server adapters", () => {
     let renderCalls = 0;
     const routes: RouteDefinition[] = [
       {
-        path: "/items/:id",
+        path: "/safe",
         render: () => {
           renderCalls += 1;
           return "item";
         },
       },
     ];
-    const workersResponse = await createWorkersHandler({ routes }).fetch(new Request("https://example.com/items/%zz"));
+    const workersResponse = await createWorkersHandler({ routes }).fetch(new Request("https://example.com/%zz"));
     expect(workersResponse.status).toBe(400);
     expect(await workersResponse.text()).toBe("<h1>Bad Request</h1>");
 
-    const lambdaResponse = await createLambdaHandler({ routes })(lambdaEvent({ rawPath: "/items/%zz" }));
+    const lambdaResponse = await createLambdaHandler({ routes })(lambdaEvent({ rawPath: "/%zz" }));
     expect(lambdaResponse.statusCode).toBe(400);
     expect(lambdaResponse.body).toBe("<h1>Bad Request</h1>");
 
@@ -307,7 +307,7 @@ describe("server adapters", () => {
       headers: Record<string, string>;
     };
     req.method = "GET";
-    req.url = "/items/%zz";
+    req.url = "/%zz";
     req.headers = { host: "example.com" };
     const chunks: string[] = [];
     const res = {
