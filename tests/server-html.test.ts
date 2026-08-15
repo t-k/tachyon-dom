@@ -14,6 +14,40 @@ describe("server html helper", () => {
     expect(String(view)).toBe(`<input value="&quot;x&quot; &amp; &lt;y&gt;" />`);
   });
 
+  it("keeps direct attribute interpolation inside one parsed attribute", () => {
+    document.body.innerHTML = String(html`<img src=${`x onerror=alert(1)`} />`);
+    const image = document.body.firstElementChild;
+
+    expect(image?.getAttributeNames()).toEqual(["src"]);
+    expect(image?.getAttribute("src")).toBe("x onerror=alert(1)");
+  });
+
+  it.each([" ", "\t", "\n", "=", "`", '"', "'", "&", "<", ">"])(
+    "rejects interpolation inside an unquoted attribute containing %j",
+    (token) => {
+      expect(() => html`<img src=/assets/${`x${token}onerror=alert(1)`}.png>`).toThrow(
+        "Interpolation inside an unquoted attribute value is not supported; quote the complete value",
+      );
+    },
+  );
+
+  it("rejects an automatically quoted value followed by an unquoted suffix", () => {
+    const strings = ["<img src=", ".png>"] as unknown as TemplateStringsArray;
+
+    expect(() => html(strings, "avatar")).toThrow(
+      "Interpolated attribute values with literal suffixes must be quoted in the template",
+    );
+  });
+
+  it("rejects trusted fragments outside their intended HTML context", () => {
+    expect(() => html`<div title="${rawHtml(`x" onmouseover="alert(1)`)}"></div>`).toThrow(
+      "Trusted HTML fragments can only be interpolated in text context",
+    );
+    expect(() => html`<p>${attr("data-value", "x")}</p>`).toThrow(
+      "Attribute fragments can only be interpolated inside an opening tag",
+    );
+  });
+
   it("escapes single quotes in quoted attribute interpolation", () => {
     const strings = [`<a href='`, `'>link</a>`] as unknown as TemplateStringsArray;
     const view = html(strings, `' onmouseover='alert(1)`);

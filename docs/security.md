@@ -10,6 +10,8 @@
 
 `tachyon-dom/server/html` escapes interpolated text and values created with `attr()`. It is an escaping helper, not an arbitrary HTML sanitizer. Use `rawHtml()` only for trusted framework or application output.
 
+Direct `name=${value}` interpolation is quoted automatically. Quote the complete attribute value when a template contains a prefix or suffix, such as `src="/assets/${file}.png"`; interpolation into an unquoted value is rejected. `rawHtml()` is accepted only in text context, while fragments returned by `attr()` and `booleanAttr()` are accepted only between attributes inside an opening tag.
+
 `sanitizeHtml(markup)` has a small allowlist for constrained, already-simple backend HTML. For user-generated or third-party markup, pass a vetted adapter through `createHtmlSanitizer()` or `sanitizeHtml(..., { adapter })`, such as a DOMPurify-backed implementation in the target runtime.
 
 Progressive route `stream()` strings are trusted raw HTML. Node, Workers, and Lambda adapters do not escape or sanitize chunks. Escape text before branding a chunk:

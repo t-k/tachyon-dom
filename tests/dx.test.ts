@@ -410,6 +410,14 @@ describe("DX helpers", () => {
     expect(adapters).toContain("A configured `origin` takes precedence over forwarded protocol metadata");
   });
 
+  it("documents contextual escaping for the server HTML helper", async () => {
+    const security = await readFile("docs/security.md", "utf8");
+
+    expect(security).toContain("Quote the complete attribute value when a template contains a prefix or suffix");
+    expect(security).toContain("Direct `name=${value}` interpolation is quoted automatically");
+    expect(security).toContain("`rawHtml()` is accepted only in text context");
+  });
+
   it("uses Node ESM-compatible relative module specifiers in emitted source files", async () => {
     const files = await collectTypeScriptFiles(path.join(process.cwd(), "src"));
     const extensionlessSpecifiers: string[] = [];
