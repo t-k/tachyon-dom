@@ -3,6 +3,7 @@ import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
 import { applyHtmlWhitespace, resolveHtmlWhitespacePolicy, type HtmlWhitespacePolicy } from "./html-whitespace.js";
 import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "./url-policy.js";
+import { validateRedirectTarget } from "./redirect-policy.js";
 
 export type RouteParams = Record<string, string>;
 
@@ -320,37 +321,10 @@ export type RedirectOptions = ResponseInit & {
   allowedOrigins?: readonly string[];
 };
 
-const isSafePathRedirect = (location: string): boolean => {
-  const controlCharacterPattern = /[\u0000-\u001F\u007F]/;
-  if (!location.startsWith("/") || location.startsWith("//") || controlCharacterPattern.test(location)) {
-    return false;
-  }
-  try {
-    const decoded = decodeURIComponent(location);
-    return !decoded.startsWith("//") && !decoded.includes("\\") && !controlCharacterPattern.test(decoded);
-  } catch {
-    return false;
-  }
-};
-
-const isApprovedExternalRedirect = (location: string, allowedOrigins: readonly string[] | undefined): boolean => {
-  if (!allowedOrigins || allowedOrigins.length === 0) {
-    return false;
-  }
-  try {
-    const url = new URL(location);
-    return (url.protocol === "https:" || url.protocol === "http:") && allowedOrigins.includes(url.origin);
-  } catch {
-    return false;
-  }
-};
-
 export const redirect = (location: string, init: RedirectOptions = {}): RouteResponse => {
-  if (
-    !isSafePathRedirect(location) &&
-    !(init.allowExternal && isApprovedExternalRedirect(location, init.allowedOrigins))
-  ) {
-    throw new Error(`Unsafe redirect target: ${location}`);
+  const decision = validateRedirectTarget(location, init);
+  if (!decision.ok) {
+    throw new Error(decision.error);
   }
   const headers = new Headers(init.headers);
   headers.set("location", location);
