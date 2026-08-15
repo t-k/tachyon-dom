@@ -15,9 +15,10 @@ import { preflightReleasePublication } from "../scripts/preflight-release-public
 
 const { verifyReleaseIdentity } = releaseContract;
 
-const repository = () => ({
+const repository = (directory?: string) => ({
   type: "git",
   url: "git+https://github.com/t-k/tachyon-dom.git",
+  ...(directory === undefined ? {} : { directory }),
 });
 
 const packages = (version = "1.2.3", dependency = version) => ({
@@ -25,7 +26,7 @@ const packages = (version = "1.2.3", dependency = version) => ({
   createPackage: {
     name: "create-tachyon-dom",
     version,
-    repository: repository(),
+    repository: repository("packages/create-tachyon-dom"),
     dependencies: { "tachyon-dom": dependency },
   },
 });
@@ -71,6 +72,15 @@ describe("npm release identity", () => {
     expect(verifyReleaseIdentity({ tag: "v1.2.3", ...fixture })).toEqual({
       ok: false,
       error: expect.stringMatching(/repository metadata/),
+    });
+  });
+
+  it("rejects create package repository metadata without its package directory", () => {
+    const fixture = packages();
+    delete fixture.createPackage.repository.directory;
+    expect(verifyReleaseIdentity({ tag: "v1.2.3", ...fixture })).toEqual({
+      ok: false,
+      error: expect.stringMatching(/repository directory/),
     });
   });
 });
@@ -171,7 +181,7 @@ describe("initializer package artifacts", () => {
         `${JSON.stringify({
           name: "create-tachyon-dom",
           version: "1.2.3",
-          repository: repository(),
+          repository: repository("packages/create-tachyon-dom"),
           files: ["dist", "README.md", "LICENSE"],
           bin: { "create-tachyon-dom": "./dist/index.js" },
           dependencies: { "tachyon-dom": "1.2.3" },

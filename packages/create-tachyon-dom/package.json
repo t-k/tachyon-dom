@@ -6,7 +6,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/t-k/tachyon-dom.git"
+    "url": "git+https://github.com/t-k/tachyon-dom.git",
+    "directory": "packages/create-tachyon-dom"
   },
   "type": "module",
   "bin": {

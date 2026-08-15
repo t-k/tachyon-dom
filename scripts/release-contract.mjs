@@ -37,6 +37,9 @@ export const verifyReleaseIdentity = ({ tag, rootPackage, createPackage }) => {
   if (!hasExpectedRepository(rootPackage) || !hasExpectedRepository(createPackage)) {
     return failure("Both release packages must declare repository metadata for t-k/tachyon-dom.");
   }
+  if (createPackage.repository.directory !== "packages/create-tachyon-dom") {
+    return failure("The create-tachyon-dom repository directory must be packages/create-tachyon-dom.");
+  }
   return { ok: true, version, npmTag: version.includes("-") ? "next" : "latest" };
 };
 

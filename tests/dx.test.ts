@@ -256,12 +256,13 @@ describe("DX helpers", () => {
     expect(packageJson.publishConfig).toEqual({ access: "public" });
 
     const createPackageJson = JSON.parse(await readFile("packages/create-tachyon-dom/package.json", "utf8")) as {
-      repository?: { type?: string; url?: string };
+      repository?: { type?: string; url?: string; directory?: string };
       publishConfig?: { access?: string };
     };
     expect(createPackageJson.repository).toEqual({
       type: "git",
       url: "git+https://github.com/t-k/tachyon-dom.git",
+      directory: "packages/create-tachyon-dom",
     });
     expect(createPackageJson.publishConfig).toEqual({ access: "public" });
   });
