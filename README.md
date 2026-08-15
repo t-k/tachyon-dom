@@ -120,10 +120,9 @@ The normal project shape keeps route markup in `src/routes/**/page.td`, client c
 The package root contains browser-safe reactive and runtime APIs such as `createSignal()`, `createMemo()`, `createResource()`, `createRoot()`, `onCleanup()`, and the client router. Heavier tools use explicit subpaths:
 
 ```ts
-import { createSignal } from "tachyon-dom";
+import { createClientRouter, createSignal } from "tachyon-dom";
 import { compileTemplate } from "tachyon-dom/compiler";
 import { defineApp } from "tachyon-dom/app";
-import { createRouter } from "tachyon-dom/router";
 import { html } from "tachyon-dom/server/html";
 import { tachyonDom } from "tachyon-dom/vite";
 ```

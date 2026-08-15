@@ -81,7 +81,78 @@ const collectRelativeModuleSpecifiers = (sourceFile: ts.SourceFile): string[] =>
   return specifiers;
 };
 
+type PublicMarkdownImport = {
+  file: string;
+  line: number;
+  specifier: string;
+  names: string[];
+};
+
+const collectMarkdownFiles = async (directory: string): Promise<string[]> => {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const nested = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) return collectMarkdownFiles(entryPath);
+      return entry.isFile() && entry.name.endsWith(".md") ? [entryPath] : [];
+    }),
+  );
+  return nested.flat();
+};
+
+const collectPublicMarkdownImports = async (files: readonly string[]): Promise<PublicMarkdownImport[]> => {
+  const imports: PublicMarkdownImport[] = [];
+  for (const file of files) {
+    const markdown = await readFile(file, "utf8");
+    const fencePattern = /```(?:js|jsx|mjs|mts|ts|tsx|javascript|typescript)\s*\n([\s\S]*?)```/g;
+    for (const fence of markdown.matchAll(fencePattern)) {
+      const source = fence[1] ?? "";
+      const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+      for (const statement of sourceFile.statements) {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+        const specifier = statement.moduleSpecifier.text;
+        if (specifier !== "tachyon-dom" && !specifier.startsWith("tachyon-dom/")) continue;
+        const clause = statement.importClause;
+        const names: string[] = [];
+        if (clause && !clause.isTypeOnly) {
+          if (clause.name) names.push("default");
+          if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+            for (const element of clause.namedBindings.elements) {
+              if (!element.isTypeOnly) names.push((element.propertyName ?? element.name).text);
+            }
+          }
+        }
+        const markdownLine = markdown.slice(0, fence.index).split("\n").length;
+        const sourceLine = sourceFile.getLineAndCharacterOfPosition(statement.getStart()).line + 1;
+        imports.push({ file, line: markdownLine + sourceLine, specifier, names });
+      }
+    }
+  }
+  return imports;
+};
+
 describe("DX helpers", () => {
+  it("resolves every tachyon-dom import in public Markdown", async () => {
+    const manifest = JSON.parse(await readFile("package.json", "utf8")) as {
+      exports: Record<string, { import?: string }>;
+    };
+    const markdownFiles = ["README.md", ...(await collectMarkdownFiles("docs"))];
+    const imports = await collectPublicMarkdownImports(markdownFiles);
+
+    for (const imported of imports) {
+      const exportKey = imported.specifier === "tachyon-dom" ? "." : `.${imported.specifier.slice("tachyon-dom".length)}`;
+      const target = manifest.exports[exportKey]?.import;
+      expect(target, `${imported.file}:${imported.line}: ${imported.specifier} is not exported`).toBeDefined();
+      if (!target) continue;
+      const exports = (await import(pathToFileURL(path.resolve(target)).href)) as Record<string, unknown>;
+      for (const name of imported.names) {
+        expect(exports, `${imported.file}:${imported.line}: ${name} is not exported by ${imported.specifier}`).toHaveProperty(
+          name,
+        );
+      }
+    }
+  });
+
   it("keeps template and HTML tag whitespace policy types distinct", () => {
     expectTypeOf<TemplateWhitespacePolicy>().not.toEqualTypeOf<HtmlWhitespacePolicy>();
   });
