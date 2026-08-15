@@ -1,7 +1,7 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
 import { emptyTextMarker } from "../../text-marker.js";
-import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../../url-policy.js";
+import { sanitizeMetaRefreshContent, sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../../url-policy.js";
 import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
 import {
   attrExpression,
@@ -50,6 +50,27 @@ const componentScope = (node: ElementNode, scope: Record<string, unknown>): Reco
   };
   node.children.forEach(applyStores);
   return next;
+};
+
+const hasStaticMetaRefreshMode = (node: ElementNode): boolean =>
+  node.tagName.toLowerCase() === "meta" &&
+  node.attrs.some(
+    (attribute) =>
+      attribute.name.toLowerCase() === "http-equiv" &&
+      attribute.value !== true &&
+      !readExpressionAttribute(attribute.value) &&
+      attribute.value.trim().toLowerCase() === "refresh",
+  );
+
+const sanitizeDynamicAttributeValue = (node: ElementNode, name: string, value: unknown): unknown => {
+  if (hasStaticMetaRefreshMode(node) && name.toLowerCase() === "content") {
+    const result = sanitizeMetaRefreshContent(String(value));
+    if (!result.ok) throw result.error;
+    return result.value;
+  }
+  return urlPurposeForAttribute(node.tagName, name)
+    ? sanitizeUrlAttributeValue(node.tagName, name, String(value))
+    : value;
 };
 
 const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
@@ -169,9 +190,7 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
     if (expression) {
       const value = readPath(scope, expression);
       if (value != null && value !== false) {
-        const safeValue = urlPurposeForAttribute(node.tagName, attr.name)
-          ? sanitizeUrlAttributeValue(node.tagName, attr.name, String(value))
-          : value;
+        const safeValue = sanitizeDynamicAttributeValue(node, attr.name, value);
         attrs.push(` ${attr.name}="${escapeHtml(safeValue)}"`);
       }
       continue;
@@ -298,9 +317,12 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
     const expression = readExpressionAttribute(attr.value);
     if (expression) {
       const value = expressionToScopeAccess(expression, locals);
-      const safeValue = urlPurposeForAttribute(node.tagName, attr.name)
-        ? `__tachyonSafeUrlAttribute(${jsString(node.tagName)}, ${jsString(attr.name)}, ${value})`
-        : value;
+      const safeValue =
+        hasStaticMetaRefreshMode(node) && attr.name.toLowerCase() === "content"
+          ? `__tachyonSafeMetaRefreshContent(${value})`
+          : urlPurposeForAttribute(node.tagName, attr.name)
+            ? `__tachyonSafeUrlAttribute(${jsString(node.tagName)}, ${jsString(attr.name)}, ${value})`
+            : value;
       parts.push(
         `(${value} == null || ${value} === false ? "" : ${jsString(` ${attr.name}="`)} + escapeHtml(${safeValue}) + ${jsString(`"`)} )`,
       );
@@ -312,9 +334,7 @@ export const renderOpenTagExpression = (node: ElementNode, locals: ReadonlySet<s
   if (staticClasses.length > 0 || dynamicBaseClasses.length > 0 || dynamicClasses.length > 0) {
     const classExpression = `${jsString(staticClasses.join(" "))}${
       dynamicBaseClasses.length > 0 ? ` + ${dynamicBaseClasses.join(" + ")}` : ""
-    }${
-      dynamicClasses.length > 0 ? ` + ${dynamicClasses.join(" + ")}` : ""
-    }`;
+    }${dynamicClasses.length > 0 ? ` + ${dynamicClasses.join(" + ")}` : ""}`;
     parts.splice(
       1,
       0,
@@ -460,7 +480,8 @@ export const hasDynamicUrlAttribute = (node: TemplateNode): boolean =>
   (node.attrs.some(
     (attribute) =>
       Boolean(readExpressionAttribute(attribute.value)) &&
-      urlPurposeForAttribute(node.tagName, attribute.name) !== undefined,
+      (urlPurposeForAttribute(node.tagName, attribute.name) !== undefined ||
+        (hasStaticMetaRefreshMode(node) && attribute.name.toLowerCase() === "content")),
   ) ||
     node.children.some(hasDynamicUrlAttribute));
 

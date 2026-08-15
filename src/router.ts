@@ -2,8 +2,8 @@ import { escapeHtml } from "./html-escape.js";
 import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
 import { applyHtmlWhitespace, resolveHtmlWhitespacePolicy, type HtmlWhitespacePolicy } from "./html-whitespace.js";
-import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "./url-policy.js";
 import { validateRedirectTarget } from "./redirect-policy.js";
+import { sanitizeHeadAttributes } from "./head-policy.js";
 
 export type RouteParams = Record<string, string>;
 
@@ -1012,45 +1012,15 @@ const requestFor = (input: Request | URL | string): Request => {
   return new Request(input instanceof URL ? input : new URL(input, "http://tachyon.local"));
 };
 
-const headAttributeNamePattern = /^[A-Za-z_:][A-Za-z0-9_.:-]*$/;
-const safeHeadAttributeValue = (element: string, name: string, value: string): string | undefined => {
-  const normalized = name.toLowerCase();
-  if (!headAttributeNamePattern.test(name) || normalized.startsWith("on")) {
-    return undefined;
-  }
-  if (!urlPurposeForAttribute(element, normalized)) return value;
-  try {
-    return sanitizeUrlAttributeValue(element, normalized, value);
-  } catch {
-    return undefined;
-  }
-};
-
-const hasUnsafeUrlAttribute = (element: string, attrs: Record<string, string>): boolean =>
-  Object.entries(attrs).some(([name, value]) => {
-    const normalized = name.toLowerCase();
-    if (!urlPurposeForAttribute(element, normalized)) return false;
-    try {
-      sanitizeUrlAttributeValue(element, normalized, value);
-      return false;
-    } catch {
-      return true;
-    }
-  });
-
 const renderAttributes = (
-  element: string,
+  element: "meta" | "link" | "script",
   attrs: Record<string, string>,
   options: { dropOnUnsafeUrl?: boolean } = {},
 ): string | undefined => {
-  if (options.dropOnUnsafeUrl && hasUnsafeUrlAttribute(element, attrs)) {
-    return undefined;
-  }
-  return Object.entries(attrs)
-    .flatMap(([name, value]) => {
-      const safeValue = safeHeadAttributeValue(element, name, value);
-      return safeValue === undefined ? [] : [` ${name}="${escapeHtml(safeValue)}"`];
-    })
+  const safeAttributes = sanitizeHeadAttributes(element, attrs, options);
+  if (!safeAttributes) return undefined;
+  return Object.entries(safeAttributes)
+    .map(([name, value]) => ` ${name}="${escapeHtml(value)}"`)
     .join("");
 };
 

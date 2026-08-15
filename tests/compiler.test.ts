@@ -312,6 +312,29 @@ describe("HTML-first compiler", () => {
     await expect(consumeStream()).rejects.toThrow("Unsafe URL for href");
   });
 
+  it("validates meta refresh across static and dynamic compiler targets", async () => {
+    const staticUnsafe = compileTemplate(`<meta content="0;url=javascript:alert(1)" http-equiv="refresh">`);
+    expect(staticUnsafe.ok).toBe(false);
+    if (staticUnsafe.ok) throw new Error("Expected unsafe meta refresh diagnostic.");
+    expect(staticUnsafe.error.message).toBe("Unsafe URL for content.");
+
+    const unresolved = compileTemplate(`<meta content="0;url=/safe" http-equiv={mode}>`);
+    expect(unresolved.ok).toBe(false);
+    if (unresolved.ok) throw new Error("Expected unresolved meta refresh diagnostic.");
+    expect(unresolved.error.message).toContain("Dynamic meta refresh mode");
+
+    const dynamic = compileTemplate(`<meta http-equiv="refresh" content={refresh}>`);
+    if (!dynamic.ok) throw new Error(dynamic.error.message);
+    const unsafeScope = { refresh: "0;url=javascript:alert(1)" };
+    expect(() => renderServerTemplate(dynamic.value, unsafeScope)).toThrow("Unsafe URL for content");
+
+    const serverModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerModule(dynamic.value)).toString("base64")}`
+    )) as { render(scope: Record<string, unknown>): string };
+    expect(() => serverModule.render(unsafeScope)).toThrow("Unsafe URL for content");
+    expect(serverModule.render({ refresh: "0;url=/safe" })).toBe(`<meta http-equiv="refresh" content="0;url=/safe">`);
+  });
+
   it("normalizes a mixed-case dynamic URL attribute consistently", async () => {
     const result = compileTemplate(`<img SRC={url}>`);
     if (!result.ok) throw new Error(result.error.message);
@@ -495,37 +518,40 @@ describe("HTML-first compiler", () => {
     expect(generateServerStreamModule(result.value)).toContain(`__tachyonPush("<!---->");`);
   });
 
-  it.each(["", null, undefined])("preserves an empty text hydration anchor for %j across server targets", async (value) => {
-    const result = compileTemplate(`<p>a{value}b</p>`);
-    if (!result.ok) throw new Error(result.error.message);
-    const scope = { value };
-    const expected = `<p>a<!----><!--td:text--><!---->b</p>`;
+  it.each(["", null, undefined])(
+    "preserves an empty text hydration anchor for %j across server targets",
+    async (value) => {
+      const result = compileTemplate(`<p>a{value}b</p>`);
+      if (!result.ok) throw new Error(result.error.message);
+      const scope = { value };
+      const expected = `<p>a<!----><!--td:text--><!---->b</p>`;
 
-    expect(renderServerTemplate(result.value, scope)).toBe(expected);
+      expect(renderServerTemplate(result.value, scope)).toBe(expected);
 
-    const serverModule = (await import(
-      `data:text/javascript;base64,${Buffer.from(generateServerModule(result.value)).toString("base64")}`
-    )) as { render(scope: Record<string, unknown>): string };
-    expect(serverModule.render(scope)).toBe(expected);
+      const serverModule = (await import(
+        `data:text/javascript;base64,${Buffer.from(generateServerModule(result.value)).toString("base64")}`
+      )) as { render(scope: Record<string, unknown>): string };
+      expect(serverModule.render(scope)).toBe(expected);
 
-    const streamModule = (await import(
-      `data:text/javascript;base64,${Buffer.from(generateServerStreamModule(result.value)).toString("base64")}`
-    )) as { stream(scope: Record<string, unknown>): AsyncIterable<string> };
-    const chunks: string[] = [];
-    for await (const chunk of streamModule.stream(scope)) chunks.push(chunk);
-    expect(chunks.join("")).toBe(expected);
+      const streamModule = (await import(
+        `data:text/javascript;base64,${Buffer.from(generateServerStreamModule(result.value)).toString("base64")}`
+      )) as { stream(scope: Record<string, unknown>): AsyncIterable<string> };
+      const chunks: string[] = [];
+      for await (const chunk of streamModule.stream(scope)) chunks.push(chunk);
+      expect(chunks.join("")).toBe(expected);
 
-    document.body.innerHTML = expected;
-    const root = document.body.firstElementChild;
-    if (!(root instanceof HTMLElement)) throw new Error("Missing SSR root.");
-    const binding = result.value.client.bindings.find((candidate) => candidate.kind === "text");
-    if (!binding || binding.kind !== "text") throw new Error("Missing text binding.");
-    const target = textAt(root, binding.path);
-    expect(target).toBeInstanceOf(Text);
-    expect(root.textContent).toBe("ab");
-    setText(target, "Z");
-    expect(root.textContent).toBe("aZb");
-  });
+      document.body.innerHTML = expected;
+      const root = document.body.firstElementChild;
+      if (!(root instanceof HTMLElement)) throw new Error("Missing SSR root.");
+      const binding = result.value.client.bindings.find((candidate) => candidate.kind === "text");
+      if (!binding || binding.kind !== "text") throw new Error("Missing text binding.");
+      const target = textAt(root, binding.path);
+      expect(target).toBeInstanceOf(Text);
+      expect(root.textContent).toBe("ab");
+      setText(target, "Z");
+      expect(root.textContent).toBe("aZb");
+    },
+  );
 
   it("throws when a text binding path is missing or resolves to a non-text node", () => {
     document.body.innerHTML = `<p><span></span></p>`;
@@ -554,9 +580,7 @@ describe("HTML-first compiler", () => {
   });
 
   it("places table row list bindings inside a normalized tbody", () => {
-    const result = compileTemplate(
-      `<table><for each={rows} key={row.id}><tr><td>{row.label}</td></tr></for></table>`,
-    );
+    const result = compileTemplate(`<table><for each={rows} key={row.id}><tr><td>{row.label}</td></tr></for></table>`);
     if (!result.ok) throw new Error(result.error.message);
     const list = result.value.client.bindings.find((binding) => binding.kind === "list");
 
@@ -580,17 +604,18 @@ describe("HTML-first compiler", () => {
     expect(root.querySelector("optgroup option")?.textContent).toBe("Choice");
   });
 
-  it.each([`<table><div>{value}</div></table>`, `<table>text<tr><td>x</td></tr></table>`, `<select><div>x</div></select>`])(
-    "reports unsupported HTML tree construction for %s",
-    (source) => {
-      const result = compileTemplate(source);
+  it.each([
+    `<table><div>{value}</div></table>`,
+    `<table>text<tr><td>x</td></tr></table>`,
+    `<select><div>x</div></select>`,
+  ])("reports unsupported HTML tree construction for %s", (source) => {
+    const result = compileTemplate(source);
 
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error("Expected tree construction diagnostic.");
-      expect(result.error.message).toContain("Unsupported HTML tree construction");
-      expect(result.error.offset).toBeGreaterThanOrEqual(0);
-    },
-  );
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected tree construction diagnostic.");
+    expect(result.error.message).toContain("Unsupported HTML tree construction");
+    expect(result.error.offset).toBeGreaterThanOrEqual(0);
+  });
 
   it("omits closing tags for void elements in client and server targets", () => {
     const result = compileTemplate(`<div><br/>{label}<hr/></div>`);

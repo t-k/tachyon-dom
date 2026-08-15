@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderHead, type RouteHeadDescriptor } from "../src/router";
 import { createClientRouter, rawHtml, type ClientRouteDefinition } from "../src/runtime/router";
 
 const createWindow = (path = "/") => {
@@ -253,7 +254,9 @@ describe("client router", () => {
           path: "/app",
           render: () => {
             layoutRenders += 1;
-            return rawHtml(`<section data-layout><nav><a href="/app/orders">Orders</a></nav><div data-tachyon-outlet></div></section>`);
+            return rawHtml(
+              `<section data-layout><nav><a href="/app/orders">Orders</a></nav><div data-tachyon-outlet></div></section>`,
+            );
           },
           children: [
             { id: "users", path: "users", render: () => rawHtml(`<h1>Users</h1>`) },
@@ -290,9 +293,7 @@ describe("client router", () => {
           path: "/app",
           render: ({ url }) => {
             layoutRenders += 1;
-            return rawHtml(
-              `<section data-query="${url.search}"><div data-tachyon-outlet></div></section>`,
-            );
+            return rawHtml(`<section data-query="${url.search}"><div data-tachyon-outlet></div></section>`);
           },
           children: [{ id: "child", path: "child", render: () => rawHtml("<p>Child</p>") }],
         },
@@ -407,14 +408,7 @@ describe("client router", () => {
 
     await router.start();
 
-    expect(calls).toEqual([
-      "load:parent",
-      "load:child",
-      "render:Child",
-      "render:Parent",
-      "head:Parent",
-      "head:Child",
-    ]);
+    expect(calls).toEqual(["load:parent", "load:child", "render:Child", "render:Parent", "head:Parent", "head:Child"]);
     expect(document.title).toBe("Child");
     expect(document.head.querySelector(`[name="parent"]`)).not.toBeNull();
     expect(document.head.querySelector(`[name="child"]`)).not.toBeNull();
@@ -716,6 +710,55 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("applies the same URL policy to server and client head elements", async () => {
+    document.head.innerHTML = "";
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    const descriptor: RouteHeadDescriptor = {
+      metas: [{ "http-equiv": "refresh", content: "0;url=javascript:alert(1)", "data-id": "refresh" }],
+      links: [
+        { rel: "stylesheet", href: "data:text/css,body{}", "data-id": "unsafe-link" },
+        { rel: "stylesheet", href: "/app.css", "data-id": "safe-link" },
+      ],
+      scripts: [
+        { src: "javascript:alert(1)", onload: "alert(2)", "data-id": "unsafe-script" },
+        { src: "/app.js", "data-id": "safe-script" },
+      ],
+    };
+    const router = createClientRouter({
+      root,
+      routes: [{ path: "/", head: () => descriptor, render: () => "Home" }],
+    });
+
+    await router.start();
+
+    const normalized = (elements: readonly Element[]): unknown[] =>
+      elements.map((element) => ({
+        tag: element.localName,
+        attributes: Object.fromEntries(
+          [...element.attributes]
+            .filter(({ name }) => name !== "data-tachyon-head")
+            .map(({ name, value }) => [name, value] as const)
+            .sort((left, right) => left[0].localeCompare(right[0])),
+        ),
+      }));
+    const template = document.createElement("template");
+    template.innerHTML = renderHead(descriptor);
+    const serverElements = [...template.content.children];
+    const clientElements = [...document.head.querySelectorAll(`[data-tachyon-head="route"]`)];
+
+    expect(normalized(clientElements)).toEqual(normalized(serverElements));
+    expect(document.head.querySelector(`[data-id="unsafe-link"]`)).toBeNull();
+    expect(document.head.querySelector(`[data-id="refresh"]`)?.hasAttribute("content")).toBe(false);
+    expect(document.head.querySelector(`[data-id="unsafe-script"]`)?.hasAttribute("src")).toBe(false);
+    expect(document.head.querySelector(`[data-id="unsafe-script"]`)?.hasAttribute("onload")).toBe(false);
+    expect(document.head.querySelector(`[data-id="safe-link"]`)?.getAttribute("href")).toBe("/app.css");
+    expect(document.head.querySelector(`[data-id="safe-script"]`)?.getAttribute("src")).toBe("/app.js");
+    router.dispose();
+  });
+
   it("wraps client navigation commits in view transitions when enabled", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");
@@ -825,10 +868,14 @@ describe("client router", () => {
       root,
       routes: [
         { path: "/", render: () => "home" },
-        { path: "/action", action: ({ signal: actionSignal }) => {
-          signal = actionSignal;
-          return new Promise<Response>(() => undefined);
-        }, render: () => "action" },
+        {
+          path: "/action",
+          action: ({ signal: actionSignal }) => {
+            signal = actionSignal;
+            return new Promise<Response>(() => undefined);
+          },
+          render: () => "action",
+        },
       ],
     });
 

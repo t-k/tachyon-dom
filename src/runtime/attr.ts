@@ -1,6 +1,17 @@
 import { validateAttributeName } from "../attribute-policy.js";
-import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
+import { sanitizeElementUrlAttributes } from "../url-policy.js";
 import { setClassValue } from "./class.js";
+
+const prospectiveAttributes = (element: Element, name: string, value: string): Record<string, string> => {
+  const normalizedName = name.toLowerCase();
+  const attributes = Object.fromEntries(
+    [...element.attributes]
+      .filter((attribute) => attribute.name.toLowerCase() !== normalizedName)
+      .map((attribute) => [attribute.name, attribute.value]),
+  );
+  attributes[name] = value;
+  return attributes;
+};
 
 export const setAttributeValue = (element: Element, name: string, value: unknown): void => {
   const validatedName = validateAttributeName(name);
@@ -30,12 +41,14 @@ export const setAttributeValue = (element: Element, name: string, value: unknown
   }
   let resolvedValue = value;
   if (value === true) {
+    const result = sanitizeElementUrlAttributes(element.localName, prospectiveAttributes(element, name, ""));
+    if (!result.ok) throw result.error;
     element.setAttribute(name, "");
   } else {
     const text = String(value);
-    resolvedValue = urlPurposeForAttribute(element.localName, name)
-      ? sanitizeUrlAttributeValue(element.localName, name, text)
-      : text;
+    const result = sanitizeElementUrlAttributes(element.localName, prospectiveAttributes(element, name, text));
+    if (!result.ok) throw result.error;
+    resolvedValue = result.value[name] ?? text;
     element.setAttribute(name, String(resolvedValue));
   }
   if (name in element) {

@@ -35,6 +35,8 @@ jobs:
 
       - run: pnpm build
 
+      - run: pnpm verify:url-policy-codegen
+
       - run: pnpm verify:package
 
       - run: pnpm verify:clean-consumer

@@ -116,12 +116,14 @@ describe("open issue browser regressions", () => {
       await page.setContent("<div id=subject></div>");
       await page.addScriptTag({ content: script });
       const classNames = await page.evaluate(() => {
-        const runtime = (globalThis as unknown as {
-          TDClassFixture: {
-            setAttributeValue: (element: Element, name: string, value: unknown) => void;
-            setClassPresence: (element: Element, name: string, value: unknown) => void;
-          };
-        }).TDClassFixture;
+        const runtime = (
+          globalThis as unknown as {
+            TDClassFixture: {
+              setAttributeValue: (element: Element, name: string, value: unknown) => void;
+              setClassPresence: (element: Element, name: string, value: unknown) => void;
+            };
+          }
+        ).TDClassFixture;
         const element = document.querySelector("#subject");
         if (!(element instanceof HTMLDivElement)) throw new Error("Missing class subject.");
         runtime.setAttributeValue(element, "class", "one");
@@ -136,6 +138,94 @@ describe("open issue browser regressions", () => {
       });
 
       expect(classNames).toEqual(["two active", "two active", "active selected"]);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("prevents unsafe head URLs during a real browser client navigation", async () => {
+    const bundle = await build({
+      stdin: {
+        contents: `export { createClientRouter } from "./src/runtime/router.ts";`,
+        resolveDir: process.cwd(),
+      },
+      bundle: true,
+      format: "iife",
+      globalName: "TDRouterFixture",
+      platform: "browser",
+      write: false,
+    });
+    const script = bundle.outputFiles[0]?.text;
+    if (!script) throw new Error("Missing client router bundle.");
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      await page.route("http://tachyon.test/**", async (route) =>
+        route.fulfill({ contentType: "text/html", body: `<main id="app"></main>` }),
+      );
+      await page.goto("http://tachyon.test/");
+      await page.addScriptTag({ content: script });
+      const result = await page.evaluate(async () => {
+        const probeGlobal = globalThis as typeof globalThis & { __headProbe: number };
+        probeGlobal.__headProbe = 0;
+        const runtime = (
+          globalThis as unknown as {
+            TDRouterFixture: {
+              createClientRouter: (options: Record<string, unknown>) => {
+                start: () => Promise<void>;
+                navigate: (href: string) => Promise<void>;
+                dispose: () => void;
+              };
+            };
+          }
+        ).TDRouterFixture;
+        const root = document.querySelector("#app");
+        if (!(root instanceof HTMLElement)) throw new Error("Missing router root.");
+        const router = runtime.createClientRouter({
+          root,
+          routes: [
+            { path: "/", render: () => "Home" },
+            {
+              path: "/unsafe",
+              head: () => ({
+                metas: [{ "http-equiv": "refresh", content: "0;url=javascript:alert(1)" }],
+                links: [
+                  { rel: "stylesheet", href: "data:text/css,body{}", "data-id": "unsafe-link" },
+                  { rel: "stylesheet", href: "/safe.css", "data-id": "safe-link" },
+                ],
+                scripts: [
+                  {
+                    src: "data:text/javascript,globalThis.__headProbe=1",
+                    "data-id": "unsafe-script",
+                  },
+                ],
+              }),
+              render: () => "Unsafe",
+            },
+          ],
+          scrollTo: () => undefined,
+        });
+        await router.start();
+        await router.navigate("/unsafe");
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        const observed = {
+          probe: probeGlobal.__headProbe,
+          unsafeLink: document.head.querySelector(`[data-id="unsafe-link"]`) !== null,
+          unsafeScriptSrc: document.head.querySelector(`[data-id="unsafe-script"]`)?.hasAttribute("src"),
+          metaContent: document.head.querySelector(`meta[http-equiv="refresh"]`)?.hasAttribute("content"),
+          safeLink: document.head.querySelector(`[data-id="safe-link"]`)?.getAttribute("href"),
+        };
+        router.dispose();
+        return observed;
+      });
+
+      expect(result).toEqual({
+        probe: 0,
+        unsafeLink: false,
+        unsafeScriptSrc: false,
+        metaContent: false,
+        safeLink: "/safe.css",
+      });
     } finally {
       await page.close();
     }

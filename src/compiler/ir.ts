@@ -1,6 +1,6 @@
 import { err, ok, type Result } from "../result.js";
 import { isDangerousAttributeName } from "../attribute-policy.js";
-import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
+import { sanitizeElementUrlAttributes, sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
 import { isAssignableExpression, parseExpression } from "./expression.js";
 import type {
   CompilerError,
@@ -139,6 +139,26 @@ const validateTextExpressions = (node: TemplateNode, insideRawTextTag?: string):
 };
 
 const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => {
+  if (node.tagName.toLowerCase() === "meta") {
+    const httpEquiv = node.attrs.find((attr) => attr.name.toLowerCase() === "http-equiv");
+    const content = node.attrs.find((attr) => attr.name.toLowerCase() === "content");
+    const dynamicHttpEquiv = httpEquiv && readExpressionAttribute(httpEquiv.value);
+    if (dynamicHttpEquiv && content) {
+      return semanticError(
+        "Dynamic meta refresh mode cannot be combined with content; use a static http-equiv value.",
+        attributeSpan(httpEquiv),
+      );
+    }
+    const staticAttributes = Object.fromEntries(
+      node.attrs.flatMap((attr) =>
+        attr.value === true || readExpressionAttribute(attr.value) ? [] : [[attr.name, attr.value]],
+      ),
+    );
+    const sanitized = sanitizeElementUrlAttributes(node.tagName, staticAttributes);
+    if (!sanitized.ok) {
+      return semanticError(sanitized.error.message, content ? attributeSpan(content) : openingTagSpan(node));
+    }
+  }
   for (const attr of node.attrs) {
     if (!attr.name.startsWith("on:") && isDangerousAttributeName(attr.name)) {
       return semanticError(`Dangerous attribute is not supported: ${attr.name}.`, {
@@ -230,11 +250,7 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
   return ok(undefined);
 };
 
-const validateTree = (
-  node: TemplateNode,
-  hydrateIds: Set<string>,
-  insideFor = false,
-): Result<void, CompilerError> => {
+const validateTree = (node: TemplateNode, hydrateIds: Set<string>, insideFor = false): Result<void, CompilerError> => {
   const expressionResult = validateTextExpressions(node);
   if (!expressionResult.ok) {
     return expressionResult;

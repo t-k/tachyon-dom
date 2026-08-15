@@ -36,6 +36,8 @@ jobs:
 
       - run: pnpm build
 
+      - run: pnpm verify:url-policy-codegen
+
       - run: pnpm build:create-package
 
       - run: pnpm test

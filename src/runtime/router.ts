@@ -1,4 +1,5 @@
 import { isClientHtml, rawHtml, type ClientHtml } from "./html.js";
+import { sanitizeHeadAttributes } from "../head-policy.js";
 
 export { rawHtml, type ClientHtml } from "./html.js";
 
@@ -281,12 +282,11 @@ const managedHeadSelector = `[data-tachyon-head="route"]`;
 const maxScrollPositions = 50;
 
 const appendManagedHeadElement = (tagName: "meta" | "link" | "script", attributes: Record<string, string>): void => {
+  const safeAttributes = sanitizeHeadAttributes(tagName, attributes, { dropOnUnsafeUrl: tagName === "link" });
+  if (!safeAttributes) return;
   const element = document.createElement(tagName);
   element.setAttribute("data-tachyon-head", "route");
-  for (const [name, value] of Object.entries(attributes)) {
-    if (/^on/i.test(name)) {
-      continue;
-    }
+  for (const [name, value] of Object.entries(safeAttributes)) {
     element.setAttribute(name, value);
   }
   document.head.appendChild(element);

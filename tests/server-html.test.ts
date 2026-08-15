@@ -209,4 +209,21 @@ describe("server html helper", () => {
       "URL attribute interpolation must provide the complete value",
     );
   });
+
+  it("validates expanded URL attributes and meta refresh in either static attribute order", () => {
+    const unsafe = "javascript:alert(1)";
+    expect(() => html`<object data="${unsafe}"></object>`).toThrow("Unsafe URL for data");
+    expect(() => html`<video poster="${unsafe}"></video>`).toThrow("Unsafe URL for poster");
+    expect(() => html`<img srcset="${`/safe.jpg 1x, ${unsafe} 2x`}" />`).toThrow("Unsafe URL for srcset");
+    expect(() => html`<meta http-equiv="refresh" content="0;url=${unsafe}" />`).toThrow(
+      "URL attribute interpolation must provide the complete value",
+    );
+    expect(() => html`<meta http-equiv="refresh" content="${`0;url=${unsafe}`}" />`).toThrow("Unsafe URL for content");
+    expect(() => html`<meta content="${`0;url=${unsafe}`}" http-equiv="refresh" />`).toThrow("Unsafe URL for content");
+    expect(html`<meta content="${"0;url=/safe"}" http-equiv="refresh" />`.toString()).toBe(
+      `<meta content="0;url=/safe" http-equiv="refresh" />`,
+    );
+    expect(() => attr("data", unsafe)).toThrow("Unsafe URL for data");
+    expect(() => attr("srcset", `/safe.jpg 1x, ${unsafe} 2x`)).toThrow("Unsafe URL for srcset");
+  });
 });

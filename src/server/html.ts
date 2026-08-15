@@ -1,6 +1,6 @@
 import { escapeHtml as escapeText } from "../html-escape.js";
 import { validateAttributeName } from "../attribute-policy.js";
-import { sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
+import { sanitizeMetaRefreshContent, sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
 import { scanRawText, type RawTextTag, type ScriptDataState } from "../html-raw-text.js";
 
 const htmlFragmentBrand = Symbol("tachyon.htmlFragment");
@@ -298,7 +298,7 @@ const plainAttributeValue = (value: HtmlValue): string => {
   return String(value);
 };
 
-const currentUrlAttributeContext = (
+const currentAttributeContext = (
   output: string,
 ): { element: string; attribute: string; prefix: string } | undefined => {
   const tagStart = output.lastIndexOf("<");
@@ -307,10 +307,17 @@ const currentUrlAttributeContext = (
   const element = /^<\s*([A-Za-z][A-Za-z0-9:-]*)/.exec(openTag)?.[1];
   const attributeMatch = /([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*(?:(["'])([^"']*)?)?$/.exec(openTag);
   const attribute = attributeMatch?.[1];
-  return element && attribute && urlPurposeForAttribute(element, attribute)
-    ? { element, attribute, prefix: attributeMatch?.[3] ?? "" }
-    : undefined;
+  return element && attribute ? { element, attribute, prefix: attributeMatch?.[3] ?? "" } : undefined;
 };
+
+const openingTagAtInterpolation = (output: string, strings: TemplateStringsArray, index: number): string => {
+  const tagStart = output.lastIndexOf("<");
+  if (tagStart < 0) return "";
+  return `${output.slice(tagStart)}${strings.slice(index + 1).join("\0")}`.split(">", 1)[0] ?? "";
+};
+
+const hasStaticMetaRefreshMode = (openingTag: string): boolean =>
+  /\bhttp-equiv\s*=\s*(?:"\s*refresh\s*"|'\s*refresh\s*'|refresh(?=\s|\/?>))/i.test(openingTag);
 
 const isHtmlWhitespace = (char: string): boolean =>
   char === " " || char === "\t" || char === "\n" || char === "\r" || char === "\f";
@@ -475,11 +482,17 @@ export const attr = (name: string, value: unknown): HtmlAttribute => {
   const defaultElement =
     normalizedName === "src"
       ? "img"
-      : normalizedName === "action"
-        ? "form"
-        : normalizedName === "formaction"
-          ? "button"
-          : "a";
+      : normalizedName === "srcset"
+        ? "img"
+        : normalizedName === "data"
+          ? "object"
+          : normalizedName === "poster"
+            ? "video"
+            : normalizedName === "action"
+              ? "form"
+              : normalizedName === "formaction"
+                ? "button"
+                : "a";
   const safeValue = urlPurposeForAttribute(defaultElement, normalizedName)
     ? sanitizeUrlAttributeValue(defaultElement, normalizedName, String(value))
     : value;
@@ -522,23 +535,50 @@ export const html = (strings: TemplateStringsArray, ...values: readonly HtmlValu
     if (index < values.length) {
       const value = values[index];
       const interpolationState = context.state;
-      const urlContext =
+      const attributeContext =
         context.state === "before-attribute-value" ||
         context.state === "double-quoted-attribute" ||
         context.state === "single-quoted-attribute"
-          ? currentUrlAttributeContext(output)
+          ? currentAttributeContext(output)
           : undefined;
       const nextLiteral = strings[index + 1] ?? "";
+      const openingTag = attributeContext ? openingTagAtInterpolation(output, strings, index) : "";
       if (
-        urlContext &&
+        attributeContext?.element.toLowerCase() === "meta" &&
+        attributeContext.attribute.toLowerCase() === "http-equiv" &&
+        /\bcontent\s*=/i.test(openingTag)
+      ) {
+        throw new TypeError(
+          "Dynamic meta refresh mode cannot be combined with content; use a static http-equiv value.",
+        );
+      }
+      const metaRefreshContext =
+        attributeContext?.element.toLowerCase() === "meta" &&
+        attributeContext.attribute.toLowerCase() === "content" &&
+        hasStaticMetaRefreshMode(openingTag)
+          ? attributeContext
+          : undefined;
+      const urlContext =
+        attributeContext && urlPurposeForAttribute(attributeContext.element, attributeContext.attribute)
+          ? attributeContext
+          : undefined;
+      const protectedContext = urlContext ?? metaRefreshContext;
+      if (
+        protectedContext &&
         context.state !== "before-attribute-value" &&
-        (urlContext.prefix !== "" || !nextLiteral.startsWith(context.state === "double-quoted-attribute" ? '"' : "'"))
+        (protectedContext.prefix !== "" ||
+          !nextLiteral.startsWith(context.state === "double-quoted-attribute" ? '"' : "'"))
       ) {
         throw new TypeError("URL attribute interpolation must provide the complete value");
       }
-      const safeValue = urlContext
-        ? sanitizeUrlAttributeValue(urlContext.element, urlContext.attribute, plainAttributeValue(value))
-        : value;
+      let safeValue = value;
+      if (urlContext) {
+        safeValue = sanitizeUrlAttributeValue(urlContext.element, urlContext.attribute, plainAttributeValue(value));
+      } else if (metaRefreshContext) {
+        const result = sanitizeMetaRefreshContent(plainAttributeValue(value));
+        if (!result.ok) throw result.error;
+        safeValue = result.value;
+      }
       const rendered = renderValue(
         safeValue,
         context.state,

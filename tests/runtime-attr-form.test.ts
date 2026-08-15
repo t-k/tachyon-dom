@@ -159,6 +159,34 @@ describe("attribute and form runtime helpers", () => {
     }
   });
 
+  it("protects expanded URL attributes and every meta refresh update order", () => {
+    document.body.innerHTML = `<object></object><video></video><img><meta>`;
+    const object = document.querySelector("object");
+    const video = document.querySelector("video");
+    const image = document.querySelector("img");
+    const meta = document.querySelector("meta");
+    if (!object || !video || !image || !meta) throw new Error("Missing URL policy fixtures.");
+
+    expect(() => setAttributeValue(object, "data", "data:text/html,<script>alert(1)</script>")).toThrow(
+      "Unsafe URL for data",
+    );
+    expect(() => setAttributeValue(video, "poster", "javascript:alert(1)")).toThrow("Unsafe URL for poster");
+    expect(() => setAttributeValue(image, "srcset", "/safe.jpg 1x, javascript:alert(1) 2x")).toThrow(
+      "Unsafe URL for srcset",
+    );
+
+    setAttributeValue(meta, "content", "0;url=javascript:alert(1)");
+    expect(() => setAttributeValue(meta, "http-equiv", "refresh")).toThrow("Unsafe URL for content");
+    expect(meta.hasAttribute("http-equiv")).toBe(false);
+
+    setAttributeValue(meta, "content", null);
+    setAttributeValue(meta, "http-equiv", "refresh");
+    expect(() => setAttributeValue(meta, "content", "0;url=javascript:alert(1)")).toThrow("Unsafe URL for content");
+    expect(meta.hasAttribute("content")).toBe(false);
+    setAttributeValue(meta, "content", "0;url=/safe");
+    expect(meta.getAttribute("content")).toBe("0;url=/safe");
+  });
+
   it("binds text inputs and checkbox controls", () => {
     document.body.innerHTML = `<input id="name"><input id="active" type="checkbox">`;
     const name = document.querySelector("#name");
