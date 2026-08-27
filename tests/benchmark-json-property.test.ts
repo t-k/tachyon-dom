@@ -1,9 +1,9 @@
+import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import { compareStreamingBackpressureResults } from "../benchmark/streaming-backpressure-compare.js";
+import { propertyParameters } from "./fast-check-config";
 
-const seed = 0xb34c4004;
-const budget = 256;
 const fields = [
   "workload.connections",
   "workload.chunksPerConnection",
@@ -75,22 +75,19 @@ const setPath = (value: Record<string, any>, path: string, nextValue: unknown): 
 };
 
 describe("benchmark decoded JSON bounded properties", () => {
-  it(`rejects malformed values across ${budget} seeded mutations`, () => {
-    let state = seed >>> 0;
-    for (let index = 0; index < budget; index += 1) {
-      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
-      const field = fields[state % fields.length] as string;
-      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
-      const invalid = invalidValues[state % invalidValues.length];
-      const baseline = envelope("baseline");
-      const candidate = envelope("candidate");
-      setPath(baseline, field, invalid);
-      if (field.startsWith("workload.")) setPath(candidate, field, invalid);
-      expect(
-        () => compareStreamingBackpressureResults(baseline, candidate),
-        `seed=${seed} case=${index} field=${field} value=${String(invalid)}`,
-      ).toThrow(new RegExp(`baseline\\.${field.replaceAll(".", "\\.")}`));
-    }
+  it("rejects generated malformed numeric fields with their baseline path", () => {
+    fc.assert(
+      fc.property(fc.constantFrom(...fields), fc.constantFrom(...invalidValues), (field, invalid) => {
+        const baseline = envelope("baseline");
+        const candidate = envelope("candidate");
+        setPath(baseline, field, invalid);
+        if (field.startsWith("workload.")) setPath(candidate, field, invalid);
+        expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(
+          new RegExp(`baseline\\.${field.replaceAll(".", "\\.")}`),
+        );
+      }),
+      propertyParameters({ seed: 0xb34c4004, numRuns: 256 }),
+    );
   });
 
   it("returns only finite ratios for valid boundaries", () => {
