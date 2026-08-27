@@ -86,6 +86,21 @@ describe("single-outlet stream composition properties", () => {
     );
   });
 
+  it("closes a partially consumed source once under concurrent returns", async () => {
+    await fc.assert(
+      fc.asyncProperty(fc.array(chunk, { minLength: 1, maxLength: 6 }), async (values) => {
+        const tracked = trackedSource(values);
+        const composed = await composeSingleOutlet(tracked.source, { before: "", after: "suffix", outlet: "once" });
+        const iterator = composed[Symbol.asyncIterator]();
+        await expect(iterator.next()).resolves.toEqual({ done: false, value: values[0] });
+        await Promise.all([iterator.return?.(), iterator.return?.()]);
+        expect(tracked.tracker.nextCalls).toBe(1);
+        expect(tracked.tracker.returnCalls).toBe(1);
+      }),
+      propertyParameters(),
+    );
+  });
+
   it("closes a failing source exactly once", async () => {
     await fc.assert(
       fc.asyncProperty(fc.array(chunk, { minLength: 1, maxLength: 6 }), fc.nat(), async (values, offset) => {

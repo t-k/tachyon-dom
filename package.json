@@ -221,7 +221,7 @@
     "example:hacker-news:deploy": "wrangler deploy --config examples/hacker-news/wrangler.jsonc",
     "example:web": "vite --host 127.0.0.1",
     "test": "vitest run",
-    "test:property": "vitest run tests/*-property.test.ts",
+    "test:property": "vitest run --config vitest.property.config.ts",
     "test:mutation": "stryker run",
     "test:mutation:full": "stryker run --force",
     "build:create-package": "pnpm --dir packages/create-tachyon-dom build",

@@ -10,7 +10,16 @@ const htmlSpace = fc.string({
   minLength: 1,
   maxLength: 8,
 });
-const attributeText = fc.string({ unit: fc.constantFrom("a", "b", "c", " ", "雪"), maxLength: 24 });
+const doubleQuotedAttributeText = fc
+  .array(fc.constantFrom("a", "b", "c", " ", "\t", "雪", "'", ">", "=", "&", "&amp;", "&#39;"), {
+    maxLength: 24,
+  })
+  .map((parts) => parts.join(""));
+const singleQuotedAttributeText = fc
+  .array(fc.constantFrom("a", "b", "c", " ", "\t", "雪", '"', ">", "=", "&", "&amp;", "&quot;"), {
+    maxLength: 24,
+  })
+  .map((parts) => parts.join(""));
 const bodyText = fc.string({ unit: fc.constantFrom("a", "b", "c", " ", "雪"), maxLength: 32 });
 
 describe("HTML tag whitespace properties", () => {
@@ -20,8 +29,8 @@ describe("HTML tag whitespace properties", () => {
         htmlSpace,
         htmlSpace,
         htmlSpace,
-        attributeText,
-        attributeText,
+        doubleQuotedAttributeText,
+        singleQuotedAttributeText,
         bodyText,
         (first, second, last, title, data, text) => {
           const source = `<div${first}title="${title}"${second}data-value='${data}'${last}>${text}</div>`;
@@ -39,7 +48,7 @@ describe("HTML tag whitespace properties", () => {
 
   it("preserves generated unterminated quoted tags", () => {
     fc.assert(
-      fc.property(htmlSpace, attributeText, (space, value) => {
+      fc.property(htmlSpace, doubleQuotedAttributeText, (space, value) => {
         const source = `<div${space}title="${value}>`;
         expect(normalizeHtmlTagWhitespace(source)).toBe(source);
       }),

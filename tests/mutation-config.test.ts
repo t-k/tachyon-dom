@@ -53,7 +53,9 @@ describe("local mutation testing configuration", () => {
     const packageJson = readJson("package.json");
     const ci = readFileSync(".github/workflows/ci.yml", "utf8");
     const readme = readFileSync("README.md", "utf8");
-    expect(packageJson.scripts["test:property"]).toBe("vitest run tests/*-property.test.ts");
+    const propertyConfig = readFileSync("vitest.property.config.ts", "utf8");
+    expect(packageJson.scripts["test:property"]).toBe("vitest run --config vitest.property.config.ts");
+    expect(propertyConfig).toContain('include: ["tests/*-property.test.ts"]');
     expect(packageJson.scripts["test:mutation"]).toBe("stryker run");
     expect(packageJson.scripts["test:mutation:full"]).toBe("stryker run --force");
     expect(ci).not.toContain("test:mutation");

@@ -21,10 +21,24 @@ const segment = fc.string({
   unit: fc.constantFrom(...Array.from("abcdefghijklmnopqrstuvwxyz0123456789")),
   maxLength: 24,
 });
+const nonEmptySegment = fc.string({
+  unit: fc.constantFrom(...Array.from("abcdefghijklmnopqrstuvwxyz0123456789")),
+  minLength: 1,
+  maxLength: 24,
+});
 const mask = fc.array(fc.boolean(), { minLength: 12, maxLength: 12 });
-const hazard = fc
-  .tuple(fc.constantFrom("//", "/\\", "/%5c", "/%5C", "/%00", "javascript:", "java%73cript:"), segment)
-  .map(([prefix, suffix]) => `${prefix}${suffix}`);
+const hazard = fc.oneof(
+  fc
+    .tuple(fc.constantFrom("//", "/\\", "/%2f%2f", "/%2F%2F", "/%5c", "/%5C", "javascript:", "java%73cript:"), segment)
+    .map(([prefix, suffix]) => `${prefix}${suffix}`),
+  fc
+    .tuple(fc.oneof(fc.integer({ min: 0, max: 0x1f }), fc.constant(0x7f)), nonEmptySegment)
+    .map(([code, suffix]) => `/${String.fromCharCode(code)}${suffix}`),
+  fc
+    .tuple(fc.oneof(fc.integer({ min: 0, max: 0x1f }), fc.constant(0x7f)), segment)
+    .map(([code, suffix]) => `/%${code.toString(16).padStart(2, "0")}${suffix}`),
+  nonEmptySegment.map((suffix) => `/\\%zz${suffix}`),
+);
 const descriptor = fc.oneof(
   fc.integer({ min: 1, max: 4096 }).map((value) => `${value}w`),
   fc.integer({ min: 1, max: 40 }).map((value) => `${value / 10}x`),
