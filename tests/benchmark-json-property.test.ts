@@ -16,7 +16,13 @@ const fields = [
   "measurements.peakRssBytes",
   "measurements.peakRssDeltaBytes",
 ] as const;
-const invalidValues = [null, "1", -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1] as const;
+const safeIntegerFields = fields.filter((field) => field !== "measurements.completionTimeMs");
+const universallyInvalidValues = [null, "1", -1, Number.NaN, Number.POSITIVE_INFINITY] as const;
+const safeIntegerInvalidValues = [1.5, Number.MAX_SAFE_INTEGER + 1] as const;
+const malformedField = fc.oneof(
+  fc.tuple(fc.constantFrom(...fields), fc.constantFrom(...universallyInvalidValues)),
+  fc.tuple(fc.constantFrom(...safeIntegerFields), fc.constantFrom(...safeIntegerInvalidValues)),
+);
 
 const envelope = (revision: string) => ({
   schemaVersion: 2,
@@ -77,7 +83,7 @@ const setPath = (value: Record<string, any>, path: string, nextValue: unknown): 
 describe("benchmark decoded JSON bounded properties", () => {
   it("rejects generated malformed numeric fields with their baseline path", () => {
     fc.assert(
-      fc.property(fc.constantFrom(...fields), fc.constantFrom(...invalidValues), (field, invalid) => {
+      fc.property(malformedField, ([field, invalid]) => {
         const baseline = envelope("baseline");
         const candidate = envelope("candidate");
         setPath(baseline, field, invalid);
