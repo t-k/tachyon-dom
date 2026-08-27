@@ -26,6 +26,7 @@ describe.sequential("timingSafeEqual", () => {
     { left: null, right: "null", expected: false },
     { left: 1, right: "1", expected: false },
     { left: "value", right: undefined, expected: false },
+    { left: "", right: undefined, expected: false },
   ])("returns $expected for $left and $right", async ({ left, right, expected }) => {
     await expect(timingSafeEqual(left, right as string)).resolves.toBe(expected);
   });
@@ -43,6 +44,24 @@ describe.sequential("timingSafeEqual", () => {
         subtle: {
           digest: async () => {
             throw new Error("digest unavailable");
+          },
+        },
+      },
+    });
+
+    await expect(timingSafeEqual("secret", "secret")).resolves.toBe(false);
+  });
+
+  it.each([1, 2] as const)("fails closed when digest call %i rejects", async (rejectCall) => {
+    let digestCalls = 0;
+    Object.defineProperty(globalThis, "crypto", {
+      configurable: true,
+      value: {
+        subtle: {
+          digest: async () => {
+            digestCalls += 1;
+            if (digestCalls === rejectCall) throw new Error("digest unavailable");
+            return new Uint8Array([7]).buffer;
           },
         },
       },
