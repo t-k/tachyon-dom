@@ -2,6 +2,8 @@ node_modules/
 dist/
 coverage/
 release-artifacts/
+reports/mutation/
+.stryker-tmp/
 .vite/
 .codex/
 .worktree/

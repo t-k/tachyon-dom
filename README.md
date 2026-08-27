@@ -178,6 +178,22 @@ pnpm check:browser-entry
 pnpm check:quick-example-size
 ```
 
+Property tests use a stable default fast-check seed. Replay a reported counterexample or change the local campaign with `FAST_CHECK_SEED`, `FAST_CHECK_PATH`, and `FAST_CHECK_NUM_RUNS`:
+
+```sh
+pnpm test:property
+FAST_CHECK_SEED=123 FAST_CHECK_PATH=0:1 FAST_CHECK_NUM_RUNS=256 pnpm test:property
+```
+
+Mutation testing is an explicit local check and is not part of GitHub Actions. The normal command reuses incremental results; the full command forces every in-scope mutant to run:
+
+```sh
+pnpm test:mutation
+pnpm test:mutation:full
+```
+
+Open `reports/mutation/index.html` after a completed run for the detailed report.
+
 Useful examples:
 
 ```sh
