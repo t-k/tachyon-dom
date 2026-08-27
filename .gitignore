@@ -4,6 +4,7 @@ coverage/
 release-artifacts/
 .vite/
 .codex/
+.worktree/
 .worktrees/
 docs.local/
 docs/superpowers/
