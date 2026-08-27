@@ -19,5 +19,6 @@ export default defineConfig({
     fileParallelism: false,
     globals: true,
     include: ["tests/**/*.test.ts"],
+    setupFiles: ["./tests/fast-check.setup.ts"],
   },
 });
