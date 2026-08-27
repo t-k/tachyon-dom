@@ -40,12 +40,12 @@ export const composeSingleOutlet = async (
   const iterator: AsyncIterableIterator<string> = {
     [Symbol.asyncIterator]: () => iterator,
     next: async () => {
-      while (true) {
-        if (phase === "before") {
+      switch (phase) {
+        case "before":
           phase = "source";
           if (segments.before) return { done: false, value: segments.before };
-        }
-        if (phase === "source") {
+        // Fall through when the prefix is empty.
+        case "source":
           try {
             const next = await sourceIterator.next();
             if (!next.done) return next;
@@ -56,13 +56,12 @@ export const composeSingleOutlet = async (
             phase = "done";
             throw error;
           }
-        }
-        if (phase === "after") {
+        // Fall through after source completion.
+        case "after":
           phase = "done";
           if (segments.after) return { done: false, value: segments.after };
-        }
-        return { done: true, value: undefined };
       }
+      return { done: true, value: undefined };
     },
     return: async () => {
       await closeSource();
