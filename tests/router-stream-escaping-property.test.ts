@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import fc from "fast-check";
 import { parseFragment, type DefaultTreeAdapterMap } from "parse5";
 import { describe, expect, it } from "vitest";
 
@@ -10,9 +11,8 @@ import {
   type RouteDefinition,
   type TrustedHtml,
 } from "../src/router";
+import { propertyParameters } from "./fast-check-config";
 
-const seed = 0x5afe4004;
-const budget = 256;
 const fragments = [
   `<img src=x onerror=alert(1)>`,
   `</p><script>alert(1)</script>`,
@@ -57,43 +57,48 @@ const decodeAcrossByteBoundaries = (bytes: Uint8Array, first: number, second: nu
 };
 
 describe("progressive stream trusted HTML contract", () => {
-  it(`keeps ${budget} seeded attacker inputs in a text node`, async () => {
-    let state = seed >>> 0;
-    for (let index = 0; index < budget; index += 1) {
-      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
-      const value = `${fragments[state % fragments.length]}:${index}`;
-      const escaped = trustedHtmlChunk(escapeToHtml(value));
-      const firstSplit = state % (escaped.length + 1);
-      state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0;
-      const secondSplit = firstSplit + (state % (escaped.length - firstSplit + 1));
-      const routes: RouteDefinition[] = [
-        {
-          path: "/search",
-          loader: () => value,
-          render: () => "",
-          stream: async function* () {
-            yield "<p>";
-            yield escaped.slice(0, firstSplit);
-            yield escaped.slice(firstSplit, secondSplit);
-            yield escaped.slice(secondSplit);
-            yield "</p>";
-          },
+  it("keeps generated attacker inputs in a text node across chunk boundaries", async () => {
+    const attackerInput = fc.oneof(fc.constantFrom(...fragments), fc.string({ unit: "grapheme", maxLength: 64 }));
+    await fc.assert(
+      fc.asyncProperty(
+        attackerInput,
+        fc.nat(),
+        fc.nat(),
+        fc.nat(),
+        async (value, firstOffset, secondOffset, byteOffset) => {
+          const escaped = trustedHtmlChunk(escapeToHtml(value));
+          const firstSplit = firstOffset % (escaped.length + 1);
+          const secondSplit = firstSplit + (secondOffset % (escaped.length - firstSplit + 1));
+          const routes: RouteDefinition[] = [
+            {
+              path: "/search",
+              loader: () => value,
+              render: () => "",
+              stream: async function* () {
+                yield "<p>";
+                yield escaped.slice(0, firstSplit);
+                yield escaped.slice(firstSplit, secondSplit);
+                yield escaped.slice(secondSplit);
+                yield "</p>";
+              },
+            },
+          ];
+          const result = await renderRouteStream(routes, "https://example.test/search");
+          if (!result.ok) throw new Error(result.error.message);
+          const chunks: string[] = [];
+          for await (const chunk of result.value.chunks) chunks.push(chunk);
+          expect(chunks[0]).toBe("<p>");
+          const bytes = new TextEncoder().encode(chunks.join(""));
+          const firstByteSplit = byteOffset % (bytes.length + 1);
+          const secondByteSplit = firstByteSplit + ((byteOffset >>> 8) % (bytes.length - firstByteSplit + 1));
+          const decoded = decodeAcrossByteBoundaries(bytes, firstByteSplit, secondByteSplit);
+          const parsed = elementsAndText(parseFragment(decoded) as Node);
+          expect(parsed.elements).toEqual(["p"]);
+          expect(parsed.text).toBe(parserNormalizedText(value));
         },
-      ];
-      const result = await renderRouteStream(routes, "https://example.test/search");
-      if (!result.ok) throw new Error(result.error.message);
-      const chunks: string[] = [];
-      for await (const chunk of result.value.chunks) chunks.push(chunk);
-      expect(chunks[0], `seed=${seed} case=${index}`).toBe("<p>");
-      const html = chunks.join("");
-      const bytes = new TextEncoder().encode(html);
-      const firstByteSplit = state % (bytes.length + 1);
-      const secondByteSplit = firstByteSplit + ((state >>> 8) % (bytes.length - firstByteSplit + 1));
-      const decoded = decodeAcrossByteBoundaries(bytes, firstByteSplit, secondByteSplit);
-      const parsed = elementsAndText(parseFragment(decoded) as Node);
-      expect(parsed.elements, `seed=${seed} case=${index}`).toEqual(["p"]);
-      expect(parsed.text, `seed=${seed} case=${index}`).toBe(parserNormalizedText(value));
-    }
+      ),
+      propertyParameters({ seed: 0x5afe4004, numRuns: 256 }),
+    );
   });
 
   it("preserves early flush and propagates cancellation while using the safe helper path", async () => {
