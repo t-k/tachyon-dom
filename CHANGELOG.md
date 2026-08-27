@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-08-27
+
+### Added
+
+- Added reproducible property-based testing with fast-check and local full-source mutation testing with StrykerJS, including coverage-ledger classification for security and stream lifecycle debt.
+
+### Changed
+
+- Replaced the unbounded internal stream-segment transition loop with finite phase fall-through while preserving framing, cancellation, cleanup, error, and terminal iterator behavior.
+
+### Security
+
+- Deduplicated case-insensitive head descriptor attributes with first-wins semantics before URL-policy validation, keeping SSR and client DOM behavior aligned and preventing later duplicate attributes from changing the validated effective value.
+
 ## [0.1.5] - 2026-08-15
 
 ### Added
@@ -106,7 +120,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Initial public release of the experimental HTML-first compiler, fine-grained runtime, SSR and streaming targets, router, adapters, Vite integration, CLI, and project initializer.
 
-[Unreleased]: https://github.com/t-k/tachyon-dom/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/t-k/tachyon-dom/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/t-k/tachyon-dom/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/t-k/tachyon-dom/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/t-k/tachyon-dom/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/t-k/tachyon-dom/compare/v0.1.2...v0.1.3
