@@ -193,3 +193,26 @@ A Security Specialist review and a clean-context correctness review are required
 - Property, normal, lint, build, and diff checks pass.
 - Security and correctness reviews contain no unresolved Must Fix finding.
 - No Stryker or Vitest process remains after verification.
+
+## Security Review Amendment
+
+The first Security Specialist review found a real case-fold collision in route head descriptors. HTML attribute names are ASCII case-insensitive, but the original sanitizer preserved keys that differed only by case. SSR serialization exposed both keys and HTML parsing selected the first duplicate, while client rendering called `setAttribute` sequentially and therefore selected the last duplicate. A descriptor could consequently present a non-refresh value to the sanitizer and SSR while making `HTTP-EQUIV=refresh` effective on the client with an unvalidated `content` value.
+
+The approved resolution changes `sanitizeHeadAttributes` to retain only the first syntactically valid, non-event attribute for each ASCII-lowercased name. Later case-fold duplicates are discarded before URL policy evaluation. This preserves the existing effective SSR value, makes client rendering agree with SSR, avoids emitting duplicate HTML attributes, and ensures that a later safe value cannot rescue an unsafe first value. Rejecting the entire element was considered but would require broader meta/script rendering changes and would remove otherwise valid attributes. Validating only last-write client semantics was rejected because it would leave SSR and client with different effective values.
+
+Regression coverage will include:
+
+- direct sanitizer examples for duplicate `http-equiv` and `content` names;
+- a bounded property requiring returned attribute names to be unique after ASCII lowercase normalization and requiring first-value retention;
+- exact SSR output for a colliding route head descriptor;
+- server/client DOM parity for the original bypass descriptor.
+
+This amendment authorizes the minimal production change in `src/head-policy.ts`. No change to `src/url-policy.ts`, SSR rendering, or client rendering is expected.
+
+The review also identified three test-quality follow-ups:
+
+- the digest failure fixture will return a 32-byte value, matching the SHA-256 Web Crypto contract;
+- an actual async generator test will document standard request ordering when `return()` follows a pending `next()`; this does not introduce a stronger non-standard cancellation contract or require a source change;
+- the generated stream collector will enforce the expected maximum chunk count so three observable loop/terminal mutants fail deterministically instead of consuming the Stryker timeout. Mutants that create a synchronous infinite loop inside one `next()` call remain timeout liveness debt because JavaScript cannot preempt them from the test process.
+
+The target-specific mutation report for `head-policy` will be regenerated after the source change. Because the production source and mutant signature set change, the old and new head reports will not be treated as a tests-only signature comparison. New mutants in the deduplication logic must be attributable to the direct or public-path regression tests. Constant-time and stream reports remain comparable to their existing fresh baselines because their production sources remain unchanged.

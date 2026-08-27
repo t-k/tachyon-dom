@@ -652,7 +652,277 @@ Append a dated section containing:
 
 These ignored local documents are intentionally updated in `/Users/tk/work/tachyon-dom`, not the linked worktree, and are not committed.
 
-## Task 8: Security and Correctness Review
+## Task 8: Resolve Security Review Findings
+
+**Files:**
+
+- Modify: `tests/head-policy-property.test.ts`
+- Modify: `tests/router-security.test.ts`
+- Modify: `tests/router-client.test.ts`
+- Modify: `src/head-policy.ts`
+- Modify: `tests/constant-time.test.ts`
+- Modify: `tests/stream-segments.test.ts`
+- Modify: `tests/stream-segments-property.test.ts`
+
+- [ ] **Step 1: Add direct failing tests for case-fold duplicate head attributes**
+
+Add these examples to `tests/head-policy-property.test.ts`:
+
+```ts
+  it("keeps the first case-folded attribute and discards later duplicates", () => {
+    expect(
+      sanitizeHeadAttributes("meta", {
+        "http-equiv": "not-refresh",
+        "HTTP-EQUIV": "refresh",
+        content: "0;url=javascript:alert(1)",
+      }),
+    ).toEqual({ "http-equiv": "not-refresh", content: "0;url=javascript:alert(1)" });
+  });
+
+  it("does not let a later duplicate rescue an unsafe first value", () => {
+    expect(
+      sanitizeHeadAttributes("meta", {
+        "http-equiv": "refresh",
+        CONTENT: "0;url=javascript:alert(1)",
+        content: "0;url=/safe",
+      }),
+    ).toEqual({ "http-equiv": "refresh" });
+  });
+```
+
+Add a generator whose first character cannot create an `on` prefix:
+
+```ts
+const caseFoldedName = fc
+  .tuple(
+    fc.constantFrom(...Array.from("abcdefghijklmnpqrstuvwxyz")),
+    fc.array(fc.constantFrom(...Array.from("abcdefghijklmnopqrstuvwxyz")), { maxLength: 11 }),
+  )
+  .map(([first, remaining]) => `${first}${remaining.join("")}`);
+```
+
+Add this bounded property:
+
+```ts
+  it("returns at most one attribute for each ASCII case-folded name", () => {
+    fc.assert(
+      fc.property(caseFoldedName, (name) => {
+        const result = sanitizeHeadAttributes("meta", {
+          [name]: "first",
+          [name.toUpperCase()]: "second",
+          "data-safe": "kept",
+        });
+        expect(result).toEqual({ [name]: "first", "data-safe": "kept" });
+        expect(new Set(Object.keys(result ?? {}).map((key) => key.toLowerCase())).size).toBe(
+          Object.keys(result ?? {}).length,
+        );
+      }),
+      propertyParameters({ numRuns: 64 }),
+    );
+  });
+```
+
+- [ ] **Step 2: Add failing SSR and client parity regressions**
+
+Add to `tests/router-security.test.ts`:
+
+```ts
+  it("renders only the first case-folded head attribute", () => {
+    expect(
+      renderHead({
+        metas: [
+          {
+            "http-equiv": "not-refresh",
+            "HTTP-EQUIV": "refresh",
+            content: "0;url=javascript:alert(1)",
+          },
+        ],
+      }),
+    ).toBe('<meta http-equiv="not-refresh" content="0;url=javascript:alert(1)">');
+  });
+```
+
+Extend the descriptor in `tests/router-client.test.ts` within `applies the same URL policy to server and client head elements`:
+
+```ts
+      metas: [
+        { "http-equiv": "refresh", content: "0;url=javascript:alert(1)", "data-id": "refresh" },
+        {
+          "http-equiv": "not-refresh",
+          "HTTP-EQUIV": "refresh",
+          content: "0;url=javascript:alert(1)",
+          "data-id": "case-fold-refresh",
+        },
+      ],
+```
+
+Add these assertions after the existing unsafe refresh assertion:
+
+```ts
+    const caseFoldRefresh = document.head.querySelector(`[data-id="case-fold-refresh"]`);
+    expect(caseFoldRefresh?.getAttribute("http-equiv")).toBe("not-refresh");
+    expect(caseFoldRefresh?.attributes).toHaveLength(4);
+```
+
+- [ ] **Step 3: Run the head regressions and verify RED**
+
+Run:
+
+```bash
+FAST_CHECK_SEED=2047983838 FAST_CHECK_NUM_RUNS=64 pnpm exec vitest run tests/head-policy-property.test.ts tests/router-security.test.ts tests/router-client.test.ts
+```
+
+Expected: the direct duplicate tests, exact SSR output, property, or server/client parity test fails because the original implementation preserves both case-folded keys. Confirm the failure is the duplicate-attribute contract, not a fixture or type error.
+
+- [ ] **Step 4: Implement first-wins case-fold deduplication**
+
+Replace the construction of `safeNames` in `src/head-policy.ts` with:
+
+```ts
+  const normalizedNames = new Set<string>();
+  const safeNames = Object.fromEntries(
+    Object.entries(attributes).filter(([name]) => {
+      if (!headAttributeNamePattern.test(name) || name.toLowerCase().startsWith("on")) return false;
+      const normalizedName = name.toLowerCase();
+      if (normalizedNames.has(normalizedName)) return false;
+      normalizedNames.add(normalizedName);
+      return true;
+    }),
+  );
+```
+
+Keep `Object.fromEntries` so dangerous property names remain own data properties and cannot mutate the result prototype.
+
+- [ ] **Step 5: Run the head regressions and verify GREEN**
+
+Run:
+
+```bash
+FAST_CHECK_SEED=2047983838 FAST_CHECK_NUM_RUNS=64 pnpm exec vitest run tests/head-policy-property.test.ts tests/router-security.test.ts tests/router-client.test.ts
+```
+
+Expected: all selected files pass, SSR/client normalized head output agrees, and case-fold duplicate groups have one first-write attribute.
+
+- [ ] **Step 6: Regenerate the changed-source head mutation report**
+
+Run:
+
+```bash
+env -u FAST_CHECK_PATH TD_MUTATION_RUN_ID=review-head-policy TD_MUTATION_TARGET=src/head-policy.ts FAST_CHECK_SEED=2047983838 FAST_CHECK_NUM_RUNS=64 pnpm exec stryker run .codex/candidate-tournaments/security-mutation-debt/stryker.validator.config.mjs --force --concurrency 1 --cleanTempDir always
+```
+
+Expected: no `NoCoverage`, `CompileError`, or `RuntimeError`. Inspect every mutant introduced in the deduplication block and resolve its `killedBy` test name. Do not compare the complete signature set to the old report because the source changed.
+
+- [ ] **Step 7: Make the digest fixture realistic**
+
+In `tests/constant-time.test.ts`, replace the one-byte result:
+
+```ts
+            return new Uint8Array(32).fill(7).buffer;
+```
+
+Run:
+
+```bash
+pnpm exec vitest run tests/constant-time.test.ts
+```
+
+Expected: all 16 tests pass. No production change is required.
+
+- [ ] **Step 8: Add the native async-generator ordering test**
+
+Add to `tests/stream-segments.test.ts`:
+
+```ts
+  it("preserves async-generator request order when return follows a pending next", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const settled: string[] = [];
+
+    async function* source(): AsyncIterable<string> {
+      await gate;
+      yield "late";
+    }
+
+    const composed = await composeSingleOutlet(source(), { before: "", after: "after", outlet: "once" });
+    const iterator = composed[Symbol.asyncIterator]();
+    const pendingNext = iterator.next().then((result) => {
+      settled.push("next");
+      return result;
+    });
+    const pendingReturn = iterator.return!().then((result) => {
+      settled.push("return");
+      return result;
+    });
+
+    release();
+
+    await expect(pendingNext).resolves.toEqual({ done: false, value: "late" });
+    await expect(pendingReturn).resolves.toEqual({ done: true, value: undefined });
+    expect(settled).toEqual(["next", "return"]);
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+  });
+```
+
+Run `pnpm exec vitest run tests/stream-segments.test.ts` and expect all tests to pass. This documents standard async-generator request ordering and does not require a source change.
+
+- [ ] **Step 9: Bound generated stream collection**
+
+Replace the helper in `tests/stream-segments-property.test.ts` with:
+
+```ts
+const collect = async (source: AsyncIterable<string>, maxChunks = Number.POSITIVE_INFINITY): Promise<string[]> => {
+  const output: string[] = [];
+  const iterator = source[Symbol.asyncIterator]();
+  while (true) {
+    const next = await iterator.next();
+    if (next.done) return output;
+    if (output.length === maxChunks) throw new Error(`stream exceeded ${maxChunks} chunks`);
+    output.push(next.value);
+  }
+};
+```
+
+In the included-source property, construct `expected` before collection and pass its length:
+
+```ts
+        const expected = [...(before ? [before] : []), ...values, ...(after ? [after] : [])];
+        expect(await collect(composed, expected.length)).toEqual(expected);
+```
+
+Run focused tests, then a fresh stream mutation report:
+
+```bash
+FAST_CHECK_SEED=2047983838 FAST_CHECK_NUM_RUNS=100 pnpm exec vitest run tests/stream-segments.test.ts tests/stream-segments-property.test.ts
+env -u FAST_CHECK_PATH TD_MUTATION_RUN_ID=review-stream-segments TD_MUTATION_TARGET=src/stream-segments.ts FAST_CHECK_SEED=2047983838 FAST_CHECK_NUM_RUNS=100 pnpm exec stryker run .codex/candidate-tournaments/security-mutation-debt/stryker.validator.config.mjs --force --concurrency 1 --cleanTempDir always
+node .codex/candidate-tournaments/security-mutation-debt/compare-reports.mjs .codex/candidate-tournaments/security-mutation-debt/raw/baseline-stream-segments.mutation.json .codex/candidate-tournaments/security-mutation-debt/raw/review-stream-segments.mutation.json src/stream-segments.ts
+```
+
+Expected: the observable condition mutants at lines 44 and 48 and the `done: false` terminal mutant at line 64 become `Killed`. Only the two synchronous infinite-loop mutants remain Timeout.
+
+- [ ] **Step 10: Format, verify, and commit the review fixes**
+
+Run:
+
+```bash
+pnpm exec oxfmt --write src/head-policy.ts tests/head-policy-property.test.ts tests/router-security.test.ts tests/router-client.test.ts tests/constant-time.test.ts tests/stream-segments.test.ts tests/stream-segments-property.test.ts
+pnpm test:property
+pnpm test
+pnpm lint
+pnpm build
+git diff --check
+```
+
+Expected: all commands pass. Commit the coherent review response:
+
+```bash
+git add src/head-policy.ts tests/head-policy-property.test.ts tests/router-security.test.ts tests/router-client.test.ts tests/constant-time.test.ts tests/stream-segments.test.ts tests/stream-segments-property.test.ts
+git commit -m "fix: reject ambiguous head attribute casing"
+```
+
+## Task 9: Repeat Security and Correctness Review
 
 **Files:**
 
@@ -706,7 +976,7 @@ git commit -m "test: address security mutation review"
 
 Do not create a commit when no tracked file changed.
 
-## Task 9: Integrate the Completed Branch
+## Task 10: Integrate the Completed Branch
 
 **Files:**
 
