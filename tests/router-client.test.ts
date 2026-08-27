@@ -717,7 +717,15 @@ describe("client router", () => {
     if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
     createWindow("/");
     const descriptor: RouteHeadDescriptor = {
-      metas: [{ "http-equiv": "refresh", content: "0;url=javascript:alert(1)", "data-id": "refresh" }],
+      metas: [
+        { "http-equiv": "refresh", content: "0;url=javascript:alert(1)", "data-id": "refresh" },
+        {
+          "http-equiv": "not-refresh",
+          "HTTP-EQUIV": "refresh",
+          content: "0;url=javascript:alert(1)",
+          "data-id": "case-fold-refresh",
+        },
+      ],
       links: [
         { rel: "stylesheet", href: "data:text/css,body{}", "data-id": "unsafe-link" },
         { rel: "stylesheet", href: "/app.css", "data-id": "safe-link" },
@@ -752,6 +760,9 @@ describe("client router", () => {
     expect(normalized(clientElements)).toEqual(normalized(serverElements));
     expect(document.head.querySelector(`[data-id="unsafe-link"]`)).toBeNull();
     expect(document.head.querySelector(`[data-id="refresh"]`)?.hasAttribute("content")).toBe(false);
+    const caseFoldRefresh = document.head.querySelector(`[data-id="case-fold-refresh"]`);
+    expect(caseFoldRefresh?.getAttribute("http-equiv")).toBe("not-refresh");
+    expect(caseFoldRefresh?.attributes).toHaveLength(4);
     expect(document.head.querySelector(`[data-id="unsafe-script"]`)?.hasAttribute("src")).toBe(false);
     expect(document.head.querySelector(`[data-id="unsafe-script"]`)?.hasAttribute("onload")).toBe(false);
     expect(document.head.querySelector(`[data-id="safe-link"]`)?.getAttribute("href")).toBe("/app.css");

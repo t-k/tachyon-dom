@@ -7,10 +7,15 @@ export const sanitizeHeadAttributes = (
   attributes: Readonly<Record<string, string>>,
   options: { dropOnUnsafeUrl?: boolean } = {},
 ): Record<string, string> | undefined => {
+  const normalizedNames = new Set<string>();
   const safeNames = Object.fromEntries(
-    Object.entries(attributes).filter(
-      ([name]) => headAttributeNamePattern.test(name) && !name.toLowerCase().startsWith("on"),
-    ),
+    Object.entries(attributes).filter(([name]) => {
+      if (!headAttributeNamePattern.test(name) || name.toLowerCase().startsWith("on")) return false;
+      const normalizedName = name.toLowerCase();
+      if (normalizedNames.has(normalizedName)) return false;
+      normalizedNames.add(normalizedName);
+      return true;
+    }),
   );
   while (true) {
     const result = sanitizeElementUrlAttributes(element, safeNames);

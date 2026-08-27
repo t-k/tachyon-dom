@@ -31,10 +31,15 @@ const trackedSource = (
   return { source: { [Symbol.asyncIterator]: () => iterator }, tracker };
 };
 
-const collect = async (source: AsyncIterable<string>): Promise<string[]> => {
+const collect = async (source: AsyncIterable<string>, maxChunks = Number.POSITIVE_INFINITY): Promise<string[]> => {
   const output: string[] = [];
-  for await (const value of source) output.push(value);
-  return output;
+  const iterator = source[Symbol.asyncIterator]();
+  while (true) {
+    const next = await iterator.next();
+    if (next.done) return output;
+    if (output.length === maxChunks) throw new Error(`stream exceeded ${maxChunks} chunks`);
+    output.push(next.value);
+  }
 };
 
 const chunk = fc.string({ unit: "grapheme", maxLength: 16 });
@@ -45,7 +50,8 @@ describe("single-outlet stream composition properties", () => {
       fc.asyncProperty(fc.array(chunk, { maxLength: 6 }), chunk, chunk, async (values, before, after) => {
         const tracked = trackedSource(values);
         const composed = await composeSingleOutlet(tracked.source, { before, after, outlet: "once" });
-        expect(await collect(composed)).toEqual([...(before ? [before] : []), ...values, ...(after ? [after] : [])]);
+        const expected = [...(before ? [before] : []), ...values, ...(after ? [after] : [])];
+        expect(await collect(composed, expected.length)).toEqual(expected);
         expect(tracked.tracker.nextCalls).toBe(values.length + 1);
         expect(tracked.tracker.returnCalls).toBe(0);
       }),

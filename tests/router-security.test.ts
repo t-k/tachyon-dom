@@ -606,6 +606,20 @@ describe("router security helpers", () => {
     ).toBe(`<link rel="stylesheet" href="/app.css"><script type="module"></script>`);
   });
 
+  it("renders only the first case-folded head attribute", () => {
+    expect(
+      renderHead({
+        metas: [
+          {
+            "http-equiv": "not-refresh",
+            "HTTP-EQUIV": "refresh",
+            content: "0;url=javascript:alert(1)",
+          },
+        ],
+      }),
+    ).toBe(`<meta http-equiv="not-refresh" content="0;url=javascript:alert(1)">`);
+  });
+
   it("emits the shared canonical URL from head descriptors", () => {
     expect(renderHead({ links: [{ rel: "stylesheet", href: " \nhttps://assets.example/app.css " }] })).toBe(
       `<link rel="stylesheet" href="https://assets.example/app.css">`,

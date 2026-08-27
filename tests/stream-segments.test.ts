@@ -85,4 +85,35 @@ describe("single-outlet stream lifecycle", () => {
     await expect(iterator.next()).resolves.toEqual({ done: false, value: "source" });
     await expect(iterator.return?.()).resolves.toEqual({ done: true, value: undefined });
   });
+
+  it("preserves async-generator request order when return follows a pending next", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const settled: string[] = [];
+
+    async function* source(): AsyncIterable<string> {
+      await gate;
+      yield "late";
+    }
+
+    const composed = await composeSingleOutlet(source(), { before: "", after: "after", outlet: "once" });
+    const iterator = composed[Symbol.asyncIterator]();
+    const pendingNext = iterator.next().then((result) => {
+      settled.push("next");
+      return result;
+    });
+    const pendingReturn = iterator.return!().then((result) => {
+      settled.push("return");
+      return result;
+    });
+
+    release();
+
+    await expect(pendingNext).resolves.toEqual({ done: false, value: "late" });
+    await expect(pendingReturn).resolves.toEqual({ done: true, value: undefined });
+    expect(settled).toEqual(["next", "return"]);
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+  });
 });

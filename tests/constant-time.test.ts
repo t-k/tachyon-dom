@@ -61,7 +61,7 @@ describe.sequential("timingSafeEqual", () => {
           digest: async () => {
             digestCalls += 1;
             if (digestCalls === rejectCall) throw new Error("digest unavailable");
-            return new Uint8Array([7]).buffer;
+            return new Uint8Array(32).fill(7).buffer;
           },
         },
       },
