@@ -199,6 +199,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json && node scripts/copy-td-modules.mjs",
     "bench:compiler": "tsx benchmark/compiler/compare-expression-backends.ts",
+    "bench:raw-text-scan": "tsx benchmark/raw-text-scan/run.ts",
     "bench:sfc": "tsx benchmark/compiler/compare-sfc-transform.ts",
     "bench:local": "tsx benchmark/local-compare/run-local-compare.ts",
     "bench:local:full": "tsx benchmark/local-compare/run-local-compare.ts --iterations 9 --warmup 3",

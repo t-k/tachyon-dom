@@ -13,6 +13,7 @@ docs/superpowers/
 benchmark/local-compare/results/
 benchmark/streaming-backpressure-results/
 benchmark/html-minification-results/
+benchmark/raw-text-scan/results/
 benchmark/web-framework/results/
 benchmark/web-framework/fixtures/*/.next/
 benchmark/web-framework/fixtures/*/.mreact/
