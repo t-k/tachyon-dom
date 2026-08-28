@@ -16,6 +16,12 @@ Comparisons fail closed when required workload or environment fields differ. Sou
 
 Historical subject measurements distinguish the runner checkout from the subject checkout. The streaming backpressure runner accepts `--subject-root` and `--adapter-module`, records the subject Git identity, and uses a real TCP server and throttled client rather than an in-process destination simulation.
 
+## Raw-text scanner validation
+
+Run `pnpm bench:raw-text-scan` to compare the production scalar scanner with the benchmark-local native string-search candidate. The command writes a provenance-bearing JSON artifact under `benchmark/raw-text-scan/results/` and evaluates the approved short-input, 64 KiB inert-span, and dense-decoy gates.
+
+This benchmark validates a private prototype only. It does not imply that the candidate is safe to move into production, and it does not compare a Wasm SIMD implementation.
+
 ## Manual GitHub Actions runs
 
 The `Benchmarks` workflow can be started manually from GitHub Actions. Its `suite` input accepts `all`, `web-framework`, or `js-framework`; `all` is the default.
