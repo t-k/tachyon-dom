@@ -7,6 +7,7 @@ import { scanRawText, type RawTextScanResult, type RawTextScanState } from "../.
 import { collectBenchmarkProvenance, collectDependencyVersions } from "../provenance.js";
 import { median } from "../shared/statistical-authority.js";
 import { scanRawTextWithNativeSearch } from "./candidate.js";
+import { evaluateRawTextScanEligibility } from "./evaluation.js";
 
 type ScannerName = "baseline" | "candidate";
 type Density = "inert" | "dense-decoy";
@@ -182,33 +183,7 @@ const main = async (): Promise<void> => {
     };
   });
 
-  const shortWorkloads = measuredWorkloads.filter(({ codeUnits }) => codeUnits === 16 || codeUnits === 256);
-  const longInertWorkloads = measuredWorkloads.filter(
-    ({ codeUnits, density }) => codeUnits === 64 * 1024 && density === "inert",
-  );
-  const denseWorkloads = measuredWorkloads.filter(({ density }) => density === "dense-decoy");
-  const ratiosPass = (
-    entries: ReadonlyArray<{ medianRatio: number }>,
-    expectedCount: number,
-    maximum: number,
-  ): boolean => entries.length === expectedCount && entries.every(({ medianRatio }) => medianRatio <= maximum);
-  const shortPass = ratiosPass(shortWorkloads, 16, 1.1);
-  const longInertPass = ratiosPass(longInertWorkloads, 4, 1 / 1.5);
-  const densePass = ratiosPass(denseWorkloads, 20, 1.1);
-  const canonicalControls =
-    options.samples === 9 &&
-    options.warmups === 2 &&
-    options.fixedIterations === null &&
-    options.maxCodeUnits === 1024 * 1024;
-  const complete = canonicalControls && measuredWorkloads.length === 40;
-  const evaluation = {
-    eligible: complete && shortPass && longInertPass && densePass,
-    complete,
-    canonicalControls,
-    shortPass,
-    longInertPass,
-    densePass,
-  };
+  const evaluation = evaluateRawTextScanEligibility(measuredWorkloads, options);
   const provenance = await collectBenchmarkProvenance({
     cwd: process.cwd(),
     argv: [process.execPath, ...process.argv.slice(1)],
