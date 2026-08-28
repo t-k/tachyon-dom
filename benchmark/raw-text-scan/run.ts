@@ -182,17 +182,29 @@ const main = async (): Promise<void> => {
     };
   });
 
-  const shortPass = measuredWorkloads
-    .filter(({ codeUnits }) => codeUnits === 16 || codeUnits === 256)
-    .every(({ medianRatio }) => medianRatio <= 1.1);
-  const longInertPass = measuredWorkloads
-    .filter(({ codeUnits, density }) => codeUnits === 64 * 1024 && density === "inert")
-    .every(({ medianRatio }) => medianRatio <= 1 / 1.5);
-  const densePass = measuredWorkloads
-    .filter(({ density }) => density === "dense-decoy")
-    .every(({ medianRatio }) => medianRatio <= 1.1);
+  const shortWorkloads = measuredWorkloads.filter(({ codeUnits }) => codeUnits === 16 || codeUnits === 256);
+  const longInertWorkloads = measuredWorkloads.filter(
+    ({ codeUnits, density }) => codeUnits === 64 * 1024 && density === "inert",
+  );
+  const denseWorkloads = measuredWorkloads.filter(({ density }) => density === "dense-decoy");
+  const ratiosPass = (
+    entries: ReadonlyArray<{ medianRatio: number }>,
+    expectedCount: number,
+    maximum: number,
+  ): boolean => entries.length === expectedCount && entries.every(({ medianRatio }) => medianRatio <= maximum);
+  const shortPass = ratiosPass(shortWorkloads, 16, 1.1);
+  const longInertPass = ratiosPass(longInertWorkloads, 4, 1 / 1.5);
+  const densePass = ratiosPass(denseWorkloads, 20, 1.1);
+  const canonicalControls =
+    options.samples === 9 &&
+    options.warmups === 2 &&
+    options.fixedIterations === null &&
+    options.maxCodeUnits === 1024 * 1024;
+  const complete = canonicalControls && measuredWorkloads.length === 40;
   const evaluation = {
-    eligible: shortPass && longInertPass && densePass,
+    eligible: complete && shortPass && longInertPass && densePass,
+    complete,
+    canonicalControls,
     shortPass,
     longInertPass,
     densePass,
