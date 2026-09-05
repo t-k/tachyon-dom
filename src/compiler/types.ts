@@ -94,6 +94,7 @@ export type ListBinding = {
   itemName: string;
   indexName?: string;
   key: string;
+  updatePolicy?: "always" | "reference";
   templateHtml: string;
   bindings: ClientBinding[];
 };

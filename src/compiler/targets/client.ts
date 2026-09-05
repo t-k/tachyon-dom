@@ -170,6 +170,7 @@ const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
     itemName,
     ...(indexName ? { indexName } : {}),
     key,
+    ...(attrString(node, "update")?.trim() === "reference" ? { updatePolicy: "reference" as const } : {}),
     templateHtml,
     bindings: childContext.bindings,
   };
@@ -616,6 +617,7 @@ const listSignature = (binding: ListBinding): string =>
     key: binding.key,
     itemName: binding.itemName,
     indexName: binding.indexName,
+    updatePolicy: binding.updatePolicy,
     templateHtml: binding.templateHtml,
     bindings: binding.bindings.map((child) => {
       if (child.kind === "list" || child.kind === "if") {
@@ -673,6 +675,7 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     fields.push(`itemName: ${JSON.stringify(binding.itemName)}`);
     if (binding.indexName) fields.push(`indexName: ${JSON.stringify(binding.indexName)}`);
     fields.push(`key: ${JSON.stringify(binding.key)}`);
+    if (binding.updatePolicy) fields.push(`updatePolicy: ${JSON.stringify(binding.updatePolicy)}`);
     fields.push(
       itemKeyExpression
         ? `keyReadItem: (${binding.itemName}) => ${itemKeyExpression}`
@@ -708,6 +711,7 @@ const emitListBinding = (
       : `    keyRead: (scope) => ${bindingReadExpression(binding.key)},`,
     `    itemName: ${JSON.stringify(binding.itemName)},`,
     ...(binding.indexName ? [`    indexName: ${JSON.stringify(binding.indexName)},`] : []),
+    ...(binding.updatePolicy ? [`    updatePolicy: ${JSON.stringify(binding.updatePolicy)},`] : []),
     `    scope: ${sourceName},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,

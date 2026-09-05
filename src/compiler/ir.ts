@@ -204,6 +204,11 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
         attributeSpan(node.attrs.find((attr) => attr.name === "index") as Attribute),
       );
     }
+    const updatePolicy = attrString(node, "update");
+    if (updatePolicy && updatePolicy !== "always" && updatePolicy !== "reference") {
+      const attribute = node.attrs.find((attr) => attr.name === "update");
+      return semanticError(`<for> update must be "always" or "reference".`, attribute && attributeSpan(attribute));
+    }
   }
   if (node.tagName === "if" && !attrExpression(node, "test")) {
     return semanticError("<if> requires test={condition}.", openingTagSpan(node));

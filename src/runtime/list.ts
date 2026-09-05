@@ -75,6 +75,7 @@ type NestedListBinding = {
   keyReadItem?: (item: unknown) => unknown;
   itemName: string;
   indexName?: string;
+  updatePolicy?: "always" | "reference";
   templateHtml: string;
   bindings: Binding[];
 };
@@ -107,6 +108,7 @@ type KeyedListOptions = {
   keyReadItem?: (item: unknown) => unknown;
   itemName: string;
   indexName?: string;
+  updatePolicy?: "always" | "reference";
   scope?: Record<string, unknown>;
   templateHtml: string;
   bindings: Binding[];
@@ -118,9 +120,11 @@ type RowRecord = {
   nodes: Node[];
   scope: Record<string, unknown>;
   cleanups: Array<() => void>;
-  refCleanups: Map<number, () => void>;
+  refCleanups?: Map<number, () => void>;
   lastValues: unknown[];
   item: unknown;
+  index: number;
+  sourceScope: Record<string, unknown> | undefined;
   revision: Signal<number>;
 };
 
@@ -129,7 +133,6 @@ type ListState = {
   options: KeyedListOptions;
   templateHtml: string;
   records: Map<PropertyKey, RowRecord>;
-  recordsByElement: WeakMap<Element, RowRecord>;
   template: HTMLTemplateElement;
   elementIndices: number[];
   cleanups: Array<() => void>;
@@ -224,6 +227,7 @@ const optionsSignature = (options: KeyedListOptions): string =>
     key: options.key,
     itemName: options.itemName,
     indexName: options.indexName,
+    updatePolicy: options.updatePolicy,
     templateHtml: options.templateHtml,
     bindings: options.bindings,
   });
@@ -273,7 +277,6 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
     options,
     templateHtml: options.templateHtml,
     records: new Map<PropertyKey, RowRecord>(),
-    recordsByElement: new WeakMap<Element, RowRecord>(),
     template,
     elementIndices,
     cleanups: [] as Array<() => void>,
@@ -303,8 +306,8 @@ const cleanupRecord = (record: RowRecord): void => {
     firstError = error;
     failed = true;
   }
-  const refCleanups = Array.from(record.refCleanups.values());
-  record.refCleanups.clear();
+  const refCleanups = record.refCleanups ? Array.from(record.refCleanups.values()) : [];
+  record.refCleanups?.clear();
   try {
     runCleanups(refCleanups);
   } catch (error) {
@@ -361,8 +364,9 @@ const applyRowBinding = (
       setStyleValue(nodeAtRecord(record, binding.path) as Element, binding.name, value);
     }
   } else if (binding.kind === "ref") {
-    record.refCleanups.get(index)?.();
-    record.refCleanups.set(index, setRef(scope, binding.expression, nodeAtRecord(record, binding.path) as Element));
+    record.refCleanups?.get(index)?.();
+    const refCleanups = record.refCleanups ?? (record.refCleanups = new Map());
+    refCleanups.set(index, setRef(scope, binding.expression, nodeAtRecord(record, binding.path) as Element));
   } else if (binding.kind === "model") {
     const value = readBinding(scope, binding);
     if (shouldApplyValue(record, index, value)) {
@@ -503,16 +507,12 @@ const createRecord = (
     nodes,
     scope,
     cleanups: [],
-    refCleanups: new Map<number, () => void>(),
     lastValues: [],
     item,
+    index,
+    sourceScope: options.scope,
     revision: createSignal(0),
   };
-  for (const node of nodes) {
-    if (node instanceof Element) {
-      state.recordsByElement.set(node, record);
-    }
-  }
   try {
     bindRowEvents(record, options);
     bindRowBindings(record, options);
@@ -524,21 +524,26 @@ const createRecord = (
     } catch (cleanupError) {
       throw new AggregateError([error, cleanupError], "List row creation and cleanup failed.");
     } finally {
-      for (const node of record.nodes) {
-        if (node instanceof Element) state.recordsByElement.delete(node);
-      }
     }
     throw error;
   }
 };
 
 const updateRecord = (record: RowRecord, item: unknown, index: number, options: KeyedListOptions): void => {
+  const scopeChanged = record.sourceScope !== options.scope;
   if (options.scope) {
     Object.assign(record.scope, options.scope);
   }
   record.scope[options.itemName] = item;
   if (options.indexName) record.scope[options.indexName] = index;
+  const itemChanged = !Object.is(record.item, item);
+  const indexChanged = record.index !== index;
   record.item = item;
+  record.index = index;
+  record.sourceScope = options.scope;
+  if (options.updatePolicy === "reference" && !itemChanged && !indexChanged && !scopeChanged) {
+    return;
+  }
   record.revision.update((value) => value + 1);
 };
 
@@ -618,6 +623,22 @@ const positionRecords = (
   }
 };
 
+const canAppendWithoutMoving = (
+  nextRecords: ReadonlyMap<PropertyKey, RowRecord>,
+  orderedRecords: readonly RowRecord[],
+  previousRecords: ReadonlyMap<PropertyKey, RowRecord>,
+): boolean => {
+  const previousKeys = Array.from(previousRecords.keys());
+  const nextKeys = orderedRecords.map((record) => record.key);
+  const retainedPrevious = previousKeys.filter((key) => nextRecords.has(key));
+  const retainedNext = nextKeys.filter((key) => previousRecords.has(key));
+  if (retainedPrevious.length !== retainedNext.length) return false;
+  for (let index = 0; index < retainedPrevious.length; index++) {
+    if (retainedPrevious[index] !== retainedNext[index]) return false;
+  }
+  return nextKeys.slice(0, retainedNext.length).every((key) => previousRecords.has(key));
+};
+
 export const mountKeyedList = (
   root: Element,
   path: readonly number[],
@@ -644,9 +665,6 @@ export const mountKeyedList = (
         failed = true;
       } finally {
         records.delete(key);
-        for (const node of record.nodes) {
-          if (node instanceof Element) state.recordsByElement.delete(node);
-        }
       }
     }
     return failed ? { failed: true, error: firstError } : { failed: false };
@@ -697,6 +715,11 @@ export const mountKeyedList = (
     }
     if (canAdoptServerRows) {
       container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
+    } else if (canAppendWithoutMoving(nextRecords, orderedRecords, previousRecords)) {
+      const previousKeys = new Set(previousRecords.keys());
+      for (const record of orderedRecords) {
+        if (!previousKeys.has(record.key)) container.append(...record.nodes);
+      }
     } else {
       positionRecords(container, orderedRecords, previousRecords);
     }
@@ -714,9 +737,6 @@ export const mountKeyedList = (
         if (!cleanupFailed) firstCleanupError = cleanupError;
         cleanupFailed = true;
       } finally {
-        for (const node of record.nodes) {
-          if (node instanceof Element) state.recordsByElement.delete(node);
-        }
       }
     }
     if (cleanupFailed) {

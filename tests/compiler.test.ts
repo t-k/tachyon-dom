@@ -1277,6 +1277,15 @@ describe("HTML-first compiler", () => {
     expect(result.value.client.bindings.some((binding) => binding.kind === "list")).toBe(true);
   });
 
+  it("emits the opt-in reference update policy for immutable keyed rows", () => {
+    const result = compileTemplate(`<ul><for each={rows} key={row.id} update="reference"><li>{row.label}</li></for></ul>`);
+    if (!result.ok) throw new Error(result.error.message);
+
+    const binding = result.value.client.bindings.find((candidate) => candidate.kind === "list");
+    expect(binding).toMatchObject({ kind: "list", updatePolicy: "reference" });
+    expect(generateClientModule(result.value)).toContain(`updatePolicy: "reference"`);
+  });
+
   it("renders keyed lists on the server", () => {
     const result = compileTemplate(
       `<tbody><for each={rows} key={row.id}><tr class:danger={row.selected}><td>{row.id}</td><td>{row.label}</td></tr></for></tbody>`,

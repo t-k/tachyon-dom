@@ -19,6 +19,7 @@ type TextKeyedListOptions = {
   keyReadItem?: (item: unknown) => unknown;
   itemName: string;
   indexName?: string;
+  updatePolicy?: "always" | "reference";
   scope?: Record<string, unknown>;
   templateHtml: string;
   bindings: TextBinding[];
@@ -31,6 +32,9 @@ type RowRecord = {
   scope: Record<string, unknown>;
   cleanups: Array<() => void>;
   lastValues: unknown[];
+  item: unknown;
+  index: number;
+  sourceScope: Record<string, unknown> | undefined;
   revision: Signal<number>;
 };
 
@@ -93,6 +97,7 @@ const optionsSignature = (options: TextKeyedListOptions): string =>
     key: options.key,
     itemName: options.itemName,
     indexName: options.indexName,
+    updatePolicy: options.updatePolicy,
     templateHtml: options.templateHtml,
     bindings: options.bindings,
   });
@@ -236,6 +241,9 @@ const createRecord = (
     scope: scopedItem(options.itemName, item, options.indexName, index, options.scope),
     cleanups: [],
     lastValues: [],
+    item,
+    index,
+    sourceScope: options.scope,
     revision: createSignal(0),
   };
   bindRow(record, options);
@@ -243,9 +251,16 @@ const createRecord = (
 };
 
 const updateRecord = (record: RowRecord, item: unknown, index: number, options: TextKeyedListOptions): void => {
+  const scopeChanged = record.sourceScope !== options.scope;
   if (options.scope) Object.assign(record.scope, options.scope);
   record.scope[options.itemName] = item;
   if (options.indexName) record.scope[options.indexName] = index;
+  const itemChanged = !Object.is(record.item, item);
+  const indexChanged = record.index !== index;
+  record.item = item;
+  record.index = index;
+  record.sourceScope = options.scope;
+  if (options.updatePolicy === "reference" && !itemChanged && !indexChanged && !scopeChanged) return;
   record.revision.update((value) => value + 1);
 };
 
@@ -312,6 +327,22 @@ const positionRecords = (
       anchor = node;
     }
   }
+};
+
+const canAppendWithoutMoving = (
+  nextRecords: ReadonlyMap<PropertyKey, RowRecord>,
+  orderedRecords: readonly RowRecord[],
+  previousRecords: ReadonlyMap<PropertyKey, RowRecord>,
+): boolean => {
+  const previousKeys = Array.from(previousRecords.keys());
+  const nextKeys = orderedRecords.map((record) => record.key);
+  const retainedPrevious = previousKeys.filter((key) => nextRecords.has(key));
+  const retainedNext = nextKeys.filter((key) => previousRecords.has(key));
+  if (retainedPrevious.length !== retainedNext.length) return false;
+  for (let index = 0; index < retainedPrevious.length; index++) {
+    if (retainedPrevious[index] !== retainedNext[index]) return false;
+  }
+  return nextKeys.slice(0, retainedNext.length).every((key) => previousRecords.has(key));
 };
 
 /** Releases a text-only list produced by the Tachyon DOM compiler. */
@@ -391,7 +422,12 @@ export const mountTextKeyedList = (
       orderedRecords.push(record);
     }
     if (canAdoptServerRows) container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
-    else positionRecords(container, orderedRecords, previousRecords);
+    else if (canAppendWithoutMoving(nextRecords, orderedRecords, previousRecords)) {
+      const previousKeys = new Set(previousRecords.keys());
+      for (const record of orderedRecords) {
+        if (!previousKeys.has(record.key)) container.append(...record.nodes);
+      }
+    } else positionRecords(container, orderedRecords, previousRecords);
     state.records = nextRecords;
     createdRecords.length = 0;
     const cleanupResult = cleanupRecordsNotIn(previousRecords, nextRecords);

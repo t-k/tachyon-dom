@@ -14,6 +14,83 @@ afterEach(() => {
 });
 
 describe("mountKeyedList", () => {
+  it("skips DOM moves for stable order and appends only new rows", () => {
+    const root = document.createElement("ul");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li></li>`,
+      bindings: [],
+    };
+    const rows = [{ id: "a" }, { id: "b" }];
+    mountKeyedList(root, [], rows, options);
+    const insertBefore = vi.spyOn(root, "insertBefore");
+
+    mountKeyedList(root, [], rows, options);
+    mountKeyedList(root, [], [...rows, { id: "c" }], options);
+
+    expect(insertBefore).not.toHaveBeenCalled();
+    expect(root.textContent).toBe("");
+    insertBefore.mockRestore();
+    mountKeyedList(root, [], [{ id: "c" }, { id: "b" }, { id: "a" }], options);
+    expect(root.children.length).toBe(3);
+  });
+
+  it("supports an explicit immutable reference update policy", () => {
+    const root = document.createElement("ul");
+    let reads = 0;
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      updatePolicy: "reference" as const,
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          expression: "item.label",
+          read: (scope: Record<string, unknown>) => {
+            reads++;
+            return (scope.item as { label: string }).label;
+          },
+        },
+      ],
+    };
+    const first = { id: "a", label: "A" };
+
+    mountKeyedList(root, [], [first], options);
+    mountKeyedList(root, [], [first, { id: "b", label: "B" }], options);
+
+    expect(reads).toBe(2);
+    expect(root.textContent).toBe("AB");
+  });
+
+  it("refreshes a reference-policy row when its index changes", () => {
+    const root = document.createElement("ul");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      indexName: "position",
+      updatePolicy: "reference" as const,
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          expression: "position",
+          read: (scope: Record<string, unknown>) => scope.position,
+        },
+      ],
+    };
+    const first = { id: "a" };
+    const second = { id: "b" };
+
+    mountKeyedList(root, [], [first, second], options);
+    mountKeyedList(root, [], [second, first], options);
+
+    expect(root.textContent).toBe("01");
+  });
+
   it("rolls back rows already created when a later row fails", () => {
     const root = document.createElement("ul");
     const source = createSignal(0);
