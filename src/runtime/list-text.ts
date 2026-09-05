@@ -41,7 +41,7 @@ type RowRecord = {
   item: unknown;
   index: number;
   sourceScope: Record<string, unknown> | undefined;
-  sourceScopeSnapshot: Map<PropertyKey, unknown>;
+  sourceScopeSnapshot: Map<string, unknown>;
   revision: Signal<number>;
 };
 
@@ -71,12 +71,12 @@ const readPath = (scope: Record<string, unknown>, expression: string): unknown =
   return current;
 };
 
-const sourceScopeSnapshotFor = (scope: Record<string, unknown> | undefined): Map<PropertyKey, unknown> =>
-  new Map(scope ? Reflect.ownKeys(scope).map((key) => [key, Reflect.get(scope, key)] as const) : []);
+const sourceScopeSnapshotFor = (scope: Record<string, unknown> | undefined): Map<string, unknown> =>
+  new Map(scope ? Object.keys(scope).map((key) => [key, scope[key]] as const) : []);
 
 const sourceScopeChanged = (
-  previous: ReadonlyMap<PropertyKey, unknown>,
-  next: ReadonlyMap<PropertyKey, unknown>,
+  previous: ReadonlyMap<string, unknown>,
+  next: ReadonlyMap<string, unknown>,
 ): boolean => {
   if (previous.size !== next.size) return true;
   for (const [key, value] of previous) {

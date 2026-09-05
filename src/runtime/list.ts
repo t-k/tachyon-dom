@@ -160,8 +160,8 @@ type RowRecord = {
   item: unknown;
   index: number;
   sourceScope: Record<string, unknown> | undefined;
-  sourceScopeSnapshot: Map<PropertyKey, unknown>;
-  localScopeKeys: ReadonlySet<PropertyKey>;
+  sourceScopeSnapshot: Map<string, unknown>;
+  localScopeKeys: ReadonlySet<string>;
   revision: Signal<number>;
   hydrationBoundaries: HydrationBoundaryHandle[];
 };
@@ -231,12 +231,12 @@ const readHandler = (scope: Record<string, unknown>, binding: EventBinding): unk
 const readExpression = (scope: Record<string, unknown>, expression: string, reader?: ExpressionReader): unknown =>
   read(reader ? reader(scope) : readPath(scope, expression));
 
-const sourceScopeSnapshotFor = (scope: Record<string, unknown> | undefined): Map<PropertyKey, unknown> =>
-  new Map(scope ? Reflect.ownKeys(scope).map((key) => [key, Reflect.get(scope, key)] as const) : []);
+const sourceScopeSnapshotFor = (scope: Record<string, unknown> | undefined): Map<string, unknown> =>
+  new Map(scope ? Object.keys(scope).map((key) => [key, scope[key]] as const) : []);
 
 const sourceScopeChanged = (
-  previous: ReadonlyMap<PropertyKey, unknown>,
-  next: ReadonlyMap<PropertyKey, unknown>,
+  previous: ReadonlyMap<string, unknown>,
+  next: ReadonlyMap<string, unknown>,
 ): boolean => {
   if (previous.size !== next.size) return true;
   for (const [key, value] of previous) {
@@ -245,7 +245,7 @@ const sourceScopeChanged = (
   return false;
 };
 
-const localScopeKeysFor = (options: KeyedListOptions): ReadonlySet<PropertyKey> =>
+const localScopeKeysFor = (options: KeyedListOptions): ReadonlySet<string> =>
   new Set([
     ...(options.stores ?? []).map((store) => store.name),
     ...(options.components ?? []).flatMap((component) => component.stores.map((store) => store.name)),

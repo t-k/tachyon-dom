@@ -330,7 +330,13 @@ const scriptSymbols = (
   const stack: BindingScope[] = [root];
   for (const token of tokens) {
     if (token.punct === "{") {
-      const child: BindingScope = { start: token.end, end: root.end, parent: stack.at(-1), bindings: new Map() };
+      const parent = stack.at(-1);
+      const child: BindingScope = {
+        start: token.end,
+        end: root.end,
+        ...(parent ? { parent } : {}),
+        bindings: new Map(),
+      };
       scopes.push(child);
       stack.push(child);
     } else if (token.punct === "}" && stack.length > 1) {
@@ -432,10 +438,17 @@ const collectSymbols = (source: string): CollectedSymbols => {
   const template = descriptor.ok ? descriptor.value.template : source;
   const templateOffset = script ? templateOffsetFor(source, script.offset, script.content.length) : 0;
   const scriptRoot = script ? scriptSymbols(script.offset, script.content, symbols, references) : undefined;
-  const templateRoot: BindingScope = { start: templateOffset, end: source.length, parent: scriptRoot, bindings: new Map() };
+  const templateRoot: BindingScope = {
+    start: templateOffset,
+    end: source.length,
+    ...(scriptRoot ? { parent: scriptRoot } : {}),
+    bindings: new Map(),
+  };
   const templateScopes: BindingScope[] = [templateRoot];
   const blockStack: Array<{ tag: string; scope: BindingScope }> = [];
-  const remember = (word: Word, binding: Binding): void => references.push({ ...word, binding });
+  const remember = (word: Word, binding: Binding): void => {
+    references.push({ ...word, binding });
+  };
   const declareTemplate = (word: Word, scope: BindingScope): Binding => {
     const existing = scope.bindings.get(word.name);
     if (existing) return existing;
