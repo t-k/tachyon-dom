@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hydrate, mount, type ClientTemplateModule } from "../src/runtime/mount";
+import { createSignal, effect } from "../src/runtime/signal";
 
 describe("client mount entrypoints", () => {
   it("mounts independent instances and disposes each one once", () => {
@@ -71,5 +72,49 @@ describe("client mount entrypoints", () => {
 
     expect(() => handle.dispose()).not.toThrow();
     expect(() => handle.dispose()).not.toThrow();
+  });
+
+  it("cleans resources created before a mount bind failure", () => {
+    const root = document.createElement("main");
+    const source = createSignal(0);
+    let runs = 0;
+    const module: ClientTemplateModule = {
+      templateHtml: `<p>next</p>`,
+      bind: () => {
+        effect(() => {
+          source();
+          runs++;
+        });
+        throw new Error("bind failed after setup");
+      },
+    };
+
+    expect(() => mount(root, module)).toThrow("bind failed after setup");
+    source.set(1);
+
+    expect(runs).toBe(1);
+  });
+
+  it("cleans resources created before a hydrate bind failure", () => {
+    const root = document.createElement("main");
+    root.innerHTML = `<p>SSR</p>`;
+    const source = createSignal(0);
+    let runs = 0;
+    const module: ClientTemplateModule = {
+      templateHtml: `<p>client</p>`,
+      bind: () => {
+        effect(() => {
+          source();
+          runs++;
+        });
+        throw new Error("hydrate failed after setup");
+      },
+    };
+
+    const result = hydrate(root, module);
+    source.set(1);
+
+    expect(result.ok).toBe(false);
+    expect(runs).toBe(1);
   });
 });

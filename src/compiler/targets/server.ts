@@ -6,6 +6,7 @@ import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
 import {
   attrExpression,
   attrString,
+  assertSafeIdentifierName,
   childPathEntries,
   escapeHtml,
   escapeMarker,
@@ -494,6 +495,9 @@ export const hasDynamicUrlAttribute = (node: TemplateNode): boolean =>
     node.children.some(hasDynamicUrlAttribute));
 
 export const generateServerModule = (template: CompiledTemplate, options: ServerModuleOptions = {}): string => {
+  if (options.defaultScopeName !== undefined) {
+    assertSafeIdentifierName(options.defaultScopeName, "defaultScopeName");
+  }
   const cacheKey = options.defaultScopeName ?? "";
   const cachedByOptions = serverModuleCache.get(template);
   const cached = cachedByOptions?.get(cacheKey);

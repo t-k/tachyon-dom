@@ -888,6 +888,17 @@ const increment = (): void => {
     expect(first.state).not.toBe(second.state);
   });
 
+  it.each(["const value = 1; export { value };", "export default 1;"])(
+    "rejects export syntax from script setup: %s",
+    (content) => {
+      const transformed = transformSfcScript({ attrs: "setup", content, offset: 0 });
+
+      expect(transformed.ok).toBe(false);
+      if (transformed.ok) throw new Error("Expected script setup export to fail.");
+      expect(transformed.error.message).toContain("cannot contain exports");
+    },
+  );
+
   it("builds a file route manifest through the CLI helper", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-routes-"));
     try {

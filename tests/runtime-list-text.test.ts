@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanupTextKeyedList, mountTextKeyedList } from "../src/runtime/list-text";
-import { createSignal, effect } from "../src/runtime/signal";
+import { createSignal, effect, onCleanup } from "../src/runtime/signal";
 
 const warn = console.warn;
 
@@ -32,6 +32,38 @@ describe("mountTextKeyedList", () => {
     mountTextKeyedList(root, [], [{ id: "b" }, { id: "a" }], options);
 
     expect(root.textContent).toBe("01");
+  });
+
+  it("continues removing every text row after one cleanup throws", () => {
+    const root = document.createElement("ul");
+    const cleaned: number[] = [];
+    const options = {
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: number }).id,
+      itemName: "row",
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          expression: "row.id",
+          read: (scope: Record<string, unknown>) => {
+            const id = (scope.row as { id: number }).id;
+            onCleanup(() => {
+              cleaned.push(id);
+              if (id === 1) throw new Error("text row cleanup failed");
+            });
+            return id;
+          },
+        },
+      ],
+    };
+
+    mountTextKeyedList(root, [], [{ id: 1 }, { id: 2 }], options);
+
+    expect(() => mountTextKeyedList(root, [], undefined, options)).toThrow("text row cleanup failed");
+    expect(cleaned).toEqual([1, 2]);
+    expect(root.childElementCount).toBe(0);
   });
 
   it("reuses, moves, updates, inserts, and removes keyed rows", () => {

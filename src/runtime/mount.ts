@@ -1,5 +1,6 @@
 import { err, ok, type Result } from "../result.js";
 import { diagnoseHydrationBoundaries, type CompiledHydrationBoundary } from "./hydrate.js";
+import { createRoot } from "./signal.js";
 
 export type ClientTemplateModule<Scope extends Record<string, unknown> = Record<string, unknown>> = {
   templateHtml: string;
@@ -31,6 +32,32 @@ const handleFor = (root: Element, cleanup: void | (() => void)): MountHandle => 
   };
 };
 
+const bindWithOwner = <Scope extends Record<string, unknown>>(
+  root: Element,
+  module: ClientTemplateModule<Scope>,
+  scope: Scope,
+): (() => void) =>
+  createRoot((disposeRoot) => {
+    const bindCleanup = module.bind(root, scope);
+    return () => {
+      let firstError: unknown;
+      let failed = false;
+      try {
+        bindCleanup?.();
+      } catch (error) {
+        firstError = error;
+        failed = true;
+      }
+      try {
+        disposeRoot();
+      } catch (error) {
+        if (!failed) firstError = error;
+        failed = true;
+      }
+      if (failed) throw firstError;
+    };
+  });
+
 export const mount = <Scope extends Record<string, unknown>>(
   root: Element,
   module: ClientTemplateModule<Scope>,
@@ -39,7 +66,7 @@ export const mount = <Scope extends Record<string, unknown>>(
   const previousChildren = Array.from(root.childNodes);
   try {
     root.innerHTML = module.templateHtml;
-    return handleFor(root, module.bind(root, scope as Scope));
+    return handleFor(root, bindWithOwner(root, module, scope as Scope));
   } catch (error) {
     root.replaceChildren(...previousChildren);
     throw error;
@@ -62,7 +89,7 @@ export const hydrate = <Scope extends Record<string, unknown>>(
     });
   }
   try {
-    return ok(handleFor(root, module.bind(root, scope as Scope)));
+    return ok(handleFor(root, bindWithOwner(root, module, scope as Scope)));
   } catch (error) {
     return err({ message: error instanceof Error ? error.message : String(error) });
   }

@@ -26,9 +26,7 @@ describe("client router", () => {
       render: ({ data, params }) => `${data.name}:${params.id}`,
     });
 
-    expectTypeOf(route).toMatchTypeOf<
-      ClientRouteDefinition<{ name: string }, { id: string }>
-    >();
+    expectTypeOf(route).toMatchTypeOf<ClientRouteDefinition<{ name: string }, { id: string }>>();
   });
 
   it("treats string route output as text instead of trusted HTML", async () => {
@@ -525,9 +523,10 @@ describe("client router", () => {
         { path: "/", render: () => view("home") },
         {
           path: "/slow",
-          load: () => new Promise((resolve) => {
-            releaseSlow = resolve;
-          }),
+          load: () =>
+            new Promise((resolve) => {
+              releaseSlow = resolve;
+            }),
           render: ({ data }) => view(String(data)),
         },
       ],
@@ -545,6 +544,51 @@ describe("client router", () => {
     expect(disposed).toEqual(["home"]);
     router.dispose();
     expect(disposed).toEqual(["home", "slow"]);
+  });
+
+  it("continues router disposal after a layout cleanup throws", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/app/section/page");
+    const disposed: string[] = [];
+    const view = (name: string, throws = false): ClientMountedView => ({
+      value:
+        name === "page"
+          ? rawHtml(`<p data-view="page">Page</p>`)
+          : rawHtml(`<section data-view="${name}"><div data-tachyon-outlet></div></section>`),
+      dispose: () => {
+        disposed.push(name);
+        if (throws) throw new Error(`${name} cleanup failed`);
+      },
+    });
+    const router = createClientRouter({
+      root,
+      routes: [
+        {
+          id: "app",
+          path: "/app",
+          render: () => view("app", true),
+          children: [
+            {
+              id: "section",
+              path: "section",
+              render: () => view("section"),
+              children: [{ id: "page", path: "page", render: () => view("page") }],
+            },
+          ],
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+
+    expect(() => router.dispose()).toThrow("app cleanup failed");
+    expect(disposed).toEqual(["app", "section", "page"]);
+    expect(() => router.dispose()).not.toThrow();
+    await router.navigate("/app/section/page");
+    expect(disposed).toEqual(["app", "section", "page"]);
   });
 
   it("handles popstate navigation and exposes 404 rendering", async () => {
@@ -933,7 +977,10 @@ describe("client router", () => {
     const root = document.querySelector("#app");
     if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
     createWindow("/");
-    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false })));
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({ matches: false })),
+    );
     const callbacks: Array<() => void | Promise<void>> = [];
     const releases: Array<() => void> = [];
     const startViewTransition = vi.fn((update: () => void | Promise<void>) => {

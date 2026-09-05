@@ -38,7 +38,9 @@ export type ClientRouteDefinition<Data = unknown, Params extends ClientRoutePara
     | ((context: { root: Element; url: URL; params: Params; data: Data }) => Element | undefined | null);
   load?: (context: Omit<ClientRouteContext<Data, Params>, "data">) => Data | Promise<Data>;
   head?: (context: ClientRouteContext<Data, Params>) => ClientHeadDescriptor | Promise<ClientHeadDescriptor>;
-  action?: (context: Omit<ClientRouteContext<Data, Params>, "data"> & { request: Request }) => Response | Promise<Response>;
+  action?: (
+    context: Omit<ClientRouteContext<Data, Params>, "data"> & { request: Request },
+  ) => Response | Promise<Response>;
   revalidateOnAction?:
     | "self"
     | "all"
@@ -329,6 +331,20 @@ const once = (dispose: () => void): (() => void) => {
   };
 };
 
+const runDisposers = (disposers: readonly (() => void)[]): void => {
+  let firstError: unknown;
+  let failed = false;
+  for (const dispose of disposers) {
+    try {
+      dispose();
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
+    }
+  }
+  if (failed) throw firstError;
+};
+
 const renderInto = (root: Element, value: ClientRenderResult): (() => void) => {
   const mountedDispose = isClientMountedView(value) ? once(value.dispose) : undefined;
   const renderedValue = viewValue(value);
@@ -465,7 +481,17 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   const disposeCommittedView = (): void => {
     const current = committedView;
     committedView = undefined;
-    current?.dispose();
+    if (current) runDisposers([current.dispose]);
+  };
+  const disposeLayoutState = (route: ClientRouteDefinition): void => {
+    const state = layoutStates.get(route);
+    layoutStates.delete(route);
+    if (state) runDisposers([state.dispose]);
+  };
+  const disposeLayoutStates = (): void => {
+    const states = Array.from(layoutStates.values());
+    layoutStates.clear();
+    runDisposers(states.map((state) => state.dispose));
   };
   const writeCache = (key: string, value: unknown): void => {
     if (cacheLimit === 0) return;
@@ -489,15 +515,45 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   }
 
   const renderNotFound = (url: URL): void => {
-    disposeCommittedView();
-    const value = options.notFound ? options.notFound({ url }) : rawHtml(`<h1>Not Found</h1>`);
-    committedView = { target: options.root, dispose: renderInto(options.root, value) };
+    let cleanupError: unknown;
+    let cleanupFailed = false;
+    try {
+      disposeLayoutStates();
+    } catch (error) {
+      cleanupError = error;
+      cleanupFailed = true;
+    }
+    try {
+      disposeCommittedView();
+      const value = options.notFound ? options.notFound({ url }) : rawHtml(`<h1>Not Found</h1>`);
+      committedView = { target: options.root, dispose: renderInto(options.root, value) };
+    } catch (error) {
+      if (cleanupFailed) throw new AggregateError([cleanupError, error], "Route fallback cleanup and render failed.");
+      throw error;
+    }
+    if (cleanupFailed) throw cleanupError;
   };
 
   const renderError = (url: URL, error: unknown): void => {
-    disposeCommittedView();
-    const value = options.error ? options.error({ url, error }) : rawHtml(`<h1>Navigation Error</h1>`);
-    committedView = { target: options.root, dispose: renderInto(options.root, value) };
+    let cleanupError: unknown;
+    let cleanupFailed = false;
+    try {
+      disposeLayoutStates();
+    } catch (disposeError) {
+      cleanupError = disposeError;
+      cleanupFailed = true;
+    }
+    try {
+      disposeCommittedView();
+      const value = options.error ? options.error({ url, error }) : rawHtml(`<h1>Navigation Error</h1>`);
+      committedView = { target: options.root, dispose: renderInto(options.root, value) };
+    } catch (renderErrorValue) {
+      if (cleanupFailed) {
+        throw new AggregateError([cleanupError, renderErrorValue], "Route error cleanup and render failed.");
+      }
+      throw renderErrorValue;
+    }
+    if (cleanupFailed) throw cleanupError;
   };
 
   const isLoadedClientBranch = (value: unknown): value is LoadedClientBranch =>
@@ -610,7 +666,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
           layoutState?.searchKey !== searchKey ||
           (layoutRoute.load !== undefined && layoutState?.loaded !== loaded)
         ) {
-          layoutState?.dispose();
+          if (layoutState) disposeLayoutState(layoutRoute);
           const layoutValue = await layoutRoute.render({
             url,
             params: match.params,
@@ -1024,21 +1080,36 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
       disposed = true;
       navigationGeneration++;
       actionVersion++;
-      controller?.abort();
-      actionController?.abort();
-      prefetchEntries.forEach((entry) => entry.controller.abort());
+      let firstError: unknown;
+      let failed = false;
+      const attempt = (cleanup: () => void): void => {
+        try {
+          cleanup();
+        } catch (error) {
+          if (!failed) firstError = error;
+          failed = true;
+        }
+      };
+      attempt(() => controller?.abort());
+      attempt(() => actionController?.abort());
+      attempt(() => prefetchEntries.forEach((entry) => entry.controller.abort()));
       prefetchEntries.clear();
       cache.clear();
-      for (const layout of layoutStates.values()) layout.dispose();
-      layoutStates.clear();
-      disposeCommittedView();
+      attempt(disposeLayoutStates);
+      attempt(disposeCommittedView);
       scrollPositions.clear();
       currentNavigation = Promise.resolve();
-      options.root.removeEventListener("click", onClick);
-      options.root.removeEventListener("pointerdown", onPointerDown);
-      options.root.removeEventListener("mousedown", onPointerDown);
-      options.root.removeEventListener("pointerover", onPointerOver);
-      removeEventListener("popstate", onPopState);
+      try {
+        options.root.removeEventListener("click", onClick);
+        options.root.removeEventListener("pointerdown", onPointerDown);
+        options.root.removeEventListener("mousedown", onPointerDown);
+        options.root.removeEventListener("pointerover", onPointerOver);
+        removeEventListener("popstate", onPopState);
+      } catch (error) {
+        if (!failed) firstError = error;
+        failed = true;
+      }
+      if (failed) throw firstError;
     },
   };
 };

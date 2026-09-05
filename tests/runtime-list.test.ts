@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRoot, createSignal, effect } from "../src/runtime/signal";
+import { createRoot, createSignal, effect, onCleanup } from "../src/runtime/signal";
 import { mountKeyedList } from "../src/runtime/list";
 
 const stringify = JSON.stringify;
@@ -28,6 +28,72 @@ describe("mountKeyedList", () => {
     for (const id of [null, undefined, {}, Number.NaN, Number.POSITIVE_INFINITY]) {
       expect(() => mountKeyedList(root, [], [{ id }], options)).toThrow("Invalid keyed list key");
     }
+  });
+
+  it("validates every key before creating any new row resources", () => {
+    const root = document.createElement("ul");
+    const source = createSignal(0);
+    let rowReads = 0;
+    const options = {
+      key: "row.id",
+      keyReadItem: (item: unknown) => {
+        if ((item as { id: number }).id === 2) throw new Error("key failed");
+        return (item as { id: number }).id;
+      },
+      itemName: "row",
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          expression: "row.id",
+          read: (scope: Record<string, unknown>) => {
+            onCleanup(() => undefined);
+            rowReads++;
+            source();
+            return (scope.row as { id: number }).id;
+          },
+        },
+      ],
+    };
+
+    expect(() => mountKeyedList(root, [], [{ id: 1 }, { id: 2 }], options)).toThrow("key failed");
+    source.set(1);
+
+    expect(rowReads).toBe(0);
+    expect(root.childElementCount).toBe(0);
+  });
+
+  it("continues removing every row after one row cleanup throws", () => {
+    const root = document.createElement("ul");
+    const cleaned: number[] = [];
+    const options = {
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: number }).id,
+      itemName: "row",
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          expression: "row.id",
+          read: (scope: Record<string, unknown>) => {
+            const id = (scope.row as { id: number }).id;
+            onCleanup(() => {
+              cleaned.push(id);
+              if (id === 1) throw new Error("row cleanup failed");
+            });
+            return id;
+          },
+        },
+      ],
+    };
+
+    mountKeyedList(root, [], [{ id: 1 }, { id: 2 }], options);
+
+    expect(() => mountKeyedList(root, [], undefined, options)).toThrow("row cleanup failed");
+    expect(cleaned).toEqual([1, 2]);
+    expect(root.childElementCount).toBe(0);
   });
 
   it("clears a row ref when its keyed row is removed", () => {

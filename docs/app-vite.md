@@ -30,6 +30,8 @@ export default { plugins: [tachyonDom({ reactive: true }), tachyonApp(app)] };
 
 `tachyonDom({ templateWhitespace: "condense" })` condenses formatting whitespace in directly imported templates. Applications compiling raw route source must pass the same policy to `defineApp()` or `loadRouteApp()`. This compiler policy is applied to one shared template tree before client, buffered-server, and streaming-server generation.
 
+When a `.td` module uses `<script setup>`, Vite compiles setup declarations into a factory invoked by each client `bind()` and each server or stream render request. Import declarations remain module-scoped. Use a normal `<script>` block for intentionally shared module state.
+
 App document `htmlWhitespace` is a separate tag-syntax policy. Use `"preserve-tags"` or `"normalize-tags"`; it does not condense text-node indentation. See the [whitespace migration guide](migrations/whitespace.md) for compatibility behavior and boundary-specific failures.
 
 ## Source Maps

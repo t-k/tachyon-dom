@@ -140,6 +140,7 @@ TypeScript powers SFC script transformation and OXC parses advanced template exp
 - [Getting started](docs/getting-started.md): starter creation, project shape, route files, template types, and testing.
 - [Syntax specification](docs/syntax-spec.md): HTML-first syntax, expressions, directives, components, hydration, and streaming constructs.
 - [Runtime](docs/runtime.md): signals, ownership, DOM helpers, keyed lists, forms, enhancements, portals, and hydration.
+- [Public API layers](docs/api.md): root, runtime, generated, server, and tooling import contracts.
 - [App and Vite](docs/app-vite.md): app definitions, file routes, plugins, request-scoped SSR, logging, and packaging.
 - [Routing](docs/routing.md): server routes, layouts, loaders, actions, streaming, and client navigation.
 - [Server adapters](docs/adapters.md): Workers, Node, Lambda, static assets, origins, and deployment behavior.

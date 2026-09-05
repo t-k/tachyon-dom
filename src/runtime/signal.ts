@@ -114,8 +114,8 @@ const disposeOwner = (owner: Owner): void => {
   if (failed) throw firstError;
 };
 
-export const onCleanup = (cleanup: () => void): void => {
-  registerCleanup(currentEffectOwner ?? currentOwner, cleanup);
+export const onCleanup = (cleanup: () => void): boolean => {
+  return registerCleanup(currentEffectOwner ?? currentOwner, cleanup) !== undefined;
 };
 
 /** Registers cleanup for the current enclosing mount owner. */
@@ -419,6 +419,25 @@ export const createStore = <T extends Record<PropertyKey, unknown>>(initial: T):
 
 type EffectCallback = () => unknown;
 
+const isPromiseLike = (value: unknown): value is PromiseLike<unknown> =>
+  (typeof value === "object" && value !== null) || typeof value === "function"
+    ? typeof (value as { then?: unknown }).then === "function"
+    : false;
+
+const reportAsyncEffectError = (runner: EffectRunner, runOwner: Owner, error: unknown): void => {
+  if (runner.disposed || runOwner.disposed) return;
+  const delivered = deliverError(runner.errorOwner, error);
+  if (delivered.handled) return;
+  const throwError = (): void => {
+    throw delivered.error;
+  };
+  if (typeof globalThis.queueMicrotask === "function") {
+    globalThis.queueMicrotask(throwError);
+  } else {
+    setTimeout(throwError, 0);
+  }
+};
+
 const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
   const parent = activeEffect && !activeEffect.disposed ? activeEffect : undefined;
   const errorOwner = currentErrorOwner;
@@ -445,13 +464,16 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
       const previousEffectOwner = currentEffectOwner;
       const previousErrorOwner = currentErrorOwner;
       activeEffect = runner;
-      currentEffectOwner = runner.runOwner;
+      const runOwner = runner.runOwner;
+      currentEffectOwner = runOwner;
       currentErrorOwner = runner.errorOwner;
       let callbackError: unknown;
       try {
         const returned = fn();
         if (typeof returned === "function") {
-          registerCleanup(runner.runOwner, returned as () => void);
+          registerCleanup(runOwner, returned as () => void);
+        } else if (isPromiseLike(returned)) {
+          void Promise.resolve(returned).catch((error) => reportAsyncEffectError(runner, runOwner, error));
         }
       } catch (error) {
         callbackError = error;

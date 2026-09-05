@@ -6,6 +6,7 @@ import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
 import {
   attrExpression,
   attrString,
+  assertSafeIdentifierName,
   childPathEntries,
   expressionToScopeAccess,
   hydrationBoundaryFor,
@@ -256,6 +257,9 @@ export const generateServerStreamModule = (
   template: CompiledTemplate,
   options: ServerStreamModuleOptions = {},
 ): string => {
+  if (options.defaultScopeName !== undefined) {
+    assertSafeIdentifierName(options.defaultScopeName, "defaultScopeName");
+  }
   const validation = validateServerStreamTemplate(template);
   if (!validation.ok) {
     const error = new Error(validation.error.message);

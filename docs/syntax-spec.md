@@ -34,12 +34,20 @@ Expressions inside `script` and `style` are rejected because ordinary HTML escap
 
 ## Keyed Lists
 
-`<for each={items} key={item.id}>...</for>` creates a keyed list boundary. The first identifier in `key` becomes the item binding name. The client target lowers rows containing only text bindings to `runtime/list-text`; rows with attributes, events, models, styles, refs, or nested control flow use `runtime/list`. The server targets render the array in order.
+`<for each={items} key={item.id}>...</for>` creates a keyed list boundary. The first identifier in `key` becomes the default item binding name. Use `as="item"` and `index="index"` to declare the row variables explicitly; these declarations are independent from the key expression. The client target lowers rows containing only text bindings to `runtime/list-text`; rows with attributes, events, models, styles, refs, or nested control flow use `runtime/list`. The server targets render the array in order. Runtime keyed lists accept strings, finite numbers, and symbols as keys; `null`, `undefined`, `NaN`, infinities, objects, and duplicate keys are invalid. Duplicate rows are reported before a new row is committed.
 
 ```html
 <ul>
   <for each="{rows}" key="{row.id}">
     <li>{row.label}</li>
+  </for>
+</ul>
+```
+
+```html
+<ul>
+  <for each="{rows}" as="row" index="position" key="{row.id}">
+    <li>{position}: {row.label}</li>
   </for>
 </ul>
 ```
@@ -141,13 +149,13 @@ The synchronous server string target treats the current `value` as the resolved 
 
 - `fallback="..."` to yield static fallback HTML before awaiting in the stream target.
 - `error="..."` to yield static error HTML if the awaited value rejects in the stream target.
-- `reorder="preserve"` or `reorder="resolve"` in the IR. Current stream emission preserves document order.
+- `reorder="preserve"` or `reorder="resolve"` in the IR. The client and buffered server targets do not use this streaming ordering hint. The stream target currently supports document-order output (`preserve` or omission); `reorder="resolve"` is rejected with a positioned diagnostic until resolve-order emission is implemented.
 
 ## Single File Templates
 
 `.td` files can contain one optional `<script>` block plus template markup. The compiler removes the script block before parsing the template and maps template diagnostics back to the original source offsets.
 
-Script-only `.td` files are valid and emit empty client, server, or stream template modules. `<script setup>` exposes top-level bindings as the default client scope. A named `export const scope` or `export default` can also provide default client scope values, but a file must not use both forms at once.
+Script-only `.td` files are valid and emit empty client, server, or stream template modules. `<script setup>` exposes top-level bindings through a per-bind setup factory, so signal state and setup effects are independent for each client instance and request. Imports remain module-scoped. A named `export const scope` or `export default` can provide an explicit shared or factory default scope, but a file must not use both forms at once. `script setup` must not contain exports; use a normal `<script>` block when module-shared state or explicit exports are required.
 
 Template scripts can use compiler helper names such as `validateFormData` and `compileTachyonSfc`; the SFC transform auto-imports supported helpers from Tachyon DOM modules.
 

@@ -7,7 +7,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/attr`: dynamic attributes, styles, and refs.
 - `runtime/form`: `bind:value`, `bind:checked`, validation, and progressive form helpers.
 - `runtime/enhancement`: small progressive enhancement registry for SSR markup that opts in with `data-td-enhance`.
-- `runtime/event`: delegated event binding.
+- `runtime/event`: direct event listener binding.
 - `runtime/list`: keyed list mounting, reuse, move, multi-root item support, and row-scoped binding effects that avoid re-reading unchanged rows after a single row signal changes.
 - `runtime/keyed-rows`: dependency-free keyed table-row list where the live DOM is the single source of truth (no shadow item/row arrays). Bulk creation binds and clones a reusable multi-row chunk; remove/swap/select are O(1) DOM operations. Suited to large data tables that do not need per-row reactivity.
 - `runtime/virtual-list`: fixed-height virtualized lists with overscan, imperative updates, index scrolling, and ARIA position metadata.
@@ -19,6 +19,14 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/store` and `runtime/signal`: fine-grained store/signal helpers, memoized computed accessors, async resources, and recoverable effect errors.
 - `runtime/stream-client`: browser stream chunk reading.
 - `runtime/error-boundary`: DOM-mounted client fallback boundaries.
+
+Browser feature bundles have independent minified budgets for `runtime/list`, `runtime/form`, `runtime/conditional`, and `runtime/router`. Run `pnpm check:browser-feature-budgets` after changing one of these modules; the check also rejects compiler, server, TypeScript, parse5, and language-server inputs from the browser graph.
+
+## Mount and Hydrate Entrypoints
+
+`mount(root, module, scope)` replaces the root contents with trusted compiler output, binds the generated module once, and returns a `MountHandle`. Calling `dispose()` more than once is harmless; it releases the module's resources but intentionally leaves the rendered DOM in place. `module.bind()` may return a cleanup function, and the generated client binding owns its reactive root through the same handle.
+
+`hydrate(root, module, scope)` validates the module's static hydration markers without replacing server-rendered DOM. It returns a `Result`: an `ok` value contains the same idempotent `MountHandle`, while an `err` value contains positioned hydration diagnostics when markers do not match. Both functions expect `templateHtml` and binding metadata produced by the compiler or another trusted build step. They do not sanitize arbitrary HTML.
 
 Browser feature bundles have independent minified budgets for `runtime/list`, `runtime/form`, `runtime/conditional`, and `runtime/router`. Run `pnpm check:browser-feature-budgets` after changing one of these modules; the check also rejects compiler, server, TypeScript, parse5, and language-server inputs from the browser graph.
 
@@ -184,6 +192,8 @@ export const loginAction = formAction({
 
 In-flight prefetches are aborted when their cache entry is invalidated or when the router is disposed.
 
+Client route renderers may return a `ClientMountedView` with `{ value, dispose }`. The router keeps the committed view alive while a next navigation loads, disposes the old view only after the next view commits, disposes uncommitted stale results, and disposes the committed view from `router.dispose()`. `defineClientRoute()` connects a literal path to its loader result so `data` is inferred in `render`, `head`, `target`, and actions while named path segments are inferred in `params`.
+
 `createRouteHotReloader()` invalidates the current route cache entry and re-navigates with `replace: true` when a route module update arrives from a dev server.
 
 `connectRouteHotReloader(import.meta.hot, reloader)` wires Vite-style custom HMR events to the route hot reloader. The Vite routes plugin emits `tachyon-dom:routes-update` when a route module changes.
@@ -194,7 +204,29 @@ Client action concurrency is latest-operation-wins. A newer submission or naviga
 
 ## Signals
 
-`runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, `read()`, `untrack()`, `createResource()`, and `catchError()`. Effects run once when registered, then subsequent signal notifications are queued. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. A throwing effect does not prevent queued siblings from running. After the queue drains, one unhandled failure is rethrown directly and multiple failures are reported in an ordered `AggregateError`. `untrack(fn)` reads signals without subscribing the active effect, and effects created inside `untrack()` are not attached to the active effect lifecycle. `createMemo()` exposes a cached computed accessor that updates before dependent effects observe the next flush. `createResource()` ties an async loader to a source accessor and exposes `data`, `error`, `loading`, `refetch`, and `dispose`. Accessor changes automatically abort the superseded load and start the next one; only the newest result may update state. The fetcher receives `{ signal }` as its second argument. Call `dispose()` when the resource owner is removed so source tracking detaches and in-flight work is aborted. `catchError()` wraps an effect body with an error callback while keeping the effect subscribed for later successful runs.
+`runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, `read()`, `untrack()`, `createResource()`, and `catchError()`. Effects run once when registered, then subsequent signal notifications are queued. Each effect run has its own cleanup owner: `onCleanup()` registrations and a synchronous function returned by the callback run in reverse registration order before the next run and once more when the effect is disposed. The returned function is therefore a cleanup contract, not a value-producing callback. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. A throwing effect does not prevent queued siblings from running. After the queue drains, one unhandled failure is rethrown directly and multiple failures are reported in an ordered `AggregateError`. `untrack(fn)` reads signals without subscribing the active effect, and effects created inside `untrack()` are not attached to the active effect lifecycle. `createMemo()` exposes a cached computed accessor that updates before dependent effects observe the next flush.
+
+Effect callbacks are synchronous. A returned Promise is not a cleanup and asynchronous work must own its `AbortController` or other cleanup synchronously, before the callback returns. A rejection from an async callback is observed by the runtime and delivered to the nearest reactive error owner; an async callback should still be avoided when a synchronous effect plus an explicit task is sufficient. Calling `onCleanup()` after an `await` has no active run owner and does not attach that cleanup to the earlier run. Use `onCleanup()` before starting the task and check its abort signal in the continuation.
+
+`createResource()` ties an async loader to a source accessor and exposes `data`, `error`, `loading`, `refetch`, `refetchOutcome`, and `dispose`. A plain function passed as `source` is data; only a branded `Accessor` or `createMemo()` is tracked as a source. To combine multiple signals, create a memo explicitly:
+
+```ts
+const query = createMemo(() => `${page()}::${filter()}`);
+const resource = createResource(query, (key, { signal }) => fetchPage(key, signal));
+```
+
+`refetchOutcome()` distinguishes `{ status: "success", data }`, `{ status: "error", error }`, and `{ status: "cancelled", reason }`. Cancellation covers superseded and disposed work, including fetchers that ignore `AbortSignal`. The legacy `refetch()` method remains a compatibility wrapper that resolves data for success and `undefined` for error or cancellation. Only the newest generation may update the declarative resource state.
+
+`createStore()` is shallow. It copies the initial top-level properties and tracks reads and writes by top-level property; nested object mutation is not observed. Replace the top-level value or put a signal at the nested field when nested updates are needed:
+
+```ts
+const state = createStore({ user: { name: "Ada" }, online: createSignal(false) });
+state.user = { name: "Grace" }; // tracked top-level replacement
+state.user.name = "Lin"; // not tracked by createStore itself
+state.online.set(true); // tracked nested signal
+```
+
+The event runtime registers listeners directly on each target element. It is not a bubbling delegation layer; this preserves non-bubbling `focus`/`blur` behavior and ordinary propagation and `stopPropagation()` semantics.
 
 ## Error Boundaries and i18n
 

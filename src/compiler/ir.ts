@@ -15,8 +15,8 @@ import type {
 import {
   attrExpression,
   attrString,
+  isSafeIdentifierName,
   hydrationBoundaryFor,
-  identifierNamePattern,
   identifierPattern,
   isKnownHydrationAttribute,
   itemNameFromKey,
@@ -192,9 +192,17 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     }
     for (const name of ["as", "index"] as const) {
       const attribute = node.attrs.find((candidate) => candidate.name === name);
-      if (attribute && (typeof attribute.value !== "string" || !identifierNamePattern.test(attribute.value.trim()))) {
+      if (attribute && (typeof attribute.value !== "string" || !isSafeIdentifierName(attribute.value.trim()))) {
         return semanticError(`<for> ${name} must be a valid identifier string.`, attributeSpan(attribute));
       }
+    }
+    const itemName = attrString(node, "as")?.trim();
+    const indexName = attrString(node, "index")?.trim();
+    if (itemName && indexName && itemName === indexName) {
+      return semanticError(
+        "<for> as and index must be different identifiers.",
+        attributeSpan(node.attrs.find((attr) => attr.name === "index") as Attribute),
+      );
     }
   }
   if (node.tagName === "if" && !attrExpression(node, "test")) {
@@ -205,7 +213,7 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
       return semanticError("<component> requires a string name attribute.", openingTagSpan(node));
     }
     for (const attr of node.attrs) {
-      if (attr.name !== "name" && readExpressionAttribute(attr.value) && !identifierNamePattern.test(attr.name)) {
+      if (attr.name !== "name" && readExpressionAttribute(attr.value) && !isSafeIdentifierName(attr.name)) {
         return semanticError(`Invalid component prop binding name: ${attr.name}.`, attributeSpan(attr));
       }
     }
@@ -215,7 +223,7 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
   }
   if (node.tagName === "store") {
     for (const attr of node.attrs) {
-      if (readExpressionAttribute(attr.value) && !identifierNamePattern.test(attr.name)) {
+      if (readExpressionAttribute(attr.value) && !isSafeIdentifierName(attr.name)) {
         return semanticError(`Invalid store binding name: ${attr.name}.`, attributeSpan(attr));
       }
     }
@@ -228,7 +236,7 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     if (!thenName) {
       return semanticError(`<await> requires then="name".`, openingTagSpan(node));
     }
-    if (!identifierNamePattern.test(thenName)) {
+    if (!isSafeIdentifierName(thenName)) {
       return semanticError(
         `Invalid await then binding: ${thenName}.`,
         attributeSpan(node.attrs.find((attr) => attr.name === "then") as Attribute),

@@ -7,6 +7,64 @@ export const expressionPattern = /\{([^{}]+)\}/g;
 export const identifierNamePattern = /^[A-Za-z_$][\w$]*$/;
 export const identifierPattern = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
 
+const reservedIdentifierNames = new Set([
+  "await",
+  "break",
+  "case",
+  "catch",
+  "class",
+  "const",
+  "continue",
+  "debugger",
+  "default",
+  "delete",
+  "do",
+  "else",
+  "enum",
+  "export",
+  "extends",
+  "false",
+  "finally",
+  "for",
+  "function",
+  "if",
+  "implements",
+  "import",
+  "in",
+  "instanceof",
+  "interface",
+  "let",
+  "new",
+  "null",
+  "package",
+  "private",
+  "protected",
+  "public",
+  "return",
+  "static",
+  "super",
+  "switch",
+  "this",
+  "throw",
+  "true",
+  "try",
+  "typeof",
+  "var",
+  "void",
+  "while",
+  "with",
+  "yield",
+]);
+
+export const isSafeIdentifierName = (name: string): boolean =>
+  identifierNamePattern.test(name) && !reservedIdentifierNames.has(name);
+
+export const assertSafeIdentifierName = (name: string, context: string): void => {
+  if (!isSafeIdentifierName(name)) {
+    throw new TypeError(`${context} must be a safe identifier.`);
+  }
+};
+
 export type TextExpressionSegment =
   | { kind: "text"; value: string; start: number; end: number }
   | { kind: "expression"; value: string; start: number; end: number };

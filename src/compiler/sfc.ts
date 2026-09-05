@@ -267,7 +267,10 @@ export const extractStaticSfcScope = (source: string): Result<Record<string, unk
   if (!script) return ok(undefined);
   const sourceFile = sourceFileFor(script.content, script);
   for (const statement of sourceFile.statements) {
-    if (!ts.isVariableStatement(statement) || !statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+    if (
+      !ts.isVariableStatement(statement) ||
+      !statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+    ) {
       continue;
     }
     for (const declaration of statement.declarationList.declarations) {
@@ -459,7 +462,12 @@ const setupFactoryCode = (
       imports.push(statementText);
       continue;
     }
-    if (ts.canHaveModifiers(statement) && ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+    if (
+      ts.isExportDeclaration(statement) ||
+      ts.isExportAssignment(statement) ||
+      (ts.canHaveModifiers(statement) &&
+        ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword))
+    ) {
       return err({
         message: "<script setup> cannot contain exports; expose values through top-level declarations.",
         offset: script.offset + statement.getStart(sourceFile),
@@ -492,9 +500,7 @@ export const parseTachyonSfc = (source: string): Result<TachyonSfcDescriptor, Co
   const closeEnd = close.index + close[0].length;
   const before = "";
   const after = source.slice(closeEnd);
-  const ranges: TemplateRange[] = [
-    { generatedStart: before.length, originalStart: closeEnd, length: after.length },
-  ];
+  const ranges: TemplateRange[] = [{ generatedStart: before.length, originalStart: closeEnd, length: after.length }];
   return ok({
     script: {
       attrs: open.attrs,

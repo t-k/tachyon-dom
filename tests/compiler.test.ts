@@ -813,6 +813,36 @@ describe("HTML-first compiler", () => {
     });
   });
 
+  it.each(["class", "await"])("rejects reserved <for> binding name %s", (name) => {
+    const result = compileTemplate(
+      `<ul><for each={rows} as="${name}" index="position" key={row.id}><li>{row.id}</li></for></ul>`,
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected reserved binding name to fail.");
+    expect(result.error.message).toContain("valid identifier");
+  });
+
+  it("rejects duplicate explicit <for> binding names", () => {
+    const result = compileTemplate(
+      `<ul><for each={rows} as="row" index="row" key={row.id}><li>{row.id}</li></for></ul>`,
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected duplicate binding names to fail.");
+    expect(result.error.message).toContain("different identifiers");
+  });
+
+  it("rejects unsafe default scope identifiers in every generated target", () => {
+    const result = compileTemplate(`<main>{title}</main>`);
+    if (!result.ok) throw new Error(result.error.message);
+    const unsafeName = "scope; globalThis.__tachyonInjected = true; /*";
+
+    expect(() => generateClientModule(result.value, { defaultScopeName: unsafeName })).toThrow("safe identifier");
+    expect(() => generateServerModule(result.value, { defaultScopeName: unsafeName })).toThrow("safe identifier");
+    expect(() => generateServerStreamModule(result.value, { defaultScopeName: unsafeName })).toThrow("safe identifier");
+  });
+
   it("generates modular client code that imports only needed runtime helpers", () => {
     const result = compileTemplate(`<button class:danger={selected} on:click={select}>{label}</button>`);
     if (!result.ok) {

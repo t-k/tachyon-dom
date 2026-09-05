@@ -3,6 +3,7 @@ import {
   batch,
   catchError,
   createMemo,
+  createReactiveErrorScope,
   createResource,
   createRoot,
   createSignal,
@@ -105,6 +106,41 @@ describe("signal runtime", () => {
     dispose();
 
     expect(events).toEqual(["returned:0", "registered:0", "returned:1", "registered:1"]);
+  });
+
+  it("does not attach cleanup registered after an async effect continuation", async () => {
+    let registered: boolean | undefined;
+    const cleanup = vi.fn();
+    const dispose = effect(async () => {
+      await Promise.resolve();
+      registered = onCleanup(cleanup);
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    dispose();
+
+    expect(registered).toBe(false);
+    expect(cleanup).not.toHaveBeenCalled();
+  });
+
+  it("delivers async effect rejections to the nearest reactive error owner", async () => {
+    const errors: string[] = [];
+    const scope = createReactiveErrorScope((error) => {
+      errors.push(error instanceof Error ? error.message : String(error));
+    });
+    const dispose = scope.run(() =>
+      effect(async () => {
+        throw new Error("async failure");
+      }),
+    );
+
+    await Promise.resolve();
+    await Promise.resolve();
+    dispose();
+    scope.dispose();
+
+    expect(errors).toEqual(["async failure"]);
   });
 
   it("continues an effect rerun cleanup sequence after one cleanup throws", () => {

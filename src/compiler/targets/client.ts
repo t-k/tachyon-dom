@@ -21,6 +21,7 @@ import {
   isStoreNode,
   itemNameFromKey,
   attrString,
+  assertSafeIdentifierName,
   readExpressionAttribute,
   renderableChildren,
   serializeStaticAttr,
@@ -360,6 +361,9 @@ const clientModuleCacheKey = (options: GenerateClientModuleOptions): string =>
   `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}`;
 
 export const generateClientModule = (template: CompiledTemplate, options: GenerateClientModuleOptions = {}): string => {
+  if (options.defaultScopeName !== undefined) {
+    assertSafeIdentifierName(options.defaultScopeName, "defaultScopeName");
+  }
   const cacheKey = clientModuleCacheKey(options);
   const cachedByOptions = clientModuleCache.get(template);
   const cached = cachedByOptions?.get(cacheKey);
@@ -432,9 +436,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       `createRoot as ${runtimeNames.createRoot}`,
       ...(needsSignal ? [`effect as ${runtimeNames.effect}`, `read as ${runtimeNames.read}`] : []),
     ];
-    lines.push(
-      `import { ${signalImports.join(", ")} } from "tachyon-dom/runtime/signal";`,
-    );
+    lines.push(`import { ${signalImports.join(", ")} } from "tachyon-dom/runtime/signal";`);
   }
   if (needsStore) {
     lines.push(`import { createStore as ${runtimeNames.createStore} } from "tachyon-dom/runtime/store";`);
@@ -452,9 +454,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     );
     lines.push(`};`);
   }
-  lines.push(
-    `export const bind = (root, inputScope = {}) => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`,
-  );
+  lines.push(`export const bind = (root, inputScope = {}) => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`);
   if (hasDefaultScope) {
     lines.push(`  const scope = __tachyonCreateScope(inputScope);`);
   } else {
