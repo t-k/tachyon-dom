@@ -58,8 +58,6 @@ test("defers a boundary chunk and replays the first interaction in every engine"
 });
 
 test("loads the generated boundary chunk on demand and submits once in every engine", async ({ page, browserName }) => {
-  page.on("pageerror", (error) => console.log(`PAGEERROR ${error.message}`));
-  page.on("console", (message) => console.log(`CONSOLE ${message.type()} ${message.text()}`));
   await page.goto("/tests/browser/generated-lazy-fixture.html");
   const chunkRequest = page.waitForRequest((request) => request.url().endsWith("/generated-lazy-chunk.js"));
   const result = await page.evaluate(() => window.runGeneratedLazyHydration());
