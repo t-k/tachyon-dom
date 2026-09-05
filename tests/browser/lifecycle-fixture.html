@@ -1,0 +1,55 @@
+<!doctype html>
+<html>
+  <body>
+    <table>
+      <tbody id="rows"></tbody>
+    </table>
+    <main id="hydration"></main>
+    <script type="module">
+      import { createHydrationBoundary, createKeyedRows } from "../../dist/index.js";
+
+      const rows = document.querySelector("#rows");
+      const list = createKeyedRows({
+        tbody: rows,
+        row: "<tr><td></td><td><input></td></tr>",
+        bind: (row, item) => {
+          row.cells[0].textContent = String(item.id);
+          row.querySelector("input").value = item.label;
+        },
+      });
+      const hydration = document.querySelector("#hydration");
+      hydration.innerHTML =
+        "<!--tachyon-hydrate:panel:start--><section><button>Open</button></section><!--tachyon-hydrate:panel:end-->";
+
+      window.runLifecycle = () => {
+        const first = { id: 1, label: "one" };
+        const second = { id: 2, label: "two" };
+        list.replace([first, second]);
+        const firstRow = rows.rows[0];
+        const input = firstRow.querySelector("input");
+        input.focus();
+        input.value = "edited";
+        list.swap(0, 1);
+        const sameRow = rows.rows[1] === firstRow;
+        const focused = document.activeElement === input;
+        const value = input.value;
+        list.removeAt(0);
+        const boundary = createHydrationBoundary(hydration, "panel", (element) => {
+          element.setAttribute("data-hydrated", "true");
+        });
+        const before = hydration.innerHTML;
+        if (!boundary.ok) throw new Error(boundary.error.message);
+        boundary.value.hydrate();
+        return {
+          engine: navigator.userAgent,
+          sameRow,
+          focused,
+          value,
+          remainingRows: rows.rows.length,
+          hydrationChanged: before !== hydration.innerHTML,
+          hydrated: boundary.value.hydrated(),
+        };
+      };
+    </script>
+  </body>
+</html>

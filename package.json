@@ -224,6 +224,8 @@
     "bench:local:smoke": "tsx benchmark/local-compare/run-local-compare.ts --serve-mode dev --iterations 1 --warmup 1",
     "bench:stream-backpressure": "tsx benchmark/streaming-backpressure.ts",
     "bench:html-minification": "tsx benchmark/html-minification.ts",
+    "bench:template-representative": "tsx benchmark/template-representative.ts",
+    "bench:representation-evaluation": "tsx benchmark/representation-evaluation.ts",
     "bench:local:stable": "tsx benchmark/local-compare/run-local-compare.ts --iterations 30 --warmup 5",
     "bench:local:trace": "tsx benchmark/local-compare/run-local-compare.ts --serve-mode dev --iterations 1 --warmup 1 --trace-implementation tachyon-dom --trace-scenario partialUpdate",
     "bench:summary": "tsx benchmark/summary/cli.ts",
@@ -239,6 +241,7 @@
     "example:web": "vite --host 127.0.0.1",
     "test": "vitest run",
     "test:property": "vitest run --config vitest.property.config.ts",
+    "test:browser": "playwright test",
     "test:mutation": "stryker run",
     "test:mutation:full": "stryker run --force",
     "build:create-package": "pnpm --dir packages/create-tachyon-dom build",
@@ -267,6 +270,7 @@
     "@marko/run": "^0.10.0",
     "@marko/runtime-tags": "^6.1.8",
     "@marko/vite": "^6.1.0",
+    "@playwright/test": "^1.63.0",
     "@reckona/mreact": "^0.0.181",
     "@reckona/mreact-reactive-core": "^0.0.181",
     "@reckona/mreact-reactive-dom": "^0.0.181",
@@ -279,6 +283,7 @@
     "@stryker-mutator/vitest-runner": "10.0.0",
     "@tanstack/react-router": "^1.170.16",
     "@tanstack/react-start": "^1.168.26",
+    "@types/jsdom": "^21.1.7",
     "@types/node": "^24.0.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
@@ -293,7 +298,7 @@
     "oxc-parser": "^0.136.0",
     "oxfmt": "^0.55.0",
     "oxlint": "^1.70.0",
-    "playwright": "^1.61.0",
+    "playwright": "^1.63.0",
     "publint": "0.3.21",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -443,6 +448,14 @@
       "limit": "6 KB"
     },
     {
+      "name": "template-language",
+      "path": "dist/template-language.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "12 KB"
+    },
+    {
       "name": "i18n",
       "path": "dist/i18n.js",
       "disablePlugins": [
@@ -561,6 +574,22 @@
         "@size-limit/esbuild"
       ],
       "limit": "4 KB"
+    },
+    {
+      "name": "runtime/component",
+      "path": "dist/runtime/component.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
+    },
+    {
+      "name": "runtime/diagnostics",
+      "path": "dist/runtime/diagnostics.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "2 KB"
     },
     {
       "name": "runtime/list",
