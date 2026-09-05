@@ -1,0 +1,6 @@
+{
+  "runtime/list": { "maxMinifiedBytes": 20480 },
+  "runtime/form": { "maxMinifiedBytes": 2048 },
+  "runtime/conditional": { "maxMinifiedBytes": 20480 },
+  "runtime/router": { "maxMinifiedBytes": 18432 }
+}

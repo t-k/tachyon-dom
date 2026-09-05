@@ -20,6 +20,8 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/stream-client`: browser stream chunk reading.
 - `runtime/error-boundary`: DOM-mounted client fallback boundaries.
 
+Browser feature bundles have independent minified budgets for `runtime/list`, `runtime/form`, `runtime/conditional`, and `runtime/router`. Run `pnpm check:browser-feature-budgets` after changing one of these modules; the check also rejects compiler, server, TypeScript, parse5, and language-server inputs from the browser graph.
+
 `runtime/keyed-rows` rejects invalid numeric controls before changing the DOM. `chunks`, generated-row `count`, and update `stride` must be positive finite integers. Zero, negative values, fractions, `NaN`, and infinities throw a `TypeError` that names the invalid parameter. Empty arrays remain valid for `replace([])` and `append([])` because those methods do not accept a generated-row count.
 
 Related public utility subpaths:

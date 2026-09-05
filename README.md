@@ -17,18 +17,18 @@ This `.td` component combines a signal-backed counter with a keyed list:
 
 ```html
 <script setup lang="ts">
-const count = createSignal(0);
-const rows = createSignal([
-  { id: 1, label: "Alpha" },
-  { id: 2, label: "Beta" },
-]);
-const increment = (): void => count.update((value) => value + 1);
+  const count = createSignal(0);
+  const rows = createSignal([
+    { id: 1, label: "Alpha" },
+    { id: 2, label: "Beta" },
+  ]);
+  const increment = (): void => count.update((value) => value + 1);
 </script>
 
 <main>
-  <button on:click={increment}>{count}</button>
+  <button on:click="{increment}">{count}</button>
   <ul>
-    <for each={rows} key={row.id}>
+    <for each="{rows}" key="{row.id}">
       <li>{row.label}</li>
     </for>
   </ul>
@@ -45,11 +45,7 @@ The real output uses modular runtime imports and explicit cleanup ownership. Abb
 const countText = __tachyonTextAt(root, [0, 0]);
 cleanups.push(__tachyonEffect(() => __tachyonSetText(countText, __tachyonRead(scope.count))));
 
-cleanups.push(
-  __tachyonEffect(() =>
-    __tachyonMountTextKeyedList(listRoot, [], __tachyonRead(scope.rows), listOptions),
-  ),
-);
+cleanups.push(__tachyonEffect(() => __tachyonMountTextKeyedList(listRoot, [], __tachyonRead(scope.rows), listOptions)));
 cleanups.push(() => __tachyonCleanupTextKeyedList(listRoot, []));
 ```
 
@@ -75,11 +71,11 @@ These numbers are produced from repository scripts, not estimated from source fi
 
 On this machine, Tachyon DOM performed within 3% of the comparison implementations across nine keyed-row operations.
 
-| Compared with | Tachyon DOM result |
-| --- | ---: |
-| vanillajs-lite-keyed | 1.8% faster |
-| solid-keyed | 0.9% faster |
-| marko-keyed | 2.5% slower |
+| Compared with        | Tachyon DOM result |
+| -------------------- | -----------------: |
+| vanillajs-lite-keyed |        1.8% faster |
+| solid-keyed          |        0.9% faster |
+| marko-keyed          |        2.5% slower |
 
 Results are the geometric mean of nine operations: row creation, replacement, partial updates, selection, swapping, removal, append, clear, and creation of many rows. Lower execution time is better.
 
@@ -175,6 +171,7 @@ pnpm lint
 pnpm check:exports
 pnpm check:size
 pnpm check:browser-entry
+pnpm check:browser-feature-budgets
 pnpm check:quick-example-size
 pnpm test:property
 pnpm test:mutation

@@ -433,12 +433,16 @@ describe("DX helpers", () => {
     );
     expect(packageJson.scripts?.["check:size"]).toBe("size-limit");
     expect(packageJson.scripts?.["check:browser-entry"]).toBe("node scripts/verify-browser-entry.mjs");
+    expect(packageJson.scripts?.["check:browser-feature-budgets"]).toBe(
+      "node scripts/verify-browser-feature-budgets.mjs",
+    );
     expect(packageJson["size-limit"]?.map((entry) => entry.name)).toEqual(publicJsExportNames);
     expect(packageJson["size-limit"]?.some((entry) => entry.name === "td-modules")).toBe(false);
     expect(ci).toContain("workflow_dispatch");
     expect(ci).toContain("pnpm check:exports");
     expect(ci).toContain("pnpm check:size");
     expect(ci).toContain("pnpm check:browser-entry");
+    expect(ci).toContain("pnpm check:browser-feature-budgets");
     expect(ci).toContain("pnpm verify:clean-consumer");
     expect(ci).toContain("pnpm verify:whitespace-types");
     expect(ci).toContain("github.event_name == 'workflow_dispatch'");
@@ -447,6 +451,7 @@ describe("DX helpers", () => {
     for (const command of [
       "pnpm verify:starters",
       "pnpm check:browser-entry",
+      "pnpm check:browser-feature-budgets",
       "pnpm check:quick-example-size",
       "pnpm verify:whitespace-types",
     ]) {
@@ -1931,6 +1936,7 @@ void chunks;
     const releaseGates = [
       "pnpm verify:starters",
       "pnpm check:browser-entry",
+      "pnpm check:browser-feature-budgets",
       "pnpm check:quick-example-size",
       "pnpm verify:whitespace-types",
     ];
