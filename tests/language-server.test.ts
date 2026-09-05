@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { createDiagnosticsScheduler, diagnosticsForTachyonDocument } from "../src/language-server";
 
 describe("Tachyon language server diagnostics", () => {
@@ -93,5 +96,25 @@ export const scope = () => ({ user: { name: "Ada" }, save: 123 });
     vi.advanceTimersByTime(1);
     expect(sent).toEqual([{ uri: "file:///app/page.td", diagnostics: [] }]);
     scheduler.dispose();
+  });
+
+  it("resolves TypeScript imports relative to the LSP document URI", async () => {
+    const directory = await mkdtemp(join("/tmp", "tachyon-language-server-"));
+    try {
+      await writeFile(join(directory, "user.ts"), `export type User = { name: string };\n`);
+      const source = `<script lang="ts">\nimport type { User } from "./user";\nexport const scope = (): { user: User } => ({ user: { name: "Ada" } });\n</script>\n<main>{user.name}</main>`;
+      const uri = pathToFileURL(join(directory, "page.td")).href;
+      vi.useFakeTimers();
+      const sent: Array<{ uri: string; diagnostics: ReturnType<typeof diagnosticsForTachyonDocument> }> = [];
+      const scheduler = createDiagnosticsScheduler((payload) => sent.push(payload), 50);
+
+      scheduler.schedule({ uri, getText: () => source });
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(sent).toEqual([{ uri, diagnostics: [] }]);
+      scheduler.dispose();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

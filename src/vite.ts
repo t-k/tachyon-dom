@@ -353,6 +353,17 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
   return {
     name: "tachyon-dom",
     enforce: "pre",
+    config(config, env) {
+      if (env.command !== "build" || env.mode !== "production") {
+        return;
+      }
+      return {
+        define: {
+          ...config.define,
+          __TACHYON_PRODUCTION__: "true",
+        },
+      };
+    },
     configResolved(config) {
       command = config.command;
       mode = config.mode;

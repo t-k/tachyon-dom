@@ -66,6 +66,7 @@ export type ScheduleHydrationBoundariesOptions = {
   resolveId?: (boundary: CompiledHydrationBoundary) => string | undefined;
   onError?: (error: HydrationBoundaryError, boundary: CompiledHydrationBoundary) => void;
   matchMedia?: (query: string) => MediaQueryList;
+  replayInteraction?: boolean;
 };
 
 type HydrationCommentIndex = {
@@ -440,6 +441,7 @@ export const scheduleHydrationBoundaries = (
         ...(boundary.interaction ? { interaction: boundary.interaction } : {}),
         ...(boundary.rootMargin ? { rootMargin: boundary.rootMargin } : {}),
         ...(options.matchMedia ? { matchMedia: options.matchMedia } : {}),
+        replayInteraction: options.replayInteraction ?? boundary.strategy === "interaction",
       }),
     );
     cleanups.push(() => handle.value.dispose());

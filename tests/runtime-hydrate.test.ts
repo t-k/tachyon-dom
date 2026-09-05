@@ -228,6 +228,28 @@ describe("hydrate boundary runtime", () => {
     cleanup();
   });
 
+  it("replays compiled interaction boundaries and cancels the original event", () => {
+    document.body.innerHTML = `<main><!--tachyon-hydrate:td-h-submit:start--><section><button>Send</button></section><!--tachyon-hydrate:td-h-submit:end--></main>`;
+    const main = document.querySelector("main");
+    const button = main?.querySelector("button");
+    if (!main || !(button instanceof HTMLButtonElement)) throw new Error("Missing compiled boundary button.");
+    const dispatch = vi.spyOn(button, "dispatchEvent");
+
+    const cleanup = scheduleHydrationBoundaries(
+      main,
+      [{ id: "td-h-submit", idKind: "static", strategy: "interaction", interaction: "click" }],
+      vi.fn(),
+    );
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+
+    button.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    cleanup();
+    dispatch.mockRestore();
+  });
+
   it("loads a lazy boundary once and replays the first interaction", async () => {
     document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--><section><button>Open</button></section><!--tachyon-hydrate:panel:end--></main>`;
     const main = document.querySelector("main");

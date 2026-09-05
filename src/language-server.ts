@@ -9,6 +9,7 @@ import type {
   TextEdit,
   WorkspaceEdit,
 } from "vscode-languageserver/node";
+import { fileURLToPath } from "node:url";
 import { diagnoseTachyonSfc } from "./diagnostics.js";
 import { requireOptionalPeer } from "./optional-peer.js";
 import { checkTachyonTemplateTypes, type TemplateTypeDiagnostic } from "./template-typecheck.js";
@@ -52,10 +53,19 @@ type DiagnosticPayload = {
   diagnostics: Diagnostic[];
 };
 
-export const diagnosticsForTachyonDocument = (text: string): Diagnostic[] => {
+const fileNameForDocumentUri = (uri: string): string => {
+  if (!uri.startsWith("file:")) return uri;
+  try {
+    return fileURLToPath(uri);
+  } catch {
+    return uri;
+  }
+};
+
+export const diagnosticsForTachyonDocument = (text: string, fileName?: string): Diagnostic[] => {
   const result = diagnoseTachyonSfc(text, { target: "stream" });
   if (result.ok) {
-    const typeResult = checkTachyonTemplateTypes(text);
+    const typeResult = checkTachyonTemplateTypes(text, fileName ? { fileName: fileNameForDocumentUri(fileName) } : {});
     if (!typeResult.ok) return [];
     return typeResult.value.map((diagnostic) => lspDiagnosticForTypeDiagnostic(diagnostic));
   }
@@ -116,7 +126,7 @@ export const createDiagnosticsScheduler = (
           pending.delete(document.uri);
           sendDiagnostics({
             uri: document.uri,
-            diagnostics: diagnosticsForTachyonDocument(document.getText()),
+            diagnostics: diagnosticsForTachyonDocument(document.getText(), document.uri),
           });
         }, delayMs),
       );
@@ -161,7 +171,7 @@ export const startLanguageServer = (providedConnection?: Connection): void => {
   documents.onDidOpen((event) => {
     connection.sendDiagnostics({
       uri: event.document.uri,
-      diagnostics: diagnosticsForTachyonDocument(event.document.getText()),
+      diagnostics: diagnosticsForTachyonDocument(event.document.getText(), event.document.uri),
     });
   });
 

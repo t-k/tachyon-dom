@@ -1541,6 +1541,27 @@ export default { selected: false };
     expect(typeof result === "object" && result?.code).toContain(`sourceMappingURL=data:application/json;base64`);
   });
 
+  it("defines the production lifecycle flag through the normal Vite config hook", async () => {
+    const plugin = tachyonDom();
+    if (typeof plugin.config !== "function") throw new Error("Missing config hook.");
+
+    const production = await plugin.config.call(
+      {} as never,
+      { define: { EXISTING_DEFINE: "value" } },
+      { command: "build", mode: "production" },
+    );
+    const development = await plugin.config.call(
+      {} as never,
+      {},
+      { command: "serve", mode: "development" },
+    );
+
+    expect(production).toEqual({
+      define: { EXISTING_DEFINE: "value", __TACHYON_PRODUCTION__: "true" },
+    });
+    expect(development).toBeUndefined();
+  });
+
   it("transforms .td SFC script blocks through the Vite plugin", async () => {
     const plugin = tachyonDom({ reactive: true });
     if (typeof plugin.transform !== "function") {
