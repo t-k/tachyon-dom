@@ -57,7 +57,7 @@ See the [syntax specification](docs/syntax-spec.md) for supported expressions an
 
 `import { createSignal } from "tachyon-dom"` bundles to **944 bytes minified** in the current esbuild contract.
 
-Quick example client bundle: 7385 bytes minified, 2909 bytes Brotli, including the counter, text-only keyed-list binding code, and browser runtime. CI requires the minified baseline exactly, permits 1% Brotli variance across Node/zlib patch versions, enforces absolute 16000-byte minified and 5200-byte Brotli budgets, and rejects TypeScript, parse5, compiler, server, app, and language-server modules from both browser metafiles.
+Quick example client bundle: 9965 bytes minified, 3690 bytes Brotli, including the counter, text-only keyed-list binding code, and browser runtime. CI requires the minified baseline exactly, permits 1% Brotli variance across Node/zlib patch versions, enforces absolute 16000-byte minified and 5200-byte Brotli budgets, and rejects TypeScript, parse5, compiler, server, app, and language-server modules from both browser metafiles.
 
 ```sh
 pnpm build
