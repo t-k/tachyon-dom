@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { mountConditional } from "../src/runtime/conditional";
-import { createSignal } from "../src/runtime/signal";
+import { createRoot, createSignal, effect } from "../src/runtime/signal";
 
 describe("mountConditional", () => {
   it("clears and replaces refs when conditional content is unmounted", () => {
@@ -321,5 +321,29 @@ describe("mountConditional", () => {
 
     expect(deepestReads).toBe(0);
     expect(root.querySelector("section")).toBeNull();
+  });
+
+  it("removes delayed conditional content when its outer root is disposed", () => {
+    document.body.innerHTML = `<main><!----></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const visible = createSignal(false);
+    const scope = {};
+    const dispose = createRoot((disposeRoot) => {
+      effect(() => {
+        mountConditional(root, [0], visible(), scope, {
+          signature: "delayed-owner",
+          templateHtml: `<div>ready</div>`,
+          bindings: [],
+        });
+      });
+      return disposeRoot;
+    });
+
+    visible.set(true);
+    expect(root.querySelector("div")).not.toBeNull();
+    dispose();
+
+    expect(root.innerHTML).toBe(`<!---->`);
   });
 });

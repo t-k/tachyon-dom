@@ -136,6 +136,8 @@ type ListState = {
   ownerCleanupDispose: (() => void) | undefined;
 };
 
+type CleanupOutcome = { failed: false } | { failed: true; error: unknown };
+
 type MoveBeforeElement = Element & {
   moveBefore?: (node: Node, child: Node | null) => void;
 };
@@ -521,6 +523,10 @@ const createRecord = (
       cleanupRecord(record);
     } catch (cleanupError) {
       throw new AggregateError([error, cleanupError], "List row creation and cleanup failed.");
+    } finally {
+      for (const node of record.nodes) {
+        if (node instanceof Element) state.recordsByElement.delete(node);
+      }
     }
     throw error;
   }
@@ -626,7 +632,7 @@ export const mountKeyedList = (
   const cleanupRecordsNotIn = (
     records: Map<PropertyKey, RowRecord>,
     keep: Pick<ReadonlySet<PropertyKey>, "has">,
-  ): unknown => {
+  ): CleanupOutcome => {
     let firstError: unknown;
     let failed = false;
     for (const [key, record] of records) {
@@ -643,12 +649,12 @@ export const mountKeyedList = (
         }
       }
     }
-    return failed ? firstError : undefined;
+    return failed ? { failed: true, error: firstError } : { failed: false };
   };
   if (!items) {
-    const cleanupError = cleanupRecordsNotIn(state.records, new Set());
+    const cleanupResult = cleanupRecordsNotIn(state.records, new Set());
     state.records.clear();
-    if (cleanupError) throw cleanupError;
+    if (cleanupResult.failed) throw cleanupResult.error;
     return;
   }
   const entries: Array<{ item: unknown; index: number; key: PropertyKey }> = [];
@@ -664,32 +670,57 @@ export const mountKeyedList = (
   }
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];
+  const createdRecords: RowRecord[] = [];
   const serverElements = Array.from(container.children);
   const canAdoptServerRows =
     state.records.size === 0 &&
     state.elementIndices.length > 0 &&
     serverElements.length >= entries.length * state.elementIndices.length;
-  for (const [entryIndex, entry] of entries.entries()) {
-    const existing = state.records.get(entry.key);
-    const adoptable = canAdoptServerRows
-      ? serverElements.slice(entryIndex * state.elementIndices.length, (entryIndex + 1) * state.elementIndices.length)
-      : undefined;
-    const record = existing ?? createRecord(state, entry.key, entry.item, options, adoptable, entry.index);
-    if (!record) {
-      continue;
+  try {
+    for (const [entryIndex, entry] of entries.entries()) {
+      const existing = state.records.get(entry.key);
+      const adoptable = canAdoptServerRows
+        ? serverElements.slice(entryIndex * state.elementIndices.length, (entryIndex + 1) * state.elementIndices.length)
+        : undefined;
+      const record = existing ?? createRecord(state, entry.key, entry.item, options, adoptable, entry.index);
+      if (!record) {
+        continue;
+      }
+      if (existing) {
+        updateRecord(record, entry.item, entry.index, options);
+      } else {
+        createdRecords.push(record);
+      }
+      nextRecords.set(entry.key, record);
+      orderedRecords.push(record);
     }
-    if (existing) {
-      updateRecord(record, entry.item, entry.index, options);
+    const cleanupResult = cleanupRecordsNotIn(state.records, nextRecords);
+    if (canAdoptServerRows) {
+      container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
+    } else {
+      positionRecords(container, orderedRecords, state.records);
     }
-    nextRecords.set(entry.key, record);
-    orderedRecords.push(record);
+    state.records = nextRecords;
+    createdRecords.length = 0;
+    if (cleanupResult.failed) throw cleanupResult.error;
+  } catch (error) {
+    let firstCleanupError: unknown;
+    let cleanupFailed = false;
+    for (const record of createdRecords) {
+      try {
+        cleanupRecord(record);
+      } catch (cleanupError) {
+        if (!cleanupFailed) firstCleanupError = cleanupError;
+        cleanupFailed = true;
+      } finally {
+        for (const node of record.nodes) {
+          if (node instanceof Element) state.recordsByElement.delete(node);
+        }
+      }
+    }
+    if (cleanupFailed) {
+      throw new AggregateError([error, firstCleanupError], "List update and rollback failed.");
+    }
+    throw error;
   }
-  const cleanupError = cleanupRecordsNotIn(state.records, nextRecords);
-  if (canAdoptServerRows) {
-    container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
-  } else {
-    positionRecords(container, orderedRecords, state.records);
-  }
-  state.records = nextRecords;
-  if (cleanupError) throw cleanupError;
 };

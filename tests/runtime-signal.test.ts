@@ -20,6 +20,71 @@ afterEach(() => {
 });
 
 describe("signal runtime", () => {
+  it("does not skip older sibling cleanups when one cleanup disposes another sibling", () => {
+    const events: string[] = [];
+    let disposeSibling: (() => void) | undefined;
+    const dispose = createRoot((disposeRoot) => {
+      effect(() => {
+        onCleanup(() => events.push("C"));
+      });
+      disposeSibling = effect(() => {
+        onCleanup(() => events.push("B"));
+      });
+      effect(() => {
+        onCleanup(() => {
+          events.push("A");
+          disposeSibling?.();
+        });
+      });
+      return disposeRoot;
+    });
+
+    dispose();
+
+    expect(events).toEqual(["A", "B", "C"]);
+  });
+
+  it.each([undefined, null, 0, false, ""])("rethrows a falsy root cleanup error: %s", (error) => {
+    const dispose = createRoot((disposeRoot) => {
+      onCleanup(() => {
+        throw error;
+      });
+      return disposeRoot;
+    });
+
+    let didThrow = false;
+    let thrown: unknown;
+    try {
+      dispose();
+    } catch (caught) {
+      didThrow = true;
+      thrown = caught;
+    }
+
+    expect(didThrow).toBe(true);
+    expect(thrown).toBe(error);
+  });
+
+  it.each([undefined, null, 0, false, ""])("rethrows a falsy effect cleanup error: %s", (error) => {
+    const dispose = effect(() => {
+      onCleanup(() => {
+        throw error;
+      });
+    });
+
+    let didThrow = false;
+    let thrown: unknown;
+    try {
+      dispose();
+    } catch (caught) {
+      didThrow = true;
+      thrown = caught;
+    }
+
+    expect(didThrow).toBe(true);
+    expect(thrown).toBe(error);
+  });
+
   it("disposes root-owned effects and memos with cleanup callbacks in reverse order", () => {
     const count = createSignal(1);
     const seen: number[] = [];

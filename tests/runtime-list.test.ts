@@ -14,6 +14,78 @@ afterEach(() => {
 });
 
 describe("mountKeyedList", () => {
+  it("rolls back rows already created when a later row fails", () => {
+    const root = document.createElement("ul");
+    const source = createSignal(0);
+    let liveRows = 0;
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          expression: "item.id",
+          read: (scope: Record<string, unknown>) => {
+            source();
+            liveRows++;
+            onCleanup(() => {
+              liveRows--;
+            });
+            const id = (scope.item as { id: number }).id;
+            if (id === 2) throw new Error("row failed");
+            return id;
+          },
+        },
+      ],
+    };
+
+    expect(() => mountKeyedList(root, [], [{ id: 1 }, { id: 2 }], options)).toThrow("row failed");
+    expect(root.childElementCount).toBe(0);
+    expect(liveRows).toBe(0);
+
+    source.set(1);
+
+    expect(liveRows).toBe(0);
+  });
+
+  it("rethrows falsy row cleanup errors", () => {
+    const root = document.createElement("ul");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          expression: "item.id",
+          read: (scope: Record<string, unknown>) => {
+            onCleanup(() => {
+              throw undefined;
+            });
+            return (scope.item as { id: number }).id;
+          },
+        },
+      ],
+    };
+    mountKeyedList(root, [], [{ id: 1 }], options);
+
+    let didThrow = false;
+    let thrown: unknown;
+    try {
+      mountKeyedList(root, [], undefined, options);
+    } catch (error) {
+      didThrow = true;
+      thrown = error;
+    }
+
+    expect(didThrow).toBe(true);
+    expect(thrown).toBeUndefined();
+    expect(root.childElementCount).toBe(0);
+  });
+
   it("rejects non-primitive and non-finite keys", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

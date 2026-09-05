@@ -7,6 +7,7 @@ type EffectRunner = {
   children: Set<EffectRunner>;
   parent: EffectRunner | undefined;
   errorOwner: ReactiveErrorOwner | undefined;
+  owner: Owner | undefined;
   runOwner: Owner;
   registration: CleanupRegistration | undefined;
   run: () => void;
@@ -97,9 +98,12 @@ const disposeOwner = (owner: Owner): void => {
   }
   let firstError: unknown;
   let failed = false;
-  let registration = owner.tail;
-  while (registration) {
-    const previous = registration.previous;
+  const registrations: CleanupRegistration[] = [];
+  for (let registration = owner.tail; registration; registration = registration.previous) {
+    registrations.push(registration);
+  }
+  for (const registration of registrations) {
+    if (!registration.active) continue;
     detachCleanup(registration);
     try {
       registration.cleanup();
@@ -107,7 +111,6 @@ const disposeOwner = (owner: Owner): void => {
       if (!failed) firstError = error;
       failed = true;
     }
-    registration = previous;
   }
   owner.head = undefined;
   owner.tail = undefined;
@@ -230,14 +233,16 @@ const disposeRunner = (runner: EffectRunner): void => {
     runner.registration = undefined;
   }
   let firstError: unknown;
+  let failed = false;
   try {
     cleanup(runner, false);
   } catch (error) {
     firstError = error;
+    failed = true;
   }
   runner.parent?.children.delete(runner);
   runner.errorOwner?.runners.delete(runner);
-  if (firstError) throw firstError;
+  if (failed) throw firstError;
 };
 
 const track = (subscribers: SubscriberSet): void => {
@@ -448,6 +453,7 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
     children: new Set(),
     parent,
     errorOwner,
+    owner: currentOwner,
     runOwner: createOwner(),
     registration: undefined,
     run: () => {
@@ -455,19 +461,24 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
         return;
       }
       let cleanupError: unknown;
+      let cleanupFailed = false;
       try {
         cleanup(runner, true);
       } catch (error) {
         cleanupError = error;
+        cleanupFailed = true;
       }
       const previous = activeEffect;
+      const previousOwner = currentOwner;
       const previousEffectOwner = currentEffectOwner;
       const previousErrorOwner = currentErrorOwner;
       activeEffect = runner;
       const runOwner = runner.runOwner;
+      currentOwner = runner.owner;
       currentEffectOwner = runOwner;
       currentErrorOwner = runner.errorOwner;
       let callbackError: unknown;
+      let callbackFailed = false;
       try {
         const returned = fn();
         if (typeof returned === "function") {
@@ -477,19 +488,21 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
         }
       } catch (error) {
         callbackError = error;
+        callbackFailed = true;
       } finally {
         activeEffect = previous;
+        currentOwner = previousOwner;
         currentEffectOwner = previousEffectOwner;
         currentErrorOwner = previousErrorOwner;
         if (!previous) {
           scheduleFlush();
         }
       }
-      if (cleanupError && callbackError) {
+      if (cleanupFailed && callbackFailed) {
         throw new AggregateError([cleanupError, callbackError], "Reactive effect cleanup and callback failed.");
       }
-      if (cleanupError) throw cleanupError;
-      if (callbackError) throw callbackError;
+      if (cleanupFailed) throw cleanupError;
+      if (callbackFailed) throw callbackError;
     },
   };
   parent?.children.add(runner);
