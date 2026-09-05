@@ -17,8 +17,14 @@ describe("representative template benchmark", () => {
         operationDurationsMs: expect.any(Object),
         operationDomHashes: expect.any(Object),
       });
-      expect(result.measurements.paths[pathName].samples.every((sample) => sample.allocationBytes >= 0)).toBe(true);
+      expect(result.measurements.paths[pathName].samples.every((sample) => Number.isFinite(sample.heapDeltaBytes))).toBe(
+        true,
+      );
+      expect(result.measurements.paths[pathName].samples.every((sample) => sample.allocatedBytes === null)).toBe(true);
     }
     expect(Object.values(result.measurements.domOracle)).toHaveLength(6);
+    expect(result.workload.buildMode).toBe("generated-client-source");
+    expect(result.workload.memoryMeasurement).toBe("heap-delta-only");
+    expect(result.workload.generatedTemplateSources["mixed-template"]).toContain("bind:value");
   });
 });

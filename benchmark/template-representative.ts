@@ -5,12 +5,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { JSDOM } from "jsdom";
 import { createKeyedRows, type KeyedRows } from "../src/runtime/keyed-rows.js";
-import { cleanupOwnedSubtree } from "../src/runtime/subtree.js";
-import { mountKeyedList } from "../src/runtime/list.js";
-import { cleanupTextKeyedList, mountTextKeyedList } from "../src/runtime/list-text.js";
 import { collectBenchmarkProvenance, collectDependencyVersions, type BenchmarkEnvelope } from "./provenance.js";
+import {
+  createGeneratedTemplateDriver,
+  loadRepresentativeGeneratedModules,
+  REPRESENTATIVE_TEMPLATE_SOURCES,
+} from "./generated-template-driver.js";
 
-export const TEMPLATE_REPRESENTATIVE_CONTRACT_VERSION = 1;
+export const TEMPLATE_REPRESENTATIVE_CONTRACT_VERSION = 2;
 export const TEMPLATE_REPRESENTATIVE_PATHS = ["keyed-rows", "text-template", "mixed-template"] as const;
 export const TEMPLATE_REPRESENTATIVE_OPERATIONS = [
   "create",
@@ -28,16 +30,19 @@ export type RepresentativeItem = {
   id: number;
   label: string;
   selected: boolean;
+  onClick: () => void;
 };
 
 export type RepresentativeSample = {
   sampleIndex: number;
   durationMs: number;
-  allocationBytes: number;
+  heapDeltaBytes: number;
+  allocatedBytes: null;
   gcMs: number | null;
   retainedHeapBytes: number | null;
   operationDurationsMs: Record<OperationName, number>;
   operationDomHashes: Record<OperationName, string>;
+  operationDomHtml: Record<OperationName, string>;
   finalDomHash: string;
   finalRowCount: number;
 };
@@ -45,7 +50,7 @@ export type RepresentativeSample = {
 export type RepresentativePathMeasurement = {
   samples: RepresentativeSample[];
   medianDurationMs: number;
-  medianAllocationBytes: number;
+  medianHeapDeltaBytes: number;
   medianGcMs: number | null;
   medianRetainedHeapBytes: number | null;
 };
@@ -57,7 +62,9 @@ export type RepresentativeWorkload = {
   appendCount: number;
   warmup: number;
   iterations: number;
-  buildMode: "source";
+  buildMode: "generated-client-source";
+  generatedTemplateSources: Readonly<Record<"text-template" | "mixed-template", string>>;
+  memoryMeasurement: "heap-delta-only";
 };
 
 export type RepresentativeMeasurements = {
@@ -76,13 +83,14 @@ type ListDriver = {
   dispose: () => void;
 };
 
-const rowHtml = `<tr><td> </td><td> </td><td> </td></tr>`;
+const rowHtml = `<tr class="row"><td> </td><td><input value=""><span> </span></td><td> </td></tr>`;
 
 const itemsFor = (count: number, start = 0): RepresentativeItem[] =>
   Array.from({ length: count }, (_, index) => ({
     id: start + index,
     label: `Row ${start + index}`,
     selected: false,
+    onClick: () => undefined,
   }));
 
 const hash = (value: string): string => createHash("sha256").update(value).digest("hex");
@@ -101,9 +109,11 @@ const installDom = (dom: JSDOM): (() => void) => {
     "Element",
     "HTMLElement",
     "HTMLTemplateElement",
+    "HTMLTableElement",
     "HTMLTableRowElement",
     "HTMLTableSectionElement",
     "HTMLInputElement",
+    "HTMLSpanElement",
     "HTMLSelectElement",
     "HTMLTextAreaElement",
     "Comment",
@@ -129,135 +139,53 @@ const installDom = (dom: JSDOM): (() => void) => {
   };
 };
 
-const createDriver = (pathName: PathName, tbody: HTMLTableSectionElement): ListDriver => {
+const createDriver = (
+  pathName: PathName,
+  tbody: HTMLTableSectionElement,
+  generatedModules: Awaited<ReturnType<typeof loadRepresentativeGeneratedModules>>,
+): ListDriver => {
+  if (pathName !== "keyed-rows") {
+    return createGeneratedTemplateDriver(pathName, tbody, generatedModules) as ListDriver;
+  }
   const cellText = (row: HTMLTableRowElement, index: number): Text => {
     const text = row.cells[index]?.firstChild;
     if (!(text instanceof Text)) throw new Error(`Missing benchmark cell ${index}.`);
     return text;
   };
-  let lowLevel: KeyedRows<RepresentativeItem> | undefined;
-  if (pathName === "keyed-rows") {
-    lowLevel = createKeyedRows({
-      tbody,
-      row: rowHtml,
-      bind: (row, item) => {
-        cellText(row, 0).data = String(item.id);
-        cellText(row, 1).data = item.label;
-        cellText(row, 2).data = item.selected ? "selected" : "";
-      },
-    });
-  }
-  const textOptions = {
-    key: "item.id",
-    itemName: "item",
-    templateHtml: rowHtml,
-    bindings: [
-      {
-        kind: "text" as const,
-        path: [0, 0],
-        expression: "item.id",
-        read: (scope: Record<string, unknown>) => (scope.item as RepresentativeItem).id,
-      },
-      {
-        kind: "text" as const,
-        path: [1, 0],
-        expression: "item.label",
-        read: (scope: Record<string, unknown>) => (scope.item as RepresentativeItem).label,
-      },
-      {
-        kind: "text" as const,
-        path: [2, 0],
-        expression: "item.selected",
-        read: (scope: Record<string, unknown>) => ((scope.item as RepresentativeItem).selected ? "selected" : ""),
-      },
-    ],
-  };
-  const mixedOptions = {
-    ...textOptions,
-    bindings: [
-      ...textOptions.bindings,
-      {
-        kind: "class" as const,
-        path: [],
-        className: "selected",
-        expression: "item.selected",
-        read: (scope: Record<string, unknown>) => (scope.item as RepresentativeItem).selected,
-      },
-      { kind: "event" as const, path: [], eventName: "click", handler: "item.onClick", read: () => undefined },
-    ],
-  };
-  const replaceList = (items: readonly RepresentativeItem[]): void => {
-    if (lowLevel) lowLevel.replace(items);
-    else if (pathName === "text-template") mountTextKeyedList(tbody, [], items, textOptions);
-    else mountKeyedList(tbody, [], items, mixedOptions);
-  };
-  const appendList = (items: readonly RepresentativeItem[]): void => {
-    if (lowLevel) lowLevel.append(items);
-    else if (pathName === "text-template")
-      mountTextKeyedList(
-        tbody,
-        [],
-        [...Array.from(tbody.children).map((_, id) => ({ id, label: `Row ${id}`, selected: false })), ...items],
-        textOptions,
-      );
-    else
-      mountKeyedList(
-        tbody,
-        [],
-        [...Array.from(tbody.children).map((_, id) => ({ id, label: `Row ${id}`, selected: false })), ...items],
-        mixedOptions,
-      );
-  };
+  const driver = createKeyedRows<RepresentativeItem>({
+    tbody,
+    row: rowHtml,
+    bind: (row, item) => {
+      cellText(row, 0).data = String(item.id);
+      const input = row.cells[1]?.querySelector("input");
+      const label = row.cells[1]?.querySelector("span");
+      if (!(input instanceof HTMLInputElement) || !(label instanceof HTMLSpanElement)) {
+        throw new Error("Missing benchmark label controls.");
+      }
+      input.value = item.label;
+      label.textContent = item.label;
+      cellText(row, 2).data = item.selected ? "selected" : "";
+    },
+  });
   return {
-    replace: replaceList,
-    append: appendList,
-    partialUpdate: (items) => {
-      if (lowLevel) {
-        lowLevel.update(5, (row, index) => {
-          cellText(row, 1).data = `${items[index]?.label ?? ""} !`;
-        });
-      } else {
-        const updated = items.map((item, index) => (index % 5 === 0 ? { ...item, label: `${item.label} !` } : item));
-        if (pathName === "text-template") mountTextKeyedList(tbody, [], updated, textOptions);
-        else mountKeyedList(tbody, [], updated, mixedOptions);
-      }
-    },
+    replace: (items) => driver.replace(items),
+    append: (items) => driver.append(items),
+    partialUpdate: (items) =>
+      driver.update(5, (row, index) => {
+        const item = items[index];
+        if (!item) return;
+        const input = row.cells[1]?.querySelector("input");
+        const label = row.cells[1]?.querySelector("span");
+        if (!(input instanceof HTMLInputElement) || !(label instanceof HTMLSpanElement)) return;
+        input.value = `${item.label} !`;
+        label.textContent = `${item.label} !`;
+      }),
     swap: () => {
-      const rows = Array.from(tbody.children);
-      const last = rows.length - 2;
-      if (last < 2) return;
-      if (lowLevel) {
-        lowLevel.swap(1, last);
-        return;
-      }
-      const current = rows.map((row) => ({
-        id: Number(row.children[0]?.textContent ?? 0),
-        label: row.children[1]?.textContent ?? "",
-        selected: false,
-      }));
-      [current[1], current[last]] = [current[last] as RepresentativeItem, current[1] as RepresentativeItem];
-      if (pathName === "text-template") mountTextKeyedList(tbody, [], current, textOptions);
-      else mountKeyedList(tbody, [], current, mixedOptions);
+      const last = driver.length() - 2;
+      if (last >= 2) driver.swap(1, last);
     },
-    remove: () => {
-      if (lowLevel) {
-        lowLevel.removeAt(2);
-        return;
-      }
-      const current = Array.from(tbody.children).map((row) => ({
-        id: Number(row.children[0]?.textContent ?? 0),
-        label: row.children[1]?.textContent ?? "",
-        selected: false,
-      }));
-      current.splice(2, 1);
-      if (pathName === "text-template") mountTextKeyedList(tbody, [], current, textOptions);
-      else mountKeyedList(tbody, [], current, mixedOptions);
-    },
-    dispose: () => {
-      if (lowLevel) lowLevel.clear();
-      else if (pathName === "text-template") cleanupTextKeyedList(tbody, []);
-      else cleanupOwnedSubtree(tbody);
-    },
+    remove: () => driver.removeAt(2),
+    dispose: () => driver.clear(),
   };
 };
 
@@ -267,21 +195,24 @@ const runPathSample = (
   pathName: PathName,
   workload: RepresentativeWorkload,
   sampleIndex: number,
+  generatedModules: Awaited<ReturnType<typeof loadRepresentativeGeneratedModules>>,
 ): RepresentativeSample => {
   const dom = new JSDOM(`<table><tbody></tbody></table>`);
   const restore = installDom(dom);
   try {
     const tbody = dom.window.document.querySelector("tbody") as HTMLTableSectionElement;
-    const driver = createDriver(pathName, tbody);
+    const driver = createDriver(pathName, tbody, generatedModules);
     const initial = itemsFor(workload.itemCount);
     const appended = itemsFor(workload.appendCount, workload.itemCount);
     const operationDurationsMs = {} as Record<OperationName, number>;
     const operationDomHashes = {} as Record<OperationName, string>;
+    const operationDomHtml = {} as Record<OperationName, string>;
     const operation = (name: OperationName, run: () => void): void => {
       const started = performance.now();
       run();
       operationDurationsMs[name] = performance.now() - started;
-      operationDomHashes[name] = hash(domFor(tbody));
+      operationDomHtml[name] = domFor(tbody);
+      operationDomHashes[name] = hash(operationDomHtml[name]);
     };
     const gc = (globalThis as unknown as { gc?: () => void }).gc;
     const beforeGc = gc ? performance.now() : 0;
@@ -299,7 +230,7 @@ const runPathSample = (
         driver.dispose();
       }
     });
-    const allocationBytes = Math.max(0, process.memoryUsage().heapUsed - startedHeap);
+    const heapDeltaBytes = process.memoryUsage().heapUsed - startedHeap;
     driver.dispose();
     const gcStarted = gc ? performance.now() : 0;
     gc?.();
@@ -308,11 +239,13 @@ const runPathSample = (
     return {
       sampleIndex,
       durationMs: Object.values(operationDurationsMs).reduce((total, value) => total + value, 0),
-      allocationBytes,
+      heapDeltaBytes,
+      allocatedBytes: null,
       gcMs,
       retainedHeapBytes,
       operationDurationsMs,
       operationDomHashes,
+      operationDomHtml,
       finalDomHash: hash(domFor(tbody)),
       finalRowCount: tbody.children.length,
     };
@@ -322,13 +255,19 @@ const runPathSample = (
   }
 };
 
-const runPath = (pathName: PathName, workload: RepresentativeWorkload): RepresentativePathMeasurement => {
-  for (let index = 0; index < workload.warmup; index++) runPathSample(pathName, workload, -index - 1);
-  const samples = Array.from({ length: workload.iterations }, (_, index) => runPathSample(pathName, workload, index));
+const runPath = (
+  pathName: PathName,
+  workload: RepresentativeWorkload,
+  generatedModules: Awaited<ReturnType<typeof loadRepresentativeGeneratedModules>>,
+): RepresentativePathMeasurement => {
+  for (let index = 0; index < workload.warmup; index++) runPathSample(pathName, workload, -index - 1, generatedModules);
+  const samples = Array.from({ length: workload.iterations }, (_, index) =>
+    runPathSample(pathName, workload, index, generatedModules),
+  );
   return {
     samples,
     medianDurationMs: median(samples.map((sample) => sample.durationMs)) ?? 0,
-    medianAllocationBytes: median(samples.map((sample) => sample.allocationBytes)) ?? 0,
+    medianHeapDeltaBytes: median(samples.map((sample) => sample.heapDeltaBytes)) ?? 0,
     medianGcMs: median(samples.flatMap((sample) => (sample.gcMs === null ? [] : [sample.gcMs]))),
     medianRetainedHeapBytes: median(
       samples.flatMap((sample) => (sample.retainedHeapBytes === null ? [] : [sample.retainedHeapBytes])),
@@ -353,12 +292,15 @@ export const runRepresentativeBenchmark = async (
     appendCount: options.appendCount ?? 20,
     warmup: options.warmup ?? 2,
     iterations: options.iterations ?? 5,
-    buildMode: "source",
+    buildMode: "generated-client-source",
+    generatedTemplateSources: REPRESENTATIVE_TEMPLATE_SOURCES,
+    memoryMeasurement: "heap-delta-only",
   };
   if (!Number.isInteger(workload.iterations) || workload.iterations <= 0)
     throw new RangeError("iterations must be positive.");
+  const generatedModules = await loadRepresentativeGeneratedModules();
   const paths = Object.fromEntries(
-    TEMPLATE_REPRESENTATIVE_PATHS.map((pathName) => [pathName, runPath(pathName, workload)]),
+    TEMPLATE_REPRESENTATIVE_PATHS.map((pathName) => [pathName, runPath(pathName, workload, generatedModules)]),
   ) as Record<PathName, RepresentativePathMeasurement>;
   const first = paths[TEMPLATE_REPRESENTATIVE_PATHS[0]] as RepresentativePathMeasurement;
   const domOracle = Object.fromEntries(
@@ -371,7 +313,9 @@ export const runRepresentativeBenchmark = async (
     for (const sample of paths[pathName].samples) {
       for (const operation of TEMPLATE_REPRESENTATIVE_OPERATIONS) {
         if (sample.operationDomHashes[operation] !== domOracle[operation]) {
-          throw new Error(`DOM oracle mismatch for ${pathName} at ${operation}.`);
+          throw new Error(
+            `DOM oracle mismatch for ${pathName} at ${operation}: ${domOracle[operation]} !== ${sample.operationDomHashes[operation]} ${JSON.stringify(sample.operationDomHtml[operation])}`,
+          );
         }
       }
       if (sample.finalRowCount !== 0) throw new Error(`Final DOM was not disposed for ${pathName}.`);
