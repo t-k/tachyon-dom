@@ -26,6 +26,7 @@ const forbiddenPatterns = [
   /(?:^|[/\\])typescript(?:[/\\]|$)/,
   /(?:^|[/\\])parse5(?:[/\\]|$)/,
   /vscode-languageserver/,
+  /[/\\]runtime[/\\]diagnostics\.js$/,
   /[/\\]compiler[/\\]/,
   /[/\\]server[/\\]/,
   /[/\\]app\.js$/,

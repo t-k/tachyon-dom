@@ -74,4 +74,35 @@ describe("reusable template component interface", () => {
 
     expect(root.textContent).toBe("child");
   });
+
+  it("disposes nested component instances through the parent owner exactly once", () => {
+    const childCleanups: string[] = [];
+    const child = createTemplateComponent({
+      client: {
+        templateHtml: "<span></span>",
+        bind: (_root, scope) => {
+          (_root as HTMLSpanElement).textContent = String(scope.label);
+          return () => childCleanups.push(String(scope.label));
+        },
+      },
+    });
+    const parent = createTemplateComponent({
+      client: {
+        templateHtml: "<section><div id=\"child\"></div></section>",
+        bind: (root) => {
+          const childRoot = root.querySelector("#child");
+          if (!childRoot) throw new Error("Missing child root.");
+          const instance = child.mount(childRoot, { label: "nested" });
+          return () => instance.dispose();
+        },
+      },
+    });
+    const root = document.createElement("main");
+
+    const instance = parent.mount(root, {});
+    instance.dispose();
+    instance.dispose();
+
+    expect(childCleanups).toEqual(["nested"]);
+  });
 });
