@@ -49,6 +49,7 @@ const forbiddenPatterns = [
   /vscode-languageserver/,
   /[/\\]compiler[/\\]/,
   /[/\\]server[/\\]/,
+  /[/\\]runtime[/\\]diagnostics\.js$/,
   /[/\\]app\.js$/,
   /[/\\]html-whitespace\.js$/,
 ];

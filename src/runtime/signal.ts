@@ -80,7 +80,7 @@ const runtimeDiagnosticsSnapshot = (): RuntimeDiagnosticsSnapshot => ({
 
 const reportRuntimeDiagnostics = (type: RuntimeDiagnosticsEvent["type"]): void => {
   const event = { type, snapshot: runtimeDiagnosticsSnapshot() };
-  for (const observer of [...runtimeDiagnosticsObservers]) {
+  for (const observer of Array.from(runtimeDiagnosticsObservers)) {
     try {
       observer(event);
     } catch {
