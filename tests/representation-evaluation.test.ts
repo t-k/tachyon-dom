@@ -14,6 +14,17 @@ describe("runtime representation evaluations", () => {
     expect(
       result.measurements.signal.distributions["4"]?.rawSamples.every((sample) => sample.allocationBytes >= 0),
     ).toBe(true);
+    expect(
+      result.measurements.metadata.rawSamples.every(
+        (sample) =>
+          sample.currentMinifiedBytes > 0 &&
+          sample.compactMinifiedBytes > 0 &&
+          sample.currentBrotliBytes > 0 &&
+          sample.compactBrotliBytes > 0 &&
+          sample.currentParseDurationMs >= 0 &&
+          sample.compactParseDurationMs >= 0,
+      ),
+    ).toBe(true);
     expect(result.measurements.rowCodegen.decision.reason).toBeTruthy();
     expect(result.measurements.signal.decision.reason).toBeTruthy();
     expect(result.measurements.metadata.decision.reason).toBeTruthy();

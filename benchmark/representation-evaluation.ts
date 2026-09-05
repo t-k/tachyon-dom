@@ -35,7 +35,18 @@ export type RepresentationEvaluation = BenchmarkEnvelope<
     };
     metadata: {
       rawSamples: Array<
-        Metric & { currentBytes: number; compactBytes: number; hmrSafe: boolean; scopesIndependent: boolean }
+        Metric & {
+          currentBytes: number;
+          compactBytes: number;
+          currentMinifiedBytes: number;
+          compactMinifiedBytes: number;
+          currentBrotliBytes: number;
+          compactBrotliBytes: number;
+          currentParseDurationMs: number;
+          compactParseDurationMs: number;
+          hmrSafe: boolean;
+          scopesIndependent: boolean;
+        }
       >;
       decision: EvaluationDecision;
     };
@@ -179,11 +190,19 @@ const metadataEvaluation = (iterations: number, warmup: number) => {
       generateClientModule(second);
       return undefined;
     });
+    const currentParse = measure(() => JSON.parse(currentMetadata));
+    const compactParse = measure(() => JSON.parse(compactMetadata));
     return {
       durationMs: sample.durationMs,
       allocationBytes: sample.allocationBytes,
       currentBytes: Buffer.byteLength(currentMetadata),
       compactBytes: Buffer.byteLength(compactMetadata),
+      currentMinifiedBytes: Buffer.byteLength(currentMetadata),
+      compactMinifiedBytes: Buffer.byteLength(compactMetadata),
+      currentBrotliBytes: brotliCompressSync(currentMetadata).byteLength,
+      compactBrotliBytes: brotliCompressSync(compactMetadata).byteLength,
+      currentParseDurationMs: currentParse.durationMs,
+      compactParseDurationMs: compactParse.durationMs,
       hmrSafe: firstCode !== secondCode,
       scopesIndependent: firstCode.includes("createRoot") && secondCode.includes("createRoot"),
     };
