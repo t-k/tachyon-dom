@@ -198,6 +198,7 @@ type LayoutState = {
 
 type PendingRenderResult = {
   dispose: () => void;
+  disposeValue: () => void;
   release: () => void;
   wasDisposed: () => boolean;
 };
@@ -372,8 +373,8 @@ const runDisposers = (disposers: readonly (() => void)[]): void => {
   if (failed) throw firstError;
 };
 
-const renderInto = (root: Element, value: ClientRenderResult): (() => void) => {
-  const mountedDispose = isClientMountedView(value) ? once(value.dispose) : undefined;
+const renderInto = (root: Element, value: ClientRenderResult, disposeValue?: () => void): (() => void) => {
+  const mountedDispose = isClientMountedView(value) ? once(disposeValue ?? value.dispose) : undefined;
   const renderedValue = viewValue(value);
   root.replaceChildren();
   if (isClientHtml(renderedValue)) {
@@ -508,14 +509,16 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     !disposed && !signal.aborted && navigationGeneration === generation;
   const trackPendingRenderResult = (value: ClientRenderResult): PendingRenderResult => {
     let status: "active" | "released" | "disposed" = "active";
+    const disposeValue = once(() => disposeRenderResult(value));
     let pending: PendingRenderResult;
     pending = {
       dispose: () => {
         if (status !== "active") return;
         status = "disposed";
         pendingRenderResults.delete(pending);
-        disposeRenderResult(value);
+        disposeValue();
       },
+      disposeValue,
       release: () => {
         if (status !== "active") return;
         status = "released";
@@ -716,6 +719,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         cleanupAttempted = true;
         const disposers = [...preparedLayoutDisposers];
         if (leafPrepared && leafDispose && !pendingRendered.wasDisposed()) {
+          pendingRendered.release();
           disposers.push(leafDispose);
         } else {
           disposers.push(pendingRendered.dispose);
@@ -782,7 +786,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         }
         const leafHost = document.createElement("div");
         try {
-          leafDispose = renderInto(leafHost, rendered);
+          leafDispose = renderInto(leafHost, rendered, pendingRendered.disposeValue);
         } catch (error) {
           pendingRendered.dispose();
           throw error;
@@ -845,7 +849,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         const leafHost = document.createElement("div");
         let leafDispose: () => void;
         try {
-          leafDispose = renderInto(leafHost, rendered);
+          leafDispose = renderInto(leafHost, rendered, pendingRendered.disposeValue);
         } catch (error) {
           pendingRendered.dispose();
           throw error;
@@ -854,7 +858,10 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         target.replaceChildren(...committedNodes);
         if (!isCurrentNavigation(signal, generation)) {
           removeInsertedNodes(target, committedNodes);
-          if (!pendingRendered.wasDisposed()) leafDispose();
+          if (!pendingRendered.wasDisposed()) {
+            pendingRendered.release();
+            leafDispose();
+          }
           return;
         }
         const oldCommitted = committedView;

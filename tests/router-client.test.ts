@@ -158,7 +158,7 @@ describe("client router", () => {
     expect(root.childElementCount).toBe(0);
   });
 
-  it("disposes a newly navigated view once when connectedCallback re-enters navigation", async () => {
+  it("disposes a view once when connectedCallback re-enters navigation", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");
     if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
@@ -170,20 +170,22 @@ describe("client router", () => {
       tagName,
       class extends HTMLElement {
         connectedCallback(): void {
-          void router?.navigate("/next");
+          void router?.navigate("/other");
         }
       },
     );
     router = createClientRouter({
       root,
       routes: [
-        { path: "/", render: () => rawHtml(`<${tagName}></${tagName}>`) },
-        { path: "/next", render: () => ({ value: rawHtml("<p>next</p>"), dispose: () => nextDisposeCount++ }) },
+        { path: "/", render: () => rawHtml("<p>home</p>") },
+        { path: "/next", render: () => ({ value: rawHtml(`<${tagName}></${tagName}>`), dispose: () => nextDisposeCount++ }) },
+        { path: "/other", render: () => rawHtml("<p>other</p>") },
       ],
       scrollTo: () => undefined,
     });
 
     await router.start();
+    await router.navigate("/next");
     await router.settled();
 
     expect(nextDisposeCount).toBe(1);
