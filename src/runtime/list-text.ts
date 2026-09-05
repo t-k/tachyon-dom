@@ -20,9 +20,15 @@ type TextKeyedListOptions = {
   itemName: string;
   indexName?: string;
   updatePolicy?: "always" | "reference";
+  region?: TextKeyedListRegion;
   scope?: Record<string, unknown>;
   templateHtml: string;
   bindings: TextBinding[];
+};
+
+type TextKeyedListRegion = {
+  before: number;
+  after: number;
 };
 
 type RowRecord = {
@@ -98,6 +104,7 @@ const optionsSignature = (options: TextKeyedListOptions): string =>
     itemName: options.itemName,
     indexName: options.indexName,
     updatePolicy: options.updatePolicy,
+    region: options.region,
     templateHtml: options.templateHtml,
     bindings: options.bindings,
   });
@@ -308,13 +315,15 @@ const positionRecords = (
   container: Element,
   orderedRecords: readonly RowRecord[],
   previousRecords: ReadonlyMap<PropertyKey, RowRecord>,
+  region?: TextKeyedListRegion,
 ): void => {
   const previousOrder = new Map<PropertyKey, number>();
   Array.from(previousRecords.keys()).forEach((key, index) => previousOrder.set(key, index));
   const stablePositions = longestIncreasingSubsequencePositions(
     orderedRecords.map((record) => previousOrder.get(record.key) ?? -1),
   );
-  let anchor: Node | null = null;
+  const staticAfter = region && region.after > 0 ? (Array.from(container.children).at(-region.after) ?? null) : null;
+  let anchor: Node | null = staticAfter;
   for (let index = orderedRecords.length - 1; index >= 0; index--) {
     const record = orderedRecords[index] as RowRecord;
     if (stablePositions.has(index)) {
@@ -327,6 +336,29 @@ const positionRecords = (
       anchor = node;
     }
   }
+};
+
+const dynamicElementsFor = (container: Element, region: TextKeyedListRegion | undefined): Element[] => {
+  const elements = Array.from(container.children);
+  if (!region) return elements;
+  const start = Math.min(elements.length, Math.max(0, region.before));
+  const end = Math.max(start, elements.length - Math.max(0, region.after));
+  return elements.slice(start, end);
+};
+
+const replaceDynamicRegion = (container: Element, region: TextKeyedListRegion, nodes: readonly Node[]): void => {
+  const childNodes = Array.from(container.childNodes);
+  const elements = Array.from(container.children);
+  const firstAfter = region.after > 0 ? elements.at(-region.after) : undefined;
+  const firstDynamic = dynamicElementsFor(container, region)[0];
+  const startNode = firstDynamic ?? firstAfter;
+  const start = startNode ? childNodes.indexOf(startNode) : childNodes.length;
+  const end = firstAfter ? childNodes.indexOf(firstAfter) : childNodes.length;
+  for (const node of childNodes.slice(Math.max(0, start), Math.max(start, end))) node.remove();
+  const fragment = document.createDocumentFragment();
+  fragment.append(...nodes);
+  if (firstAfter?.parentNode === container) container.insertBefore(fragment, firstAfter);
+  else container.append(fragment);
 };
 
 const canAppendWithoutMoving = (
@@ -404,15 +436,21 @@ export const mountTextKeyedList = (
   const createdRecords: RowRecord[] = [];
   const previousRecords = state.records;
   const serverElements = Array.from(container.children);
+  const serverDynamicElements = dynamicElementsFor(container, options.region);
   const canAdoptServerRows =
     state.records.size === 0 &&
     state.elementIndices.length > 0 &&
-    serverElements.length >= entries.length * state.elementIndices.length;
+    (options.region
+      ? serverDynamicElements.length > 0
+      : serverElements.length >= entries.length * state.elementIndices.length);
   try {
     for (const [entryIndex, entry] of entries.entries()) {
       const existing = state.records.get(entry.key);
       const adoptable = canAdoptServerRows
-        ? serverElements.slice(entryIndex * state.elementIndices.length, (entryIndex + 1) * state.elementIndices.length)
+        ? serverDynamicElements.slice(
+            entryIndex * state.elementIndices.length,
+            (entryIndex + 1) * state.elementIndices.length,
+          )
         : undefined;
       const record = existing ?? createRecord(state, entry.key, entry.item, options, adoptable, entry.index);
       if (!record) continue;
@@ -421,13 +459,26 @@ export const mountTextKeyedList = (
       nextRecords.set(entry.key, record);
       orderedRecords.push(record);
     }
-    if (canAdoptServerRows) container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
+    if (canAdoptServerRows && options.region) {
+      replaceDynamicRegion(
+        container,
+        options.region,
+        orderedRecords.flatMap((record) => record.nodes),
+      );
+    } else if (canAdoptServerRows) container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
     else if (canAppendWithoutMoving(nextRecords, orderedRecords, previousRecords)) {
       const previousKeys = new Set(previousRecords.keys());
       for (const record of orderedRecords) {
-        if (!previousKeys.has(record.key)) container.append(...record.nodes);
+        if (!previousKeys.has(record.key)) {
+          if (!options.region || options.region.after <= 0) {
+            container.append(...record.nodes);
+          } else {
+            const staticAfter = Array.from(container.children).at(-options.region.after) ?? null;
+            for (const node of record.nodes) container.insertBefore(node, staticAfter);
+          }
+        }
       }
-    } else positionRecords(container, orderedRecords, previousRecords);
+    } else positionRecords(container, orderedRecords, previousRecords, options.region);
     state.records = nextRecords;
     createdRecords.length = 0;
     const cleanupResult = cleanupRecordsNotIn(previousRecords, nextRecords);

@@ -1299,6 +1299,17 @@ describe("HTML-first compiler", () => {
     expect(generateClientModule(result.value)).toContain(`updatePolicy: "reference"`);
   });
 
+  it("emits a region contract when a keyed list has static siblings", () => {
+    const result = compileTemplate(
+      `<ul><li class="header">Header</li><for each={rows} key={row.id}><li>{row.label}</li></for><li class="footer">Footer</li></ul>`,
+    );
+    if (!result.ok) throw new Error(result.error.message);
+
+    const list = result.value.client.bindings.find((binding) => binding.kind === "list");
+    expect(list).toMatchObject({ kind: "list", region: { before: 1, after: 1 } });
+    expect(generateClientModule(result.value)).toContain(`region: {"before":1,"after":1}`);
+  });
+
   it("renders keyed lists on the server", () => {
     const result = compileTemplate(
       `<tbody><for each={rows} key={row.id}><tr class:danger={row.selected}><td>{row.id}</td><td>{row.label}</td></tr></for></tbody>`,

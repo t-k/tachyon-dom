@@ -95,11 +95,17 @@ export type ListBinding = {
   indexName?: string;
   key: string;
   updatePolicy?: "always" | "reference";
+  region?: ListRegion;
   templateHtml: string;
   bindings: ClientBinding[];
   stores?: StoreDefinition[];
   hydrationBoundaries?: HydrationBoundary[];
   components?: ComponentBoundary[];
+};
+
+export type ListRegion = {
+  before: number;
+  after: number;
 };
 
 export type ConditionalBinding = {

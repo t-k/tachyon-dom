@@ -184,6 +184,32 @@ describe("mountTextKeyedList", () => {
     expect(root.innerHTML).toBe(`<li><span>Client one</span></li>`);
   });
 
+  it("keeps a static sibling outside a hydrated text-row region", () => {
+    document.body.innerHTML = `<ul id="items"><li class="row">Server one</li><li class="row">Server two</li><li class="footer">Footer</li></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      region: { before: 0, after: 1 },
+      templateHtml: `<li class="row"> </li>`,
+      bindings: [{ kind: "text" as const, path: [0], expression: "item.label" }],
+    };
+
+    mountTextKeyedList(
+      root,
+      [],
+      [
+        { id: 1, label: "One" },
+        { id: 2, label: "Two" },
+      ],
+      options,
+    );
+    expect(root.innerHTML).toBe(`<li class="row">One</li><li class="row">Two</li><li class="footer">Footer</li>`);
+    mountTextKeyedList(root, [], [], options);
+    expect(root.innerHTML).toBe(`<li class="footer">Footer</li>`);
+  });
+
   it("skips duplicate keys when console.warn is unavailable", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

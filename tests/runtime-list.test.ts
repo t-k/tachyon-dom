@@ -21,8 +21,18 @@ describe("mountKeyedList", () => {
       itemName: "item",
       templateHtml: `<li><input><span> </span><strong> </strong></li>`,
       bindings: [
-        { kind: "text" as const, path: [1, 0], expression: "label", read: (scope: Record<string, unknown>) => scope.label },
-        { kind: "text" as const, path: [2, 0], expression: "count", read: (scope: Record<string, unknown>) => scope.count },
+        {
+          kind: "text" as const,
+          path: [1, 0],
+          expression: "label",
+          read: (scope: Record<string, unknown>) => scope.label,
+        },
+        {
+          kind: "text" as const,
+          path: [2, 0],
+          expression: "count",
+          read: (scope: Record<string, unknown>) => scope.count,
+        },
         {
           kind: "model" as const,
           path: [0],
@@ -1033,6 +1043,64 @@ describe("mountKeyedList", () => {
     mountKeyedList(root, [], [{ id: 1, label: "One" }], options);
 
     expect(Array.from(root.children, (child) => child.textContent)).toEqual(["One"]);
+  });
+
+  it("keeps static siblings outside a hydrated row region", () => {
+    document.body.innerHTML = `<ul id="items"><li class="row">Server one</li><li class="row">Server two</li><li class="footer">Footer</li></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      region: { before: 0, after: 1 },
+      templateHtml: `<li class="row"> </li>`,
+      bindings: [{ kind: "text" as const, path: [0], expression: "item.label" }],
+    };
+    const serverRows = Array.from(root.querySelectorAll("li.row"));
+
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 1, label: "One" },
+        { id: 2, label: "Two" },
+      ],
+      options,
+    );
+    expect(root.innerHTML).toBe(`<li class="row">One</li><li class="row">Two</li><li class="footer">Footer</li>`);
+    expect(root.children[0]).toBe(serverRows[0]);
+    expect(root.children[1]).toBe(serverRows[1]);
+
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: 2, label: "Two updated" },
+        { id: 1, label: "One updated" },
+      ],
+      options,
+    );
+    expect(root.innerHTML).toBe(
+      `<li class="row">Two updated</li><li class="row">One updated</li><li class="footer">Footer</li>`,
+    );
+    mountKeyedList(root, [], [], options);
+    expect(root.innerHTML).toBe(`<li class="footer">Footer</li>`);
+  });
+
+  it("inserts newly mounted rows before a static trailing sibling", () => {
+    document.body.innerHTML = `<ul id="items"><li class="footer">Footer</li></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+
+    mountKeyedList(root, [], [{ id: 1, label: "One" }], {
+      key: "item.id",
+      itemName: "item",
+      region: { before: 0, after: 1 },
+      templateHtml: `<li class="row"> </li>`,
+      bindings: [{ kind: "text" as const, path: [0], expression: "item.label" }],
+    });
+
+    expect(root.innerHTML).toBe(`<li class="row">One</li><li class="footer">Footer</li>`);
   });
 
   it("binds row events without a container listener", () => {

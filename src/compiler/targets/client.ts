@@ -87,6 +87,29 @@ const componentStores = (node: ElementNode): StoreDefinition[] => {
   return stores;
 };
 
+const emitsElementRoot = (node: TemplateNode): boolean => {
+  if (node.type === "text") return false;
+  if (node.tagName === "for" || node.tagName === "if" || node.tagName === "store") return false;
+  if (node.tagName === "outlet" || node.tagName === "slot") return false;
+  if (node.tagName === "component") {
+    const children = renderableChildren(node);
+    return children.length === 1 && emitsElementRoot(children[0] as TemplateNode);
+  }
+  return true;
+};
+
+const listRegionFor = (children: readonly TemplateNode[], index: number): ListBinding["region"] => {
+  const dynamicChildren = children.filter(
+    (child) => child.type === "element" && (child.tagName === "for" || child.tagName === "if"),
+  );
+  if (dynamicChildren.length !== 1 || dynamicChildren[0]?.type !== "element" || dynamicChildren[0].tagName !== "for") {
+    return undefined;
+  }
+  const before = children.slice(0, index).filter(emitsElementRoot).length;
+  const after = children.slice(index + 1).filter(emitsElementRoot).length;
+  return before + after > 0 ? { before, after } : undefined;
+};
+
 const lowerComponent = (node: ElementNode, path: number[], context: LoweringContext): string => {
   context.components.push({
     path: [...path],
@@ -143,7 +166,7 @@ const lowerIf = (node: ElementNode, path: number[], context: LoweringContext): s
   return "<!---->";
 };
 
-const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
+const lowerList = (node: ElementNode, containerPath: number[], region?: ListBinding["region"]): ListBinding => {
   const key = attrExpression(node, "key") ?? "item";
   const itemName = attrString(node, "as")?.trim() || itemNameFromKey(key);
   const indexName = attrString(node, "index")?.trim();
@@ -170,12 +193,11 @@ const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
     ...(indexName ? { indexName } : {}),
     key,
     ...(attrString(node, "update")?.trim() === "reference" ? { updatePolicy: "reference" as const } : {}),
+    ...(region ? { region } : {}),
     templateHtml,
     bindings: childContext.bindings,
     ...(childContext.stores.length > 0 ? { stores: childContext.stores } : {}),
-    ...(childContext.hydrationBoundaries.length > 0
-      ? { hydrationBoundaries: childContext.hydrationBoundaries }
-      : {}),
+    ...(childContext.hydrationBoundaries.length > 0 ? { hydrationBoundaries: childContext.hydrationBoundaries } : {}),
     ...(childContext.components.length > 0 ? { components: childContext.components } : {}),
   };
 };
@@ -270,7 +292,7 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
   for (const child of node.children) {
     if (child.type === "element" && child.tagName === "for") {
       context.hydrationDynamicRegions.push({ path: [...path], index: domIndex, kind: "list" });
-      context.bindings.push(lowerList(child, path));
+      context.bindings.push(lowerList(child, path, listRegionFor(node.children, node.children.indexOf(child))));
       continue;
     }
     if (child.type === "element" && child.tagName === "if") {
@@ -622,6 +644,7 @@ const listSignature = (binding: ListBinding): string =>
     itemName: binding.itemName,
     indexName: binding.indexName,
     updatePolicy: binding.updatePolicy,
+    region: binding.region,
     templateHtml: binding.templateHtml,
     bindings: binding.bindings.map((child) => {
       if (child.kind === "list" || child.kind === "if") {
@@ -683,6 +706,7 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     if (binding.indexName) fields.push(`indexName: ${JSON.stringify(binding.indexName)}`);
     fields.push(`key: ${JSON.stringify(binding.key)}`);
     if (binding.updatePolicy) fields.push(`updatePolicy: ${JSON.stringify(binding.updatePolicy)}`);
+    if (binding.region) fields.push(`region: ${JSON.stringify(binding.region)}`);
     fields.push(`stores: ${JSON.stringify(binding.stores ?? [])}`);
     fields.push(`hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])}`);
     fields.push(`components: ${JSON.stringify(binding.components ?? [])}`);
@@ -722,6 +746,7 @@ const emitListBinding = (
     `    itemName: ${JSON.stringify(binding.itemName)},`,
     ...(binding.indexName ? [`    indexName: ${JSON.stringify(binding.indexName)},`] : []),
     ...(binding.updatePolicy ? [`    updatePolicy: ${JSON.stringify(binding.updatePolicy)},`] : []),
+    ...(binding.region ? [`    region: ${JSON.stringify(binding.region)},`] : []),
     `    stores: ${JSON.stringify(binding.stores ?? [])},`,
     `    hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])},`,
     `    components: ${JSON.stringify(binding.components ?? [])},`,
