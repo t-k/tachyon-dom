@@ -2,9 +2,15 @@ import { err, ok, type Result } from "../result.js";
 import { diagnoseHydrationBoundaries, type CompiledHydrationBoundary } from "./hydrate.js";
 import { createRoot } from "./signal.js";
 
+export type ClientHydrationDynamicAttribute = {
+  path: readonly number[];
+  name: string;
+};
+
 export type ClientTemplateModule<Scope extends Record<string, unknown> = Record<string, unknown>> = {
   templateHtml: string;
   hydrationBoundaries?: readonly CompiledHydrationBoundary[];
+  hydrationDynamicAttributes?: readonly ClientHydrationDynamicAttribute[];
   bind: (root: Element, scope: Scope) => void | (() => void);
 };
 
@@ -67,23 +73,62 @@ const templateRootFor = (templateHtml: string): Element | undefined => {
 const tagNameFor = (element: Element): string => element.tagName.toLowerCase();
 
 const hydrationChildNodes = (node: Node): Node[] =>
-  Array.from(node.childNodes).filter(
-    (child) => child.nodeType !== Node.COMMENT_NODE || child.nodeValue === "td:text",
-  );
+  Array.from(node.childNodes).filter((child) => child.nodeType !== Node.COMMENT_NODE || child.nodeValue === "td:text");
 
-const hydrationStructureError = (expected: Node, actual: Node, path: string): string | undefined => {
+const hydrationPathLabel = (path: readonly number[]): string => (path.length === 0 ? "root" : `root.${path.join(".")}`);
+
+const hydrationAttributeKey = (path: readonly number[], name: string): string =>
+  `${path.join(".")}\0${name.toLowerCase()}`;
+
+const hydrationUnsafeExtraNodeError = (node: Node, path: readonly number[]): string | undefined => {
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return undefined;
+  }
+  const element = node as Element;
+  const label = hydrationPathLabel(path);
+  if (tagNameFor(element) === "script") {
+    return `Hydration structure mismatch at ${label}: found an unexpected <script> element.`;
+  }
+  const eventAttribute = Array.from(element.attributes).find((attribute) =>
+    attribute.name.toLowerCase().startsWith("on"),
+  );
+  if (eventAttribute) {
+    return `Hydration structure mismatch at ${label}: found an unexpected event attribute ${eventAttribute.name}.`;
+  }
+  for (const [index, child] of Array.from(element.childNodes).entries()) {
+    const error = hydrationUnsafeExtraNodeError(child, [...path, index]);
+    if (error) return error;
+  }
+  return undefined;
+};
+
+const hydrationStructureError = (
+  expected: Node,
+  actual: Node,
+  path: readonly number[],
+  dynamicAttributes: ReadonlySet<string>,
+): string | undefined => {
+  const label = hydrationPathLabel(path);
   if (expected.nodeType === Node.ELEMENT_NODE) {
     if (actual.nodeType !== Node.ELEMENT_NODE) {
-      return `Hydration structure mismatch at ${path}: expected an element, found ${actual.nodeName}.`;
+      return `Hydration structure mismatch at ${label}: expected an element, found ${actual.nodeName}.`;
     }
     const expectedElement = expected as Element;
     const actualElement = actual as Element;
     if (tagNameFor(expectedElement) !== tagNameFor(actualElement)) {
-      return `Hydration structure mismatch at ${path}: expected <${tagNameFor(expectedElement)}>, found <${tagNameFor(actualElement)}>.`;
+      return `Hydration structure mismatch at ${label}: expected <${tagNameFor(expectedElement)}>, found <${tagNameFor(actualElement)}>.`;
     }
     for (const attribute of Array.from(expectedElement.attributes)) {
       if (actualElement.getAttribute(attribute.name) !== attribute.value) {
-        return `Hydration structure mismatch at ${path}: attribute ${attribute.name} does not match.`;
+        return `Hydration structure mismatch at ${label}: attribute ${attribute.name} does not match.`;
+      }
+    }
+    for (const attribute of Array.from(actualElement.attributes)) {
+      if (
+        !expectedElement.hasAttribute(attribute.name) &&
+        !dynamicAttributes.has(hydrationAttributeKey(path, attribute.name))
+      ) {
+        return `Hydration structure mismatch at ${label}: found an unexpected attribute ${attribute.name}.`;
       }
     }
     const expectedChildren = Array.from(expected.childNodes);
@@ -98,31 +143,46 @@ const hydrationStructureError = (expected: Node, actual: Node, path: string): st
       }
       const actualChild = actualChildren[actualIndex];
       if (!actualChild) {
-        return `Hydration structure mismatch at ${path}: missing child ${expectedIndex}.`;
+        return `Hydration structure mismatch at ${label}: missing child ${expectedIndex}.`;
       }
-      const childPath = `${path}.${expectedIndex}`;
+      const childPath = [...path, expectedIndex];
       if (allowsExtraChildren) {
         let matched = false;
         while (actualIndex < actualChildren.length) {
           const candidate = actualChildren[actualIndex] as Node;
-          const candidateError = hydrationStructureError(expectedChild, candidate, childPath);
+          const candidateError = hydrationStructureError(expectedChild, candidate, childPath, dynamicAttributes);
           actualIndex++;
           if (!candidateError) {
             matched = true;
             break;
           }
+          if (
+            expectedChild.nodeType === Node.ELEMENT_NODE &&
+            candidate.nodeType === Node.ELEMENT_NODE &&
+            tagNameFor(expectedChild as Element) === tagNameFor(candidate as Element)
+          ) {
+            return candidateError;
+          }
+          const unsafeError = hydrationUnsafeExtraNodeError(candidate, [...path, actualIndex - 1]);
+          if (unsafeError) return unsafeError;
         }
         if (!matched) {
-          return `Hydration structure mismatch at ${childPath}: expected a matching child.`;
+          return `Hydration structure mismatch at ${hydrationPathLabel(childPath)}: expected a matching child.`;
         }
         continue;
       }
-      const mismatch = hydrationStructureError(expectedChild, actualChild, childPath);
+      const mismatch = hydrationStructureError(expectedChild, actualChild, childPath, dynamicAttributes);
       if (mismatch) return mismatch;
       actualIndex++;
     }
     if (!allowsExtraChildren && actualIndex < actualChildren.length && expectedChildren.length > 0) {
-      return `Hydration structure mismatch at ${path}: found an unexpected child.`;
+      return `Hydration structure mismatch at ${label}: found an unexpected child.`;
+    }
+    if (allowsExtraChildren) {
+      for (let index = actualIndex; index < actualChildren.length; index++) {
+        const extraError = hydrationUnsafeExtraNodeError(actualChildren[index] as Node, [...path, index]);
+        if (extraError) return extraError;
+      }
     }
     return undefined;
   }
@@ -131,7 +191,7 @@ const hydrationStructureError = (expected: Node, actual: Node, path: string): st
     if (expected.nodeValue === " " && actual.nodeType === Node.COMMENT_NODE && actual.nodeValue === "td:text") {
       return undefined;
     }
-    return `Hydration structure mismatch at ${path}: expected a text node, found ${actual.nodeName}.`;
+    return `Hydration structure mismatch at ${label}: expected a text node, found ${actual.nodeName}.`;
   }
   return undefined;
 };
@@ -185,7 +245,10 @@ export const hydrate = <Scope extends Record<string, unknown>>(
       message: `Hydration structure mismatch: expected <${expectedRoot ? tagNameFor(expectedRoot) : "element"}>.`,
     });
   }
-  const structureError = hydrationStructureError(expectedRoot, bindRoot, "root");
+  const dynamicAttributes = new Set(
+    (module.hydrationDynamicAttributes ?? []).map((attribute) => hydrationAttributeKey(attribute.path, attribute.name)),
+  );
+  const structureError = hydrationStructureError(expectedRoot, bindRoot, [], dynamicAttributes);
   if (structureError) {
     return err({ message: structureError });
   }

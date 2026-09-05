@@ -455,9 +455,7 @@ const isFunctionBoundary = (node: Node): boolean =>
   ts.isMethodDeclaration(node) ||
   ts.isGetAccessorDeclaration(node) ||
   ts.isSetAccessorDeclaration(node) ||
-  ts.isConstructorDeclaration(node) ||
-  ts.isClassDeclaration(node) ||
-  ts.isClassExpression(node);
+  ts.isConstructorDeclaration(node);
 
 const topLevelAwaitNode = (sourceFile: SourceFile): Node | undefined => {
   let found: Node | undefined;
@@ -598,6 +596,7 @@ export const generateScriptOnlyModule = (target: "client" | "server" | "stream")
   return [
     `export const templateHtml = "";`,
     `export const hydrationBoundaries = [];`,
+    `export const hydrationDynamicAttributes = [];`,
     `export const componentBoundaries = [];`,
     `export const bind = () => undefined;`,
   ].join("\n");

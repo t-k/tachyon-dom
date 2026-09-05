@@ -875,6 +875,16 @@ const increment = (): void => {
     expect(topLevel.error.message).toContain("top-level await");
     expect(topLevel.error.offset).toBe(content.indexOf("await"));
 
+    const classStaticBlock = transformSfcScript({
+      attrs: "setup",
+      content: `class C { static { await loadValue(); } }`,
+      offset: 0,
+    });
+
+    expect(classStaticBlock.ok).toBe(false);
+    if (classStaticBlock.ok) throw new Error("Expected class static-block await to fail.");
+    expect(classStaticBlock.error.message).toContain("top-level await");
+
     const nested = transformSfcScript({
       attrs: "setup",
       content: `const load = async () => await loadValue();`,

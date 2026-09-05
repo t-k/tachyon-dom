@@ -371,6 +371,18 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     return cached;
   }
   const bindings = template.client.bindings;
+  const hydrationDynamicAttributes = bindings.flatMap((binding) => {
+    if (binding.kind === "attr") {
+      return [{ path: binding.path, name: binding.name }];
+    }
+    if (binding.kind === "class") {
+      return [{ path: binding.path, name: "class" }];
+    }
+    if (binding.kind === "style") {
+      return [{ path: binding.path, name: "style" }];
+    }
+    return [];
+  });
   const reactive = options.reactive === true;
   const needsStore = template.client.stores.length > 0;
   const hasDefaultScope = typeof options.defaultScopeName === "string" && options.defaultScopeName.length > 0;
@@ -443,6 +455,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
+  lines.push(`export const hydrationDynamicAttributes = ${JSON.stringify(hydrationDynamicAttributes)};`);
   lines.push(`export const componentBoundaries = ${JSON.stringify(template.client.components)};`);
   if (hasDefaultScope) {
     lines.push(`const __tachyonCreateScope = (inputScope = {}) => {`);

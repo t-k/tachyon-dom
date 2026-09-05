@@ -86,6 +86,53 @@ describe("mountKeyedList", () => {
     expect(root.childElementCount).toBe(0);
   });
 
+  it("commits non-empty row removal before rethrowing a falsy cleanup error", () => {
+    const root = document.createElement("ul");
+    const cleaned: number[] = [];
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          expression: "item.id",
+          read: (scope: Record<string, unknown>) => {
+            const id = (scope.item as { id: number }).id;
+            onCleanup(() => {
+              if (id === 1) {
+                cleaned.push(id);
+                throw undefined;
+              }
+            });
+            return id;
+          },
+        },
+      ],
+    };
+
+    mountKeyedList(root, [], [{ id: 1 }, { id: 2 }], options);
+
+    let didThrow = false;
+    let thrown: unknown;
+    try {
+      mountKeyedList(root, [], [{ id: 2 }], options);
+    } catch (error) {
+      didThrow = true;
+      thrown = error;
+    }
+
+    expect(didThrow).toBe(true);
+    expect(thrown).toBeUndefined();
+    expect(root.textContent).toBe("2");
+    expect(cleaned).toEqual([1]);
+    mountKeyedList(root, [], [{ id: 2 }], options);
+    expect(cleaned).toEqual([1]);
+    mountKeyedList(root, [], undefined, options);
+    expect(cleaned).toEqual([1]);
+  });
+
   it("rejects non-primitive and non-finite keys", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

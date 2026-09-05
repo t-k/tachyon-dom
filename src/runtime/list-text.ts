@@ -371,6 +371,7 @@ export const mountTextKeyedList = (
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];
   const createdRecords: RowRecord[] = [];
+  const previousRecords = state.records;
   const serverElements = Array.from(container.children);
   const canAdoptServerRows =
     state.records.size === 0 &&
@@ -389,11 +390,11 @@ export const mountTextKeyedList = (
       nextRecords.set(entry.key, record);
       orderedRecords.push(record);
     }
-    const cleanupResult = cleanupRecordsNotIn(state.records, nextRecords);
     if (canAdoptServerRows) container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
-    else positionRecords(container, orderedRecords, state.records);
+    else positionRecords(container, orderedRecords, previousRecords);
     state.records = nextRecords;
     createdRecords.length = 0;
+    const cleanupResult = cleanupRecordsNotIn(previousRecords, nextRecords);
     if (cleanupResult.failed) throw cleanupResult.error;
   } catch (error) {
     let firstCleanupError: unknown;

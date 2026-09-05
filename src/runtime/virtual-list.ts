@@ -44,14 +44,7 @@ const elementAndDisposer = (value: VirtualizedListItem): RenderedRow => {
 };
 
 export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): VirtualizedList<T> => {
-  const {
-    scroller,
-    itemHeight,
-    renderItem,
-    updateItem,
-    getKey,
-    viewportHeight: viewportHeightOption,
-  } = options;
+  const { scroller, itemHeight, renderItem, updateItem, getKey, viewportHeight: viewportHeightOption } = options;
   const overscan = options.overscan ?? 3;
   if (!Number.isFinite(itemHeight) || itemHeight <= 0) {
     throw new RangeError("Virtual list itemHeight must be a finite number greater than zero.");
@@ -60,7 +53,9 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
     throw new RangeError("Virtual list overscan must be a non-negative integer.");
   }
   const viewportHeightForList = (): number =>
-    typeof viewportHeightOption === "function" ? viewportHeightOption() : (viewportHeightOption ?? scroller.clientHeight);
+    typeof viewportHeightOption === "function"
+      ? viewportHeightOption()
+      : (viewportHeightOption ?? scroller.clientHeight);
   const validateViewportHeight = (viewportHeight: number): number => {
     if (!Number.isFinite(viewportHeight) || viewportHeight < 0) {
       throw new RangeError("Virtual list viewportHeight must be a finite non-negative number.");
@@ -225,9 +220,17 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
   return {
     update: (nextItems) => {
       if (disposed) return;
+      const previousItems = items;
+      const previousRangeKey = lastRangeKey;
       items = validateItems(nextItems);
       lastRangeKey = "";
-      renderWindow(true);
+      try {
+        renderWindow(true);
+      } catch (error) {
+        items = previousItems;
+        lastRangeKey = previousRangeKey;
+        throw error;
+      }
     },
     scrollToIndex: (index) => {
       if (disposed) return;

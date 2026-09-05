@@ -9,10 +9,8 @@ import {
   type ClientRouteDefinition,
 } from "../src/runtime/router";
 
-type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends <Value>() =>
-  Value extends Right ? 1 : 2
-  ? true
-  : false;
+type Equal<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends <Value>() => Value extends Right ? 1 : 2 ? true : false;
 type Expect<T extends true> = T;
 type _WildcardWithoutName = Expect<Equal<ClientParamsForPath<"/files/*">, { wildcard: string }>>;
 type _WildcardAndParam = Expect<Equal<ClientParamsForPath<"/*rest/:id">, { rest: string; id: string }>>;
@@ -384,6 +382,48 @@ describe("client router", () => {
     expect(disposed.filter((name) => name === "page")).toEqual(["page"]);
     expect(root.textContent).toBe("other");
     router.dispose();
+  });
+
+  it("disposes a leaf that is pending behind a never-settling layout", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    let pageRendered = false;
+    const disposed: string[] = [];
+    const view = (name: string): ClientMountedView => ({
+      value: rawHtml(`<p>${name}</p>`),
+      dispose: () => disposed.push(name),
+    });
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => view("home") },
+        {
+          path: "/app",
+          render: () => new Promise<ClientMountedView>(() => undefined),
+          children: [
+            {
+              path: "page",
+              render: () => {
+                pageRendered = true;
+                return view("page");
+              },
+            },
+          ],
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    void router.navigate("/app/page");
+    for (let index = 0; index < 4 && !pageRendered; index++) await Promise.resolve();
+
+    expect(pageRendered).toBe(true);
+    await Promise.resolve();
+    router.dispose();
+    expect(disposed.filter((name) => name === "page")).toEqual(["page"]);
   });
 
   it("keeps the displayed nested layout until a replacement layout is ready", async () => {
@@ -781,6 +821,50 @@ describe("client router", () => {
 
     await router.navigate("/blog/2026/launch");
     expect(root.innerHTML).toBe("<h1>2026/launch</h1>");
+    router.dispose();
+  });
+
+  it("keeps runtime route parameters aligned with the route type grammar", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => "home" },
+        { path: "/files/*", render: ({ params }) => `${params.wildcard}` },
+        { path: "/*rest/:id", render: ({ params }) => `${params.rest}:${params.id}` },
+        { path: "/literal:tag", render: () => "literal" },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    await router.navigate("/files/a%20b");
+    expect(root.textContent).toBe("a b");
+    await router.navigate("/alpha/beta/42");
+    expect(root.textContent).toBe("alpha/beta:42");
+    await router.navigate("/literal:tag");
+    expect(root.textContent).toBe("literal");
+    router.dispose();
+  });
+
+  it("treats malformed encoded route parameters as a not-found route", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/%E0%A4%A");
+    const router = createClientRouter({
+      root,
+      routes: [{ path: "/users/:id", render: ({ params }) => params.id }],
+      notFound: () => "not found",
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+
+    expect(root.textContent).toBe("not found");
     router.dispose();
   });
 

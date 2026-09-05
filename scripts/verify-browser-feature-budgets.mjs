@@ -73,7 +73,9 @@ for (const [name, contents] of Object.entries(features)) {
     );
   }
   if (brotliBytes > budget.maxBrotliBytes) {
-    throw new Error(`${name} feature bundle is ${brotliBytes} bytes Brotli; expected at most ${budget.maxBrotliBytes} bytes.`);
+    throw new Error(
+      `${name} feature bundle is ${brotliBytes} bytes Brotli; expected at most ${budget.maxBrotliBytes} bytes.`,
+    );
   }
   console.log(
     `${name}: ${outputBytes}/${budget.maxMinifiedBytes} minified bytes, ${brotliBytes}/${budget.maxBrotliBytes} Brotli bytes, ${Object.keys(result.metafile.inputs).length} distribution inputs.`,

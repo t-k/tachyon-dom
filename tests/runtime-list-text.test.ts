@@ -66,6 +66,54 @@ describe("mountTextKeyedList", () => {
     expect(root.childElementCount).toBe(0);
   });
 
+  it("commits non-empty text row removal before rethrowing a falsy cleanup error", () => {
+    const root = document.createElement("ul");
+    const cleaned: number[] = [];
+    const options = {
+      key: "item.id",
+      keyReadItem: (item: unknown) => (item as { id: number }).id,
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          expression: "item.id",
+          read: (scope: Record<string, unknown>) => {
+            const id = (scope.item as { id: number }).id;
+            onCleanup(() => {
+              if (id === 1) {
+                cleaned.push(id);
+                throw undefined;
+              }
+            });
+            return id;
+          },
+        },
+      ],
+    };
+
+    mountTextKeyedList(root, [], [{ id: 1 }, { id: 2 }], options);
+
+    let didThrow = false;
+    let thrown: unknown;
+    try {
+      mountTextKeyedList(root, [], [{ id: 2 }], options);
+    } catch (error) {
+      didThrow = true;
+      thrown = error;
+    }
+
+    expect(didThrow).toBe(true);
+    expect(thrown).toBeUndefined();
+    expect(root.textContent).toBe("2");
+    expect(cleaned).toEqual([1]);
+    mountTextKeyedList(root, [], [{ id: 2 }], options);
+    expect(cleaned).toEqual([1]);
+    mountTextKeyedList(root, [], undefined, options);
+    expect(cleaned).toEqual([1]);
+  });
+
   it("reuses, moves, updates, inserts, and removes keyed rows", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

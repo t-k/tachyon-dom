@@ -105,6 +105,41 @@ describe("virtualized list runtime", () => {
     list.destroy();
   });
 
+  it("rolls back items when rendering a virtual-list update fails", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    let fail = true;
+    let attemptedItemOne = false;
+    const list = createVirtualizedList({
+      scroller,
+      items: [0],
+      itemHeight: 20,
+      viewportHeight: 40,
+      overscan: 0,
+      renderItem: (item) => {
+        if (item === 1) {
+          attemptedItemOne = true;
+          if (fail) throw new Error("virtual update failed");
+        }
+        const element = document.createElement("div");
+        element.textContent = String(item);
+        return element;
+      },
+    });
+
+    expect(() => list.update([0, 1])).toThrow("virtual update failed");
+    attemptedItemOne = false;
+    list.scrollToIndex(1);
+
+    expect(attemptedItemOne).toBe(false);
+    expect(scroller.textContent).toBe("0");
+    fail = false;
+    list.update([0, 1]);
+    expect(scroller.textContent).toBe("01");
+    list.destroy();
+  });
+
   it("disposes rows that leave the window and makes destroy idempotent", () => {
     document.body.innerHTML = `<div id="scroller"></div>`;
     const scroller = document.querySelector("#scroller");

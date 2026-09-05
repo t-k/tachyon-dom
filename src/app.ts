@@ -450,6 +450,7 @@ export const generateTachyonModuleTypes = (
   const templateExports = [
     `export declare const templateHtml: string;`,
     `export declare const hydrationBoundaries: unknown[];`,
+    `export declare const hydrationDynamicAttributes: unknown[];`,
     `export declare const componentBoundaries: unknown[];`,
     `export declare const bind: (root: Element, scope: ${typeName}) => void | (() => void);`,
   ].join("\n");

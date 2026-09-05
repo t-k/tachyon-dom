@@ -196,6 +196,11 @@ type LayoutState = {
   dispose: () => void;
 };
 
+type PendingRenderResult = {
+  dispose: () => void;
+  release: () => void;
+};
+
 type PrefetchEntry = {
   controller: AbortController;
   promise: Promise<void>;
@@ -310,9 +315,14 @@ const matchClientRoute = (routes: readonly CompiledClientRoute[], pathname: stri
     if (!match) {
       continue;
     }
-    const params = Object.fromEntries(
-      routeEntry.names.map((name, index) => [name, decodeURIComponent(match[index + 1] ?? "")]),
-    );
+    let params: ClientRouteParams;
+    try {
+      params = Object.fromEntries(
+        routeEntry.names.map((name, index) => [name, decodeURIComponent(match[index + 1] ?? "")]),
+      );
+    } catch {
+      continue;
+    }
     const matched = { route: routeEntry.route, branch: routeEntry.branch, params };
     if (routeEntry.wildcard) {
       fallback = matched;
@@ -490,10 +500,30 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   const prefetchEntries = new Map<string, PrefetchEntry>();
   const eagerlyNavigated = new WeakSet<HTMLAnchorElement>();
   const scrollPositions = new Map<number, { x: number; y: number }>();
+  const pendingRenderResults = new Set<PendingRenderResult>();
   let nextScrollKey = 1;
   const cacheKey = (url: URL): string => `${url.pathname}${url.search}`;
   const isCurrentNavigation = (signal: AbortSignal, generation: number): boolean =>
     !disposed && !signal.aborted && navigationGeneration === generation;
+  const trackPendingRenderResult = (value: ClientRenderResult): PendingRenderResult => {
+    let active = true;
+    let pending: PendingRenderResult;
+    pending = {
+      dispose: () => {
+        if (!active) return;
+        active = false;
+        pendingRenderResults.delete(pending);
+        disposeRenderResult(value);
+      },
+      release: () => {
+        if (!active) return;
+        active = false;
+        pendingRenderResults.delete(pending);
+      },
+    };
+    pendingRenderResults.add(pending);
+    return pending;
+  };
   const disposeCommittedView = (): void => {
     const current = committedView;
     committedView = undefined;
@@ -654,12 +684,13 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     match: ClientMatch,
     loaded: LoadedClientBranch,
     rendered: ClientRenderResult,
+    pendingRendered: PendingRenderResult,
     navigateOptions: NavigateOptions,
     signal: AbortSignal,
     generation: number,
   ): Promise<void> => {
     if (!isCurrentNavigation(signal, generation)) {
-      disposeRenderResult(rendered);
+      pendingRendered.dispose();
       return;
     }
     const target = routeTargetFor(options.root, match, url, loaded.leafData);
@@ -680,7 +711,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         if (leafPrepared && leafDispose) {
           disposers.push(leafDispose);
         } else {
-          disposers.push(() => disposeRenderResult(rendered));
+          disposers.push(pendingRendered.dispose);
         }
         runDisposers(disposers);
       };
@@ -725,8 +756,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
             if (!stagingTarget) {
               stagingTarget = layoutHost;
               commitTarget = parentTarget;
-            }
-            else parentTarget.replaceChildren(...Array.from(layoutHost.childNodes));
+            } else parentTarget.replaceChildren(...Array.from(layoutHost.childNodes));
             const nextState: LayoutState = { root: layoutRoot, loaded, paramsKey, searchKey, dispose: layoutDispose };
             nextStates.set(layoutRoute, nextState);
           }
@@ -747,10 +777,11 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         try {
           leafDispose = renderInto(leafHost, rendered);
         } catch (error) {
-          disposeRenderResult(rendered);
+          pendingRendered.dispose();
           throw error;
         }
         leafPrepared = true;
+        pendingRendered.release();
         if (stagingTarget) parentTarget.replaceChildren(...Array.from(leafHost.childNodes));
         else {
           stagingTarget = leafHost;
@@ -788,14 +819,14 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     };
     const commit = async (): Promise<void> => {
       if (!isCurrentNavigation(signal, generation)) {
-        disposeRenderResult(rendered);
+        pendingRendered.dispose();
         return;
       }
       if (match.branch.length > 1) {
         await renderNestedBranch();
       } else {
         if (!isCurrentNavigation(signal, generation)) {
-          disposeRenderResult(rendered);
+          pendingRendered.dispose();
           return;
         }
         const leafHost = document.createElement("div");
@@ -803,9 +834,10 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         try {
           leafDispose = renderInto(leafHost, rendered);
         } catch (error) {
-          disposeRenderResult(rendered);
+          pendingRendered.dispose();
           throw error;
         }
+        pendingRendered.release();
         if (!isCurrentNavigation(signal, generation)) {
           leafDispose();
           return;
@@ -900,7 +932,12 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     if (!url.hash) {
       return false;
     }
-    const id = decodeURIComponent(url.hash.slice(1));
+    let id: string;
+    try {
+      id = decodeURIComponent(url.hash.slice(1));
+    } catch {
+      return false;
+    }
     const namedTarget =
       typeof CSS !== "undefined" && typeof CSS.escape === "function"
         ? document.querySelector(`[name="${CSS.escape(id)}"]`)
@@ -1073,12 +1110,25 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
           data: loaded.leafData,
           signal: nextController.signal,
         });
-        if (!isCurrentNavigation(nextController.signal, generation)) {
-          disposeRenderResult(rendered);
-          return;
+        const pendingRendered = trackPendingRenderResult(rendered);
+        try {
+          if (!isCurrentNavigation(nextController.signal, generation)) {
+            return;
+          }
+          writeHistory(url, navigateOptions);
+          await commitNavigation(
+            url,
+            match,
+            loaded,
+            rendered,
+            pendingRendered,
+            navigateOptions,
+            nextController.signal,
+            generation,
+          );
+        } finally {
+          pendingRendered.dispose();
         }
-        writeHistory(url, navigateOptions);
-        await commitNavigation(url, match, loaded, rendered, navigateOptions, nextController.signal, generation);
       } catch (error) {
         if (isCurrentNavigation(nextController.signal, generation)) {
           renderError(url, error);
@@ -1202,6 +1252,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
       attempt(() => prefetchEntries.forEach((entry) => entry.controller.abort()));
       prefetchEntries.clear();
       cache.clear();
+      attempt(() => runDisposers(Array.from(pendingRenderResults, (entry) => entry.dispose)));
       attempt(disposeLayoutStates);
       attempt(disposeCommittedView);
       scrollPositions.clear();

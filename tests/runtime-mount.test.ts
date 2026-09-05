@@ -13,7 +13,7 @@ const evaluateGeneratedClientModule = (code: string): ClientTemplateModule<{ nam
     "__tachyonCreateRoot",
     "__tachyonSetText",
     "__tachyonTextAt",
-    `${executable}; return { templateHtml, hydrationBoundaries, bind };`,
+    `${executable}; return { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, bind };`,
   )(createRoot, setText, textAt) as ClientTemplateModule<{ name: string }>;
 };
 
@@ -41,6 +41,42 @@ describe("client mount entrypoints", () => {
 
     expect(result.ok).toBe(false);
     expect(root.outerHTML).toBe(before);
+  });
+
+  it("rejects unexpected hydration attributes and unsafe extra nodes", () => {
+    const root = document.createElement("main");
+    root.innerHTML = `<p>SSR</p><script>alert(1)</script>`;
+    root.setAttribute("onclick", "alert(2)");
+    const before = root.outerHTML;
+    const module: ClientTemplateModule = {
+      templateHtml: `<main><!----><p> </p></main>`,
+      bind: () => undefined,
+    };
+
+    const result = hydrate(root, module);
+
+    expect(result.ok).toBe(false);
+    expect(root.outerHTML).toBe(before);
+  });
+
+  it("allows compiler-declared dynamic attributes during hydration", () => {
+    const compiled = compileTemplate(`<main><p class:active={active} aria-label={label}>Hello</p></main>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const generated = evaluateGeneratedClientModule(generateClientModule(compiled.value));
+    const module: ClientTemplateModule = {
+      templateHtml: generated.templateHtml,
+      hydrationDynamicAttributes: generated.hydrationDynamicAttributes ?? [],
+      bind: () => undefined,
+    };
+    const root = document.createElement("main");
+    root.innerHTML = `<p class="active" aria-label="server">Hello</p>`;
+    const scope = { name: "ignored", active: true, label: "client" };
+
+    const result = hydrate(root, module, scope);
+
+    expect(result.ok).toBe(true);
+    expect(root.querySelector("p")?.getAttribute("aria-label")).toBe("server");
+    if (result.ok) result.value.dispose();
   });
 
   it("mounts independent instances and disposes each one once", () => {
