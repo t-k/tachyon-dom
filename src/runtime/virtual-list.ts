@@ -51,7 +51,6 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
     updateItem,
     getKey,
     viewportHeight: viewportHeightOption,
-    items: initialItems,
   } = options;
   const overscan = options.overscan ?? 3;
   if (!Number.isFinite(itemHeight) || itemHeight <= 0) {
@@ -81,7 +80,7 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
   };
   const initialViewportHeight = validateViewportHeight(viewportHeightForList());
   const previousChildren = Array.from(scroller.childNodes);
-  let items = validateItems(initialItems);
+  let items = validateItems(options.items);
   let rendered = new Map<PropertyKey, RenderedRow>();
   let lastRangeKey = "";
   let animationFrame: number | undefined;

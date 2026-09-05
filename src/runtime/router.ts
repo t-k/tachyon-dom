@@ -499,11 +499,6 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     committedView = undefined;
     if (current) runDisposers([current.dispose]);
   };
-  const disposeLayoutState = (route: ClientRouteDefinition): void => {
-    const state = layoutStates.get(route);
-    layoutStates.delete(route);
-    if (state) runDisposers([state.dispose]);
-  };
   const disposeLayoutStates = (): void => {
     const states = Array.from(layoutStates.values());
     layoutStates.clear();
