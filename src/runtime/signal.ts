@@ -153,8 +153,18 @@ export const createReactiveErrorScope = (handle: (error: unknown) => void): Reac
     dispose: () => {
       if (owner.disposed) return;
       owner.disposed = true;
-      for (const runner of Array.from(owner.runners)) disposeRunner(runner);
+      let firstError: unknown;
+      let failed = false;
+      for (const runner of Array.from(owner.runners)) {
+        try {
+          disposeRunner(runner);
+        } catch (error) {
+          if (!failed) firstError = error;
+          failed = true;
+        }
+      }
       owner.runners.clear();
+      if (failed) throw firstError;
     },
   };
   onCleanup(scope.dispose);

@@ -208,6 +208,27 @@ describe("signal runtime", () => {
     expect(errors).toEqual(["async failure"]);
   });
 
+  it("continues reactive error-scope disposal after a runner cleanup throws", () => {
+    const events: string[] = [];
+    const scope = createReactiveErrorScope(() => undefined);
+
+    scope.run(() => {
+      effect(() => {
+        onCleanup(() => {
+          events.push("first");
+          throw new Error("scope cleanup failed");
+        });
+      });
+      effect(() => {
+        onCleanup(() => events.push("second"));
+      });
+    });
+
+    expect(() => scope.dispose()).toThrow("scope cleanup failed");
+    expect(events).toEqual(["first", "second"]);
+    expect(() => scope.dispose()).not.toThrow();
+  });
+
   it("continues an effect rerun cleanup sequence after one cleanup throws", () => {
     const source = createSignal(0);
     const events: string[] = [];
