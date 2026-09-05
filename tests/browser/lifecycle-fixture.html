@@ -5,8 +5,16 @@
       <tbody id="rows"></tbody>
     </table>
     <main id="hydration"></main>
+    <main id="lazy-hydration">
+      <!--tachyon-hydrate:lazy-panel:start--><section><button>Open</button></section><!--tachyon-hydrate:lazy-panel:end-->
+    </main>
     <script type="module">
-      import { createHydrationBoundary, createKeyedRows } from "../../dist/index.js";
+      import {
+        createHydrationBoundary,
+        createKeyedRows,
+        createLazyHydrationBoundary,
+        scheduleHydration,
+      } from "../../dist/index.js";
 
       const rows = document.querySelector("#rows");
       const list = createKeyedRows({
@@ -48,6 +56,45 @@
           remainingRows: rows.rows.length,
           hydrationChanged: before !== hydration.innerHTML,
           hydrated: boundary.value.hydrated(),
+        };
+      };
+
+      window.runLazyHydration = async () => {
+        const lazyRoot = document.querySelector("#lazy-hydration");
+        if (!lazyRoot) throw new Error("Missing lazy hydration root.");
+        const before = lazyRoot.innerHTML;
+        let resolveChunk;
+        const load = () =>
+          new Promise((resolve) => {
+            resolveChunk = resolve;
+          });
+        const result = createLazyHydrationBoundary(lazyRoot, "lazy-panel", load);
+        if (!result.ok) throw new Error(result.error.message);
+        const interactionCleanup = scheduleHydration(result.value, {
+          strategy: "interaction",
+          interaction: "click",
+          replayInteraction: true,
+        });
+        lazyRoot.querySelector("button")?.click();
+        const during = lazyRoot.innerHTML;
+        resolveChunk({
+          bind: (element) => {
+            element.querySelector("button")?.addEventListener("click", () => {
+              element.setAttribute("data-opened", "true");
+            });
+          },
+        });
+        await result.value.hydrate();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        const opened = lazyRoot.querySelector("section")?.getAttribute("data-opened") === "true";
+        interactionCleanup();
+        result.value.dispose();
+        return {
+          before,
+          during,
+          unchangedBeforeHydration: before === during,
+          opened,
+          hydrated: result.value.hydrated(),
         };
       };
     </script>

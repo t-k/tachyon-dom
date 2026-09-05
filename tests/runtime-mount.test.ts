@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
 import { hydrate, mount, type ClientTemplateModule } from "../src/runtime/mount";
+import { cleanupTextKeyedList, mountTextKeyedList } from "../src/runtime/list-text";
 import { createRoot, createSignal, effect } from "../src/runtime/signal";
 import { setText, textAt } from "../src/runtime/text";
 
-const evaluateGeneratedClientModule = (code: string): ClientTemplateModule<{ name: string }> => {
+const evaluateGeneratedClientModule = (code: string): ClientTemplateModule<Record<string, unknown>> => {
   const executable = code
     .replace(/^import .*$/gm, "")
     .replace(/^export default /m, "return ")
@@ -13,8 +14,16 @@ const evaluateGeneratedClientModule = (code: string): ClientTemplateModule<{ nam
     "__tachyonCreateRoot",
     "__tachyonSetText",
     "__tachyonTextAt",
-    `${executable}; return { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, bind };`,
-  )(createRoot, setText, textAt) as ClientTemplateModule<{ name: string }>;
+    "__tachyonCleanupTextKeyedList",
+    "__tachyonMountTextKeyedList",
+    `${executable}; return { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind };`,
+  )(
+    createRoot,
+    setText,
+    textAt,
+    cleanupTextKeyedList,
+    mountTextKeyedList,
+  ) as ClientTemplateModule<Record<string, unknown>>;
 };
 
 describe("client mount entrypoints", () => {
@@ -97,6 +106,29 @@ describe("client mount entrypoints", () => {
 
     expect(result.ok).toBe(true);
     expect(root.textContent).toBe("ABFooter");
+    if (result.ok) result.value.dispose();
+  });
+
+  it("binds a generated list module without consuming static siblings", () => {
+    const compiled = compileTemplate(
+      `<ul><for each={items} key={item.id}><li class="row">{item.name}</li></for><li class="footer">Footer</li></ul>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value));
+    const root = document.createElement("main");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      items: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+    });
+    const serverRows = Array.from(root.querySelectorAll("li.row"));
+
+    const result = hydrate(root, module, {
+      items: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(root.innerHTML).toBe(`<ul><li class="row">A</li><li class="row">B</li><li class="footer">Footer</li></ul>`);
+    expect(root.querySelectorAll("li.row")[0]).toBe(serverRows[0]);
+    expect(root.querySelectorAll("li.row")[1]).toBe(serverRows[1]);
     if (result.ok) result.value.dispose();
   });
 
