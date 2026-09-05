@@ -154,6 +154,21 @@ describe("client mount entrypoints", () => {
     expect(root.innerHTML).toBe(`<main><ul><li><span>7</span></li></ul></main>`);
   });
 
+  it("executes compiler-generated row component props and stores on the generic list path", () => {
+    const compiled = compileTemplate(
+      `<main><ul><for each={rows} key={row.id}><component name="Row" label={row.label}><li><store count={row.count}/><span>{label}:{count}</span></li></component></for></ul></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const generated = generateClientModule(compiled.value);
+    expect(generated).toContain('components: [{ path: [], name: "Row"');
+    const module = evaluateGeneratedClientModule(generated);
+    const root = document.createElement("div");
+
+    mount(root, module, { rows: [{ id: "a", label: "A", count: 7 }] });
+
+    expect(root.textContent).toBe("A:7");
+  });
+
   it("schedules compiler-generated row hydration boundaries and replays one interaction", async () => {
     const compiled = compileTemplate(
       `<main><ul><for each={rows} key={row.id}><li><button hydrate:id={row.id} hydrate:interaction="click" on:click={select}>{row.label}</button></li></for></ul></main>`,

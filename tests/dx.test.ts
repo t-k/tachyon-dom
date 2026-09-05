@@ -16,6 +16,7 @@ import {
   parseArgs,
   runCli,
   serverCommandMessage,
+  typecheckFile,
 } from "../src/cli";
 import {
   defineApp,
@@ -436,6 +437,7 @@ describe("DX helpers", () => {
     expect(packageJson.scripts?.["check:browser-feature-budgets"]).toBe(
       "node scripts/verify-browser-feature-budgets.mjs",
     );
+    expect(packageJson.scripts?.["check:template-types"]).toBe("node scripts/verify-template-typecheck.mjs");
     expect(packageJson["size-limit"]?.map((entry) => entry.name)).toEqual(publicJsExportNames);
     expect(packageJson["size-limit"]?.some((entry) => entry.name === "td-modules")).toBe(false);
     expect(ci).toContain("workflow_dispatch");
@@ -443,6 +445,7 @@ describe("DX helpers", () => {
     expect(ci).toContain("pnpm check:size");
     expect(ci).toContain("pnpm check:browser-entry");
     expect(ci).toContain("pnpm check:browser-feature-budgets");
+    expect(ci).toContain("pnpm check:template-types");
     expect(ci).toContain("pnpm verify:clean-consumer");
     expect(ci).toContain("pnpm verify:whitespace-types");
     expect(ci).toContain("github.event_name == 'workflow_dispatch'");
@@ -635,9 +638,7 @@ export default () => ({
       expect(code).toContain(`export const pageTitle = "Counter";`);
       expect(code).toContain(`const __tachyonSfcDefaultScope = () => ({`);
       expect(code).toContain(`export { __tachyonSfcDefaultScope as default };`);
-      expect(code).toContain(
-        `const scope = __tachyonResolvedScope ? inputScope : __tachyonCreateScope(inputScope);`,
-      );
+      expect(code).toContain(`const scope = __tachyonResolvedScope ? inputScope : __tachyonCreateScope(inputScope);`);
       expect(code).toContain(`export const templateHtml = "<button> </button>";`);
       expect(code).toContain(`scope.increment`);
     } finally {
@@ -1461,6 +1462,28 @@ export default { selected: false };
       ok: true,
       value: { command: "init", outDir: "app", template: "basic", force: true },
     });
+    expect(parseArgs(["typecheck", "page.td", "--type", "PageScope"])).toEqual({
+      ok: true,
+      value: { command: "typecheck", input: "page.td", scopeType: "PageScope" },
+    });
+  });
+
+  it("runs the same script/template type checker from the CLI", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-typecheck-"));
+    try {
+      const input = path.join(dir, "page.td");
+      await writeFile(
+        input,
+        `<script lang="ts">\nexport const scope = () => ({ title: "Home" });\n</script>\n<main>{missing}</main>`,
+      );
+      const result = await typecheckFile({ input });
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected a type diagnostic.");
+      expect(result.error).toContain("TS2339");
+      expect(result.error).toContain(`${input}:4:8:`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("detects CLI entrypoints through npm bin symlinks", async () => {
@@ -1544,10 +1567,24 @@ export default {
     const code = typeof result === "object" ? result?.code : undefined;
     expect(code).toContain(`export const pageTitle = "Counter";`);
     expect(code).toContain(`const __tachyonSfcDefaultScope = {`);
-    expect(code).toContain(
-      `const scope = __tachyonResolvedScope ? inputScope : __tachyonCreateScope(inputScope);`,
-    );
+    expect(code).toContain(`const scope = __tachyonResolvedScope ? inputScope : __tachyonCreateScope(inputScope);`);
     expect(code).toContain(`cleanups.push(__tachyonDelegate(root, "click", [], scope.increment));`);
+  });
+
+  it("uses the shared template type checker when Vite type checking is enabled", async () => {
+    const plugin = tachyonDom({ typecheck: true });
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+    await expect(
+      plugin.transform.call(
+        {
+          error(error: string): never {
+            throw new Error(error);
+          },
+        } as never,
+        `<script lang="ts">\nexport const scope = () => ({ title: "Home" });\n</script>\n<main>{missing}</main>`,
+        "/src/type-error.td",
+      ),
+    ).rejects.toThrow("TS2339");
   });
 
   it("aliases generated runtime imports so SFC scripts can use named runtime imports", async () => {
@@ -1630,6 +1667,35 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(chunkCode).toContain(`export const templateHtml = "<section><button> </button></section>"`);
     expect(chunkCode).toContain(`export const bind =`);
     expect(chunkCode).not.toContain(`export const hydrationChunks =`);
+  });
+
+  it("generates one lazy chunk request per top-level hydration boundary", async () => {
+    const plugin = tachyonDom();
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+    const context = {
+      error(error: string): never {
+        throw new Error(error);
+      },
+    } as never;
+    const source = `<main><section hydrate>First</section><aside hydrate>Second</aside></main>`;
+
+    const entry = await plugin.transform.call(context, source, "/src/multiple.td");
+    const entryCode = typeof entry === "object" ? String(entry?.code ?? "") : "";
+    expect(entryCode).toContain(`import("/src/multiple.td?client&tachyon-hydration=td-h-0")`);
+    expect(entryCode).toContain(`import("/src/multiple.td?client&tachyon-hydration=td-h-1")`);
+
+    const firstChunk = await plugin.transform.call(
+      context,
+      source,
+      "/src/multiple.td?client&tachyon-hydration=td-h-0",
+    );
+    const firstChunkCode = typeof firstChunk === "object" ? String(firstChunk?.code ?? "") : "";
+    expect(firstChunkCode).toContain(`export const templateHtml = "<section>First</section>"`);
+    expect(firstChunkCode).not.toContain("Second");
+
+    await expect(
+      plugin.transform.call(context, source, "/src/multiple.td?client&tachyon-hydration=td-h-missing"),
+    ).rejects.toThrow("Cannot generate hydration chunk for boundary td-h-missing.");
   });
 
   it("applies one template whitespace policy to every Vite target", async () => {
