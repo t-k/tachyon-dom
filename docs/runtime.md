@@ -99,7 +99,7 @@ void env.value.env.SESSION_SECRET;
 
 The compiler records hydration boundaries with `hydrate:id={id}`. Runtime scheduling chooses when to call `handle.hydrate()`.
 
-`scheduleHydrationBoundaries(root, boundaries, bind, options)` consumes compiled hydration metadata, creates each boundary handle, and schedules it according to the boundary strategy. Static auto-generated ids can be scheduled directly. Expression-based ids can be resolved with `options.resolveId(boundary)`.
+`scheduleHydrationBoundaries(root, boundaries, bind, options)` consumes compiled hydration metadata, creates each boundary handle, and schedules it according to the boundary strategy. Static auto-generated ids can be scheduled directly. Expression-based ids can be resolved with `options.resolveId(boundary)`. Interaction boundaries replay the triggering event by default; pass `replayInteraction: false` when an integration intentionally owns the original event lifecycle.
 
 `createLazyHydrationBoundary(root, id, load, options)` keeps the SSR subtree untouched until hydration is triggered, then loads a boundary chunk once and binds it. Concurrent triggers share the same load promise. A dispose during import prevents the binder from running; a rejected load is reported through `onError` and can be retried. With `replayInteraction: true`, the first interaction is replayed after the asynchronous bind completes without allowing the original event's default action to run twice. The Vite plugin emits one dynamic import per top-level compiler hydration boundary and serves a boundary-only module for that import. The loader is application code and should only import trusted build output.
 
@@ -107,7 +107,7 @@ The compiler records hydration boundaries with `hydrate:id={id}`. Runtime schedu
 
 ## Development Runtime Diagnostics
 
-`tachyon-dom/runtime/diagnostics` is an opt-in development entry. `createRuntimeDiagnostics({ bindings, onEvent })` observes aggregate owner, effect, subscription, and cleanup counts, records lifecycle events, and maps a `(templateId, path)` pair to a source location supplied by the compiler or integration. It retains event data and source descriptors, not runtime owners or DOM nodes. Multiple diagnostic consumers can be attached independently and disposing one does not affect the others. Normal compiler-generated production modules do not import this entry, and the production build flag removes lifecycle counters and hook calls from the signal hot path. Verify the browser metafile before shipping a custom diagnostic integration.
+`tachyon-dom/runtime/diagnostics` is an opt-in development entry. `createRuntimeDiagnostics({ bindings, onEvent })` observes aggregate owner, effect, subscription, and cleanup counts, records lifecycle events, and maps a `(templateId, path)` pair to a source location supplied by the compiler or integration. It retains event data and source descriptors, not runtime owners or DOM nodes. Multiple diagnostic consumers can be attached independently and disposing one does not affect the others. Normal compiler-generated production modules do not import this entry, and the Tachyon Vite plugin automatically defines `__TACHYON_PRODUCTION__` for production builds so lifecycle counters and hook calls are removed from the signal hot path. Verify the browser metafile before shipping a custom diagnostic integration.
 
 ## Template Language Tooling
 
