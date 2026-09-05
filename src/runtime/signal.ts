@@ -27,6 +27,8 @@ type Owner = {
   parentRegistration: CleanupRegistration | undefined;
 };
 
+type OwnerRunner = <T>(fn: () => T) => T;
+
 type CleanupRegistration = {
   owner: Owner;
   cleanup: () => void;
@@ -234,16 +236,36 @@ export const createReactiveErrorScope = (handle: (error: unknown) => void): Reac
   return scope;
 };
 
-export const createRoot = <T>(fn: (dispose: () => void) => T): T => {
+export const createRoot = <T>(
+  fn: (dispose: () => void, runInOwner: OwnerRunner, disposed: () => boolean) => T,
+): T => {
   const parent = currentOwner;
   const owner = createOwner();
   const dispose = (): void => disposeOwner(owner);
+  const runInOwner: OwnerRunner = <Value>(callback: () => Value): Value => {
+    if (owner.disposed) {
+      throw new Error("Cannot run work in a disposed owner.");
+    }
+    const previousOwner = currentOwner;
+    const previousEffectOwner = currentEffectOwner;
+    const previousActiveEffect = activeEffect;
+    currentOwner = owner;
+    currentEffectOwner = undefined;
+    activeEffect = undefined;
+    try {
+      return callback();
+    } finally {
+      currentOwner = previousOwner;
+      currentEffectOwner = previousEffectOwner;
+      activeEffect = previousActiveEffect;
+    }
+  };
   owner.parentRegistration = registerCleanup(parent, dispose);
   currentOwner = owner;
   const previousEffectOwner = currentEffectOwner;
   currentEffectOwner = undefined;
   try {
-    return fn(dispose);
+    return fn(dispose, runInOwner, () => owner.disposed);
   } catch (error) {
     try {
       dispose();
