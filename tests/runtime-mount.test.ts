@@ -1,8 +1,48 @@
 import { describe, expect, it } from "vitest";
+import { compileTemplate, generateClientModule } from "../src/compiler";
 import { hydrate, mount, type ClientTemplateModule } from "../src/runtime/mount";
-import { createSignal, effect } from "../src/runtime/signal";
+import { createRoot, createSignal, effect } from "../src/runtime/signal";
+import { setText, textAt } from "../src/runtime/text";
+
+const evaluateGeneratedClientModule = (code: string): ClientTemplateModule<{ name: string }> => {
+  const executable = code
+    .replace(/^import .*$/gm, "")
+    .replace(/^export default /m, "return ")
+    .replace(/^export const /gm, "const ");
+  return new Function(
+    "__tachyonCreateRoot",
+    "__tachyonSetText",
+    "__tachyonTextAt",
+    `${executable}; return { templateHtml, hydrationBoundaries, bind };`,
+  )(createRoot, setText, textAt) as ClientTemplateModule<{ name: string }>;
+};
 
 describe("client mount entrypoints", () => {
+  it("binds generated client modules against the generated template root", () => {
+    const compiled = compileTemplate(`<p>{name}</p>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value));
+    const root = document.createElement("main");
+
+    mount(root, module, { name: "Alice" });
+
+    expect(root.innerHTML).toBe(`<p>Alice</p>`);
+  });
+
+  it("rejects hydration when the existing root structure does not match", () => {
+    const compiled = compileTemplate(`<p>{name}</p>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value));
+    const root = document.createElement("b");
+    root.textContent = "SSR";
+    const before = root.outerHTML;
+
+    const result = hydrate(root, module, { name: "Alice" });
+
+    expect(result.ok).toBe(false);
+    expect(root.outerHTML).toBe(before);
+  });
+
   it("mounts independent instances and disposes each one once", () => {
     const first = document.createElement("main");
     const second = document.createElement("main");
@@ -10,7 +50,7 @@ describe("client mount entrypoints", () => {
     const module: ClientTemplateModule<{ name: string }> = {
       templateHtml: `<p></p>`,
       bind: (root, scope) => {
-        root.querySelector("p")!.textContent = scope.name;
+        root.textContent = scope.name;
         return () => disposed.push(scope.name);
       },
     };
@@ -51,7 +91,7 @@ describe("client mount entrypoints", () => {
       templateHtml: `<section>client</section>`,
       hydrationBoundaries: [{ id: "panel", idKind: "static" }],
       bind: (element) => {
-        element.querySelector("section")!.setAttribute("data-bound", "yes");
+        element.setAttribute("data-bound", "yes");
       },
     };
 

@@ -63,7 +63,7 @@ const renderForYieldStatements = (
   const statements = [
     `${indent}if (Array.isArray(${eachAccess})) {`,
     indexName
-      ? `${indent}  for (const [${itemName}, ${indexName}] of ${eachAccess}.entries()) {`
+      ? `${indent}  for (const [${indexName}, ${itemName}] of ${eachAccess}.entries()) {`
       : `${indent}  for (const ${itemName} of ${eachAccess}) {`,
   ];
   for (const entry of childPathEntries(node.children, path)) {

@@ -448,12 +448,49 @@ const autoImportScriptHelpers = (code: string, script: TachyonSfcScript | undefi
   return `${imports}\n${code}`;
 };
 
+const isFunctionBoundary = (node: Node): boolean =>
+  ts.isFunctionDeclaration(node) ||
+  ts.isFunctionExpression(node) ||
+  ts.isArrowFunction(node) ||
+  ts.isMethodDeclaration(node) ||
+  ts.isGetAccessorDeclaration(node) ||
+  ts.isSetAccessorDeclaration(node) ||
+  ts.isConstructorDeclaration(node) ||
+  ts.isClassDeclaration(node) ||
+  ts.isClassExpression(node);
+
+const topLevelAwaitNode = (sourceFile: SourceFile): Node | undefined => {
+  let found: Node | undefined;
+  const visit = (node: Node): void => {
+    if (found) return;
+    if (ts.isAwaitExpression(node)) {
+      found = node;
+      return;
+    }
+    if (ts.isForOfStatement(node) && node.awaitModifier) {
+      found = node.awaitModifier;
+      return;
+    }
+    if (isFunctionBoundary(node)) return;
+    ts.forEachChild(node, visit);
+  };
+  sourceFile.statements.forEach(visit);
+  return found;
+};
+
 const setupFactoryCode = (
   content: string,
   script: TachyonSfcScript,
   setupBindings: readonly string[],
 ): Result<string, CompilerError> => {
   const sourceFile = sourceFileFor(content, script);
+  const topLevelAwait = topLevelAwaitNode(sourceFile);
+  if (topLevelAwait) {
+    return err({
+      message: "<script setup> does not support top-level await; move it into an async function.",
+      offset: script.offset + topLevelAwait.getStart(sourceFile),
+    });
+  }
   const imports: string[] = [];
   const body: string[] = [];
   for (const statement of sourceFile.statements) {

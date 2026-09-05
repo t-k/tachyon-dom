@@ -866,6 +866,24 @@ const increment = (): void => {
     }
   });
 
+  it("rejects top-level await in script setup but accepts nested async await", () => {
+    const content = `const value = await loadValue();`;
+    const topLevel = transformSfcScript({ attrs: "setup", content, offset: 0 });
+
+    expect(topLevel.ok).toBe(false);
+    if (topLevel.ok) throw new Error("Expected top-level await to fail.");
+    expect(topLevel.error.message).toContain("top-level await");
+    expect(topLevel.error.offset).toBe(content.indexOf("await"));
+
+    const nested = transformSfcScript({
+      attrs: "setup",
+      content: `const load = async () => await loadValue();`,
+      offset: 0,
+    });
+
+    expect(nested.ok).toBe(true);
+  });
+
   it("creates independent setup state for each client bind invocation", () => {
     const transformed = transformSfcScript({
       attrs: "setup",
