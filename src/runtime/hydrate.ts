@@ -395,6 +395,7 @@ export const scheduleHydration = (
   const listener = (event: Event): void => {
     if (!active) return;
     element.removeEventListener(eventName, listener, true);
+    if (options.replayInteraction && event.cancelable) event.preventDefault();
     trigger(event);
   };
   element.addEventListener(eventName, listener, true);
