@@ -5,12 +5,20 @@ import { createRoot } from "./signal.js";
 export type ClientHydrationDynamicAttribute = {
   path: readonly number[];
   name: string;
+  kind?: "value" | "token";
+};
+
+export type ClientHydrationDynamicRegion = {
+  path: readonly number[];
+  index: number;
+  kind: "list" | "conditional";
 };
 
 export type ClientTemplateModule<Scope extends Record<string, unknown> = Record<string, unknown>> = {
   templateHtml: string;
   hydrationBoundaries?: readonly CompiledHydrationBoundary[];
   hydrationDynamicAttributes?: readonly ClientHydrationDynamicAttribute[];
+  hydrationDynamicRegions?: readonly ClientHydrationDynamicRegion[];
   bind: (root: Element, scope: Scope) => void | (() => void);
 };
 
@@ -80,6 +88,8 @@ const hydrationPathLabel = (path: readonly number[]): string => (path.length ===
 const hydrationAttributeKey = (path: readonly number[], name: string): string =>
   `${path.join(".")}\0${name.toLowerCase()}`;
 
+const hydrationRegionKey = (path: readonly number[]): string => path.join(".");
+
 const hydrationUnsafeExtraNodeError = (node: Node, path: readonly number[]): string | undefined => {
   if (node.nodeType !== Node.ELEMENT_NODE) {
     return undefined;
@@ -106,7 +116,8 @@ const hydrationStructureError = (
   expected: Node,
   actual: Node,
   path: readonly number[],
-  dynamicAttributes: ReadonlySet<string>,
+  dynamicAttributes: ReadonlyMap<string, ClientHydrationDynamicAttribute>,
+  dynamicRegions: ReadonlyMap<string, readonly ClientHydrationDynamicRegion[]>,
 ): string | undefined => {
   const label = hydrationPathLabel(path);
   if (expected.nodeType === Node.ELEMENT_NODE) {
@@ -119,7 +130,14 @@ const hydrationStructureError = (
       return `Hydration structure mismatch at ${label}: expected <${tagNameFor(expectedElement)}>, found <${tagNameFor(actualElement)}>.`;
     }
     for (const attribute of Array.from(expectedElement.attributes)) {
-      if (actualElement.getAttribute(attribute.name) !== attribute.value) {
+      const dynamicAttribute = dynamicAttributes.get(hydrationAttributeKey(path, attribute.name));
+      if (dynamicAttribute?.kind === "token" && attribute.name.toLowerCase() === "class") {
+        const actualTokens = new Set((actualElement.getAttribute(attribute.name) ?? "").split(/\s+/).filter(Boolean));
+        const expectedTokens = attribute.value.split(/\s+/).filter(Boolean);
+        if (expectedTokens.some((token) => !actualTokens.has(token))) {
+          return `Hydration structure mismatch at ${label}: attribute ${attribute.name} does not match.`;
+        }
+      } else if (actualElement.getAttribute(attribute.name) !== attribute.value) {
         return `Hydration structure mismatch at ${label}: attribute ${attribute.name} does not match.`;
       }
     }
@@ -133,10 +151,16 @@ const hydrationStructureError = (
     }
     const expectedChildren = Array.from(expected.childNodes);
     const actualChildren = hydrationChildNodes(actual);
+    const regions = dynamicRegions.get(hydrationRegionKey(path)) ?? [];
+    const regionByIndex = new Map(regions.map((region) => [region.index, region]));
     let actualIndex = 0;
     let allowsExtraChildren = false;
     for (let expectedIndex = 0; expectedIndex < expectedChildren.length; expectedIndex++) {
       const expectedChild = expectedChildren[expectedIndex] as Node;
+      const region = regionByIndex.get(expectedIndex);
+      if (region) {
+        allowsExtraChildren = true;
+      }
       if (expectedChild.nodeType === Node.COMMENT_NODE) {
         allowsExtraChildren = true;
         continue;
@@ -150,13 +174,20 @@ const hydrationStructureError = (
         let matched = false;
         while (actualIndex < actualChildren.length) {
           const candidate = actualChildren[actualIndex] as Node;
-          const candidateError = hydrationStructureError(expectedChild, candidate, childPath, dynamicAttributes);
+          const candidateError = hydrationStructureError(
+            expectedChild,
+            candidate,
+            childPath,
+            dynamicAttributes,
+            dynamicRegions,
+          );
           actualIndex++;
           if (!candidateError) {
             matched = true;
             break;
           }
           if (
+            !region &&
             expectedChild.nodeType === Node.ELEMENT_NODE &&
             candidate.nodeType === Node.ELEMENT_NODE &&
             tagNameFor(expectedChild as Element) === tagNameFor(candidate as Element)
@@ -171,14 +202,15 @@ const hydrationStructureError = (
         }
         continue;
       }
-      const mismatch = hydrationStructureError(expectedChild, actualChild, childPath, dynamicAttributes);
+      const mismatch = hydrationStructureError(expectedChild, actualChild, childPath, dynamicAttributes, dynamicRegions);
       if (mismatch) return mismatch;
       actualIndex++;
     }
-    if (!allowsExtraChildren && actualIndex < actualChildren.length && expectedChildren.length > 0) {
+    const trailingRegion = regions.some((region) => region.index >= expectedChildren.length);
+    if (!allowsExtraChildren && !trailingRegion && actualIndex < actualChildren.length) {
       return `Hydration structure mismatch at ${label}: found an unexpected child.`;
     }
-    if (allowsExtraChildren) {
+    if (allowsExtraChildren || trailingRegion) {
       for (let index = actualIndex; index < actualChildren.length; index++) {
         const extraError = hydrationUnsafeExtraNodeError(actualChildren[index] as Node, [...path, index]);
         if (extraError) return extraError;
@@ -245,10 +277,20 @@ export const hydrate = <Scope extends Record<string, unknown>>(
       message: `Hydration structure mismatch: expected <${expectedRoot ? tagNameFor(expectedRoot) : "element"}>.`,
     });
   }
-  const dynamicAttributes = new Set(
-    (module.hydrationDynamicAttributes ?? []).map((attribute) => hydrationAttributeKey(attribute.path, attribute.name)),
+  const dynamicAttributes = new Map(
+    (module.hydrationDynamicAttributes ?? []).map((attribute) => [
+      hydrationAttributeKey(attribute.path, attribute.name),
+      attribute,
+    ]),
   );
-  const structureError = hydrationStructureError(expectedRoot, bindRoot, [], dynamicAttributes);
+  const dynamicRegions = new Map<string, ClientHydrationDynamicRegion[]>();
+  for (const region of module.hydrationDynamicRegions ?? []) {
+    const key = hydrationRegionKey(region.path);
+    const regions = dynamicRegions.get(key) ?? [];
+    regions.push(region);
+    dynamicRegions.set(key, regions);
+  }
+  const structureError = hydrationStructureError(expectedRoot, bindRoot, [], dynamicAttributes, dynamicRegions);
   if (structureError) {
     return err({ message: structureError });
   }

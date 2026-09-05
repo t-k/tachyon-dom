@@ -448,9 +448,12 @@ export const generateTachyonModuleTypes = (
     ? `type __TachyonAssertScope<T extends __TachyonRequiredScope> = T;\nexport type ${typeName} = __TachyonAssertScope<ReturnType<typeof scope>>;`
     : `export type ${typeName} = __TachyonRequiredScope;`;
   const templateExports = [
+    `type __TachyonHydrationDynamicAttribute = { path: readonly number[]; name: string; kind?: "value" | "token" };`,
+    `type __TachyonHydrationDynamicRegion = { path: readonly number[]; index: number; kind: "list" | "conditional" };`,
     `export declare const templateHtml: string;`,
     `export declare const hydrationBoundaries: unknown[];`,
-    `export declare const hydrationDynamicAttributes: unknown[];`,
+    `export declare const hydrationDynamicAttributes: readonly __TachyonHydrationDynamicAttribute[];`,
+    `export declare const hydrationDynamicRegions: readonly __TachyonHydrationDynamicRegion[];`,
     `export declare const componentBoundaries: unknown[];`,
     `export declare const bind: (root: Element, scope: ${typeName}) => void | (() => void);`,
   ].join("\n");

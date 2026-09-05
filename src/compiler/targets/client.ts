@@ -123,6 +123,7 @@ const lowerIf = (node: ElementNode, path: number[], context: LoweringContext): s
     bindings: [],
     stores: [],
     hydrationBoundaries: [],
+    hydrationDynamicRegions: [],
     components: [],
   };
   const children = renderableChildren(node);
@@ -151,6 +152,7 @@ const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
     bindings: [],
     stores: [],
     hydrationBoundaries: [],
+    hydrationDynamicRegions: [],
     components: [],
   };
   const children = renderableChildren(node);
@@ -261,9 +263,13 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
   let children = "";
   let domIndex = 0;
   for (const child of node.children) {
-    if (isForNode(child)) {
+    if (child.type === "element" && child.tagName === "for") {
+      context.hydrationDynamicRegions.push({ path: [...path], index: domIndex, kind: "list" });
       context.bindings.push(lowerList(child, path));
       continue;
+    }
+    if (child.type === "element" && child.tagName === "if") {
+      context.hydrationDynamicRegions.push({ path: [...path], index: domIndex, kind: "conditional" });
     }
     if (isStoreNode(child)) {
       addStoreDefinitions(child, context);
@@ -290,6 +296,7 @@ export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client
     bindings: [],
     stores: [],
     hydrationBoundaries: [],
+    hydrationDynamicRegions: [],
     components: [],
   };
   const templateHtml = lowerElement(root, [], context);
@@ -298,6 +305,7 @@ export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client
     bindings: context.bindings,
     stores: context.stores,
     hydrationBoundaries: context.hydrationBoundaries,
+    hydrationDynamicRegions: context.hydrationDynamicRegions,
     components: context.components,
   };
 };
@@ -376,7 +384,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       return [{ path: binding.path, name: binding.name }];
     }
     if (binding.kind === "class") {
-      return [{ path: binding.path, name: "class" }];
+      return [{ path: binding.path, name: "class", kind: "token" as const }];
     }
     if (binding.kind === "style") {
       return [{ path: binding.path, name: "style" }];
@@ -456,6 +464,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
   lines.push(`export const hydrationDynamicAttributes = ${JSON.stringify(hydrationDynamicAttributes)};`);
+  lines.push(`export const hydrationDynamicRegions = ${JSON.stringify(template.client.hydrationDynamicRegions)};`);
   lines.push(`export const componentBoundaries = ${JSON.stringify(template.client.components)};`);
   if (hasDefaultScope) {
     lines.push(`const __tachyonCreateScope = (inputScope = {}) => {`);

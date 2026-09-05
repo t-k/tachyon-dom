@@ -132,6 +132,12 @@ export type HydrationBoundary = {
   rootMargin?: string;
 };
 
+export type HydrationDynamicRegion = {
+  path: number[];
+  index: number;
+  kind: "list" | "conditional";
+};
+
 export type ComponentProp = {
   name: string;
   expression: string;
@@ -185,6 +191,7 @@ export type CompiledTemplate = {
     bindings: ClientBinding[];
     stores: StoreDefinition[];
     hydrationBoundaries: HydrationBoundary[];
+    hydrationDynamicRegions: HydrationDynamicRegion[];
     components: ComponentBoundary[];
   };
 };
@@ -193,6 +200,7 @@ export type LoweringContext = {
   bindings: ClientBinding[];
   stores: StoreDefinition[];
   hydrationBoundaries: HydrationBoundary[];
+  hydrationDynamicRegions: HydrationDynamicRegion[];
   components: ComponentBoundary[];
 };
 

@@ -105,7 +105,7 @@ describe("client mount entrypoints", () => {
     if (!compiled.ok) throw new Error(compiled.error.message);
     const module: ClientTemplateModule = {
       templateHtml: compiled.value.client.templateHtml,
-      hydrationDynamicAttributes: compiled.value.client.hydrationDynamicAttributes,
+      hydrationDynamicAttributes: [{ path: [], name: "class", kind: "token" }],
       bind: () => undefined,
     };
     const root = document.createElement("main");

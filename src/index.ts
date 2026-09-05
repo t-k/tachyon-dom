@@ -35,6 +35,7 @@ export type {
 } from "./runtime/router.js";
 export type {
   ClientHydrationDynamicAttribute,
+  ClientHydrationDynamicRegion,
   ClientTemplateModule,
   HydrateError,
   MountHandle,
