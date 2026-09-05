@@ -185,7 +185,7 @@ export const hydrationBoundaryFor = (node: ElementNode, path: readonly number[])
     return undefined;
   }
   const boundary: HydrationBoundary = explicitId
-    ? { path: [...path], id: explicitId }
+    ? { path: [...path], id: explicitId, idKind: "expression" }
     : { path: [...path], id: automaticHydrationId(path), idKind: "static" };
   if (!strategyAttr) {
     return boundary;

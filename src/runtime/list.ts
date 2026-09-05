@@ -1,6 +1,6 @@
 import { setClassPresence } from "./class.js";
 import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
-import { setText } from "./text.js";
+import { setText, textAt } from "./text.js";
 import { bindControl, setControlValue, writeModelValue } from "./form.js";
 import { mountConditional } from "./conditional.js";
 import { createSignal, createStore, effect, onOwnerCleanup, read, untrack, type Signal } from "./signal.js";
@@ -235,15 +235,35 @@ const readHandler = (scope: Record<string, unknown>, binding: EventBinding): unk
   binding.read ? binding.read(scope) : readPath(scope, binding.handler);
 
 const readExpression = (scope: Record<string, unknown>, expression: string, reader?: ExpressionReader): unknown =>
-  read(reader ? reader(scope) : readPath(scope, expression));
+  read(reader ? reader(scope) : readLiteralExpression(scope, expression));
+
+const readLiteralExpression = (scope: Record<string, unknown>, expression: string): unknown => {
+  const value = expression.trim();
+  if (value === "undefined") return undefined;
+  if (value === "null") return null;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/.test(value)) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return readPath(scope, expression);
+    }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1).replaceAll("\\'", "'").replaceAll('\\"', '"').replaceAll("\\\\", "\\");
+  }
+  return readPath(scope, expression);
+};
 
 const sourceScopeSnapshotFor = (scope: Record<string, unknown> | undefined): Map<string, unknown> =>
   new Map(scope ? Object.keys(scope).map((key) => [key, scope[key]] as const) : []);
 
-const sourceScopeChanged = (
-  previous: ReadonlyMap<string, unknown>,
-  next: ReadonlyMap<string, unknown>,
-): boolean => {
+const sourceScopeChanged = (previous: ReadonlyMap<string, unknown>, next: ReadonlyMap<string, unknown>): boolean => {
   if (previous.size !== next.size) return true;
   for (const [key, value] of previous) {
     if (!next.has(key) || !Object.is(next.get(key), value)) return true;
@@ -254,7 +274,10 @@ const sourceScopeChanged = (
 const localScopeKeysFor = (options: KeyedListOptions): ReadonlySet<string> =>
   new Set([
     ...(options.stores ?? []).map((store) => store.name),
-    ...(options.components ?? []).flatMap((component) => component.stores.map((store) => store.name)),
+    ...(options.components ?? []).flatMap((component) => [
+      ...component.props.map((prop) => prop.name),
+      ...component.stores.map((store) => store.name),
+    ]),
   ]);
 
 const scopedItem = (
@@ -311,13 +334,36 @@ const nodeAt = (root: Node, path: readonly number[]): Node => {
   return current;
 };
 
+const isHydrationBoundaryMarker = (node: Node): boolean =>
+  node.nodeType === Node.COMMENT_NODE && (node.nodeValue?.startsWith("tachyon-hydrate:") ?? false);
+
+const nodeAtIgnoringHydrationMarkers = (root: Node, path: readonly number[]): Node => {
+  let current = root;
+  for (const index of path) {
+    const children = Array.from(current.childNodes).filter((child) => !isHydrationBoundaryMarker(child));
+    current = children[index] as Node;
+  }
+  return current;
+};
+
 const nodeAtRecord = (record: RowRecord, path: readonly number[]): Node => {
   if (record.nodes.length <= 1) {
-    return nodeAt(record.element, path);
+    return nodeAtIgnoringHydrationMarkers(record.element, path);
   }
   const [firstIndex, ...rest] = path;
   const root = record.nodes[firstIndex ?? 0] ?? record.element;
-  return nodeAt(root, rest);
+  return nodeAtIgnoringHydrationMarkers(root, rest);
+};
+
+const textAtRecord = (record: RowRecord, path: readonly number[]): Text => {
+  const node = nodeAtRecord(record, path);
+  if (node.nodeType === Node.COMMENT_NODE && node.nodeValue === "td:text") {
+    return textAt(node, []);
+  }
+  if (node.nodeType !== Node.TEXT_NODE) {
+    throw new TypeError(`Text binding path ${path.join(".")} resolved to ${node.nodeName} instead of a Text node.`);
+  }
+  return node as Text;
 };
 
 const createTemplate = (templateHtml: string): HTMLTemplateElement => {
@@ -459,7 +505,7 @@ const applyRowBinding = (
   if (binding.kind === "text") {
     const value = readBinding(scope, binding);
     if (shouldApplyValue(record, index, value)) {
-      setText(nodeAtRecord(record, binding.path) as Text, value);
+      setText(textAtRecord(record, binding.path), value);
     }
   } else if (binding.kind === "class") {
     const value = readBinding(scope, binding);
@@ -528,11 +574,7 @@ const bindRowBindings = (
   );
 };
 
-const bindRowEvents = (
-  record: RowRecord,
-  bindings: readonly Binding[],
-  cleanups: Array<() => void>,
-): void => {
+const bindRowEvents = (record: RowRecord, bindings: readonly Binding[], cleanups: Array<() => void>): void => {
   const delegateKeys = new Set<string>();
   for (const binding of bindings) {
     if (binding.kind !== "event") {
@@ -558,11 +600,7 @@ const bindRowEvents = (
   }
 };
 
-const bindRowControls = (
-  record: RowRecord,
-  bindings: readonly Binding[],
-  cleanups: Array<() => void>,
-): void => {
+const bindRowControls = (record: RowRecord, bindings: readonly Binding[], cleanups: Array<() => void>): void => {
   for (const binding of bindings) {
     if (binding.kind !== "model") {
       continue;
@@ -664,15 +702,11 @@ const createRecord = (
       if (resolvedId === undefined || resolvedId === null) continue;
       const boundaryPath = boundary.path ?? [];
       const boundaryBindings = options.bindings.filter((binding) => bindingWithin(boundaryPath, binding.path));
-      const handle = createHydrationBoundary(
-        record.element.parentElement ?? record.element,
-        String(resolvedId),
-        () => {
-          const cleanups: Array<() => void> = [];
-          bindRow(record, options, boundaryBindings, cleanups);
-          return () => runCleanups(cleanups);
-        },
-      );
+      const handle = createHydrationBoundary(record.element.parentElement ?? record.element, String(resolvedId), () => {
+        const cleanups: Array<() => void> = [];
+        bindRow(record, options, boundaryBindings, cleanups);
+        return () => runCleanups(cleanups);
+      });
       if (handle.ok) {
         record.hydrationBoundaries.push(handle.value);
         record.hydrationCleanups.push(

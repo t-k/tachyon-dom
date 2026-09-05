@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
 import { hydrate, mount, type ClientTemplateModule } from "../src/runtime/mount";
 import { cleanupTextKeyedList, mountTextKeyedList } from "../src/runtime/list-text";
@@ -19,14 +19,9 @@ const evaluateGeneratedClientModule = (code: string): ClientTemplateModule<Recor
     "__tachyonMountTextKeyedList",
     "__tachyonMountKeyedList",
     `${executable}; return { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind };`,
-  )(
-    createRoot,
-    setText,
-    textAt,
-    cleanupTextKeyedList,
-    mountTextKeyedList,
-    mountKeyedList,
-  ) as ClientTemplateModule<Record<string, unknown>>;
+  )(createRoot, setText, textAt, cleanupTextKeyedList, mountTextKeyedList, mountKeyedList) as ClientTemplateModule<
+    Record<string, unknown>
+  >;
 };
 
 describe("client mount entrypoints", () => {
@@ -98,7 +93,10 @@ describe("client mount entrypoints", () => {
     if (!compiled.ok) throw new Error(compiled.error.message);
     const root = document.createElement("main");
     root.innerHTML = renderServerTemplate(compiled.value, {
-      items: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+      items: [
+        { id: "a", name: "A" },
+        { id: "b", name: "B" },
+      ],
     });
 
     const result = hydrate(root, {
@@ -120,12 +118,18 @@ describe("client mount entrypoints", () => {
     const module = evaluateGeneratedClientModule(generateClientModule(compiled.value));
     const root = document.createElement("main");
     root.innerHTML = renderServerTemplate(compiled.value, {
-      items: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+      items: [
+        { id: "a", name: "A" },
+        { id: "b", name: "B" },
+      ],
     });
     const serverRows = Array.from(root.querySelectorAll("li.row"));
 
     const result = hydrate(root, module, {
-      items: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+      items: [
+        { id: "a", name: "A" },
+        { id: "b", name: "B" },
+      ],
     });
 
     expect(result.ok).toBe(true);
@@ -148,6 +152,28 @@ describe("client mount entrypoints", () => {
     mount(root, module, { rows: [{ id: "a", count: 7 }] });
 
     expect(root.innerHTML).toBe(`<main><ul><li><span>7</span></li></ul></main>`);
+  });
+
+  it("schedules compiler-generated row hydration boundaries and replays one interaction", async () => {
+    const compiled = compileTemplate(
+      `<main><ul><for each={rows} key={row.id}><li><button hydrate:id={row.id} hydrate:interaction="click" on:click={select}>{row.label}</button></li></for></ul></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value));
+    const root = document.createElement("div");
+    const select = vi.fn();
+    const scope = { rows: [{ id: "a", label: "A" }], select };
+    root.innerHTML = renderServerTemplate(compiled.value, scope);
+    const button = root.querySelector("button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Missing row button.");
+
+    const result = hydrate(root, module, scope);
+    expect(result.ok).toBe(true);
+    button.click();
+    await Promise.resolve();
+
+    expect(select).toHaveBeenCalledTimes(1);
+    if (result.ok) result.value.dispose();
   });
 
   it("compares static class tokens while allowing compiler-declared class tokens", () => {

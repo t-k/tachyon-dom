@@ -322,16 +322,18 @@ export const scheduleHydration = (
     try {
       const hydration = handle.hydrate();
       if (options.replayInteraction && event) {
-        void Promise.resolve(hydration)
-          .then(() => {
-            if (handle.hydrated()) {
-              const target = event.target instanceof Node && handle.element().contains(event.target)
-                ? event.target
-                : handle.element();
-              target.dispatchEvent(cloneInteractionEvent(event));
-            }
-          })
-          .catch((error: unknown) => options.onError?.(hydrationErrorFor(error)));
+        const replay = (): void => {
+          if (handle.hydrated()) {
+            const target =
+              event.target instanceof Node && handle.element().contains(event.target) ? event.target : handle.element();
+            target.dispatchEvent(cloneInteractionEvent(event));
+          }
+        };
+        if (hydration && typeof hydration.then === "function") {
+          void hydration.then(replay).catch((error: unknown) => options.onError?.(hydrationErrorFor(error)));
+        } else {
+          replay();
+        }
       } else if (hydration && typeof hydration.then === "function") {
         void hydration.catch((error: unknown) => options.onError?.(hydrationErrorFor(error)));
       }
@@ -400,7 +402,10 @@ export const scheduleHydration = (
   const listener = (event: Event): void => {
     if (!active) return;
     element.removeEventListener(eventName, listener, true);
-    if (options.replayInteraction && event.cancelable) event.preventDefault();
+    if (options.replayInteraction) {
+      event.stopImmediatePropagation();
+      if (event.cancelable) event.preventDefault();
+    }
     trigger(event);
   };
   element.addEventListener(eventName, listener, true);

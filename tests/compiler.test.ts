@@ -1097,7 +1097,7 @@ describe("HTML-first compiler", () => {
       throw new Error(result.error.message);
     }
 
-    expect(result.value.client.hydrationBoundaries).toEqual([{ path: [0], id: "islandId" }]);
+    expect(result.value.client.hydrationBoundaries).toEqual([{ path: [0], id: "islandId", idKind: "expression" }]);
     expect(result.value.client.templateHtml).toBe(`<main><section><button> </button></section></main>`);
     expect(renderServerTemplate(result.value, { islandId: "cart", label: "Buy" })).toBe(
       `<main><!--tachyon-hydrate:cart:start--><section><button>Buy</button></section><!--tachyon-hydrate:cart:end--></main>`,
@@ -1253,8 +1253,7 @@ describe("HTML-first compiler", () => {
   });
 
   it("carries row-local component, store, and hydration metadata", () => {
-    const source =
-      `<main><ul><for each={rows} key={row.id} as="row"><component name="Row" label={row.label}><li><store count={row.count}/><span hydrate:id={row.id}>{label}:{count}</span></li></component></for></ul></main>`;
+    const source = `<main><ul><for each={rows} key={row.id} as="row"><component name="Row" label={row.label}><li><store count={row.count}/><span hydrate:id={row.id}>{label}:{count}</span></li></component></for></ul></main>`;
     const result = compileTemplate(source);
 
     expect(result.ok).toBe(true);
@@ -1267,6 +1266,23 @@ describe("HTML-first compiler", () => {
       hydrationBoundaries: [{ id: "row.id" }],
     });
     expect(generateClientModule(result.value)).toContain(`hydrationBoundaries`);
+  });
+
+  it("carries conditional-local stores, components, and hydration metadata", () => {
+    const source = `<main><if test={visible}><component name="Panel" title={title}><section hydrate:id={boundaryId} hydrate:interaction="click"><span>{title}</span><store count={initial}/></section></component></if></main>`;
+    const result = compileTemplate(source);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    const conditional = result.value.client.bindings.find((binding) => binding.kind === "if");
+    expect(conditional).toMatchObject({
+      kind: "if",
+      stores: [{ name: "count", initial: "initial" }],
+      components: [{ name: "Panel", props: [{ name: "title", expression: "title" }] }],
+      hydrationBoundaries: [
+        { path: [], id: "boundaryId", idKind: "expression", strategy: "interaction", interaction: "click" },
+      ],
+    });
   });
 
   it("rejects automatic row-local hydration ids that cannot be unique", () => {
@@ -1291,7 +1307,9 @@ describe("HTML-first compiler", () => {
   });
 
   it("emits the opt-in reference update policy for immutable keyed rows", () => {
-    const result = compileTemplate(`<ul><for each={rows} key={row.id} update="reference"><li>{row.label}</li></for></ul>`);
+    const result = compileTemplate(
+      `<ul><for each={rows} key={row.id} update="reference"><li>{row.label}</li></for></ul>`,
+    );
     if (!result.ok) throw new Error(result.error.message);
 
     const binding = result.value.client.bindings.find((candidate) => candidate.kind === "list");
@@ -1459,7 +1477,7 @@ describe("HTML-first compiler", () => {
     expect(result.value.ir.directives).toEqual([
       { kind: "store", path: [0], stores: [{ name: "count", initial: "initialCount" }] },
       { kind: "component", path: [1], name: "CounterPanel", props: [], stores: [] },
-      { kind: "hydrate", path: [1], id: "islandId" },
+      { kind: "hydrate", path: [1], id: "islandId", idKind: "expression" },
       { kind: "if", path: [1, 0], test: "active" },
       { kind: "event", path: [1, 0, 0], eventName: "click", handler: "increment" },
       { kind: "for", path: [1, 1, 0], each: "rows", key: "row.id", itemName: "row" },
@@ -1605,7 +1623,7 @@ describe("HTML-first compiler", () => {
 
     const code = generateServerModule(result.value);
 
-    expect(code).toContain(`export const hydrationBoundaries = [{"path":[0],"id":"islandId"}];`);
+    expect(code).toContain(`export const hydrationBoundaries = [{"path":[0],"id":"islandId","idKind":"expression"}];`);
     expect(code).toContain(`export const renderHydrationState = (id, state) =>`);
 
     const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {

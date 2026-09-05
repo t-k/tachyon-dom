@@ -116,6 +116,59 @@ describe("mountConditional", () => {
     stringify.mockRestore();
   });
 
+  it("owns conditional-local stores and component props without copying them from the parent", () => {
+    document.body.innerHTML = `<section><!----></section>`;
+    const root = document.querySelector("section");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const scope = { initial: 3, count: 99, title: "Parent" };
+    const options = {
+      templateHtml: `<article><span> </span><strong> </strong></article>`,
+      stores: [{ name: "count", initial: "initial" }],
+      components: [
+        {
+          path: [],
+          name: "Panel",
+          props: [{ name: "title", expression: "title" }],
+          stores: [],
+        },
+      ],
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "count" },
+        { kind: "text" as const, path: [1, 0], expression: "title" },
+      ],
+    };
+
+    mountConditional(root, [0], true, scope, options);
+    scope.count = 7;
+    scope.title = "Changed";
+    mountConditional(root, [0], true, scope, options);
+
+    expect(root.textContent).toBe("3Parent");
+  });
+
+  it("defers conditional boundary bindings, replays interaction, and disposes them on hide", async () => {
+    document.body.innerHTML = `<section><!----></section>`;
+    const root = document.querySelector("section");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const calls: string[] = [];
+    const scope = { save: () => calls.push("save") };
+    const options = {
+      templateHtml: `<!--tachyon-hydrate:panel:start--><button>Save</button><!--tachyon-hydrate:panel:end-->`,
+      hydrationBoundaries: [{ id: "panel", idKind: "static" as const, path: [] }],
+      bindings: [{ kind: "event" as const, path: [1], eventName: "click", handler: "save" }],
+    };
+
+    mountConditional(root, [0], true, scope, options);
+    const button = root.querySelector("button");
+    button?.click();
+    await Promise.resolve();
+
+    expect(calls).toEqual(["save"]);
+    mountConditional(root, [0], false, scope, options);
+    button?.click();
+    expect(calls).toEqual(["save"]);
+  });
+
   it("keeps event handlers current when a visible conditional is reused", () => {
     document.body.innerHTML = `<section><!----></section>`;
     const root = document.querySelector("section");

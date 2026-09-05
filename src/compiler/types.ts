@@ -114,6 +114,9 @@ export type ConditionalBinding = {
   test: string;
   templateHtml: string;
   bindings: ClientBinding[];
+  stores?: StoreDefinition[];
+  hydrationBoundaries?: HydrationBoundary[];
+  components?: ComponentBoundary[];
 };
 
 export type ClientBinding =

@@ -162,6 +162,9 @@ const lowerIf = (node: ElementNode, path: number[], context: LoweringContext): s
     test: attrExpression(node, "test") ?? "false",
     templateHtml,
     bindings: childContext.bindings,
+    ...(childContext.stores.length > 0 ? { stores: childContext.stores } : {}),
+    ...(childContext.hydrationBoundaries.length > 0 ? { hydrationBoundaries: childContext.hydrationBoundaries } : {}),
+    ...(childContext.components.length > 0 ? { components: childContext.components } : {}),
   });
   return "<!---->";
 };
@@ -561,11 +564,14 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     );
     lines.push(`};`);
   }
-  lines.push(
-    `export const bind = (root, inputScope = {}, __tachyonSkipHydration = false, __tachyonResolvedScope = false) => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`,
-  );
+  const bindSignature = hasHydrationChunks
+    ? `(root, inputScope = {}, __tachyonSkipHydration = false, __tachyonResolvedScope = false)`
+    : `(root, inputScope = {})`;
+  lines.push(`export const bind = ${bindSignature} => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`);
   if (hasDefaultScope) {
-    lines.push(`  const scope = __tachyonResolvedScope ? inputScope : __tachyonCreateScope(inputScope);`);
+    lines.push(
+      `  const scope = ${hasHydrationChunks ? "__tachyonResolvedScope ? inputScope : " : ""}__tachyonCreateScope(inputScope);`,
+    );
   } else {
     lines.push(`  const scope = inputScope;`);
   }
@@ -584,8 +590,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   for (const binding of bindings) {
     const bindingInHydrationBoundary =
       hasHydrationChunks &&
-      template.client.hydrationBoundaries.some(
-        (boundary) => boundary.path.every((part, index) => binding.path[index] === part),
+      template.client.hydrationBoundaries.some((boundary) =>
+        boundary.path.every((part, index) => binding.path[index] === part),
       );
     const bindingStart = lines.length;
     if (bindingInHydrationBoundary) lines.push(`  if (!__tachyonSkipHydration) {`);
@@ -704,7 +710,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (hasHydrationChunks) {
     lines.push(`const __tachyonLoadHydrationChunk = (loader, scope) => Promise.resolve(loader()).then((module) => ({`);
     lines.push(`  bind: (element) => {`);
-    lines.push(`    const binder = typeof module === "function" ? module : typeof module.bind === "function" ? module.bind : module.default;`);
+    lines.push(
+      `    const binder = typeof module === "function" ? module : typeof module.bind === "function" ? module.bind : module.default;`,
+    );
     lines.push(`    return typeof binder === "function" ? binder(element, scope) : undefined;`);
     lines.push(`  },`);
     lines.push(`}));`);
@@ -793,6 +801,9 @@ const conditionalSignature = (binding: ConditionalBinding): string =>
     test: binding.test,
     templateHtml: binding.templateHtml,
     bindings: binding.bindings,
+    stores: binding.stores ?? [],
+    hydrationBoundaries: binding.hydrationBoundaries ?? [],
+    components: binding.components ?? [],
   })}`;
 
 const bindingReadExpression = (expression: string): string => expressionToScopeAccess(expression, new Set(), "scope");
@@ -814,9 +825,8 @@ const serializeComponentBoundary = (component: NonNullable<ListBinding["componen
 const serializeStoreDefinitions = (stores: readonly StoreDefinition[]): string =>
   `[${stores.map(serializeStoreDefinition).join(", ")}]`;
 
-const serializeComponentBoundaries = (
-  components: readonly NonNullable<ListBinding["components"]>[number][],
-): string => `[${components.map(serializeComponentBoundary).join(", ")}]`;
+const serializeComponentBoundaries = (components: readonly NonNullable<ListBinding["components"]>[number][]): string =>
+  `[${components.map(serializeComponentBoundary).join(", ")}]`;
 
 const serializeListRowBinding = (binding: ListBinding["bindings"][number]): string => {
   const fields: string[] = [`kind: ${JSON.stringify(binding.kind)}`, `path: ${JSON.stringify(binding.path)}`];
@@ -873,6 +883,9 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     fields.push(`test: ${JSON.stringify(binding.test)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.test)}`);
     fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
+    fields.push(`stores: ${serializeStoreDefinitions(binding.stores ?? [])}`);
+    fields.push(`hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])}`);
+    fields.push(`components: ${serializeComponentBoundaries(binding.components ?? [])}`);
     fields.push(`bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}]`);
   }
   return `{ ${fields.join(", ")} }`;
@@ -930,6 +943,9 @@ const emitConditionalBinding = (
     `  const ${optionsName} = {`,
     `    signature: ${JSON.stringify(conditionalSignature(binding))},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
+    `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
+    `    hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])},`,
+    `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
     `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
     `  };`,
   ].join("\n");

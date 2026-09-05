@@ -176,6 +176,21 @@ describe("mountKeyedList", () => {
     expect(root.textContent).toBe("0");
   });
 
+  it("evaluates literal row store initializers when no generated reader is supplied", () => {
+    const root = document.createElement("ul");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      stores: [{ name: "count", initial: "0" }],
+      bindings: [{ kind: "text" as const, path: [0], expression: "count" }],
+    };
+
+    mountKeyedList(root, [], [{ id: "a" }], options);
+
+    expect(root.textContent).toBe("0");
+  });
+
   it("refreshes a reference-policy row when its index changes", () => {
     const root = document.createElement("ul");
     const options = {
