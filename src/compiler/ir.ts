@@ -282,11 +282,11 @@ const validateTree = (node: TemplateNode, hydrateIds: Set<string>, insideFor = f
     return specialResult;
   }
   const hydrateBoundary = hydrationBoundaryFor(node, []);
-  if (insideFor && hydrateBoundary) {
-    return semanticError("Row-local hydration metadata inside <for> is not supported.", openingTagSpan(node));
-  }
-  if (insideFor && (node.tagName === "component" || node.tagName === "store")) {
-    return semanticError(`Row-local <${node.tagName}> metadata inside <for> is not supported.`, openingTagSpan(node));
+  if (insideFor && hydrateBoundary?.idKind === "static") {
+    return semanticError(
+      "Automatic row-local hydration ids are not unique; use hydrate:id={row.id} or another row-scoped expression.",
+      openingTagSpan(node),
+    );
   }
   if (hydrateBoundary && hydrateBoundary.idKind !== "static") {
     if (hydrateIds.has(hydrateBoundary.id)) {

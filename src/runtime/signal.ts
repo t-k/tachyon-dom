@@ -35,6 +35,26 @@ type CleanupRegistration = {
   next: CleanupRegistration | undefined;
 };
 
+export type RuntimeDiagnosticsSnapshot = {
+  owners: number;
+  effects: number;
+  subscriptions: number;
+  cleanups: number;
+};
+
+export type RuntimeDiagnosticsEvent = {
+  type:
+    | "owner-created"
+    | "owner-disposed"
+    | "effect-created"
+    | "effect-disposed"
+    | "subscription-changed"
+    | "cleanup-changed";
+  snapshot: RuntimeDiagnosticsSnapshot;
+};
+
+type RuntimeDiagnosticsObserver = (event: RuntimeDiagnosticsEvent) => void;
+
 const signalBrand = Symbol("tachyon.signal");
 
 let activeEffect: EffectRunner | undefined;
@@ -43,15 +63,48 @@ let currentEffectOwner: Owner | undefined;
 let currentErrorOwner: ReactiveErrorOwner | undefined;
 let batchDepth = 0;
 let flushing = false;
+let runtimeOwners = 0;
+let runtimeEffects = 0;
+let runtimeSubscriptions = 0;
+let runtimeCleanups = 0;
+let runtimeDiagnosticsObserver: RuntimeDiagnosticsObserver | undefined;
 const pendingComputedEffects = new Set<EffectRunner>();
 const pendingEffects = new Set<EffectRunner>();
 
-const createOwner = (): Owner => ({
-  disposed: false,
-  head: undefined,
-  tail: undefined,
-  parentRegistration: undefined,
+const runtimeDiagnosticsSnapshot = (): RuntimeDiagnosticsSnapshot => ({
+  owners: runtimeOwners,
+  effects: runtimeEffects,
+  subscriptions: runtimeSubscriptions,
+  cleanups: runtimeCleanups,
 });
+
+const reportRuntimeDiagnostics = (type: RuntimeDiagnosticsEvent["type"]): void => {
+  try {
+    runtimeDiagnosticsObserver?.({ type, snapshot: runtimeDiagnosticsSnapshot() });
+  } catch {
+    // Diagnostics must never change runtime behavior.
+  }
+};
+
+export const getRuntimeDiagnosticsSnapshot = (): RuntimeDiagnosticsSnapshot => runtimeDiagnosticsSnapshot();
+
+export const setRuntimeDiagnosticsObserver = (observer: RuntimeDiagnosticsObserver | undefined): (() => void) => {
+  runtimeDiagnosticsObserver = observer;
+  return () => {
+    if (runtimeDiagnosticsObserver === observer) runtimeDiagnosticsObserver = undefined;
+  };
+};
+
+const createOwner = (): Owner => {
+  runtimeOwners++;
+  reportRuntimeDiagnostics("owner-created");
+  return {
+    disposed: false,
+    head: undefined,
+    tail: undefined,
+    parentRegistration: undefined,
+  };
+};
 
 const detachCleanup = (registration: CleanupRegistration): void => {
   if (!registration.active) return;
@@ -69,6 +122,8 @@ const detachCleanup = (registration: CleanupRegistration): void => {
   registration.active = false;
   registration.previous = undefined;
   registration.next = undefined;
+  runtimeCleanups--;
+  reportRuntimeDiagnostics("cleanup-changed");
 };
 
 const registerCleanup = (owner: Owner | undefined, cleanup: () => void): CleanupRegistration | undefined => {
@@ -86,12 +141,16 @@ const registerCleanup = (owner: Owner | undefined, cleanup: () => void): Cleanup
     owner.head = registration;
   }
   owner.tail = registration;
+  runtimeCleanups++;
+  reportRuntimeDiagnostics("cleanup-changed");
   return registration;
 };
 
 const disposeOwner = (owner: Owner): void => {
   if (owner.disposed) return;
   owner.disposed = true;
+  runtimeOwners--;
+  reportRuntimeDiagnostics("owner-disposed");
   if (owner.parentRegistration) {
     detachCleanup(owner.parentRegistration);
     owner.parentRegistration = undefined;
@@ -216,7 +275,10 @@ const cleanup = (runner: EffectRunner, createNextRunOwner: boolean): void => {
   }
   runner.children.clear();
   for (const dependency of runner.dependencies) {
-    dependency.delete(runner);
+    if (dependency.delete(runner)) {
+      runtimeSubscriptions--;
+      reportRuntimeDiagnostics("subscription-changed");
+    }
   }
   runner.dependencies.clear();
   try {
@@ -236,6 +298,8 @@ const disposeRunner = (runner: EffectRunner): void => {
     return;
   }
   runner.disposed = true;
+  runtimeEffects--;
+  reportRuntimeDiagnostics("effect-disposed");
   pendingComputedEffects.delete(runner);
   pendingEffects.delete(runner);
   if (runner.registration) {
@@ -257,8 +321,12 @@ const disposeRunner = (runner: EffectRunner): void => {
 
 const track = (subscribers: SubscriberSet): void => {
   if (activeEffect && !activeEffect.disposed) {
-    subscribers.add(activeEffect);
-    activeEffect.dependencies.add(subscribers);
+    if (!subscribers.has(activeEffect)) {
+      subscribers.add(activeEffect);
+      activeEffect.dependencies.add(subscribers);
+      runtimeSubscriptions++;
+      reportRuntimeDiagnostics("subscription-changed");
+    }
   }
 };
 
@@ -515,6 +583,8 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
       if (callbackFailed) throw callbackError;
     },
   };
+  runtimeEffects++;
+  reportRuntimeDiagnostics("effect-created");
   parent?.children.add(runner);
   errorOwner?.runners.add(runner);
   try {

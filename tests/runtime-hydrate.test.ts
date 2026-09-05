@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createHydrationBoundary,
+  createLazyHydrationBoundary,
   diagnoseHydrationBoundaries,
   locateHydrationBoundary,
   readHydrationState,
@@ -225,6 +226,91 @@ describe("hydrate boundary runtime", () => {
       interaction: "pointerenter",
     });
     cleanup();
+  });
+
+  it("loads a lazy boundary once and replays the first interaction", async () => {
+    document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--><section><button>Open</button></section><!--tachyon-hydrate:panel:end--></main>`;
+    const main = document.querySelector("main");
+    if (!main) throw new Error("Missing main.");
+    const before = main.innerHTML;
+    let resolveChunk!: (value: { bind: (element: Element) => void }) => void;
+    const load = vi.fn(
+      () =>
+        new Promise<{ bind: (element: Element) => void }>((resolve) => {
+          resolveChunk = resolve;
+        }),
+    );
+    const bind = vi.fn((element: Element) => {
+      element.querySelector("button")?.addEventListener("click", () => {
+        element.setAttribute("data-opened", "true");
+      });
+    });
+    const result = createLazyHydrationBoundary(main, "panel", load);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+
+    const interactionCleanup = scheduleHydration(result.value, {
+      strategy: "interaction",
+      interaction: "click",
+      replayInteraction: true,
+    });
+    const button = main.querySelector("button");
+    button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(bind).not.toHaveBeenCalled();
+    expect(main.innerHTML).toBe(before);
+
+    resolveChunk({ bind });
+    await result.value.hydrate();
+    await Promise.resolve();
+
+    expect(bind).toHaveBeenCalledTimes(1);
+    expect(result.value.hydrated()).toBe(true);
+    expect(main.querySelector("section")?.getAttribute("data-opened")).toBe("true");
+    interactionCleanup();
+  });
+
+  it("shares an in-flight lazy chunk, cancels it on dispose, and retries failures", async () => {
+    document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--><section></section><!--tachyon-hydrate:panel:end--></main>`;
+    const main = document.querySelector("main");
+    if (!main) throw new Error("Missing main.");
+    let rejectChunk!: (reason?: unknown) => void;
+    let resolveChunk!: (value: { bind: (element: Element) => void }) => void;
+    const bind = vi.fn();
+    let attempt = 0;
+    const load = vi.fn(() => {
+      attempt += 1;
+      if (attempt === 1) {
+        return new Promise<{ bind: (element: Element) => void }>((_resolve, reject) => {
+          rejectChunk = reject;
+        });
+      }
+      return new Promise<{ bind: (element: Element) => void }>((resolve) => {
+        resolveChunk = resolve;
+      });
+    });
+    const errors: string[] = [];
+    const result = createLazyHydrationBoundary(main, "panel", load, {
+      onError: (error) => errors.push(error.message),
+    });
+    if (!result.ok) throw new Error(result.error.message);
+
+    const first = result.value.hydrate();
+    const second = result.value.hydrate();
+    expect(load).toHaveBeenCalledTimes(1);
+    result.value.dispose();
+    rejectChunk(new Error("chunk failed"));
+    await expect(first).rejects.toThrow("chunk failed");
+    await expect(second).rejects.toThrow("chunk failed");
+    expect(bind).not.toHaveBeenCalled();
+    expect(errors).toEqual(["chunk failed"]);
+
+    const retry = result.value.hydrate();
+    expect(load).toHaveBeenCalledTimes(2);
+    resolveChunk({ bind });
+    await retry;
+    expect(bind).toHaveBeenCalledTimes(1);
   });
 
   it("hydrates only the interaction boundary that receives the event", () => {

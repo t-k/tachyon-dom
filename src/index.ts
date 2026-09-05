@@ -2,7 +2,23 @@ import { err, ok } from "./result.js";
 export { enhanceForm, validateFormData, writeModelValue } from "./runtime/form.js";
 export { cleanupEnhancements, createEnhancementRegistry, enhance, registerEnhancement } from "./runtime/enhancement.js";
 export { createClientRouter, defineClientRoute } from "./runtime/router.js";
+export {
+  createHydrationBoundary,
+  createLazyHydrationBoundary,
+  diagnoseHydrationBoundaries,
+  readHydrationState,
+  reportHydrationDiagnostics,
+  scheduleHydration,
+  scheduleHydrationBoundaries,
+  serializeHydrationState,
+} from "./runtime/hydrate.js";
 export { hydrate, hydrateClientTemplate, mount, mountClientTemplate } from "./runtime/mount.js";
+export { createTemplateComponent } from "./runtime/component.js";
+export type {
+  TemplateComponent,
+  TemplateComponentInstance,
+  TemplateComponentOptions,
+} from "./runtime/component.js";
 export { createErrorBoundary } from "./runtime/error-boundary.js";
 export { createKeyedRows } from "./runtime/keyed-rows.js";
 export {
@@ -19,6 +35,15 @@ export {
 export { createStore } from "./runtime/store.js";
 export { readDeferredDataScript, readDeferredDataScriptResult, readTextStreamChunks } from "./runtime/stream-client.js";
 export type { DeferredDataReadError } from "./runtime/stream-client.js";
+export type {
+  CompiledHydrationBoundary,
+  HydrationBoundaryChunk,
+  HydrationBoundaryError,
+  HydrationBoundaryHandle,
+  HydrationCleanup,
+  HydrationScheduleOptions,
+  HydrationStrategy,
+} from "./runtime/hydrate.js";
 export { err, ok };
 export { sanitizeUrlAttribute, UnsafeUrlError } from "./url-policy.js";
 export { textAt } from "./runtime/text.js";

@@ -1252,17 +1252,30 @@ describe("HTML-first compiler", () => {
     ]);
   });
 
-  it.each([
-    `<ul><for each={rows} key={row.id}><li hydrate:idle>{row.label}</li></for></ul>`,
-    `<ul><for each={rows} key={row.id}><if test={row.visible}><li hydrate:id={row.id}>{row.label}</li></if></for></ul>`,
-    `<main><for each={rows} key={row.id}><component name="Row"><p>{row.label}</p></component></for></main>`,
-    `<main><for each={rows} key={row.id}><section><store value={row.value}/><p>{value}</p></section></for></main>`,
-  ])("rejects unsupported row-local hydration metadata in %s", (source) => {
+  it("carries row-local component, store, and hydration metadata", () => {
+    const source =
+      `<main><ul><for each={rows} key={row.id} as="row"><component name="Row" label={row.label}><li><store count={row.count}/><span hydrate:id={row.id}>{label}:{count}</span></li></component></for></ul></main>`;
+    const result = compileTemplate(source);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    const list = result.value.client.bindings.find((binding) => binding.kind === "list");
+    expect(list).toMatchObject({
+      kind: "list",
+      components: [{ name: "Row", props: [{ name: "label", expression: "row.label" }] }],
+      stores: [{ name: "count", initial: "row.count" }],
+      hydrationBoundaries: [{ id: "row.id" }],
+    });
+    expect(generateClientModule(result.value)).toContain(`hydrationBoundaries`);
+  });
+
+  it("rejects automatic row-local hydration ids that cannot be unique", () => {
+    const source = `<ul><for each={rows} key={row.id}><li hydrate:idle>{row.label}</li></for></ul>`;
     const result = compileTemplate(source);
 
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("Expected row-local metadata diagnostic.");
-    expect(result.error.message).toContain("inside <for> is not supported");
+    expect(result.error.message).toContain("hydrate:id");
     expect(result.error.offset).toBeGreaterThan(0);
   });
 

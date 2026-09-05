@@ -16,7 +16,6 @@ import {
   expressionToScopeAccess,
   hydrationBoundaryFor,
   isHydrationAttribute,
-  isForNode,
   isVoidElement,
   isStoreNode,
   itemNameFromKey,
@@ -173,6 +172,11 @@ const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
     ...(attrString(node, "update")?.trim() === "reference" ? { updatePolicy: "reference" as const } : {}),
     templateHtml,
     bindings: childContext.bindings,
+    ...(childContext.stores.length > 0 ? { stores: childContext.stores } : {}),
+    ...(childContext.hydrationBoundaries.length > 0
+      ? { hydrationBoundaries: childContext.hydrationBoundaries }
+      : {}),
+    ...(childContext.components.length > 0 ? { components: childContext.components } : {}),
   };
 };
 
@@ -625,6 +629,9 @@ const listSignature = (binding: ListBinding): string =>
       }
       return child;
     }),
+    stores: binding.stores ?? [],
+    hydrationBoundaries: binding.hydrationBoundaries ?? [],
+    components: binding.components ?? [],
   })}`;
 
 const conditionalSignature = (binding: ConditionalBinding): string =>
@@ -676,6 +683,9 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     if (binding.indexName) fields.push(`indexName: ${JSON.stringify(binding.indexName)}`);
     fields.push(`key: ${JSON.stringify(binding.key)}`);
     if (binding.updatePolicy) fields.push(`updatePolicy: ${JSON.stringify(binding.updatePolicy)}`);
+    fields.push(`stores: ${JSON.stringify(binding.stores ?? [])}`);
+    fields.push(`hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])}`);
+    fields.push(`components: ${JSON.stringify(binding.components ?? [])}`);
     fields.push(
       itemKeyExpression
         ? `keyReadItem: (${binding.itemName}) => ${itemKeyExpression}`
@@ -712,6 +722,9 @@ const emitListBinding = (
     `    itemName: ${JSON.stringify(binding.itemName)},`,
     ...(binding.indexName ? [`    indexName: ${JSON.stringify(binding.indexName)},`] : []),
     ...(binding.updatePolicy ? [`    updatePolicy: ${JSON.stringify(binding.updatePolicy)},`] : []),
+    `    stores: ${JSON.stringify(binding.stores ?? [])},`,
+    `    hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])},`,
+    `    components: ${JSON.stringify(binding.components ?? [])},`,
     `    scope: ${sourceName},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,

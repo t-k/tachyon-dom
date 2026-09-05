@@ -14,6 +14,54 @@ afterEach(() => {
 });
 
 describe("mountKeyedList", () => {
+  it("owns row component props and stores across reorder and removal", () => {
+    const root = document.createElement("ul");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><input><span> </span><strong> </strong></li>`,
+      bindings: [
+        { kind: "text" as const, path: [1, 0], expression: "label", read: (scope: Record<string, unknown>) => scope.label },
+        { kind: "text" as const, path: [2, 0], expression: "count", read: (scope: Record<string, unknown>) => scope.count },
+        {
+          kind: "model" as const,
+          path: [0],
+          property: "value" as const,
+          expression: "count",
+          read: (scope: Record<string, unknown>) => scope.count,
+          write: (scope: Record<string, unknown>, value: unknown) => {
+            scope.count = value;
+          },
+        },
+      ],
+      components: [
+        {
+          path: [],
+          name: "Row",
+          props: [{ name: "label", expression: "item.label" }],
+          stores: [{ name: "count", initial: "item.count" }],
+        },
+      ],
+      stores: [],
+      hydrationBoundaries: [],
+    };
+    const first = { id: "a", label: "A", count: "1" };
+    const second = { id: "b", label: "B", count: "2" };
+
+    mountKeyedList(root, [], [first, second], options);
+    const firstInput = root.querySelector("input");
+    if (!firstInput) throw new Error("Missing first input.");
+    firstInput.value = "changed";
+    firstInput.dispatchEvent(new Event("input", { bubbles: true }));
+    mountKeyedList(root, [], [second, first], options);
+
+    expect(Array.from(root.querySelectorAll("li"), (row) => row.textContent)).toEqual(["B2", "Achanged"]);
+    expect(root.querySelectorAll("li")[1]?.querySelector("input")).toBe(firstInput);
+
+    mountKeyedList(root, [], [second], options);
+    expect(root.textContent).toBe("B2");
+  });
+
   it("skips DOM moves for stable order and appends only new rows", () => {
     const root = document.createElement("ul");
     const options = {

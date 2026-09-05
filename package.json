@@ -144,6 +144,14 @@
       "types": "./dist/runtime/mount.d.ts",
       "import": "./dist/runtime/mount.js"
     },
+    "./runtime/component": {
+      "types": "./dist/runtime/component.d.ts",
+      "import": "./dist/runtime/component.js"
+    },
+    "./runtime/diagnostics": {
+      "types": "./dist/runtime/diagnostics.d.ts",
+      "import": "./dist/runtime/diagnostics.js"
+    },
     "./runtime/list": {
       "types": "./dist/runtime/list.d.ts",
       "import": "./dist/runtime/list.js"

@@ -23,7 +23,7 @@ export type HydrationDiagnosticsHot = {
 };
 
 export type HydrationBoundaryHandle = {
-  hydrate: () => void;
+  hydrate: () => void | Promise<void>;
   hydrated: () => boolean;
   element: () => Element;
   dispose: () => void;
@@ -37,7 +37,16 @@ export type HydrationScheduleOptions = {
   interaction?: keyof HTMLElementEventMap | string;
   rootMargin?: string;
   matchMedia?: (query: string) => MediaQueryList;
+  replayInteraction?: boolean;
+  onError?: (error: HydrationBoundaryError) => void;
 };
+
+export type HydrationCleanup = void | (() => void);
+
+export type HydrationBoundaryChunk =
+  | ((element: Element) => HydrationCleanup)
+  | { bind: (element: Element) => HydrationCleanup }
+  | { default: ((element: Element) => HydrationCleanup) | { bind: (element: Element) => HydrationCleanup } };
 
 export type CompiledHydrationBoundary = {
   id: string;
@@ -53,8 +62,6 @@ export type ScheduleHydrationBoundariesOptions = {
   onError?: (error: HydrationBoundaryError, boundary: CompiledHydrationBoundary) => void;
   matchMedia?: (query: string) => MediaQueryList;
 };
-
-type HydrationCleanup = void | (() => void);
 
 type HydrationCommentIndex = {
   starts: Map<string, Comment[]>;
@@ -168,6 +175,20 @@ export const reportHydrationDiagnostics = (
   return diagnostics;
 };
 
+const cloneInteractionEvent = (event: Event): Event => {
+  if (typeof MouseEvent !== "undefined" && event instanceof MouseEvent) {
+    return new MouseEvent(event.type, event);
+  }
+  if (typeof KeyboardEvent !== "undefined" && event instanceof KeyboardEvent) {
+    return new KeyboardEvent(event.type, event);
+  }
+  return new Event(event.type, {
+    bubbles: event.bubbles,
+    cancelable: event.cancelable,
+    composed: event.composed,
+  });
+};
+
 export const createHydrationBoundary = (
   root: ParentNode,
   id: string,
@@ -201,6 +222,74 @@ export const createHydrationBoundary = (
   });
 };
 
+const hydrationChunkBinder = (chunk: HydrationBoundaryChunk): ((element: Element) => HydrationCleanup) => {
+  if (typeof chunk === "function") return chunk;
+  if ("bind" in chunk) return chunk.bind;
+  return typeof chunk.default === "function" ? chunk.default : chunk.default.bind;
+};
+
+const hydrationErrorFor = (error: unknown): HydrationBoundaryError => ({
+  message: error instanceof Error ? error.message : String(error),
+});
+
+export const createLazyHydrationBoundary = (
+  root: ParentNode,
+  id: string,
+  load: () => Promise<HydrationBoundaryChunk> | HydrationBoundaryChunk,
+  options: { onError?: (error: HydrationBoundaryError) => void } = {},
+  index?: HydrationCommentIndex,
+): Result<HydrationBoundaryHandle, HydrationBoundaryError> => {
+  const located = locateHydrationBoundary(root, id, index);
+  if (!located.ok) return err(located.error);
+  let cleanup: HydrationCleanup;
+  let isHydrated = false;
+  let loadedBinder: ((element: Element) => HydrationCleanup) | undefined;
+  let pending: Promise<void> | undefined;
+  let epoch = 0;
+  const hydrate = (): Promise<void> => {
+    if (isHydrated) return Promise.resolve();
+    if (pending) return pending;
+    const requestEpoch = epoch;
+    let loadedChunk: Promise<HydrationBoundaryChunk>;
+    try {
+      loadedChunk = Promise.resolve(loadedBinder ? loadedBinder : load());
+    } catch (error) {
+      loadedChunk = Promise.reject(error);
+    }
+    let operation: Promise<void>;
+    operation = loadedChunk
+      .then((chunk) => {
+        const binder = loadedBinder ?? hydrationChunkBinder(chunk as HydrationBoundaryChunk);
+        loadedBinder = binder;
+        if (requestEpoch !== epoch || isHydrated) return;
+        cleanup = binder(located.value.element);
+        isHydrated = true;
+      })
+      .catch((error: unknown) => {
+        const hydrationError = hydrationErrorFor(error);
+        options.onError?.(hydrationError);
+        throw error;
+      })
+      .finally(() => {
+        if (pending === operation) pending = undefined;
+      });
+    pending = operation;
+    return operation;
+  };
+  return ok({
+    hydrate,
+    hydrated: () => isHydrated,
+    element: () => located.value.element,
+    dispose: () => {
+      epoch += 1;
+      const currentCleanup = cleanup;
+      cleanup = undefined;
+      isHydrated = false;
+      if (typeof currentCleanup === "function") currentCleanup();
+    },
+  });
+};
+
 export const serializeHydrationState = (id: string, state: unknown, options: { nonce?: string } = {}): string => {
   const nonce = options.nonce ? ` nonce="${escapeAttribute(options.nonce)}"` : "";
   return `<script type="application/json" data-tachyon-state="${escapeAttribute(id)}"${nonce}>${escapeScriptJson(JSON.stringify(state) ?? "null")}</script>`;
@@ -224,8 +313,29 @@ export const scheduleHydration = (
   handle: HydrationBoundaryHandle,
   options: HydrationScheduleOptions = { strategy: "load" },
 ): (() => void) => {
+  const trigger = (event?: Event): void => {
+    try {
+      const hydration = handle.hydrate();
+      if (options.replayInteraction && event) {
+        void Promise.resolve(hydration)
+          .then(() => {
+            if (handle.hydrated()) {
+              const target = event.target instanceof Node && handle.element().contains(event.target)
+                ? event.target
+                : handle.element();
+              target.dispatchEvent(cloneInteractionEvent(event));
+            }
+          })
+          .catch((error: unknown) => options.onError?.(hydrationErrorFor(error)));
+      } else if (hydration && typeof hydration.then === "function") {
+        void hydration.catch((error: unknown) => options.onError?.(hydrationErrorFor(error)));
+      }
+    } catch (error) {
+      options.onError?.(hydrationErrorFor(error));
+    }
+  };
   if (options.strategy === "load") {
-    handle.hydrate();
+    trigger();
     return () => undefined;
   }
   if (options.strategy === "idle") {
@@ -235,7 +345,7 @@ export const scheduleHydration = (
     const cancelIdle = globalThis.cancelIdleCallback ?? clearTimeout;
     let active = true;
     const id = requestIdle(() => {
-      if (active) handle.hydrate();
+      if (active) trigger();
     });
     return () => {
       active = false;
@@ -252,7 +362,7 @@ export const scheduleHydration = (
     let active = true;
     const listener = (): void => {
       if (active && media.matches) {
-        handle.hydrate();
+        trigger();
       }
     };
     media.addEventListener("change", listener);
@@ -267,7 +377,7 @@ export const scheduleHydration = (
     const observer = new IntersectionObserver(
       (entries) => {
         if (active && entries.some((entry) => entry.isIntersecting)) {
-          handle.hydrate();
+          trigger();
           observer.disconnect();
         }
       },
@@ -282,10 +392,10 @@ export const scheduleHydration = (
   const eventName = options.interaction ?? "click";
   const element = handle.element();
   let active = true;
-  const listener = (): void => {
+  const listener = (event: Event): void => {
     if (!active) return;
-    handle.hydrate();
     element.removeEventListener(eventName, listener, true);
+    trigger(event);
   };
   element.addEventListener(eventName, listener, true);
   return () => {

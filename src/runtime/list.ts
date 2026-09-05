@@ -3,9 +3,10 @@ import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
 import { setText } from "./text.js";
 import { bindControl, setControlValue, writeModelValue } from "./form.js";
 import { mountConditional } from "./conditional.js";
-import { createSignal, effect, onOwnerCleanup, read, untrack, type Signal } from "./signal.js";
+import { createSignal, createStore, effect, onOwnerCleanup, read, untrack, type Signal } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { normalizeListKey } from "./key.js";
+import { createHydrationBoundary, type CompiledHydrationBoundary, type HydrationBoundaryHandle } from "./hydrate.js";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void;
@@ -78,6 +79,26 @@ type NestedListBinding = {
   updatePolicy?: "always" | "reference";
   templateHtml: string;
   bindings: Binding[];
+  stores?: StoreDefinition[];
+  hydrationBoundaries?: CompiledHydrationBoundary[];
+  components?: ComponentBoundary[];
+};
+
+type StoreDefinition = {
+  name: string;
+  initial: string;
+};
+
+type ComponentProp = {
+  name: string;
+  expression: string;
+};
+
+type ComponentBoundary = {
+  path: number[];
+  name: string;
+  props: ComponentProp[];
+  stores: StoreDefinition[];
 };
 
 type NestedConditionalBinding = {
@@ -88,6 +109,9 @@ type NestedConditionalBinding = {
   read?: ExpressionReader;
   templateHtml: string;
   bindings: Binding[];
+  stores?: StoreDefinition[];
+  hydrationBoundaries?: CompiledHydrationBoundary[];
+  components?: ComponentBoundary[];
 };
 
 type Binding =
@@ -112,6 +136,9 @@ type KeyedListOptions = {
   scope?: Record<string, unknown>;
   templateHtml: string;
   bindings: Binding[];
+  stores?: StoreDefinition[];
+  hydrationBoundaries?: CompiledHydrationBoundary[];
+  components?: ComponentBoundary[];
 };
 
 type RowRecord = {
@@ -126,6 +153,7 @@ type RowRecord = {
   index: number;
   sourceScope: Record<string, unknown> | undefined;
   revision: Signal<number>;
+  hydrationBoundaries: HydrationBoundaryHandle[];
 };
 
 type ListState = {
@@ -197,6 +225,43 @@ const scopedItem = (
   index: number,
   scope: Record<string, unknown> | undefined,
 ): Record<string, unknown> => ({ ...scope, [itemName]: item, ...(indexName ? { [indexName]: index } : {}) });
+
+const localScopeFor = (
+  itemName: string,
+  item: unknown,
+  indexName: string | undefined,
+  index: number,
+  sourceScope: Record<string, unknown> | undefined,
+  options: KeyedListOptions,
+): Record<string, unknown> => {
+  const definitions = [
+    ...(options.stores ?? []),
+    ...(options.components ?? []).flatMap((component) => component.stores),
+  ];
+  const scope = definitions.length > 0
+    ? createStore(scopedItem(itemName, item, indexName, index, sourceScope))
+    : scopedItem(itemName, item, indexName, index, sourceScope);
+  for (const store of options.stores ?? []) {
+    scope[store.name] = readPath(scope, store.initial);
+  }
+  for (const component of options.components ?? []) {
+    for (const prop of component.props) {
+      scope[prop.name] = readPath(scope, prop.expression);
+    }
+    for (const store of component.stores) {
+      scope[store.name] = readPath(scope, store.initial);
+    }
+  }
+  return scope;
+};
+
+const updateComponentProps = (scope: Record<string, unknown>, options: KeyedListOptions): void => {
+  for (const component of options.components ?? []) {
+    for (const prop of component.props) {
+      scope[prop.name] = readPath(scope, prop.expression);
+    }
+  }
+};
 
 const nodeAt = (root: Node, path: readonly number[]): Node => {
   let current = root;
@@ -310,6 +375,14 @@ const cleanupRecord = (record: RowRecord): void => {
   record.refCleanups?.clear();
   try {
     runCleanups(refCleanups);
+  } catch (error) {
+    if (!failed) firstError = error;
+    failed = true;
+  }
+  try {
+    for (const boundary of record.hydrationBoundaries.splice(0)) {
+      boundary.dispose();
+    }
   } catch (error) {
     if (!failed) firstError = error;
     failed = true;
@@ -500,8 +573,8 @@ const createRecord = (
   if (!element) {
     return undefined;
   }
-  const scope = scopedItem(options.itemName, item, options.indexName, index, options.scope);
-  const record = {
+  const scope = localScopeFor(options.itemName, item, options.indexName, index, options.scope, options);
+  const record: RowRecord = {
     key,
     element,
     nodes,
@@ -512,8 +585,19 @@ const createRecord = (
     index,
     sourceScope: options.scope,
     revision: createSignal(0),
+    hydrationBoundaries: [],
   };
   try {
+    for (const boundary of options.hydrationBoundaries ?? []) {
+      const resolvedId = boundary.idKind === "expression" ? readPath(scope, boundary.id) : boundary.id;
+      if (resolvedId === undefined || resolvedId === null) continue;
+      const handle = createHydrationBoundary(
+        record.element.parentElement ?? record.element,
+        String(resolvedId),
+        () => undefined,
+      );
+      if (handle.ok) record.hydrationBoundaries.push(handle.value);
+    }
     bindRowEvents(record, options);
     bindRowBindings(record, options);
     untrack(() => bindRowControls(record, options));
@@ -536,6 +620,7 @@ const updateRecord = (record: RowRecord, item: unknown, index: number, options: 
   }
   record.scope[options.itemName] = item;
   if (options.indexName) record.scope[options.indexName] = index;
+  updateComponentProps(record.scope, options);
   const itemChanged = !Object.is(record.item, item);
   const indexChanged = record.index !== index;
   record.item = item;

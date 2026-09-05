@@ -97,6 +97,9 @@ export type ListBinding = {
   updatePolicy?: "always" | "reference";
   templateHtml: string;
   bindings: ClientBinding[];
+  stores?: StoreDefinition[];
+  hydrationBoundaries?: HydrationBoundary[];
+  components?: ComponentBoundary[];
 };
 
 export type ConditionalBinding = {
