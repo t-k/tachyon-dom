@@ -67,7 +67,7 @@ let runtimeOwners = 0;
 let runtimeEffects = 0;
 let runtimeSubscriptions = 0;
 let runtimeCleanups = 0;
-let runtimeDiagnosticsObserver: RuntimeDiagnosticsObserver | undefined;
+const runtimeDiagnosticsObservers = new Set<RuntimeDiagnosticsObserver>();
 const pendingComputedEffects = new Set<EffectRunner>();
 const pendingEffects = new Set<EffectRunner>();
 
@@ -79,19 +79,23 @@ const runtimeDiagnosticsSnapshot = (): RuntimeDiagnosticsSnapshot => ({
 });
 
 const reportRuntimeDiagnostics = (type: RuntimeDiagnosticsEvent["type"]): void => {
-  try {
-    runtimeDiagnosticsObserver?.({ type, snapshot: runtimeDiagnosticsSnapshot() });
-  } catch {
-    // Diagnostics must never change runtime behavior.
+  const event = { type, snapshot: runtimeDiagnosticsSnapshot() };
+  for (const observer of [...runtimeDiagnosticsObservers]) {
+    try {
+      observer(event);
+    } catch {
+      // Diagnostics must never change runtime behavior.
+    }
   }
 };
 
 export const getRuntimeDiagnosticsSnapshot = (): RuntimeDiagnosticsSnapshot => runtimeDiagnosticsSnapshot();
 
 export const setRuntimeDiagnosticsObserver = (observer: RuntimeDiagnosticsObserver | undefined): (() => void) => {
-  runtimeDiagnosticsObserver = observer;
+  if (!observer) return () => undefined;
+  runtimeDiagnosticsObservers.add(observer);
   return () => {
-    if (runtimeDiagnosticsObserver === observer) runtimeDiagnosticsObserver = undefined;
+    runtimeDiagnosticsObservers.delete(observer);
   };
 };
 

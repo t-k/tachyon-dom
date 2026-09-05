@@ -29,4 +29,25 @@ describe("development runtime diagnostics", () => {
     expect(diagnostics.events().length).toBeGreaterThan(0);
     diagnostics.dispose();
   });
+
+  it("keeps multiple diagnostic observers independent", () => {
+    const first = createRuntimeDiagnostics();
+    const second = createRuntimeDiagnostics();
+    const dispose = createRoot((disposeRoot) => disposeRoot);
+
+    expect(first.events().some((event) => event.type === "owner-created")).toBe(true);
+    expect(second.events().some((event) => event.type === "owner-created")).toBe(true);
+
+    const firstEventCount = first.events().length;
+    const secondEventCount = second.events().length;
+    first.dispose();
+    const nextDispose = createRoot((disposeRoot) => disposeRoot);
+
+    expect(first.events()).toHaveLength(firstEventCount);
+    expect(second.events().length).toBeGreaterThan(secondEventCount);
+
+    dispose();
+    nextDispose();
+    second.dispose();
+  });
 });
