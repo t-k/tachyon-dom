@@ -12,7 +12,26 @@ describe("runtime representation evaluations", () => {
     expect(result.measurements.signal.distributions["4"]?.rawSamples).toHaveLength(4);
     expect(result.measurements.metadata.rawSamples).toHaveLength(2);
     expect(
-      result.measurements.signal.distributions["4"]?.rawSamples.every((sample) => sample.allocationBytes >= 0),
+      result.measurements.signal.distributions["4"]?.rawSamples.every(
+        (sample) => Number.isFinite(sample.heapDeltaBytes) && sample.allocatedBytes === null,
+      ),
+    ).toBe(true);
+    expect(
+      Object.values(result.measurements.signal.distributions).every(({ rawSamples }) =>
+        rawSamples.every((sample) => sample.contractEquivalent),
+      ),
+    ).toBe(true);
+    expect(
+      result.measurements.rowCodegen.generic.rawSamples.every(
+        (sample) =>
+          sample.evidence.identityPreserved && sample.evidence.finalEmpty && sample.evidence.cleanupEquivalent,
+      ),
+    ).toBe(true);
+    expect(
+      result.measurements.rowCodegen.specialized.rawSamples.every(
+        (sample) =>
+          sample.evidence.identityPreserved && sample.evidence.finalEmpty && sample.evidence.cleanupEquivalent,
+      ),
     ).toBe(true);
     expect(
       result.measurements.metadata.rawSamples.every(
@@ -22,7 +41,10 @@ describe("runtime representation evaluations", () => {
           sample.currentBrotliBytes > 0 &&
           sample.compactBrotliBytes > 0 &&
           sample.currentParseDurationMs >= 0 &&
-          sample.compactParseDurationMs >= 0,
+          sample.compactParseDurationMs >= 0 &&
+          sample.metadataEquivalent &&
+          sample.hmrSafe &&
+          sample.scopesIndependent,
       ),
     ).toBe(true);
     expect(result.measurements.rowCodegen.decision.reason).toBeTruthy();

@@ -24,16 +24,14 @@ export type GeneratedTemplateDriver = {
   dispose: () => void;
 };
 
-type GeneratedClientModule = {
+export type GeneratedClientModule = {
   bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
   createSignal: <T>(initial: T) => Signal<T>;
 };
 
 export const REPRESENTATIVE_TEMPLATE_SOURCES = {
-  "text-template":
-    `<table><tbody><for each={rows} key={row.id}><tr class="row"><td>{row.id}</td><td><input value=""><span>{row.label}</span></td><td>{row.selected ? "selected" : ""}</td></tr></for></tbody></table>`,
-  "mixed-template":
-    `<table><tbody><for each={rows} key={row.id}><tr class="row" class:selected={row.selected} on:click={row.onClick}><td>{row.id}</td><td><input value="" bind:value={row.label}><span>{row.label}</span></td><td>{row.selected ? "selected" : ""}</td></tr></for></tbody></table>`,
+  "text-template": `<table><tbody><for each={rows} key={row.id}><tr class="row"><td>{row.id}</td><td><input value=""><span>{row.label}</span></td><td>{row.selected ? "selected" : ""}</td></tr></for></tbody></table>`,
+  "mixed-template": `<table><tbody><for each={rows} key={row.id}><tr class="row" class:selected={row.selected} on:click={row.onClick}><td>{row.id}</td><td><input value="" bind:value={row.label}><span>{row.label}</span></td><td>{row.selected ? "selected" : ""}</td></tr></for></tbody></table>`,
 } as const;
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -41,26 +39,29 @@ const execFileAsync = promisify(execFile);
 const requireFromProject = createRequire(path.join(projectRoot, "package.json"));
 const esbuildCli = requireFromProject.resolve("esbuild/bin/esbuild");
 
-const bundleGeneratedModule = async (source: string): Promise<GeneratedClientModule> => {
+export const loadGeneratedClientModule = async (source: string): Promise<GeneratedClientModule> => {
   const compiled = compileTemplate(source);
   if (!compiled.ok) throw new Error(compiled.error.message);
   const code = (
     `import { createSignal as __tachyonBenchmarkCreateSignal } from "tachyon-dom/runtime/signal";\n` +
     `export { __tachyonBenchmarkCreateSignal as createSignal };\n` +
     generateClientModule(compiled.value, { reactive: true })
-  ).replaceAll(
-      /"tachyon-dom\/([^"]+)"/g,
-      (_match, specifier: string) => JSON.stringify(path.resolve(projectRoot, "src", `${specifier}.ts`)),
-    );
+  ).replaceAll(/"tachyon-dom\/([^"]+)"/g, (_match, specifier: string) =>
+    JSON.stringify(path.resolve(projectRoot, "src", `${specifier}.ts`)),
+  );
   const directory = await mkdtemp(path.join(tmpdir(), "tachyon-generated-template-"));
   const input = path.join(directory, "entry.js");
   const output = path.join(directory, "entry.out.js");
   try {
     await writeFile(input, code);
-    await execFileAsync(process.execPath, [esbuildCli, input, "--bundle", "--format=esm", "--platform=node", "--target=es2022", `--outfile=${output}`], {
-      cwd: projectRoot,
-      maxBuffer: 16 * 1024 * 1024,
-    });
+    await execFileAsync(
+      process.execPath,
+      [esbuildCli, input, "--bundle", "--format=esm", "--platform=node", "--target=es2022", `--outfile=${output}`],
+      {
+        cwd: projectRoot,
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
     const bundled = await readFile(output, "utf8");
     const encoded = Buffer.from(bundled).toString("base64");
     return (await import(`data:text/javascript;base64,${encoded}`)) as GeneratedClientModule;
@@ -73,8 +74,8 @@ export const loadRepresentativeGeneratedModules = async (): Promise<{
   "text-template": GeneratedClientModule;
   "mixed-template": GeneratedClientModule;
 }> => ({
-  "text-template": await bundleGeneratedModule(REPRESENTATIVE_TEMPLATE_SOURCES["text-template"]),
-  "mixed-template": await bundleGeneratedModule(REPRESENTATIVE_TEMPLATE_SOURCES["mixed-template"]),
+  "text-template": await loadGeneratedClientModule(REPRESENTATIVE_TEMPLATE_SOURCES["text-template"]),
+  "mixed-template": await loadGeneratedClientModule(REPRESENTATIVE_TEMPLATE_SOURCES["mixed-template"]),
 });
 
 export const createGeneratedTemplateDriver = (
