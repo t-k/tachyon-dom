@@ -283,11 +283,11 @@ const runPathSample = (
       operationDurationsMs[name] = performance.now() - started;
       operationDomHashes[name] = hash(domFor(tbody));
     };
-    const startedHeap = process.memoryUsage().heapUsed;
     const gc = (globalThis as unknown as { gc?: () => void }).gc;
     const beforeGc = gc ? performance.now() : 0;
     gc?.();
     const gcBeforeMs = gc ? performance.now() - beforeGc : null;
+    const startedHeap = process.memoryUsage().heapUsed;
     operation("create", () => driver.replace(initial));
     operation("append", () => driver.append(appended));
     operation("partial-update", () => driver.partialUpdate([...initial, ...appended]));
@@ -299,6 +299,7 @@ const runPathSample = (
         driver.dispose();
       }
     });
+    const allocationBytes = Math.max(0, process.memoryUsage().heapUsed - startedHeap);
     driver.dispose();
     const gcStarted = gc ? performance.now() : 0;
     gc?.();
@@ -307,7 +308,7 @@ const runPathSample = (
     return {
       sampleIndex,
       durationMs: Object.values(operationDurationsMs).reduce((total, value) => total + value, 0),
-      allocationBytes: process.memoryUsage().heapUsed - startedHeap,
+      allocationBytes,
       gcMs,
       retainedHeapBytes,
       operationDurationsMs,

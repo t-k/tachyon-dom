@@ -48,7 +48,7 @@ const measure = <T>(run: () => T): Metric & { value: T } => {
   const before = heapUsed();
   const started = performance.now();
   const value = run();
-  return { value, durationMs: performance.now() - started, allocationBytes: heapUsed() - before };
+  return { value, durationMs: performance.now() - started, allocationBytes: Math.max(0, heapUsed() - before) };
 };
 
 const compilerResult = (source: string) => {

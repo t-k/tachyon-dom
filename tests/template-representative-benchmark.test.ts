@@ -17,6 +17,7 @@ describe("representative template benchmark", () => {
         operationDurationsMs: expect.any(Object),
         operationDomHashes: expect.any(Object),
       });
+      expect(result.measurements.paths[pathName].samples.every((sample) => sample.allocationBytes >= 0)).toBe(true);
     }
     expect(Object.values(result.measurements.domOracle)).toHaveLength(6);
   });
