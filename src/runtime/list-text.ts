@@ -41,6 +41,7 @@ type RowRecord = {
   item: unknown;
   index: number;
   sourceScope: Record<string, unknown> | undefined;
+  sourceScopeSnapshot: Map<PropertyKey, unknown>;
   revision: Signal<number>;
 };
 
@@ -68,6 +69,20 @@ const readPath = (scope: Record<string, unknown>, expression: string): unknown =
     current = (current as Record<string, unknown>)[part];
   }
   return current;
+};
+
+const sourceScopeSnapshotFor = (scope: Record<string, unknown> | undefined): Map<PropertyKey, unknown> =>
+  new Map(scope ? Reflect.ownKeys(scope).map((key) => [key, Reflect.get(scope, key)] as const) : []);
+
+const sourceScopeChanged = (
+  previous: ReadonlyMap<PropertyKey, unknown>,
+  next: ReadonlyMap<PropertyKey, unknown>,
+): boolean => {
+  if (previous.size !== next.size) return true;
+  for (const [key, value] of previous) {
+    if (!next.has(key) || !Object.is(next.get(key), value)) return true;
+  }
+  return false;
 };
 
 const readItemPath = (item: unknown, expression: string, itemName: string): unknown => {
@@ -251,6 +266,7 @@ const createRecord = (
     item,
     index,
     sourceScope: options.scope,
+    sourceScopeSnapshot: sourceScopeSnapshotFor(options.scope),
     revision: createSignal(0),
   };
   bindRow(record, options);
@@ -258,8 +274,18 @@ const createRecord = (
 };
 
 const updateRecord = (record: RowRecord, item: unknown, index: number, options: TextKeyedListOptions): void => {
-  const scopeChanged = record.sourceScope !== options.scope;
-  if (options.scope) Object.assign(record.scope, options.scope);
+  const nextSourceScopeSnapshot = sourceScopeSnapshotFor(options.scope);
+  const scopeChanged =
+    record.sourceScope !== options.scope || sourceScopeChanged(record.sourceScopeSnapshot, nextSourceScopeSnapshot);
+  for (const key of record.sourceScopeSnapshot.keys()) {
+    if (!nextSourceScopeSnapshot.has(key) && key !== options.itemName && key !== options.indexName) {
+      record.scope[key] = undefined;
+    }
+  }
+  for (const [key, value] of nextSourceScopeSnapshot) {
+    if (key === options.itemName || key === options.indexName) continue;
+    record.scope[key] = value;
+  }
   record.scope[options.itemName] = item;
   if (options.indexName) record.scope[options.indexName] = index;
   const itemChanged = !Object.is(record.item, item);
@@ -267,6 +293,7 @@ const updateRecord = (record: RowRecord, item: unknown, index: number, options: 
   record.item = item;
   record.index = index;
   record.sourceScope = options.scope;
+  record.sourceScopeSnapshot = nextSourceScopeSnapshot;
   if (options.updatePolicy === "reference" && !itemChanged && !indexChanged && !scopeChanged) return;
   record.revision.update((value) => value + 1);
 };

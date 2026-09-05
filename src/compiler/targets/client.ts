@@ -381,7 +381,11 @@ const runtimeValueExpression = (expression: string, reactive: boolean, sourceNam
 };
 
 const isTextOnlyList = (binding: ListBinding): boolean =>
-  binding.bindings.length > 0 && binding.bindings.every((child) => child.kind === "text");
+  binding.bindings.length > 0 &&
+  binding.bindings.every((child) => child.kind === "text") &&
+  (binding.stores?.length ?? 0) === 0 &&
+  (binding.hydrationBoundaries?.length ?? 0) === 0 &&
+  (binding.components?.length ?? 0) === 0;
 
 const hasModelBinding = (binding: ClientBinding): boolean => {
   if (binding.kind === "model") {
@@ -667,6 +671,27 @@ const conditionalSignature = (binding: ConditionalBinding): string =>
 
 const bindingReadExpression = (expression: string): string => expressionToScopeAccess(expression, new Set(), "scope");
 
+const serializeStoreDefinition = (store: StoreDefinition): string =>
+  `{ name: ${JSON.stringify(store.name)}, initial: ${JSON.stringify(store.initial)}, read: (scope) => ${bindingReadExpression(store.initial)} }`;
+
+const serializeComponentBoundary = (component: NonNullable<ListBinding["components"]>[number]): string => {
+  const props = component.props
+    .map(
+      (prop) =>
+        `{ name: ${JSON.stringify(prop.name)}, expression: ${JSON.stringify(prop.expression)}, read: (scope) => ${bindingReadExpression(prop.expression)} }`,
+    )
+    .join(", ");
+  const stores = component.stores.map(serializeStoreDefinition).join(", ");
+  return `{ path: ${JSON.stringify(component.path)}, name: ${JSON.stringify(component.name)}, props: [${props}], stores: [${stores}] }`;
+};
+
+const serializeStoreDefinitions = (stores: readonly StoreDefinition[]): string =>
+  `[${stores.map(serializeStoreDefinition).join(", ")}]`;
+
+const serializeComponentBoundaries = (
+  components: readonly NonNullable<ListBinding["components"]>[number][],
+): string => `[${components.map(serializeComponentBoundary).join(", ")}]`;
+
 const serializeListRowBinding = (binding: ListBinding["bindings"][number]): string => {
   const fields: string[] = [`kind: ${JSON.stringify(binding.kind)}`, `path: ${JSON.stringify(binding.path)}`];
   if (binding.kind === "text") {
@@ -707,9 +732,9 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     fields.push(`key: ${JSON.stringify(binding.key)}`);
     if (binding.updatePolicy) fields.push(`updatePolicy: ${JSON.stringify(binding.updatePolicy)}`);
     if (binding.region) fields.push(`region: ${JSON.stringify(binding.region)}`);
-    fields.push(`stores: ${JSON.stringify(binding.stores ?? [])}`);
+    fields.push(`stores: ${serializeStoreDefinitions(binding.stores ?? [])}`);
     fields.push(`hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])}`);
-    fields.push(`components: ${JSON.stringify(binding.components ?? [])}`);
+    fields.push(`components: ${serializeComponentBoundaries(binding.components ?? [])}`);
     fields.push(
       itemKeyExpression
         ? `keyReadItem: (${binding.itemName}) => ${itemKeyExpression}`
@@ -747,9 +772,9 @@ const emitListBinding = (
     ...(binding.indexName ? [`    indexName: ${JSON.stringify(binding.indexName)},`] : []),
     ...(binding.updatePolicy ? [`    updatePolicy: ${JSON.stringify(binding.updatePolicy)},`] : []),
     ...(binding.region ? [`    region: ${JSON.stringify(binding.region)},`] : []),
-    `    stores: ${JSON.stringify(binding.stores ?? [])},`,
+    `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
     `    hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])},`,
-    `    components: ${JSON.stringify(binding.components ?? [])},`,
+    `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
     `    scope: ${sourceName},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,

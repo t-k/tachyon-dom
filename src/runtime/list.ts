@@ -87,11 +87,13 @@ type NestedListBinding = {
 type StoreDefinition = {
   name: string;
   initial: string;
+  read?: ExpressionReader;
 };
 
 type ComponentProp = {
   name: string;
   expression: string;
+  read?: ExpressionReader;
 };
 
 type ComponentBoundary = {
@@ -158,6 +160,8 @@ type RowRecord = {
   item: unknown;
   index: number;
   sourceScope: Record<string, unknown> | undefined;
+  sourceScopeSnapshot: Map<PropertyKey, unknown>;
+  localScopeKeys: ReadonlySet<PropertyKey>;
   revision: Signal<number>;
   hydrationBoundaries: HydrationBoundaryHandle[];
 };
@@ -224,6 +228,29 @@ const readBinding = (
 const readHandler = (scope: Record<string, unknown>, binding: EventBinding): unknown =>
   binding.read ? binding.read(scope) : readPath(scope, binding.handler);
 
+const readExpression = (scope: Record<string, unknown>, expression: string, reader?: ExpressionReader): unknown =>
+  read(reader ? reader(scope) : readPath(scope, expression));
+
+const sourceScopeSnapshotFor = (scope: Record<string, unknown> | undefined): Map<PropertyKey, unknown> =>
+  new Map(scope ? Reflect.ownKeys(scope).map((key) => [key, Reflect.get(scope, key)] as const) : []);
+
+const sourceScopeChanged = (
+  previous: ReadonlyMap<PropertyKey, unknown>,
+  next: ReadonlyMap<PropertyKey, unknown>,
+): boolean => {
+  if (previous.size !== next.size) return true;
+  for (const [key, value] of previous) {
+    if (!next.has(key) || !Object.is(next.get(key), value)) return true;
+  }
+  return false;
+};
+
+const localScopeKeysFor = (options: KeyedListOptions): ReadonlySet<PropertyKey> =>
+  new Set([
+    ...(options.stores ?? []).map((store) => store.name),
+    ...(options.components ?? []).flatMap((component) => component.stores.map((store) => store.name)),
+  ]);
+
 const scopedItem = (
   itemName: string,
   item: unknown,
@@ -249,14 +276,14 @@ const localScopeFor = (
       ? createStore(scopedItem(itemName, item, indexName, index, sourceScope))
       : scopedItem(itemName, item, indexName, index, sourceScope);
   for (const store of options.stores ?? []) {
-    scope[store.name] = readPath(scope, store.initial);
+    scope[store.name] = readExpression(scope, store.initial, store.read);
   }
   for (const component of options.components ?? []) {
     for (const prop of component.props) {
-      scope[prop.name] = readPath(scope, prop.expression);
+      scope[prop.name] = readExpression(scope, prop.expression, prop.read);
     }
     for (const store of component.stores) {
-      scope[store.name] = readPath(scope, store.initial);
+      scope[store.name] = readExpression(scope, store.initial, store.read);
     }
   }
   return scope;
@@ -265,7 +292,7 @@ const localScopeFor = (
 const updateComponentProps = (scope: Record<string, unknown>, options: KeyedListOptions): void => {
   for (const component of options.components ?? []) {
     for (const prop of component.props) {
-      scope[prop.name] = readPath(scope, prop.expression);
+      scope[prop.name] = readExpression(scope, prop.expression, prop.read);
     }
   }
 };
@@ -592,6 +619,8 @@ const createRecord = (
     item,
     index,
     sourceScope: options.scope,
+    sourceScopeSnapshot: sourceScopeSnapshotFor(options.scope),
+    localScopeKeys: localScopeKeysFor(options),
     revision: createSignal(0),
     hydrationBoundaries: [],
   };
@@ -622,9 +651,22 @@ const createRecord = (
 };
 
 const updateRecord = (record: RowRecord, item: unknown, index: number, options: KeyedListOptions): void => {
-  const scopeChanged = record.sourceScope !== options.scope;
-  if (options.scope) {
-    Object.assign(record.scope, options.scope);
+  const nextSourceScopeSnapshot = sourceScopeSnapshotFor(options.scope);
+  const scopeChanged =
+    record.sourceScope !== options.scope || sourceScopeChanged(record.sourceScopeSnapshot, nextSourceScopeSnapshot);
+  for (const key of record.sourceScopeSnapshot.keys()) {
+    if (
+      !nextSourceScopeSnapshot.has(key) &&
+      !record.localScopeKeys.has(key) &&
+      key !== options.itemName &&
+      key !== options.indexName
+    ) {
+      record.scope[key] = undefined;
+    }
+  }
+  for (const [key, value] of nextSourceScopeSnapshot) {
+    if (record.localScopeKeys.has(key) || key === options.itemName || key === options.indexName) continue;
+    record.scope[key] = value;
   }
   record.scope[options.itemName] = item;
   if (options.indexName) record.scope[options.indexName] = index;
@@ -634,6 +676,7 @@ const updateRecord = (record: RowRecord, item: unknown, index: number, options: 
   record.item = item;
   record.index = index;
   record.sourceScope = options.scope;
+  record.sourceScopeSnapshot = nextSourceScopeSnapshot;
   if (options.updatePolicy === "reference" && !itemChanged && !indexChanged && !scopeChanged) {
     return;
   }

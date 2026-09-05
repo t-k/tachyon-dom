@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
 import { hydrate, mount, type ClientTemplateModule } from "../src/runtime/mount";
 import { cleanupTextKeyedList, mountTextKeyedList } from "../src/runtime/list-text";
+import { mountKeyedList } from "../src/runtime/list";
 import { createRoot, createSignal, effect } from "../src/runtime/signal";
 import { setText, textAt } from "../src/runtime/text";
 
@@ -16,6 +17,7 @@ const evaluateGeneratedClientModule = (code: string): ClientTemplateModule<Recor
     "__tachyonTextAt",
     "__tachyonCleanupTextKeyedList",
     "__tachyonMountTextKeyedList",
+    "__tachyonMountKeyedList",
     `${executable}; return { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind };`,
   )(
     createRoot,
@@ -23,6 +25,7 @@ const evaluateGeneratedClientModule = (code: string): ClientTemplateModule<Recor
     textAt,
     cleanupTextKeyedList,
     mountTextKeyedList,
+    mountKeyedList,
   ) as ClientTemplateModule<Record<string, unknown>>;
 };
 
@@ -130,6 +133,21 @@ describe("client mount entrypoints", () => {
     expect(root.querySelectorAll("li.row")[0]).toBe(serverRows[0]);
     expect(root.querySelectorAll("li.row")[1]).toBe(serverRows[1]);
     if (result.ok) result.value.dispose();
+  });
+
+  it("executes compiler-generated row store readers on the generic list path", () => {
+    const compiled = compileTemplate(
+      `<main><ul><for each={rows} key={row.id}><li><store count={row.count}/><span>{count}</span></li></for></ul></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const generated = generateClientModule(compiled.value);
+    expect(generated).toContain("mountKeyedList");
+    const module = evaluateGeneratedClientModule(generated);
+    const root = document.createElement("div");
+
+    mount(root, module, { rows: [{ id: "a", count: 7 }] });
+
+    expect(root.innerHTML).toBe(`<main><ul><li><span>7</span></li></ul></main>`);
   });
 
   it("compares static class tokens while allowing compiler-declared class tokens", () => {
