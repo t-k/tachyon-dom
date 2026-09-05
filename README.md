@@ -26,9 +26,9 @@ This `.td` component combines a signal-backed counter with a keyed list:
 </script>
 
 <main>
-  <button on:click="{increment}">{count}</button>
+  <button on:click={increment}>{count}</button>
   <ul>
-    <for each="{rows}" key="{row.id}">
+    <for each={rows} key={row.id}>
       <li>{row.label}</li>
     </for>
   </ul>
@@ -73,9 +73,9 @@ On this machine, Tachyon DOM performed within 3% of the comparison implementatio
 
 | Compared with        | Tachyon DOM result |
 | -------------------- | -----------------: |
-| vanillajs-lite-keyed |        1.8% faster |
-| solid-keyed          |        0.9% faster |
-| marko-keyed          |        2.5% slower |
+| vanillajs-lite-keyed | 1.8% faster |
+| solid-keyed | 0.9% faster |
+| marko-keyed | 2.5% slower |
 
 Results are the geometric mean of nine operations: row creation, replacement, partial updates, selection, swapping, removal, append, clear, and creation of many rows. Lower execution time is better.
 
