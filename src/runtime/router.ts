@@ -199,6 +199,7 @@ type LayoutState = {
 type PendingRenderResult = {
   dispose: () => void;
   release: () => void;
+  wasDisposed: () => boolean;
 };
 
 type PrefetchEntry = {
@@ -506,20 +507,21 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   const isCurrentNavigation = (signal: AbortSignal, generation: number): boolean =>
     !disposed && !signal.aborted && navigationGeneration === generation;
   const trackPendingRenderResult = (value: ClientRenderResult): PendingRenderResult => {
-    let active = true;
+    let status: "active" | "released" | "disposed" = "active";
     let pending: PendingRenderResult;
     pending = {
       dispose: () => {
-        if (!active) return;
-        active = false;
+        if (status !== "active") return;
+        status = "disposed";
         pendingRenderResults.delete(pending);
         disposeRenderResult(value);
       },
       release: () => {
-        if (!active) return;
-        active = false;
+        if (status !== "active") return;
+        status = "released";
         pendingRenderResults.delete(pending);
       },
+      wasDisposed: () => status === "disposed",
     };
     pendingRenderResults.add(pending);
     return pending;
@@ -695,6 +697,11 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     }
     const target = routeTargetFor(options.root, match, url, loaded.leafData);
     let committedTarget = target;
+    const removeInsertedNodes = (container: Element, nodes: readonly Node[]): void => {
+      for (const node of nodes) {
+        if (node.parentNode === container) node.parentNode.removeChild(node);
+      }
+    };
     const renderNestedBranch = async (): Promise<void> => {
       const previousStates = new Map(layoutStates);
       const nextStates = new Map<ClientRouteDefinition, LayoutState>();
@@ -708,7 +715,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         if (cleanupAttempted) return;
         cleanupAttempted = true;
         const disposers = [...preparedLayoutDisposers];
-        if (leafPrepared && leafDispose) {
+        if (leafPrepared && leafDispose && !pendingRendered.wasDisposed()) {
           disposers.push(leafDispose);
         } else {
           disposers.push(pendingRendered.dispose);
@@ -781,7 +788,6 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
           throw error;
         }
         leafPrepared = true;
-        pendingRendered.release();
         if (stagingTarget) parentTarget.replaceChildren(...Array.from(leafHost.childNodes));
         else {
           stagingTarget = leafHost;
@@ -795,12 +801,19 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         const oldStates = Array.from(previousStates.values());
         const retainedStates = new Set(nextStates.values());
         if (!commitTarget) throw new Error("Nested client route did not produce a commit target.");
-        commitTarget.replaceChildren(...Array.from(stagingTarget.childNodes));
+        const committedNodes = Array.from(stagingTarget.childNodes);
+        commitTarget.replaceChildren(...committedNodes);
+        if (!isCurrentNavigation(signal, generation)) {
+          removeInsertedNodes(commitTarget, committedNodes);
+          cleanupPrepared();
+          return;
+        }
         layoutStates.clear();
         for (const [route, state] of nextStates) layoutStates.set(route, state);
         committedView = { target: parentTarget, dispose: leafDispose };
         committedTarget = parentTarget;
         committed = true;
+        pendingRendered.release();
         const obsoleteDisposers = oldStates
           .reverse()
           .filter((state) => !retainedStates.has(state))
@@ -837,17 +850,19 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
           pendingRendered.dispose();
           throw error;
         }
-        pendingRendered.release();
+        const committedNodes = Array.from(leafHost.childNodes);
+        target.replaceChildren(...committedNodes);
         if (!isCurrentNavigation(signal, generation)) {
-          leafDispose();
+          removeInsertedNodes(target, committedNodes);
+          if (!pendingRendered.wasDisposed()) leafDispose();
           return;
         }
         const oldCommitted = committedView;
         const oldStates = Array.from(layoutStates.values()).reverse();
-        target.replaceChildren(...Array.from(leafHost.childNodes));
         layoutStates.clear();
         committedView = { target, dispose: leafDispose };
         committedTarget = target;
+        pendingRendered.release();
         runDisposers([...(oldCommitted ? [oldCommitted.dispose] : []), ...oldStates.map((state) => state.dispose)]);
       }
       await updateHead(url, match, loaded, signal, generation);

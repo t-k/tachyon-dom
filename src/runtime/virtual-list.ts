@@ -38,7 +38,17 @@ const elementAndDisposer = (value: VirtualizedListItem): RenderedRow => {
     return { element: value, dispose: undefined };
   }
   if (value && value.element instanceof Element) {
-    return { element: value.element, dispose: value.dispose };
+    let disposed = false;
+    return {
+      element: value.element,
+      dispose: value.dispose
+        ? () => {
+            if (disposed) return;
+            disposed = true;
+            value.dispose?.();
+          }
+        : undefined,
+    };
   }
   throw new TypeError("Virtual list renderItem must return an Element or a view handle.");
 };
@@ -81,6 +91,7 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
   let animationFrame: number | undefined;
   let disposed = false;
   let listenerAttached = false;
+  let lastRenderCommitted = false;
   const spacer = document.createElement("div");
   const windowEl = document.createElement("div");
   spacer.style.position = "relative";
@@ -119,6 +130,7 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
   };
 
   const renderWindow = (force = false, measuredViewportHeight?: number): void => {
+    lastRenderCommitted = false;
     if (disposed) return;
     const viewportHeight = validateViewportHeight(measuredViewportHeight ?? viewportHeightForList());
     const visibleCount = Math.ceil(viewportHeight / itemHeight);
@@ -154,19 +166,25 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
       }
       throw error;
     }
-    const disposeResult = disposeRows(
-      Array.from(rendered).flatMap(([key, row]) => (nextRendered.has(key) ? [] : [row])),
-    );
+    const previousRendered = rendered;
+    const removedRows = Array.from(rendered).flatMap(([key, row]) => (nextRendered.has(key) ? [] : [row]));
+    rendered = nextRendered;
+    const disposeResult = disposeRows(removedRows);
+    if (disposed) {
+      if (disposeResult.failed) throw disposeResult.error;
+      return;
+    }
     try {
       spacer.style.height = `${items.length * itemHeight}px`;
       windowEl.style.transform = `translateY(${start * itemHeight}px)`;
-      rendered = nextRendered;
       reconcileWindow(nextElements);
       if (!windowEl.parentNode) {
         spacer.appendChild(windowEl);
       }
       lastRangeKey = rangeKey;
+      lastRenderCommitted = true;
     } catch (error) {
+      rendered = previousRendered;
       const cleanupResult = disposeRows(createdRows);
       for (const row of createdRows) row.element.parentNode?.removeChild(row.element);
       if (cleanupResult.failed) {
@@ -227,8 +245,10 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
       try {
         renderWindow(true);
       } catch (error) {
-        items = previousItems;
-        lastRangeKey = previousRangeKey;
+        if (!lastRenderCommitted && !disposed) {
+          items = previousItems;
+          lastRangeKey = previousRangeKey;
+        }
         throw error;
       }
     },
@@ -249,11 +269,13 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
       animationFrame = undefined;
       if (listenerAttached) scroller.removeEventListener("scroll", onScroll);
       resizeObserver?.disconnect();
-      const disposeResult = disposeRows(rendered.values());
-      rendered.clear();
+      const activeRows = Array.from(rendered.values());
+      rendered = new Map();
       items = [];
+      lastRangeKey = "";
       windowEl.replaceChildren();
       scroller.replaceChildren();
+      const disposeResult = disposeRows(activeRows);
       if (disposeResult.failed) throw disposeResult.error;
     },
   };
