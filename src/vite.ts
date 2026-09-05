@@ -238,6 +238,8 @@ const codeForTarget = (
   reactive: boolean,
   scriptOnly: boolean,
   defaultScopeName?: string,
+  hydrationBoundaryId?: string,
+  hydrationChunkImports?: Readonly<Record<string, string>>,
 ): string => {
   if (scriptOnly) {
     return generateScriptOnlyModule(target);
@@ -248,7 +250,12 @@ const codeForTarget = (
   if (target === "stream") {
     return generateServerStreamModule(template, defaultScopeName ? { defaultScopeName } : {});
   }
-  return generateClientModule(template, { reactive, ...(defaultScopeName ? { defaultScopeName } : {}) });
+  return generateClientModule(template, {
+    reactive,
+    ...(defaultScopeName ? { defaultScopeName } : {}),
+    ...(hydrationBoundaryId ? { hydrationBoundaryId } : {}),
+    ...(hydrationChunkImports ? { hydrationChunkImports } : {}),
+  });
 };
 
 const cleanId = (id: string): string => id.split("?", 1)[0] ?? id;
@@ -273,6 +280,19 @@ const targetForId = (
 };
 
 const isEntryRequest = (id: string): boolean => queryForId(id).has("entry");
+
+const hydrationBoundaryIdFor = (id: string): string | undefined => queryForId(id).get("tachyon-hydration") ?? undefined;
+
+const hydrationChunkImportsFor = (
+  id: string,
+  boundaries: readonly { id: string }[],
+): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    boundaries.map((boundary) => [
+      boundary.id,
+      `${cleanId(id)}?client&tachyon-hydration=${encodeURIComponent(boundary.id)}`,
+    ]),
+  );
 
 const shouldIgnoreQueryRequest = (id: string): boolean => {
   const query = queryForId(id);
@@ -407,12 +427,19 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       if (!script.ok) {
         this.error(formatDiagnostic(diagnosticFromCompilerError(source, script.error), id));
       }
+      const hydrationBoundaryId = resolvedTarget === "client" ? hydrationBoundaryIdFor(id) : undefined;
+      const hydrationChunkImports =
+        resolvedTarget === "client" && hydrationBoundaryId === undefined && result.value.template.client.hydrationBoundaries.length > 0
+          ? hydrationChunkImportsFor(id, result.value.template.client.hydrationBoundaries)
+          : undefined;
       const code = `${script.value.code}${codeForTarget(
         resolvedTarget,
         result.value.template,
         options.reactive === true,
         result.value.scriptOnly,
         resolvedTarget === "client" && script.value.defaultScopeName ? script.value.defaultScopeName : undefined,
+        hydrationBoundaryId,
+        hydrationChunkImports,
       )}`;
       const emitSourceMap = shouldEmitSourceMap({
         sourcemap: options.sourcemap,

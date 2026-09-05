@@ -397,9 +397,50 @@ const hasModelBinding = (binding: ClientBinding): boolean => {
 const clientModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
 
 const clientModuleCacheKey = (options: GenerateClientModuleOptions): string =>
-  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}`;
+  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}\0${options.hydrationBoundaryId ?? ""}\0${JSON.stringify(options.hydrationChunkImports ?? {})}`;
+
+const nodeAtElementPath = (root: ElementNode, path: readonly number[]): ElementNode | undefined => {
+  let current = root;
+  for (const index of path) {
+    const child = current.children[index];
+    if (!child || child.type !== "element") return undefined;
+    current = child;
+  }
+  return current;
+};
+
+const templateForHydrationBoundary = (template: CompiledTemplate, id: string): CompiledTemplate | undefined => {
+  const boundary = template.client.hydrationBoundaries.find((candidate) => candidate.id === id);
+  if (!boundary) return undefined;
+  const root = nodeAtElementPath(template.root, boundary.path);
+  if (!root) return undefined;
+  return {
+    ...template,
+    root,
+    ir: { ...template.ir, root },
+    client: lowerClientTemplate(root),
+  };
+};
+
+export const generateClientHydrationChunkModule = (
+  template: CompiledTemplate,
+  boundaryId: string,
+  options: Omit<GenerateClientModuleOptions, "hydrationBoundaryId" | "hydrationChunkImports"> = {},
+): string => {
+  const boundaryTemplate = templateForHydrationBoundary(template, boundaryId);
+  if (!boundaryTemplate) {
+    throw new Error(`Cannot generate hydration chunk for boundary ${boundaryId}.`);
+  }
+  return generateClientModule(boundaryTemplate, {
+    ...(options.reactive === undefined ? {} : { reactive: options.reactive }),
+    ...(options.defaultScopeName ? { defaultScopeName: options.defaultScopeName } : {}),
+  });
+};
 
 export const generateClientModule = (template: CompiledTemplate, options: GenerateClientModuleOptions = {}): string => {
+  if (options.hydrationBoundaryId !== undefined) {
+    return generateClientHydrationChunkModule(template, options.hydrationBoundaryId, options);
+  }
   if (options.defaultScopeName !== undefined) {
     assertSafeIdentifierName(options.defaultScopeName, "defaultScopeName");
   }
@@ -423,6 +464,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     return [];
   });
   const reactive = options.reactive === true;
+  const hydrationChunkImports = options.hydrationChunkImports ?? {};
+  const hasHydrationChunks = Object.keys(hydrationChunkImports).length > 0;
   const needsStore = template.client.stores.length > 0;
   const hasDefaultScope = typeof options.defaultScopeName === "string" && options.defaultScopeName.length > 0;
   const sourceName = scopeName(needsStore);
@@ -492,11 +535,22 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (needsStore) {
     lines.push(`import { createStore as ${runtimeNames.createStore} } from "tachyon-dom/runtime/store";`);
   }
+  if (hasHydrationChunks) {
+    lines.push(
+      `import { createLazyHydrationBoundary as __tachyonCreateLazyHydrationBoundary, scheduleHydration as __tachyonScheduleHydration } from "tachyon-dom/runtime/hydrate";`,
+    );
+  }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
   lines.push(`export const hydrationDynamicAttributes = ${JSON.stringify(hydrationDynamicAttributes)};`);
   lines.push(`export const hydrationDynamicRegions = ${JSON.stringify(template.client.hydrationDynamicRegions)};`);
   lines.push(`export const componentBoundaries = ${JSON.stringify(template.client.components)};`);
+  if (hasHydrationChunks) {
+    const loaders = Object.entries(hydrationChunkImports)
+      .map(([key, moduleId]) => `${JSON.stringify(key)}: () => import(${JSON.stringify(moduleId)})`)
+      .join(", ");
+    lines.push(`export const hydrationChunks = { ${loaders} };`);
+  }
   if (hasDefaultScope) {
     lines.push(`const __tachyonCreateScope = (inputScope = {}) => {`);
     lines.push(
@@ -507,9 +561,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     );
     lines.push(`};`);
   }
-  lines.push(`export const bind = (root, inputScope = {}) => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`);
+  lines.push(
+    `export const bind = (root, inputScope = {}, __tachyonSkipHydration = false, __tachyonResolvedScope = false) => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`,
+  );
   if (hasDefaultScope) {
-    lines.push(`  const scope = __tachyonCreateScope(inputScope);`);
+    lines.push(`  const scope = __tachyonResolvedScope ? inputScope : __tachyonCreateScope(inputScope);`);
   } else {
     lines.push(`  const scope = inputScope;`);
   }
@@ -526,6 +582,13 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   let conditionalIndex = 0;
   let targetIndex = 0;
   for (const binding of bindings) {
+    const bindingInHydrationBoundary =
+      hasHydrationChunks &&
+      template.client.hydrationBoundaries.some(
+        (boundary) => boundary.path.every((part, index) => binding.path[index] === part),
+      );
+    const bindingStart = lines.length;
+    if (bindingInHydrationBoundary) lines.push(`  if (!__tachyonSkipHydration) {`);
     if (binding.kind === "text") {
       const target = `${runtimeNames.textAt}(root, ${JSON.stringify(binding.path)})`;
       if (reactive) {
@@ -609,6 +672,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       const targetName = reactive ? `__tachyonTarget${targetIndex++}` : undefined;
       lines.push(emitConditionalBinding(binding, reactive, sourceName, conditionalIndex++, targetName));
     }
+    if (bindingInHydrationBoundary) {
+      const emitted = lines.splice(bindingStart + 1);
+      lines.push(...emitted.map((line) => `  ${line}`));
+      lines.push(`  }`);
+    }
   }
   lines.push(`  return () => {`);
   if (needsManualCleanup) {
@@ -633,6 +701,64 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   lines.push(`  };`);
   lines.push(`});`);
+  if (hasHydrationChunks) {
+    lines.push(`const __tachyonLoadHydrationChunk = (loader, scope) => Promise.resolve(loader()).then((module) => ({`);
+    lines.push(`  bind: (element) => {`);
+    lines.push(`    const binder = typeof module === "function" ? module : typeof module.bind === "function" ? module.bind : module.default;`);
+    lines.push(`    return typeof binder === "function" ? binder(element, scope) : undefined;`);
+    lines.push(`  },`);
+    lines.push(`}));`);
+    lines.push(
+      `export const hydrate = (bindRoot, hydrationRoot, inputScope = {}) => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`,
+    );
+    if (hasDefaultScope) {
+      lines.push(`  const scope = __tachyonCreateScope(inputScope);`);
+    } else {
+      lines.push(`  const scope = inputScope;`);
+    }
+    if (needsStore) {
+      const fields = template.client.stores
+        .map((store) => `${store.name}: ${expressionToScopeAccess(store.initial)}`)
+        .join(", ");
+      lines.push(`  const state = ${runtimeNames.createStore}({ ...scope, ${fields} });`);
+    }
+    lines.push(`  const cleanups = [];`);
+    lines.push(`  const eagerCleanup = bind(bindRoot, scope, true, true);`);
+    lines.push(`  cleanups.push(eagerCleanup);`);
+    let hydrationIndex = 0;
+    for (const boundary of template.client.hydrationBoundaries) {
+      const key = boundary.id;
+      const idExpression =
+        boundary.idKind === "expression"
+          ? expressionToScopeAccess(boundary.id, new Set(), sourceName)
+          : JSON.stringify(boundary.id);
+      const resultName = `__tachyonBoundary${hydrationIndex++}`;
+      lines.push(
+        `  const ${resultName} = __tachyonCreateLazyHydrationBoundary(hydrationRoot, String(${idExpression}), () => __tachyonLoadHydrationChunk(hydrationChunks[${JSON.stringify(key)}], scope));`,
+      );
+      lines.push(`  if (!${resultName}.ok) throw new Error(${resultName}.error.message);`);
+      lines.push(
+        `  cleanups.push(__tachyonScheduleHydration(${resultName}.value, { strategy: ${JSON.stringify(boundary.strategy ?? "load")},${boundary.media ? ` media: ${JSON.stringify(boundary.media)},` : ""}${boundary.interaction ? ` interaction: ${JSON.stringify(boundary.interaction)},` : ""}${boundary.rootMargin ? ` rootMargin: ${JSON.stringify(boundary.rootMargin)},` : ""} replayInteraction: true }));`,
+      );
+      lines.push(`  cleanups.push(() => ${resultName}.value.dispose());`);
+    }
+    lines.push(`  return () => {`);
+    lines.push(`    let __tachyonCleanupError;`);
+    lines.push(`    let __tachyonCleanupFailed = false;`);
+    lines.push(`    for (const cleanup of cleanups) {`);
+    lines.push(`      try { cleanup?.(); } catch (error) {`);
+    lines.push(`        if (!__tachyonCleanupFailed) __tachyonCleanupError = error;`);
+    lines.push(`        __tachyonCleanupFailed = true;`);
+    lines.push(`      }`);
+    lines.push(`    }`);
+    lines.push(`    try { __tachyonDisposeRoot(); } catch (error) {`);
+    lines.push(`      if (!__tachyonCleanupFailed) __tachyonCleanupError = error;`);
+    lines.push(`      __tachyonCleanupFailed = true;`);
+    lines.push(`    }`);
+    lines.push(`    if (__tachyonCleanupFailed) throw __tachyonCleanupError;`);
+    lines.push(`  };`);
+    lines.push(`});`);
+  }
   const code = `${lines.join("\n")}\n`;
   const nextCache = cachedByOptions ?? new Map<string, string>();
   nextCache.set(cacheKey, code);

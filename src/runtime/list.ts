@@ -6,7 +6,12 @@ import { mountConditional } from "./conditional.js";
 import { createSignal, createStore, effect, onOwnerCleanup, read, untrack, type Signal } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { normalizeListKey } from "./key.js";
-import { createHydrationBoundary, type CompiledHydrationBoundary, type HydrationBoundaryHandle } from "./hydrate.js";
+import {
+  createHydrationBoundary,
+  scheduleHydration,
+  type CompiledHydrationBoundary,
+  type HydrationBoundaryHandle,
+} from "./hydrate.js";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void;
@@ -164,6 +169,7 @@ type RowRecord = {
   localScopeKeys: ReadonlySet<string>;
   revision: Signal<number>;
   hydrationBoundaries: HydrationBoundaryHandle[];
+  hydrationCleanups: Array<() => void>;
 };
 
 type ListState = {
@@ -415,13 +421,12 @@ const cleanupRecord = (record: RowRecord): void => {
     failed = true;
   }
   try {
-    for (const boundary of record.hydrationBoundaries.splice(0)) {
-      boundary.dispose();
-    }
+    runCleanups(record.hydrationCleanups.splice(0));
   } catch (error) {
     if (!failed) firstError = error;
     failed = true;
   }
+  record.hydrationBoundaries.splice(0);
   for (const node of record.nodes) {
     try {
       cleanupOwnedSubtree(node);
@@ -498,8 +503,13 @@ const applyRowBinding = (
   }
 };
 
-const bindRowBindings = (record: RowRecord, options: KeyedListOptions): void => {
-  const rowBindings = options.bindings
+const bindRowBindings = (
+  record: RowRecord,
+  options: KeyedListOptions,
+  bindings: readonly Binding[],
+  cleanups: Array<() => void>,
+): void => {
+  const rowBindings = bindings
     .map((binding, index) => ({ binding, index }))
     .filter(
       (entry): entry is { binding: Exclude<Binding, EventBinding>; index: number } => entry.binding.kind !== "event",
@@ -507,7 +517,7 @@ const bindRowBindings = (record: RowRecord, options: KeyedListOptions): void => 
   if (rowBindings.length === 0) {
     return;
   }
-  record.cleanups.push(
+  cleanups.push(
     untrack(() =>
       effect(() => {
         for (const { binding, index } of rowBindings) {
@@ -518,9 +528,13 @@ const bindRowBindings = (record: RowRecord, options: KeyedListOptions): void => 
   );
 };
 
-const bindRowEvents = (record: RowRecord, options: KeyedListOptions): void => {
+const bindRowEvents = (
+  record: RowRecord,
+  bindings: readonly Binding[],
+  cleanups: Array<() => void>,
+): void => {
   const delegateKeys = new Set<string>();
-  for (const binding of options.bindings) {
+  for (const binding of bindings) {
     if (binding.kind !== "event") {
       continue;
     }
@@ -540,17 +554,21 @@ const bindRowEvents = (record: RowRecord, options: KeyedListOptions): void => {
       }
     };
     target.addEventListener(binding.eventName, listener);
-    record.cleanups.push(() => target.removeEventListener(binding.eventName, listener));
+    cleanups.push(() => target.removeEventListener(binding.eventName, listener));
   }
 };
 
-const bindRowControls = (record: RowRecord, options: KeyedListOptions): void => {
-  for (const binding of options.bindings) {
+const bindRowControls = (
+  record: RowRecord,
+  bindings: readonly Binding[],
+  cleanups: Array<() => void>,
+): void => {
+  for (const binding of bindings) {
     if (binding.kind !== "model") {
       continue;
     }
     const element = nodeAtRecord(record, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
-    record.cleanups.push(
+    cleanups.push(
       bindControl(
         element,
         binding.property,
@@ -566,6 +584,20 @@ const bindRowControls = (record: RowRecord, options: KeyedListOptions): void => 
       ),
     );
   }
+};
+
+const bindingWithin = (boundaryPath: readonly number[], bindingPath: readonly number[]): boolean =>
+  boundaryPath.length <= bindingPath.length && boundaryPath.every((part, index) => bindingPath[index] === part);
+
+const bindRow = (
+  record: RowRecord,
+  options: KeyedListOptions,
+  bindings: readonly Binding[],
+  cleanups: Array<() => void>,
+): void => {
+  bindRowEvents(record, bindings, cleanups);
+  bindRowBindings(record, options, bindings, cleanups);
+  untrack(() => bindRowControls(record, bindings, cleanups));
 };
 
 const keyFor = (item: unknown, index: number, options: KeyedListOptions): PropertyKey => {
@@ -623,21 +655,45 @@ const createRecord = (
     localScopeKeys: localScopeKeysFor(options),
     revision: createSignal(0),
     hydrationBoundaries: [],
+    hydrationCleanups: [],
   };
   try {
+    const deferredBindings = new Set<Binding>();
     for (const boundary of options.hydrationBoundaries ?? []) {
       const resolvedId = boundary.idKind === "expression" ? readPath(scope, boundary.id) : boundary.id;
       if (resolvedId === undefined || resolvedId === null) continue;
+      const boundaryPath = boundary.path ?? [];
+      const boundaryBindings = options.bindings.filter((binding) => bindingWithin(boundaryPath, binding.path));
       const handle = createHydrationBoundary(
         record.element.parentElement ?? record.element,
         String(resolvedId),
-        () => undefined,
+        () => {
+          const cleanups: Array<() => void> = [];
+          bindRow(record, options, boundaryBindings, cleanups);
+          return () => runCleanups(cleanups);
+        },
       );
-      if (handle.ok) record.hydrationBoundaries.push(handle.value);
+      if (handle.ok) {
+        record.hydrationBoundaries.push(handle.value);
+        record.hydrationCleanups.push(
+          scheduleHydration(handle.value, {
+            strategy: boundary.strategy ?? "load",
+            ...(boundary.media ? { media: boundary.media } : {}),
+            ...(boundary.interaction ? { interaction: boundary.interaction } : {}),
+            ...(boundary.rootMargin ? { rootMargin: boundary.rootMargin } : {}),
+            replayInteraction: true,
+          }),
+        );
+        record.hydrationCleanups.push(() => handle.value.dispose());
+        for (const binding of boundaryBindings) deferredBindings.add(binding);
+      }
     }
-    bindRowEvents(record, options);
-    bindRowBindings(record, options);
-    untrack(() => bindRowControls(record, options));
+    bindRow(
+      record,
+      options,
+      options.bindings.filter((binding) => !deferredBindings.has(binding)),
+      record.cleanups,
+    );
     return record;
   } catch (error) {
     try {

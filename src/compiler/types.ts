@@ -217,4 +217,6 @@ export type LoweringContext = {
 export type GenerateClientModuleOptions = {
   reactive?: boolean;
   defaultScopeName?: string;
+  hydrationChunkImports?: Readonly<Record<string, string>>;
+  hydrationBoundaryId?: string;
 };

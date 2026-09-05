@@ -1140,6 +1140,62 @@ describe("mountKeyedList", () => {
     expect(root.innerHTML).toBe(`<li class="footer">Footer</li>`);
   });
 
+  it("defers row bindings until interaction hydration and disposes them with the keyed row", () => {
+    document.body.innerHTML =
+      `<ul id="items"><!--tachyon-hydrate:a:start--><li><button>Server A</button></li><!--tachyon-hydrate:a:end-->` +
+      `<!--tachyon-hydrate:b:start--><li><button>Server B</button></li><!--tachyon-hydrate:b:end--></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const calls: string[] = [];
+    const options = {
+      signature: "row-interaction-hydration",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><button> </button></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "item.label" },
+        {
+          kind: "event" as const,
+          path: [0],
+          eventName: "click",
+          handler: "item.onClick",
+          read: (scope: Record<string, unknown>) => (scope.item as { onClick: () => void }).onClick,
+        },
+      ],
+      hydrationBoundaries: [
+        {
+          path: [],
+          id: "item.id",
+          idKind: "expression" as const,
+          strategy: "interaction" as const,
+          interaction: "click",
+        },
+      ],
+    };
+    const first = { id: "a", label: "A", onClick: () => calls.push("a") };
+    const second = { id: "b", label: "B", onClick: () => calls.push("b") };
+
+    mountKeyedList(root, [], [first, second], options);
+    const firstButton = root.querySelector("button");
+    if (!(firstButton instanceof HTMLButtonElement)) throw new Error("Missing first button.");
+    expect(firstButton.textContent).toBe("Server A");
+
+    firstButton.click();
+
+    expect(firstButton.textContent).toBe("A");
+    expect(calls).toEqual(["a"]);
+
+    mountKeyedList(root, [], [second, first], options);
+    const reorderedButton = root.querySelectorAll("button")[1];
+    if (!(reorderedButton instanceof HTMLButtonElement)) throw new Error("Missing reordered button.");
+    reorderedButton.click();
+    expect(calls).toEqual(["a", "a"]);
+
+    mountKeyedList(root, [], [second], options);
+    reorderedButton.click();
+    expect(calls).toEqual(["a", "a"]);
+  });
+
   it("inserts newly mounted rows before a static trailing sibling", () => {
     document.body.innerHTML = `<ul id="items"><li class="footer">Footer</li></ul>`;
     const root = document.querySelector("#items");

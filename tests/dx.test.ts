@@ -635,7 +635,9 @@ export default () => ({
       expect(code).toContain(`export const pageTitle = "Counter";`);
       expect(code).toContain(`const __tachyonSfcDefaultScope = () => ({`);
       expect(code).toContain(`export { __tachyonSfcDefaultScope as default };`);
-      expect(code).toContain(`const scope = __tachyonCreateScope(inputScope);`);
+      expect(code).toContain(
+        `const scope = __tachyonResolvedScope ? inputScope : __tachyonCreateScope(inputScope);`,
+      );
       expect(code).toContain(`export const templateHtml = "<button> </button>";`);
       expect(code).toContain(`scope.increment`);
     } finally {
@@ -1542,7 +1544,9 @@ export default {
     const code = typeof result === "object" ? result?.code : undefined;
     expect(code).toContain(`export const pageTitle = "Counter";`);
     expect(code).toContain(`const __tachyonSfcDefaultScope = {`);
-    expect(code).toContain(`const scope = __tachyonCreateScope(inputScope);`);
+    expect(code).toContain(
+      `const scope = __tachyonResolvedScope ? inputScope : __tachyonCreateScope(inputScope);`,
+    );
     expect(code).toContain(`cleanups.push(__tachyonDelegate(root, "click", [], scope.increment));`);
   });
 
@@ -1601,8 +1605,31 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(typeof server === "object" && server?.code).toContain(`export const render = (scope) =>`);
     expect(typeof stream === "object" && stream?.code).toContain(`export const stream = async function*`);
     expect(typeof client === "object" && client?.code).toContain(
-      `export const bind = (root, inputScope = {}) => __tachyonCreateRoot`,
+      `export const bind = (root, inputScope = {}, __tachyonSkipHydration = false, __tachyonResolvedScope = false) => __tachyonCreateRoot`,
     );
+  });
+
+  it("generates a Vite hydration chunk loader and boundary-only module", async () => {
+    const plugin = tachyonDom({ reactive: true });
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+    const context = {
+      error(error: string): never {
+        throw new Error(error);
+      },
+    } as never;
+    const source = `<main><section hydrate:interaction="click"><button>{label}</button></section></main>`;
+    const entry = await plugin.transform.call(context, source, "/src/lazy.td");
+    const code = typeof entry === "object" ? String(entry?.code ?? "") : "";
+    expect(code).toContain(`export const hydrationChunks = {`);
+    expect(code).toContain(`import("/src/lazy.td?client&tachyon-hydration=td-h-0")`);
+    expect(code).toContain(`export const hydrate = (bindRoot, hydrationRoot, inputScope = {})`);
+    expect(code).toContain(`__tachyonSkipHydration`);
+
+    const chunk = await plugin.transform.call(context, source, "/src/lazy.td?client&tachyon-hydration=td-h-0");
+    const chunkCode = typeof chunk === "object" ? String(chunk?.code ?? "") : "";
+    expect(chunkCode).toContain(`export const templateHtml = "<section><button> </button></section>"`);
+    expect(chunkCode).toContain(`export const bind =`);
+    expect(chunkCode).not.toContain(`export const hydrationChunks =`);
   });
 
   it("applies one template whitespace policy to every Vite target", async () => {

@@ -44,13 +44,18 @@ export type HydrationScheduleOptions = {
 export type HydrationCleanup = void | (() => void);
 
 export type HydrationBoundaryChunk =
-  | ((element: Element) => HydrationCleanup)
-  | { bind: (element: Element) => HydrationCleanup }
-  | { default: ((element: Element) => HydrationCleanup) | { bind: (element: Element) => HydrationCleanup } };
+  | ((element: Element, scope?: Record<string, unknown>) => HydrationCleanup)
+  | { bind: (element: Element, scope?: Record<string, unknown>) => HydrationCleanup }
+  | {
+      default:
+        | ((element: Element, scope?: Record<string, unknown>) => HydrationCleanup)
+        | { bind: (element: Element, scope?: Record<string, unknown>) => HydrationCleanup };
+    };
 
 export type CompiledHydrationBoundary = {
   id: string;
   idKind?: "expression" | "static";
+  path?: readonly number[];
   strategy?: HydrationStrategy;
   media?: string;
   interaction?: keyof HTMLElementEventMap | string;

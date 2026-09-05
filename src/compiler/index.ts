@@ -70,7 +70,7 @@ export const compileTemplate = (
 };
 
 export * from "./types.js";
-export { generateClientModule } from "./targets/client.js";
+export { generateClientHydrationChunkModule, generateClientModule } from "./targets/client.js";
 export {
   compileServerTemplate,
   generateServerModule,

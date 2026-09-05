@@ -1,5 +1,9 @@
 import { err, ok, type Result } from "../result.js";
-import { diagnoseHydrationBoundaries, type CompiledHydrationBoundary } from "./hydrate.js";
+import {
+  diagnoseHydrationBoundaries,
+  type CompiledHydrationBoundary,
+  type HydrationBoundaryChunk,
+} from "./hydrate.js";
 import { createRoot } from "./signal.js";
 
 export type ClientHydrationDynamicAttribute = {
@@ -17,8 +21,10 @@ export type ClientHydrationDynamicRegion = {
 export type ClientTemplateModule<Scope extends Record<string, unknown> = Record<string, unknown>> = {
   templateHtml: string;
   hydrationBoundaries?: readonly CompiledHydrationBoundary[];
+  hydrationChunks?: Readonly<Record<string, () => Promise<HydrationBoundaryChunk> | HydrationBoundaryChunk>>;
   hydrationDynamicAttributes?: readonly ClientHydrationDynamicAttribute[];
   hydrationDynamicRegions?: readonly ClientHydrationDynamicRegion[];
+  hydrate?: (bindRoot: Element, hydrationRoot: ParentNode, scope: Scope) => void | (() => void);
   bind: (root: Element, scope: Scope) => void | (() => void);
 };
 
@@ -295,7 +301,10 @@ export const hydrate = <Scope extends Record<string, unknown>>(
     return err({ message: structureError });
   }
   try {
-    return ok(handleFor(root, bindWithOwner(bindRoot, module, scope as Scope)));
+    const cleanup = module.hydrate
+      ? module.hydrate(bindRoot, root, scope as Scope)
+      : bindWithOwner(bindRoot, module, scope as Scope);
+    return ok(handleFor(root, cleanup));
   } catch (error) {
     return err({ message: error instanceof Error ? error.message : String(error) });
   }
