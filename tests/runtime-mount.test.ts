@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compileTemplate, generateClientModule } from "../src/compiler";
+import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
 import { hydrate, mount, type ClientTemplateModule } from "../src/runtime/mount";
 import { createRoot, createSignal, effect } from "../src/runtime/signal";
 import { setText, textAt } from "../src/runtime/text";
@@ -77,6 +77,57 @@ describe("client mount entrypoints", () => {
     expect(result.ok).toBe(true);
     expect(root.querySelector("p")?.getAttribute("aria-label")).toBe("server");
     if (result.ok) result.value.dispose();
+  });
+
+  it("hydrates SSR rows around static siblings", () => {
+    const compiled = compileTemplate(
+      `<ul><for each={items} key={item.id}><li class="row">{item.name}</li></for><li class="footer">Footer</li></ul>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const root = document.createElement("main");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      items: [{ id: "a", name: "A" }, { id: "b", name: "B" }],
+    });
+
+    const result = hydrate(root, {
+      templateHtml: compiled.value.client.templateHtml,
+      hydrationDynamicRegions: compiled.value.client.hydrationDynamicRegions,
+      bind: () => undefined,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(root.textContent).toBe("ABFooter");
+    if (result.ok) result.value.dispose();
+  });
+
+  it("compares static class tokens while allowing compiler-declared class tokens", () => {
+    const compiled = compileTemplate(`<p class="btn" class:active={active}>Hello</p>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module: ClientTemplateModule = {
+      templateHtml: compiled.value.client.templateHtml,
+      hydrationDynamicAttributes: compiled.value.client.hydrationDynamicAttributes,
+      bind: () => undefined,
+    };
+    const root = document.createElement("main");
+    root.innerHTML = `<p class="btn active">Hello</p>`;
+
+    const hydrated = hydrate(root, module, { active: true });
+    expect(hydrated.ok).toBe(true);
+    if (hydrated.ok) hydrated.value.dispose();
+
+    root.innerHTML = `<p class="wrong active">Hello</p>`;
+    expect(hydrate(root, module, { active: true }).ok).toBe(false);
+  });
+
+  it("rejects unsafe children even when the expected element has no children", () => {
+    const root = document.createElement("main");
+    root.innerHTML = `<div><script>alert(1)</script></div>`;
+    const before = root.outerHTML;
+
+    const result = hydrate(root, { templateHtml: `<div></div>`, bind: () => undefined });
+
+    expect(result.ok).toBe(false);
+    expect(root.outerHTML).toBe(before);
   });
 
   it("mounts independent instances and disposes each one once", () => {

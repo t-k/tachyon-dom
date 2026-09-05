@@ -86,6 +86,78 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("disposes a flat view when its connected callback synchronously disposes the router", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    const tagName = `td-dispose-flat-${Math.random().toString(36).slice(2)}`;
+    let router: ReturnType<typeof createClientRouter> | undefined;
+    let disposeCount = 0;
+    customElements.define(
+      tagName,
+      class extends HTMLElement {
+        connectedCallback(): void {
+          router?.dispose();
+        }
+      },
+    );
+    router = createClientRouter({
+      root,
+      routes: [
+        {
+          path: "/",
+          render: () => ({ value: rawHtml(`<${tagName}></${tagName}>`), dispose: () => disposeCount++ }),
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+
+    expect(disposeCount).toBe(1);
+    expect(root.childElementCount).toBe(0);
+  });
+
+  it("disposes a nested leaf when its connected callback synchronously disposes the router", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/layout/page");
+    const tagName = `td-dispose-nested-${Math.random().toString(36).slice(2)}`;
+    let router: ReturnType<typeof createClientRouter> | undefined;
+    let disposeCount = 0;
+    customElements.define(
+      tagName,
+      class extends HTMLElement {
+        connectedCallback(): void {
+          router?.dispose();
+        }
+      },
+    );
+    router = createClientRouter({
+      root,
+      routes: [
+        {
+          path: "/layout",
+          render: () => rawHtml(`<section><div data-tachyon-outlet></div></section>`),
+          children: [
+            {
+              path: "page",
+              render: () => ({ value: rawHtml(`<${tagName}></${tagName}>`), dispose: () => disposeCount++ }),
+            },
+          ],
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+
+    expect(disposeCount).toBe(1);
+    expect(root.childElementCount).toBe(0);
+  });
+
   it("intercepts same-origin links while preserving modified clicks", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");

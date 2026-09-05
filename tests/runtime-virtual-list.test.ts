@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createVirtualizedList } from "../src/runtime/virtual-list";
+import { createVirtualizedList, type VirtualizedList } from "../src/runtime/virtual-list";
 
 describe("virtualized list runtime", () => {
   afterEach(() => {
@@ -165,6 +165,62 @@ describe("virtualized list runtime", () => {
 
     expect(disposed).toEqual(["a", "b"]);
     expect(scroller.childElementCount).toBe(0);
+  });
+
+  it("does not dispose an exiting row twice when its disposer destroys the list", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const disposed: string[] = [];
+    let list: VirtualizedList<{ id: string }> | undefined;
+    list = createVirtualizedList({
+      scroller,
+      items: [{ id: "a" }],
+      itemHeight: 20,
+      viewportHeight: 20,
+      overscan: 0,
+      getKey: (item) => item.id,
+      renderItem: (item) => ({
+        element: document.createElement("div"),
+        dispose: () => {
+          disposed.push(item.id);
+          list?.destroy();
+        },
+      }),
+    });
+
+    list.update([]);
+
+    expect(disposed).toEqual(["a"]);
+    expect(scroller.childElementCount).toBe(0);
+  });
+
+  it("keeps the committed item generation after an exiting-row cleanup error", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const list = createVirtualizedList({
+      scroller,
+      items: [{ id: 0 }],
+      itemHeight: 20,
+      viewportHeight: 20,
+      overscan: 0,
+      getKey: (item) => item.id,
+      renderItem: (item) => ({
+        element: Object.assign(document.createElement("div"), { textContent: String(item.id) }),
+        dispose: () => {
+          if (item.id === 0) throw new Error("row cleanup failed");
+        },
+      }),
+    });
+
+    expect(() => list.update([{ id: 1 }, { id: 2 }])).toThrow("row cleanup failed");
+    expect(scroller.textContent).toBe("1");
+
+    list.scrollToIndex(1);
+
+    expect(scroller.textContent).toBe("2");
+    list.destroy();
   });
 
   it("renders only added keys and removes missing keys on update", () => {
