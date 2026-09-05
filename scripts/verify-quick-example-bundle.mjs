@@ -7,6 +7,7 @@ import { checkQuickExampleSizes } from "./quick-example-size-policy.mjs";
 const expectedSizes = JSON.parse(
   await readFile(new URL("./browser-bundle-sizes.json", import.meta.url), "utf8"),
 );
+const productionDefines = { __TACHYON_PRODUCTION__: "true" };
 
 const templateSource = `<main>
   <button on:click={increment}>{count}</button>
@@ -39,6 +40,7 @@ const result = await build({
   metafile: true,
   minify: true,
   platform: "browser",
+  define: productionDefines,
   stdin: { contents: clientSource, loader: "js", resolveDir: process.cwd() },
   write: false,
 });

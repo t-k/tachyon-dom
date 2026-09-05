@@ -18,6 +18,14 @@ declare global {
       opened: boolean;
       hydrated: boolean;
     }>;
+    runGeneratedLazyHydration: () => Promise<{
+      before: string;
+      during: string;
+      unchangedBeforeHydration: boolean;
+      opened: boolean;
+      submits: number;
+      hydrated: boolean;
+    }>;
   }
 }
 
@@ -46,5 +54,21 @@ test("defers a boundary chunk and replays the first interaction in every engine"
   expect(result.before).toBe(result.during);
   expect(result.opened).toBe(true);
   expect(result.hydrated).toBe(false);
+  expect(["chromium", "firefox", "webkit"]).toContain(browserName);
+});
+
+test("loads the generated boundary chunk on demand and submits once in every engine", async ({ page, browserName }) => {
+  page.on("pageerror", (error) => console.log(`PAGEERROR ${error.message}`));
+  page.on("console", (message) => console.log(`CONSOLE ${message.type()} ${message.text()}`));
+  await page.goto("/tests/browser/generated-lazy-fixture.html");
+  const chunkRequest = page.waitForRequest((request) => request.url().endsWith("/generated-lazy-chunk.js"));
+  const result = await page.evaluate(() => window.runGeneratedLazyHydration());
+
+  await chunkRequest;
+  expect(result.unchangedBeforeHydration).toBe(true);
+  expect(result.before).toBe(result.during);
+  expect(result.opened).toBe(true);
+  expect(result.submits).toBe(1);
+  expect(result.hydrated).toBe(true);
   expect(["chromium", "firefox", "webkit"]).toContain(browserName);
 });

@@ -85,6 +85,10 @@
       "types": "./dist/template-language.d.ts",
       "import": "./dist/template-language.js"
     },
+    "./template-typecheck": {
+      "types": "./dist/template-typecheck.d.ts",
+      "import": "./dist/template-typecheck.js"
+    },
     "./i18n": {
       "types": "./dist/i18n.d.ts",
       "import": "./dist/i18n.js"
@@ -249,6 +253,7 @@
     "check:size": "size-limit",
     "check:browser-entry": "node scripts/verify-browser-entry.mjs",
     "check:browser-feature-budgets": "node scripts/verify-browser-feature-budgets.mjs",
+    "check:template-types": "node scripts/verify-template-typecheck.mjs",
     "check:quick-example-size": "node scripts/verify-quick-example-bundle.mjs",
     "verify:package": "node scripts/verify-package-artifacts.mjs && node scripts/verify-middleware-context-types.mjs",
     "verify:clean-consumer": "node scripts/verify-clean-consumer.mjs",
@@ -454,6 +459,14 @@
         "@size-limit/esbuild"
       ],
       "limit": "12 KB"
+    },
+    {
+      "name": "template-typecheck",
+      "path": "dist/template-typecheck.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "24 KB"
     },
     {
       "name": "i18n",

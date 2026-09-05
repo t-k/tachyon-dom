@@ -208,15 +208,6 @@ const tokenise = (source: string, offset = 0): LexToken[] => {
   return tokens;
 };
 
-const wordAt = (source: string, offset: number): Word | undefined => {
-  const clamped = Math.max(0, Math.min(source.length, offset));
-  let start = clamped;
-  while (start > 0 && identifierPart(source[start - 1])) start -= 1;
-  let end = clamped;
-  while (end < source.length && identifierPart(source[end])) end += 1;
-  return start === end ? undefined : { name: source.slice(start, end), start, end };
-};
-
 const positionToOffset = (source: string, position: TemplateLanguagePosition): number => {
   let offset = 0;
   let line = 0;

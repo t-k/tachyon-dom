@@ -410,7 +410,7 @@ const createCandidateRuntime = (representation: "set" | "array"): CandidateRunti
       }
     },
     dispose: () => {
-      for (const subscriber of [...effects]) {
+      for (const subscriber of effects) {
         subscriber.disposed = true;
         for (const dependency of subscriber.dependencies) remove(dependency, subscriber);
         subscriber.dependencies = [];

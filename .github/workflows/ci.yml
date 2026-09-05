@@ -35,6 +35,8 @@ jobs:
 
       - run: pnpm build
 
+      - run: pnpm check:template-types
+
       - run: pnpm verify:url-policy-codegen
 
       - run: pnpm verify:package

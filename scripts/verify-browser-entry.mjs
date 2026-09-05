@@ -4,6 +4,7 @@ import { build } from "esbuild";
 const expectedSizes = JSON.parse(
   await readFile(new URL("./browser-bundle-sizes.json", import.meta.url), "utf8"),
 );
+const productionDefines = { __TACHYON_PRODUCTION__: "true" };
 
 const forbiddenInputs = [
   /(?:^|[/\\])typescript(?:[/\\]|$)/,
@@ -23,6 +24,7 @@ const result = await build({
   metafile: true,
   minify: true,
   platform: "browser",
+  define: productionDefines,
   stdin: {
     contents: 'import { createSignal } from "tachyon-dom"; export const value = createSignal(1);',
     loader: "js",
@@ -36,6 +38,11 @@ const forbidden = Object.keys(result.metafile.inputs).filter((input) =>
 );
 if (forbidden.length > 0) {
   throw new Error(`Browser entry includes forbidden dependencies:\n${forbidden.join("\n")}`);
+}
+
+const outputText = result.outputFiles.map((output) => output.text).join("\n");
+if (/(?:cleanupChanged|ownerCreated|effectCreated|subscriptionChanged|setRuntimeLifecycleHooks)/.test(outputText)) {
+  throw new Error("Browser entry includes lifecycle diagnostics instrumentation.");
 }
 
 const outputBytes = result.outputFiles.reduce((total, output) => total + output.contents.byteLength, 0);
@@ -55,6 +62,7 @@ const cookiesResult = await build({
   metafile: true,
   minify: true,
   platform: "browser",
+  define: productionDefines,
   stdin: {
     contents:
       'import { parseCookies, signCookieValue, verifySignedCookieValue } from "tachyon-dom/cookies"; export const cookies = parseCookies("theme=dark"); export const signed = signCookieValue("hello", "key"); export const verified = verifySignedCookieValue(signed, "key");',

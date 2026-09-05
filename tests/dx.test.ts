@@ -638,7 +638,7 @@ export default () => ({
       expect(code).toContain(`export const pageTitle = "Counter";`);
       expect(code).toContain(`const __tachyonSfcDefaultScope = () => ({`);
       expect(code).toContain(`export { __tachyonSfcDefaultScope as default };`);
-      expect(code).toContain(`const scope = __tachyonResolvedScope ? inputScope : __tachyonCreateScope(inputScope);`);
+      expect(code).toContain(`const scope = __tachyonCreateScope(inputScope);`);
       expect(code).toContain(`export const templateHtml = "<button> </button>";`);
       expect(code).toContain(`scope.increment`);
     } finally {
@@ -1567,7 +1567,7 @@ export default {
     const code = typeof result === "object" ? result?.code : undefined;
     expect(code).toContain(`export const pageTitle = "Counter";`);
     expect(code).toContain(`const __tachyonSfcDefaultScope = {`);
-    expect(code).toContain(`const scope = __tachyonResolvedScope ? inputScope : __tachyonCreateScope(inputScope);`);
+    expect(code).toContain(`const scope = __tachyonCreateScope(inputScope);`);
     expect(code).toContain(`cleanups.push(__tachyonDelegate(root, "click", [], scope.increment));`);
   });
 
@@ -1642,7 +1642,7 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(typeof server === "object" && server?.code).toContain(`export const render = (scope) =>`);
     expect(typeof stream === "object" && stream?.code).toContain(`export const stream = async function*`);
     expect(typeof client === "object" && client?.code).toContain(
-      `export const bind = (root, inputScope = {}, __tachyonSkipHydration = false, __tachyonResolvedScope = false) => __tachyonCreateRoot`,
+      `export const bind = (root, inputScope = {}) => __tachyonCreateRoot`,
     );
   });
 

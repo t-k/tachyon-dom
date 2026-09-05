@@ -4,6 +4,7 @@ import { build } from "esbuild";
 import { compileTemplate, generateClientModule } from "../dist/compiler.js";
 
 const budgets = JSON.parse(await readFile(new URL("./browser-feature-budgets.json", import.meta.url), "utf8"));
+const productionDefines = { __TACHYON_PRODUCTION__: "true" };
 
 const generatedClientSource = (source, options = {}) => {
   const compiled = compileTemplate(source);
@@ -50,6 +51,7 @@ for (const [name, contents] of Object.entries(features)) {
     metafile: true,
     minify: true,
     platform: "browser",
+    define: productionDefines,
     stdin: { contents, loader: "js", resolveDir: process.cwd() },
     write: false,
   });

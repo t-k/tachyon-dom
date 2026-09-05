@@ -1,11 +1,29 @@
+type TachyonHydrationBoundary = {
+  id: string;
+  idKind?: "expression" | "static";
+  path?: readonly number[];
+  strategy?: "load" | "idle" | "visible" | "media" | "interaction";
+  media?: string;
+  interaction?: string;
+  rootMargin?: string;
+};
+
 declare module "*.td" {
   const defaultScope: Record<string, unknown> | ((scope: Record<string, unknown>) => Record<string, unknown>);
   export default defaultScope;
   export const scope: Record<string, unknown> | ((scope: Record<string, unknown>) => Record<string, unknown>);
   export const templateHtml: string;
-  export const hydrationBoundaries: unknown[];
-  export const hydrationDynamicAttributes: readonly { path: readonly number[]; name: string; kind?: "value" | "token" }[];
-  export const hydrationDynamicRegions: readonly { path: readonly number[]; index: number; kind: "list" | "conditional" }[];
+  export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
+  export const hydrationDynamicAttributes: readonly {
+    path: readonly number[];
+    name: string;
+    kind?: "value" | "token";
+  }[];
+  export const hydrationDynamicRegions: readonly {
+    path: readonly number[];
+    index: number;
+    kind: "list" | "conditional";
+  }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
@@ -17,15 +35,23 @@ declare module "*.td?raw" {
 
 declare module "*.td?client" {
   export const templateHtml: string;
-  export const hydrationBoundaries: unknown[];
-  export const hydrationDynamicAttributes: readonly { path: readonly number[]; name: string; kind?: "value" | "token" }[];
-  export const hydrationDynamicRegions: readonly { path: readonly number[]; index: number; kind: "list" | "conditional" }[];
+  export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
+  export const hydrationDynamicAttributes: readonly {
+    path: readonly number[];
+    name: string;
+    kind?: "value" | "token";
+  }[];
+  export const hydrationDynamicRegions: readonly {
+    path: readonly number[];
+    index: number;
+    kind: "list" | "conditional";
+  }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
 
 declare module "*.td?server" {
-  export const hydrationBoundaries: unknown[];
+  export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
   export const renderHydrationState: (id: string, state: unknown) => string;
   export const render: (scope: Record<string, unknown>) => string;
 }
@@ -44,9 +70,17 @@ declare module "*.tachyon" {
   export default defaultScope;
   export const scope: Record<string, unknown> | ((scope: Record<string, unknown>) => Record<string, unknown>);
   export const templateHtml: string;
-  export const hydrationBoundaries: unknown[];
-  export const hydrationDynamicAttributes: readonly { path: readonly number[]; name: string; kind?: "value" | "token" }[];
-  export const hydrationDynamicRegions: readonly { path: readonly number[]; index: number; kind: "list" | "conditional" }[];
+  export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
+  export const hydrationDynamicAttributes: readonly {
+    path: readonly number[];
+    name: string;
+    kind?: "value" | "token";
+  }[];
+  export const hydrationDynamicRegions: readonly {
+    path: readonly number[];
+    index: number;
+    kind: "list" | "conditional";
+  }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
@@ -58,15 +92,23 @@ declare module "*.tachyon?raw" {
 
 declare module "*.tachyon?client" {
   export const templateHtml: string;
-  export const hydrationBoundaries: unknown[];
-  export const hydrationDynamicAttributes: readonly { path: readonly number[]; name: string; kind?: "value" | "token" }[];
-  export const hydrationDynamicRegions: readonly { path: readonly number[]; index: number; kind: "list" | "conditional" }[];
+  export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
+  export const hydrationDynamicAttributes: readonly {
+    path: readonly number[];
+    name: string;
+    kind?: "value" | "token";
+  }[];
+  export const hydrationDynamicRegions: readonly {
+    path: readonly number[];
+    index: number;
+    kind: "list" | "conditional";
+  }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
 
 declare module "*.tachyon?server" {
-  export const hydrationBoundaries: unknown[];
+  export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
   export const renderHydrationState: (id: string, state: unknown) => string;
   export const render: (scope: Record<string, unknown>) => string;
 }
@@ -85,9 +127,17 @@ declare module "*.tachyon.html" {
   export default defaultScope;
   export const scope: Record<string, unknown> | ((scope: Record<string, unknown>) => Record<string, unknown>);
   export const templateHtml: string;
-  export const hydrationBoundaries: unknown[];
-  export const hydrationDynamicAttributes: readonly { path: readonly number[]; name: string; kind?: "value" | "token" }[];
-  export const hydrationDynamicRegions: readonly { path: readonly number[]; index: number; kind: "list" | "conditional" }[];
+  export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
+  export const hydrationDynamicAttributes: readonly {
+    path: readonly number[];
+    name: string;
+    kind?: "value" | "token";
+  }[];
+  export const hydrationDynamicRegions: readonly {
+    path: readonly number[];
+    index: number;
+    kind: "list" | "conditional";
+  }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
@@ -99,15 +149,23 @@ declare module "*.tachyon.html?raw" {
 
 declare module "*.tachyon.html?client" {
   export const templateHtml: string;
-  export const hydrationBoundaries: unknown[];
-  export const hydrationDynamicAttributes: readonly { path: readonly number[]; name: string; kind?: "value" | "token" }[];
-  export const hydrationDynamicRegions: readonly { path: readonly number[]; index: number; kind: "list" | "conditional" }[];
+  export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
+  export const hydrationDynamicAttributes: readonly {
+    path: readonly number[];
+    name: string;
+    kind?: "value" | "token";
+  }[];
+  export const hydrationDynamicRegions: readonly {
+    path: readonly number[];
+    index: number;
+    kind: "list" | "conditional";
+  }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
 
 declare module "*.tachyon.html?server" {
-  export const hydrationBoundaries: unknown[];
+  export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
   export const renderHydrationState: (id: string, state: unknown) => string;
   export const render: (scope: Record<string, unknown>) => string;
 }

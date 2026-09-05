@@ -4,7 +4,7 @@ import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { JSDOM } from "jsdom";
-import { createKeyedRows, type KeyedRows } from "../src/runtime/keyed-rows.js";
+import { createKeyedRows } from "../src/runtime/keyed-rows.js";
 import { collectBenchmarkProvenance, collectDependencyVersions, type BenchmarkEnvelope } from "./provenance.js";
 import {
   createGeneratedTemplateDriver,

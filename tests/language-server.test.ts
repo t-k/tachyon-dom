@@ -50,6 +50,29 @@ describe("Tachyon language server diagnostics", () => {
     });
   });
 
+  it("shares TypeScript template diagnostics and source ranges with the checker", () => {
+    const source = `<script lang="ts">
+export const scope = () => ({ user: { name: "Ada" }, save: 123 });
+</script>
+<main><p>{user.missing}</p><button on:click={save}>Save</button></main>`;
+
+    const diagnostics = diagnosticsForTachyonDocument(source);
+
+    expect(diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 2339,
+          range: {
+            start: { line: 3, character: 10 },
+            end: { line: 3, character: 22 },
+          },
+          source: "typescript",
+        }),
+        expect.objectContaining({ code: 2322, source: "typescript" }),
+      ]),
+    );
+  });
+
   it("debounces change diagnostics so keypresses do not compile immediately", () => {
     vi.useFakeTimers();
     const sent: Array<{ uri: string; diagnostics: ReturnType<typeof diagnosticsForTachyonDocument> }> = [];

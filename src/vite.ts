@@ -22,6 +22,7 @@ import { createFileRouteManifest } from "./router.js";
 import { scanFileRoutes } from "./router-node.js";
 import { err, ok, type Result } from "./result.js";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "./source-map.js";
+import { checkTachyonTemplateTypes, formatTemplateTypeDiagnostic } from "./template-typecheck.js";
 
 export type TachyonDomViteOptions = {
   include?: RegExp;
@@ -32,6 +33,7 @@ export type TachyonDomViteOptions = {
   productionSourceMap?: boolean;
   requestLog?: boolean | TachyonDomRequestLogOptions;
   declarationOutput?: false | ((id: string) => string | undefined);
+  typecheck?: boolean;
   onSourceMap?: (artifact: { id: string; code: string; map: SourceMap; source: string }) => void | Promise<void>;
 };
 
@@ -423,13 +425,26 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       if (!result.ok) {
         this.error(formatDiagnostic(result.error, id));
       }
+      if (options.typecheck === true && hydrationBoundaryIdFor(id) === undefined) {
+        const typeResult = checkTachyonTemplateTypes(source, { fileName: cleanId(id) });
+        if (!typeResult.ok) {
+          this.error(typeResult.error);
+        }
+        if (typeResult.value.length > 0) {
+          this.error(
+            typeResult.value.map((diagnostic) => formatTemplateTypeDiagnostic(diagnostic, cleanId(id))).join("\n"),
+          );
+        }
+      }
       const script = transformSfcScript(result.value.descriptor.script);
       if (!script.ok) {
         this.error(formatDiagnostic(diagnosticFromCompilerError(source, script.error), id));
       }
       const hydrationBoundaryId = resolvedTarget === "client" ? hydrationBoundaryIdFor(id) : undefined;
       const hydrationChunkImports =
-        resolvedTarget === "client" && hydrationBoundaryId === undefined && result.value.template.client.hydrationBoundaries.length > 0
+        resolvedTarget === "client" &&
+        hydrationBoundaryId === undefined &&
+        result.value.template.client.hydrationBoundaries.length > 0
           ? hydrationChunkImportsFor(id, result.value.template.client.hydrationBoundaries)
           : undefined;
       const code = `${script.value.code}${codeForTarget(

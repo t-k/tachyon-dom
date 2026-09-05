@@ -1,5 +1,10 @@
 type SubscriberSet = Set<EffectRunner>;
 
+declare const __TACHYON_PRODUCTION__: boolean;
+
+// Production browser builds define this flag so lifecycle diagnostics disappear from the hot path.
+const lifecycleDiagnosticsEnabled = typeof __TACHYON_PRODUCTION__ === "undefined" || __TACHYON_PRODUCTION__ === false;
+
 type EffectRunner = {
   id: number | undefined;
   disposed: boolean;
@@ -63,6 +68,7 @@ const pendingComputedEffects = new Set<EffectRunner>();
 const pendingEffects = new Set<EffectRunner>();
 
 export const setRuntimeLifecycleHooks = (hooks: RuntimeLifecycleHooks | undefined): (() => void) => {
+  if (!lifecycleDiagnosticsEnabled) return () => undefined;
   const previous = runtimeLifecycleHooks;
   runtimeLifecycleHooks = hooks;
   return () => {
@@ -72,13 +78,13 @@ export const setRuntimeLifecycleHooks = (hooks: RuntimeLifecycleHooks | undefine
 
 const createOwner = (): Owner => {
   const owner: Owner = {
-    id: runtimeLifecycleHooks ? ++nextOwnerId : undefined,
+    id: lifecycleDiagnosticsEnabled && runtimeLifecycleHooks ? ++nextOwnerId : undefined,
     disposed: false,
     head: undefined,
     tail: undefined,
     parentRegistration: undefined,
   };
-  if (owner.id !== undefined) runtimeLifecycleHooks?.ownerCreated?.(owner.id);
+  if (lifecycleDiagnosticsEnabled && owner.id !== undefined) runtimeLifecycleHooks?.ownerCreated?.(owner.id);
   return owner;
 };
 
@@ -98,7 +104,7 @@ const detachCleanup = (registration: CleanupRegistration): void => {
   registration.active = false;
   registration.previous = undefined;
   registration.next = undefined;
-  runtimeLifecycleHooks?.cleanupChanged?.(-1);
+  if (lifecycleDiagnosticsEnabled) runtimeLifecycleHooks?.cleanupChanged?.(-1);
 };
 
 const registerCleanup = (owner: Owner | undefined, cleanup: () => void): CleanupRegistration | undefined => {
@@ -116,14 +122,14 @@ const registerCleanup = (owner: Owner | undefined, cleanup: () => void): Cleanup
     owner.head = registration;
   }
   owner.tail = registration;
-  runtimeLifecycleHooks?.cleanupChanged?.(1);
+  if (lifecycleDiagnosticsEnabled) runtimeLifecycleHooks?.cleanupChanged?.(1);
   return registration;
 };
 
 const disposeOwner = (owner: Owner): void => {
   if (owner.disposed) return;
   owner.disposed = true;
-  if (owner.id !== undefined) runtimeLifecycleHooks?.ownerDisposed?.(owner.id);
+  if (lifecycleDiagnosticsEnabled && owner.id !== undefined) runtimeLifecycleHooks?.ownerDisposed?.(owner.id);
   if (owner.parentRegistration) {
     detachCleanup(owner.parentRegistration);
     owner.parentRegistration = undefined;
@@ -203,9 +209,7 @@ export const createReactiveErrorScope = (handle: (error: unknown) => void): Reac
   return scope;
 };
 
-export const createRoot = <T>(
-  fn: (dispose: () => void, runInOwner: OwnerRunner, disposed: () => boolean) => T,
-): T => {
+export const createRoot = <T>(fn: (dispose: () => void, runInOwner: OwnerRunner, disposed: () => boolean) => T): T => {
   const parent = currentOwner;
   const owner = createOwner();
   const dispose = (): void => disposeOwner(owner);
@@ -269,7 +273,7 @@ const cleanup = (runner: EffectRunner, createNextRunOwner: boolean): void => {
   runner.children.clear();
   for (const dependency of runner.dependencies) {
     if (dependency.delete(runner)) {
-      runtimeLifecycleHooks?.subscriptionChanged?.(-1);
+      if (lifecycleDiagnosticsEnabled) runtimeLifecycleHooks?.subscriptionChanged?.(-1);
     }
   }
   runner.dependencies.clear();
@@ -290,7 +294,7 @@ const disposeRunner = (runner: EffectRunner): void => {
     return;
   }
   runner.disposed = true;
-  if (runner.id !== undefined) runtimeLifecycleHooks?.effectDisposed?.(runner.id);
+  if (lifecycleDiagnosticsEnabled && runner.id !== undefined) runtimeLifecycleHooks?.effectDisposed?.(runner.id);
   pendingComputedEffects.delete(runner);
   pendingEffects.delete(runner);
   if (runner.registration) {
@@ -315,7 +319,7 @@ const track = (subscribers: SubscriberSet): void => {
     if (!subscribers.has(activeEffect)) {
       subscribers.add(activeEffect);
       activeEffect.dependencies.add(subscribers);
-      runtimeLifecycleHooks?.subscriptionChanged?.(1);
+      if (lifecycleDiagnosticsEnabled) runtimeLifecycleHooks?.subscriptionChanged?.(1);
     }
   }
 };
@@ -514,8 +518,8 @@ const reportAsyncEffectError = (runner: EffectRunner, runOwner: Owner, error: un
 const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
   const parent = activeEffect && !activeEffect.disposed ? activeEffect : undefined;
   const errorOwner = currentErrorOwner;
-const runner: EffectRunner = {
-    id: runtimeLifecycleHooks ? ++nextEffectId : undefined,
+  const runner: EffectRunner = {
+    id: lifecycleDiagnosticsEnabled && runtimeLifecycleHooks ? ++nextEffectId : undefined,
     disposed: false,
     computed,
     dependencies: new Set(),
@@ -574,7 +578,8 @@ const runner: EffectRunner = {
       if (callbackFailed) throw callbackError;
     },
   };
-  if (runner.id !== undefined) runtimeLifecycleHooks?.effectCreated?.(runner.id, runner.runOwner.id);
+  if (lifecycleDiagnosticsEnabled && runner.id !== undefined)
+    runtimeLifecycleHooks?.effectCreated?.(runner.id, runner.runOwner.id);
   parent?.children.add(runner);
   errorOwner?.runners.add(runner);
   try {

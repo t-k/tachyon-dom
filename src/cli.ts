@@ -8,6 +8,7 @@ import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js"
 import { diagnoseTachyonSfc, diagnosticFromCompilerError, formatDiagnostic } from "./diagnostics.js";
 import { scanFileRoutes } from "./router-node.js";
 import { appendInlineSourceMap, createSourceMap } from "./source-map.js";
+import { checkTachyonTemplateTypes, formatTemplateTypeDiagnostic } from "./template-typecheck.js";
 import { err, ok, type Result } from "./result.js";
 
 export type CliCompileOptions = {
@@ -46,6 +47,12 @@ export type CliTypegenOptions = {
   typeName?: string;
 };
 
+export type CliTypecheckOptions = {
+  command: "typecheck";
+  input: string;
+  scopeType?: string;
+};
+
 export type CliInitOptions = {
   command: "init";
   outDir: string;
@@ -64,11 +71,12 @@ export type CliOptions =
   | CliServerOptions
   | CliAddPageOptions
   | CliTypegenOptions
+  | CliTypecheckOptions
   | CliInitOptions
   | CliLanguageServerOptions;
 
 const usage =
-  "Usage: tachyon-dom <compile|routes|dev|build|preview|add|typegen|init|language-server>. Use compile for templates, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, init for starters, and language-server for editor diagnostics.";
+  "Usage: tachyon-dom <compile|routes|dev|build|preview|add|typegen|typecheck|init|language-server>. Use compile for templates, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, typecheck for script/template TypeScript diagnostics, init for starters, and language-server for editor diagnostics.";
 
 const commandUsage: Record<string, string> = {
   add: "Usage: tachyon-dom add page <name> [--routes-dir src/routes] [--force]. Existing files are preserved unless --force is explicit.",
@@ -81,6 +89,7 @@ const commandUsage: Record<string, string> = {
   preview: "Usage: tachyon-dom preview [--host 127.0.0.1] [--port 4173]",
   routes: "Usage: tachyon-dom routes <routes-dir> [--out route-manifest.json]",
   typegen: "Usage: tachyon-dom typegen <input> [--out file] [--type TemplateScope] [--module]",
+  typecheck: "Usage: tachyon-dom typecheck <input> [--type ScopeType]",
 };
 
 export const isCreateEntrypoint = (entrypoint: string | undefined): boolean => {
@@ -248,6 +257,24 @@ const parseTypegenArgs = (input: string, rest: readonly string[]): Result<CliTyp
   return ok(options);
 };
 
+const parseTypecheckArgs = (input: string, rest: readonly string[]): Result<CliTypecheckOptions, string> => {
+  if (!input) {
+    return err("Usage: tachyon-dom typecheck <input> [--type ScopeType]");
+  }
+  const options: CliTypecheckOptions = { command: "typecheck", input };
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === "--type") {
+      const scopeType = rest[++index];
+      if (!scopeType) return err("--type requires a TypeScript scope type.");
+      options.scopeType = scopeType;
+    } else {
+      return err(`Unknown argument: ${arg}`);
+    }
+  }
+  return ok(options);
+};
+
 const parseInitArgs = (rest: readonly string[]): Result<CliInitOptions, string> => {
   const options: CliInitOptions = { command: "init", outDir: ".", template: "basic" };
   for (let index = 0; index < rest.length; index++) {
@@ -301,6 +328,9 @@ export const parseArgs = (argv: readonly string[]): Result<CliOptions, string> =
   if (command === "typegen") {
     return parseTypegenArgs(input ?? "", rest);
   }
+  if (command === "typecheck") {
+    return parseTypecheckArgs(input ?? "", rest);
+  }
   if (command === "init") {
     return parseInitArgs([input, ...rest].filter((arg): arg is string => Boolean(arg)));
   }
@@ -321,11 +351,17 @@ export const compileFile = async (options: Omit<CliCompileOptions, "command">): 
     return err(formatDiagnostic(diagnosticFromCompilerError(source, script.error), options.input));
   }
   const code = result.value.scriptOnly
-      ? generateScriptOnlyModule(options.target)
-      : options.target === "server"
-      ? generateServerModule(result.value.template, script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {})
+    ? generateScriptOnlyModule(options.target)
+    : options.target === "server"
+      ? generateServerModule(
+          result.value.template,
+          script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {},
+        )
       : options.target === "stream"
-        ? generateServerStreamModule(result.value.template, script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {})
+        ? generateServerStreamModule(
+            result.value.template,
+            script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {},
+          )
         : generateClientModule(result.value.template, {
             reactive: options.reactive,
             ...(script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {}),
@@ -338,6 +374,21 @@ export const compileFile = async (options: Omit<CliCompileOptions, "command">): 
     await writeFile(options.output, output);
   }
   return ok(output);
+};
+
+export const typecheckFile = async (options: Omit<CliTypecheckOptions, "command">): Promise<Result<string, string>> => {
+  const source = await readFile(options.input, "utf8");
+  const syntax = diagnoseTachyonSfc(source);
+  if (!syntax.ok) return err(formatDiagnostic(syntax.error, options.input));
+  const result = checkTachyonTemplateTypes(source, {
+    fileName: options.input,
+    ...(options.scopeType ? { scopeType: options.scopeType } : {}),
+  });
+  if (!result.ok) return err(result.error);
+  if (result.value.length > 0) {
+    return err(result.value.map((diagnostic) => formatTemplateTypeDiagnostic(diagnostic, options.input)).join("\n"));
+  }
+  return ok("");
 };
 
 export const buildRouteManifestFile = async (
@@ -795,6 +846,9 @@ export const runCli = async (
       break;
     case "typegen":
       result = await generateTemplateTypesFile(parsed.value);
+      break;
+    case "typecheck":
+      result = await typecheckFile(parsed.value);
       break;
     case "compile":
       result = await compileFile(parsed.value);

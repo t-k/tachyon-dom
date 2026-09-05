@@ -11,6 +11,7 @@ import type {
 } from "vscode-languageserver/node";
 import { diagnoseTachyonSfc } from "./diagnostics.js";
 import { requireOptionalPeer } from "./optional-peer.js";
+import { checkTachyonTemplateTypes, type TemplateTypeDiagnostic } from "./template-typecheck.js";
 import { createTemplateLanguageFeatures } from "./template-language.js";
 export {
   createTemplateLanguageFeatures,
@@ -29,6 +30,13 @@ export type {
   TemplateRename,
   TemplateTextEdit,
 } from "./template-language.js";
+export {
+  checkTachyonSfcTypes,
+  checkTachyonTemplateTypes,
+  diagnoseTachyonTemplateTypes,
+  formatTemplateTypeDiagnostic,
+} from "./template-typecheck.js";
+export type { TemplateTypeCheckOptions, TemplateTypeDiagnostic } from "./template-typecheck.js";
 
 type LanguageServerModule = typeof import("vscode-languageserver/node");
 type TextDocumentModule = typeof import("vscode-languageserver-textdocument");
@@ -47,7 +55,9 @@ type DiagnosticPayload = {
 export const diagnosticsForTachyonDocument = (text: string): Diagnostic[] => {
   const result = diagnoseTachyonSfc(text, { target: "stream" });
   if (result.ok) {
-    return [];
+    const typeResult = checkTachyonTemplateTypes(text);
+    if (!typeResult.ok) return [];
+    return typeResult.value.map((diagnostic) => lspDiagnosticForTypeDiagnostic(diagnostic));
   }
   const diagnostic = result.error;
   const line = Math.max(0, diagnostic.line - 1);
@@ -66,6 +76,20 @@ export const diagnosticsForTachyonDocument = (text: string): Diagnostic[] => {
     },
   ];
 };
+
+const lspDiagnosticForTypeDiagnostic = (diagnostic: TemplateTypeDiagnostic): Diagnostic => ({
+  message: diagnostic.message,
+  range: {
+    start: { line: Math.max(0, diagnostic.line - 1), character: Math.max(0, diagnostic.column - 1) },
+    end: {
+      line: Math.max(0, diagnostic.endLine - 1),
+      character: Math.max(0, diagnostic.endColumn - 1),
+    },
+  },
+  severity: diagnostic.category === "error" ? 1 : diagnostic.category === "warning" ? 2 : 3,
+  code: diagnostic.code,
+  source: "typescript",
+});
 
 export const createDiagnosticsScheduler = (
   sendDiagnostics: (payload: DiagnosticPayload) => void,
@@ -165,13 +189,21 @@ export const startLanguageServer = (providedConnection?: Connection): void => {
   connection.onHover((params): Hover | null => {
     const document = documents.get(params.textDocument.uri);
     if (!document) return null;
-    return createTemplateLanguageFeatures(document.getText(), document.uri).hover(params.position as Position) as Hover | undefined ?? null;
+    return (
+      (createTemplateLanguageFeatures(document.getText(), document.uri).hover(params.position as Position) as
+        | Hover
+        | undefined) ?? null
+    );
   });
 
   connection.onDefinition((params): Location | null => {
     const document = documents.get(params.textDocument.uri);
     if (!document) return null;
-    return createTemplateLanguageFeatures(document.getText(), document.uri).definition(params.position as Position) as Location | undefined ?? null;
+    return (
+      (createTemplateLanguageFeatures(document.getText(), document.uri).definition(params.position as Position) as
+        | Location
+        | undefined) ?? null
+    );
   });
 
   connection.onRenameRequest((params): WorkspaceEdit | null => {
