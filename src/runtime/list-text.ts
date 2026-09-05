@@ -330,7 +330,10 @@ export const mountTextKeyedList = (
   const container = nodeAt(root, path);
   if (!(container instanceof Element)) return;
   const state = getListState(container, options);
-  const cleanupRecordsNotIn = (records: Map<PropertyKey, RowRecord>, keep: ReadonlySet<PropertyKey>): unknown => {
+  const cleanupRecordsNotIn = (
+    records: Map<PropertyKey, RowRecord>,
+    keep: Pick<ReadonlySet<PropertyKey>, "has">,
+  ): unknown => {
     let firstError: unknown;
     let failed = false;
     for (const [key, record] of records) {

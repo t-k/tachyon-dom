@@ -623,7 +623,10 @@ export const mountKeyedList = (
     return;
   }
   const state = getListState(container, options);
-  const cleanupRecordsNotIn = (records: Map<PropertyKey, RowRecord>, keep: ReadonlySet<PropertyKey>): unknown => {
+  const cleanupRecordsNotIn = (
+    records: Map<PropertyKey, RowRecord>,
+    keep: Pick<ReadonlySet<PropertyKey>, "has">,
+  ): unknown => {
     let firstError: unknown;
     let failed = false;
     for (const [key, record] of records) {
