@@ -1,6 +1,34 @@
-import type { Connection, Diagnostic, InitializeResult } from "vscode-languageserver/node";
+import type {
+  CompletionItem,
+  Connection,
+  Diagnostic,
+  Hover,
+  InitializeResult,
+  Location,
+  Position,
+  TextEdit,
+  WorkspaceEdit,
+} from "vscode-languageserver/node";
 import { diagnoseTachyonSfc } from "./diagnostics.js";
 import { requireOptionalPeer } from "./optional-peer.js";
+import { createTemplateLanguageFeatures } from "./template-language.js";
+export {
+  createTemplateLanguageFeatures,
+  templateCompletionAt,
+  templateDefinitionAt,
+  templateHoverAt,
+  templateRenameAt,
+} from "./template-language.js";
+export type {
+  TemplateCompletionItem,
+  TemplateDefinition,
+  TemplateHover,
+  TemplateLanguageFeatures,
+  TemplateLanguagePosition,
+  TemplateLanguageRange,
+  TemplateRename,
+  TemplateTextEdit,
+} from "./template-language.js";
 
 type LanguageServerModule = typeof import("vscode-languageserver/node");
 type TextDocumentModule = typeof import("vscode-languageserver-textdocument");
@@ -98,6 +126,10 @@ export const startLanguageServer = (providedConnection?: Connection): void => {
     (): InitializeResult => ({
       capabilities: {
         textDocumentSync: TextDocumentSyncKind.Incremental,
+        completionProvider: { triggerCharacters: ["<", "{", ":", "."] },
+        hoverProvider: true,
+        definitionProvider: true,
+        renameProvider: true,
       },
     }),
   );
@@ -116,6 +148,41 @@ export const startLanguageServer = (providedConnection?: Connection): void => {
   documents.onDidClose((event) => {
     diagnostics.clear(event.document.uri);
     connection.sendDiagnostics({ uri: event.document.uri, diagnostics: [] });
+  });
+
+  connection.onCompletion((params): CompletionItem[] => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return [];
+    return createTemplateLanguageFeatures(document.getText(), document.uri)
+      .completion(params.position as Position)
+      .map((item) => ({
+        label: item.label,
+        ...(item.detail ? { detail: item.detail } : {}),
+        kind: item.kind === "directive" ? 14 : item.kind === "property" ? 10 : 6,
+      }));
+  });
+
+  connection.onHover((params): Hover | null => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+    return createTemplateLanguageFeatures(document.getText(), document.uri).hover(params.position as Position) as Hover | undefined ?? null;
+  });
+
+  connection.onDefinition((params): Location | null => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+    return createTemplateLanguageFeatures(document.getText(), document.uri).definition(params.position as Position) as Location | undefined ?? null;
+  });
+
+  connection.onRenameRequest((params): WorkspaceEdit | null => {
+    const document = documents.get(params.textDocument.uri);
+    if (!document) return null;
+    const rename = createTemplateLanguageFeatures(document.getText(), document.uri).rename(
+      params.position as Position,
+      params.newName,
+    );
+    if (!rename) return null;
+    return { changes: { [document.uri]: rename.edits as TextEdit[] } };
   });
 
   documents.listen(connection);

@@ -81,6 +81,10 @@
       "types": "./dist/language-server.d.ts",
       "import": "./dist/language-server.js"
     },
+    "./template-language": {
+      "types": "./dist/template-language.d.ts",
+      "import": "./dist/template-language.js"
+    },
     "./i18n": {
       "types": "./dist/i18n.d.ts",
       "import": "./dist/i18n.js"
