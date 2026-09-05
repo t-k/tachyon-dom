@@ -140,6 +140,10 @@
       "types": "./dist/runtime/hydrate.d.ts",
       "import": "./dist/runtime/hydrate.js"
     },
+    "./runtime/mount": {
+      "types": "./dist/runtime/mount.d.ts",
+      "import": "./dist/runtime/mount.js"
+    },
     "./runtime/list": {
       "types": "./dist/runtime/list.d.ts",
       "import": "./dist/runtime/list.js"
@@ -536,6 +540,14 @@
         "@size-limit/esbuild"
       ],
       "limit": "10 KB"
+    },
+    {
+      "name": "runtime/mount",
+      "path": "dist/runtime/mount.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
     },
     {
       "name": "runtime/list",

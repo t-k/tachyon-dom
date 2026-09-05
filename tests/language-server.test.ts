@@ -26,6 +26,19 @@ describe("Tachyon language server diagnostics", () => {
     expect(diagnosticsForTachyonDocument("<main><h1>{title}</h1></main>")).toEqual([]);
   });
 
+  it("reports unsupported stream await reordering at the reorder attribute", () => {
+    const diagnostics = diagnosticsForTachyonDocument(
+      `<main>\n  <await value={message} then="value" reorder="resolve">Ready</await>\n</main>`,
+    );
+
+    expect(diagnostics[0]).toMatchObject({
+      message: '<await reorder="resolve"> is not supported by the stream target; use reorder="preserve" or omit it.',
+      range: {
+        start: { line: 1, character: 38 },
+      },
+    });
+  });
+
   it("maps nested SFC semantic diagnostics to the same opening-tag range", () => {
     const diagnostics = diagnosticsForTachyonDocument(
       `<script>\nexport const scope = () => ({});\n</script>\n<main>\n  <section>\n    <if></if>\n  </section>\n</main>`,

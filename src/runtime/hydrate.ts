@@ -1,4 +1,5 @@
 import { err, ok, type Result } from "../result.js";
+import { runCleanups } from "./subtree.js";
 
 export type HydrationBoundaryError = {
   message: string;
@@ -183,7 +184,8 @@ export const createHydrationBoundary = (
     if (isHydrated) {
       return;
     }
-    cleanup = bind(located.value.element);
+    const nextCleanup = bind(located.value.element);
+    cleanup = nextCleanup;
     isHydrated = true;
   };
   return ok({
@@ -191,10 +193,10 @@ export const createHydrationBoundary = (
     hydrated: () => isHydrated,
     element: () => located.value.element,
     dispose: () => {
-      if (typeof cleanup === "function") {
-        cleanup();
-      }
+      const currentCleanup = cleanup;
+      cleanup = undefined;
       isHydrated = false;
+      if (typeof currentCleanup === "function") currentCleanup();
     },
   });
 };
@@ -231,8 +233,14 @@ export const scheduleHydration = (
       globalThis.requestIdleCallback ??
       ((callback: IdleRequestCallback) => setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 }), 0));
     const cancelIdle = globalThis.cancelIdleCallback ?? clearTimeout;
-    const id = requestIdle(() => handle.hydrate());
-    return () => cancelIdle(id);
+    let active = true;
+    const id = requestIdle(() => {
+      if (active) handle.hydrate();
+    });
+    return () => {
+      active = false;
+      cancelIdle(id);
+    };
   }
   if (options.strategy === "media") {
     const query = options.media;
@@ -241,19 +249,24 @@ export const scheduleHydration = (
     }
     const matcher = options.matchMedia ?? globalThis.matchMedia;
     const media = matcher(query);
+    let active = true;
     const listener = (): void => {
-      if (media.matches) {
+      if (active && media.matches) {
         handle.hydrate();
       }
     };
     media.addEventListener("change", listener);
     listener();
-    return () => media.removeEventListener("change", listener);
+    return () => {
+      active = false;
+      media.removeEventListener("change", listener);
+    };
   }
   if (options.strategy === "visible") {
+    let active = true;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
+        if (active && entries.some((entry) => entry.isIntersecting)) {
           handle.hydrate();
           observer.disconnect();
         }
@@ -261,16 +274,24 @@ export const scheduleHydration = (
       options.rootMargin === undefined ? {} : { rootMargin: options.rootMargin },
     );
     observer.observe(handle.element());
-    return () => observer.disconnect();
+    return () => {
+      active = false;
+      observer.disconnect();
+    };
   }
   const eventName = options.interaction ?? "click";
   const element = handle.element();
+  let active = true;
   const listener = (): void => {
+    if (!active) return;
     handle.hydrate();
     element.removeEventListener(eventName, listener, true);
   };
   element.addEventListener(eventName, listener, true);
-  return () => element.removeEventListener(eventName, listener, true);
+  return () => {
+    active = false;
+    element.removeEventListener(eventName, listener, true);
+  };
 };
 
 export const scheduleHydrationBoundaries = (
@@ -302,9 +323,5 @@ export const scheduleHydrationBoundaries = (
     );
     cleanups.push(() => handle.value.dispose());
   }
-  return () => {
-    for (const cleanup of cleanups.splice(0).reverse()) {
-      cleanup();
-    }
-  };
+  return () => runCleanups(cleanups);
 };

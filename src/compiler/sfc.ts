@@ -445,6 +445,35 @@ const autoImportScriptHelpers = (code: string, script: TachyonSfcScript | undefi
   return `${imports}\n${code}`;
 };
 
+const setupFactoryCode = (
+  content: string,
+  script: TachyonSfcScript,
+  setupBindings: readonly string[],
+): Result<string, CompilerError> => {
+  const sourceFile = sourceFileFor(content, script);
+  const imports: string[] = [];
+  const body: string[] = [];
+  for (const statement of sourceFile.statements) {
+    const statementText = content.slice(statement.getStart(sourceFile), statement.end).trim();
+    if (ts.isImportDeclaration(statement)) {
+      imports.push(statementText);
+      continue;
+    }
+    if (ts.canHaveModifiers(statement) && ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+      return err({
+        message: "<script setup> cannot contain exports; expose values through top-level declarations.",
+        offset: script.offset + statement.getStart(sourceFile),
+      });
+    }
+    body.push(statementText);
+  }
+  const scopeEntries = setupBindings.map((name) => `${name}: ${name}`).join(", ");
+  const indentedBody = body.flatMap((statement) => statement.split("\n").map((line) => `  ${line}`));
+  return ok(
+    `${imports.length > 0 ? `${imports.join("\n")}\n` : ""}const ${sfcSetupScopeName} = (inputScope = {}) => {\n${indentedBody.join("\n")}\n  return { ${scopeEntries} };\n};\n`,
+  );
+};
+
 export const parseTachyonSfc = (source: string): Result<TachyonSfcDescriptor, CompilerError> => {
   const open = leadingScriptOpen(source);
   if (!open || !isComponentScript(open.attrs)) {
@@ -544,9 +573,10 @@ export const transformSfcScript = (
   const setupBindings = isSfcSetupScript(script) ? topLevelBindings(script) : [];
   const content = autoImportScriptHelpers(transpiled.value, script);
   if (isSfcSetupScript(script)) {
-    const scopeEntries = setupBindings.map((name) => `${name}: ${name}`).join(", ");
+    const factory = setupFactoryCode(content, script, setupBindings);
+    if (!factory.ok) return factory;
     return ok({
-      code: `${content}\nconst ${sfcSetupScopeName} = { ${scopeEntries} };\n`,
+      code: factory.value,
       defaultScopeName: sfcSetupScopeName,
       setupBindings,
     });

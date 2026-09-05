@@ -14,6 +14,22 @@ afterEach(() => {
 });
 
 describe("mountKeyedList", () => {
+  it("rejects non-primitive and non-finite keys", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [{ kind: "text" as const, path: [0], expression: "item.id" }],
+    };
+
+    for (const id of [null, undefined, {}, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => mountKeyedList(root, [], [{ id }], options)).toThrow("Invalid keyed list key");
+    }
+  });
+
   it("clears a row ref when its keyed row is removed", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

@@ -6,6 +6,22 @@ describe("virtualized list runtime", () => {
     vi.unstubAllGlobals();
   });
 
+  it("rejects invalid geometry before mounting a virtual list", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const options = {
+      scroller,
+      items: ["row"],
+      viewportHeight: 20,
+      renderItem: () => document.createElement("div"),
+    };
+
+    for (const itemHeight of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => createVirtualizedList({ ...options, itemHeight })).toThrow("itemHeight");
+    }
+  });
+
   it("keeps keyed elements and refreshes their content on update", () => {
     document.body.innerHTML = `<div id="scroller"></div>`;
     const scroller = document.querySelector("#scroller");
@@ -32,6 +48,33 @@ describe("virtualized list runtime", () => {
     expect(scroller.querySelector("button")).toBe(before);
     expect(before?.textContent).toBe("B");
     list.destroy();
+  });
+
+  it("disposes rows that leave the window and makes destroy idempotent", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const disposed: string[] = [];
+    const list = createVirtualizedList({
+      scroller,
+      items: [{ id: "a" }, { id: "b" }],
+      itemHeight: 20,
+      viewportHeight: 20,
+      overscan: 0,
+      getKey: (item) => item.id,
+      renderItem: (item) => ({
+        element: document.createElement("div"),
+        dispose: () => disposed.push(item.id),
+      }),
+    });
+
+    list.update([{ id: "b" }]);
+    list.destroy();
+    list.destroy();
+    list.update([{ id: "c" }]);
+
+    expect(disposed).toEqual(["a", "b"]);
+    expect(scroller.childElementCount).toBe(0);
   });
 
   it("renders only added keys and removes missing keys on update", () => {

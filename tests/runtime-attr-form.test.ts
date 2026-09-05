@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { setAttributeValue, setRef, setStyleValue } from "../src/runtime/attr";
 import { setClassPresence } from "../src/runtime/class";
-import { bindControl, setControlValue } from "../src/runtime/form";
+import { bindControl, setControlValue, writeModelValue } from "../src/runtime/form";
+import { createMemo, createSignal } from "../src/runtime/signal";
 
 describe("attribute and form runtime helpers", () => {
   it("retains directive classes when a dynamic base class changes", () => {
@@ -255,5 +256,20 @@ describe("attribute and form runtime helpers", () => {
     expect(scope.name).toBe("あ");
 
     cleanup();
+  });
+
+  it("writes writable signals without replacing their identity and rejects readonly accessors", () => {
+    const value = createSignal("Ada");
+    let fallbackCalls = 0;
+
+    writeModelValue(value, "Grace", () => {
+      fallbackCalls++;
+    });
+
+    expect(value()).toBe("Grace");
+    expect(fallbackCalls).toBe(0);
+
+    const readonly = createMemo(() => value().toUpperCase());
+    expect(() => writeModelValue(readonly, "LIN", () => undefined)).toThrow("readonly");
   });
 });

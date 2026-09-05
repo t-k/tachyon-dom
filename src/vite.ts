@@ -243,10 +243,10 @@ const codeForTarget = (
     return generateScriptOnlyModule(target);
   }
   if (target === "server") {
-    return generateServerModule(template);
+    return generateServerModule(template, defaultScopeName ? { defaultScopeName } : {});
   }
   if (target === "stream") {
-    return generateServerStreamModule(template);
+    return generateServerStreamModule(template, defaultScopeName ? { defaultScopeName } : {});
   }
   return generateClientModule(template, { reactive, ...(defaultScopeName ? { defaultScopeName } : {}) });
 };
@@ -398,6 +398,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       const resolvedTarget = targetForId(id, target);
       const result = diagnoseTachyonSfc(source, {
         whitespace: options.templateWhitespace ?? "preserve",
+        target: resolvedTarget,
       });
       if (!result.ok) {
         this.error(formatDiagnostic(result.error, id));

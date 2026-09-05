@@ -1,7 +1,8 @@
 import { err, ok } from "./result.js";
-export { enhanceForm, validateFormData } from "./runtime/form.js";
+export { enhanceForm, validateFormData, writeModelValue } from "./runtime/form.js";
 export { cleanupEnhancements, createEnhancementRegistry, enhance, registerEnhancement } from "./runtime/enhancement.js";
-export { createClientRouter } from "./runtime/router.js";
+export { createClientRouter, defineClientRoute } from "./runtime/router.js";
+export { hydrate, hydrateClientTemplate, mount, mountClientTemplate } from "./runtime/mount.js";
 export { createErrorBoundary } from "./runtime/error-boundary.js";
 export { createKeyedRows } from "./runtime/keyed-rows.js";
 export {
@@ -26,5 +27,22 @@ export { err, ok };
 export { sanitizeUrlAttribute, UnsafeUrlError } from "./url-policy.js";
 export { textAt } from "./runtime/text.js";
 export type { KeyedRows, KeyedRowsOptions } from "./runtime/keyed-rows.js";
+export type {
+  Accessor,
+  Resource,
+  ResourceFetcherContext,
+  ResourceOutcome,
+  Signal,
+} from "./runtime/signal.js";
+export type {
+  ClientMountedView,
+  ClientRenderResult,
+  ClientRenderValue,
+  ClientRouteContext,
+  ClientRouteDefinition,
+  ClientRouteDefinitionInput,
+  ClientParamsForPath,
+} from "./runtime/router.js";
+export type { ClientTemplateModule, HydrateError, MountHandle } from "./runtime/mount.js";
 export type { Err, Ok, Result } from "./result.js";
 export type { UrlAttributeContext, UrlAttributeName, UrlPurpose } from "./url-policy.js";

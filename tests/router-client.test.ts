@@ -1,6 +1,12 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { renderHead, type RouteHeadDescriptor } from "../src/router";
-import { createClientRouter, rawHtml, type ClientRouteDefinition } from "../src/runtime/router";
+import {
+  createClientRouter,
+  defineClientRoute,
+  rawHtml,
+  type ClientMountedView,
+  type ClientRouteDefinition,
+} from "../src/runtime/router";
 
 const createWindow = (path = "/") => {
   const domWindow = window;
@@ -11,6 +17,18 @@ const createWindow = (path = "/") => {
 describe("client router", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("infers loader data and path parameters through defineClientRoute", () => {
+    const route = defineClientRoute({
+      path: "/users/:id",
+      load: ({ params }) => ({ name: params.id }),
+      render: ({ data, params }) => `${data.name}:${params.id}`,
+    });
+
+    expectTypeOf(route).toMatchTypeOf<
+      ClientRouteDefinition<{ name: string }, { id: string }>
+    >();
   });
 
   it("treats string route output as text instead of trusted HTML", async () => {
@@ -490,6 +508,45 @@ describe("client router", () => {
     router.dispose();
   });
 
+  it("keeps the committed screen alive until the next screen commits", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    let releaseSlow: ((value: string) => void) | undefined;
+    const disposed: string[] = [];
+    const view = (name: string): ClientMountedView => ({
+      value: rawHtml(`<h1>${name}</h1>`),
+      dispose: () => disposed.push(name),
+    });
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => view("home") },
+        {
+          path: "/slow",
+          load: () => new Promise((resolve) => {
+            releaseSlow = resolve;
+          }),
+          render: ({ data }) => view(String(data)),
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    const navigation = router.navigate("/slow");
+    await Promise.resolve();
+    expect(disposed).toEqual([]);
+    releaseSlow?.("slow");
+    await navigation;
+
+    expect(root.textContent).toBe("slow");
+    expect(disposed).toEqual(["home"]);
+    router.dispose();
+    expect(disposed).toEqual(["home", "slow"]);
+  });
+
   it("handles popstate navigation and exposes 404 rendering", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");
@@ -641,6 +698,39 @@ describe("client router", () => {
     await router.navigate("/b");
 
     expect(Object.fromEntries(calls)).toEqual({ "/a": 1, "/b": 2, "/c": 1 });
+    router.dispose();
+  });
+
+  it("shares one in-flight prefetch for concurrent requests to the same URL", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    let loads = 0;
+    let release: ((value: string) => void) | undefined;
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => "home" },
+        {
+          path: "/slow",
+          load: () => {
+            loads++;
+            return new Promise((resolve) => {
+              release = resolve;
+            });
+          },
+          render: ({ data }) => String(data),
+        },
+      ],
+    });
+
+    const first = router.prefetch("/slow");
+    const second = router.prefetch("/slow");
+    await Promise.resolve();
+    expect(loads).toBe(1);
+    release?.("slow");
+    await Promise.all([first, second]);
     router.dispose();
   });
 
@@ -835,6 +925,48 @@ describe("client router", () => {
 
     expect(startViewTransition).not.toHaveBeenCalled();
     expect(root.innerHTML).toBe("<h1>Next</h1>");
+    router.dispose();
+  });
+
+  it("ignores a delayed view-transition callback after a newer navigation commits", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false })));
+    const callbacks: Array<() => void | Promise<void>> = [];
+    const releases: Array<() => void> = [];
+    const startViewTransition = vi.fn((update: () => void | Promise<void>) => {
+      const index = callbacks.push(update) - 1;
+      if (index === 0 || index === 2) {
+        const updateCallbackDone = Promise.resolve(update());
+        return { updateCallbackDone, finished: updateCallbackDone };
+      }
+      const updateCallbackDone = new Promise<void>((resolve) => releases.push(resolve));
+      return { updateCallbackDone, finished: updateCallbackDone };
+    });
+    Object.defineProperty(document, "startViewTransition", { configurable: true, value: startViewTransition });
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => rawHtml("<h1>Home</h1>") },
+        { path: "/next", render: () => rawHtml("<h1>Next</h1>") },
+        { path: "/fast", render: () => rawHtml("<h1>Fast</h1>") },
+      ],
+      scrollTo: () => undefined,
+      viewTransition: true,
+    });
+
+    await router.start();
+    const delayed = router.navigate("/next");
+    await vi.waitFor(() => expect(callbacks).toHaveLength(2));
+    await router.navigate("/fast");
+    expect(root.textContent).toBe("Fast");
+    callbacks[1]?.();
+    releases[0]?.();
+    await delayed;
+
+    expect(root.textContent).toBe("Fast");
     router.dispose();
   });
 

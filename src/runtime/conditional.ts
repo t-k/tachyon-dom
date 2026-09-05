@@ -1,10 +1,11 @@
 import { setClassPresence } from "./class.js";
 import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
 import { delegate } from "./event.js";
-import { bindControl, setControlValue } from "./form.js";
+import { bindControl, setControlValue, writeModelValue } from "./form.js";
 import { mountKeyedList } from "./list.js";
-import { cleanupOwnedSubtree, registerOwnedSubtree } from "./subtree.js";
+import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { setText } from "./text.js";
+import { onOwnerCleanup, read } from "./signal.js";
 
 type TextBinding = {
   kind: "text";
@@ -69,6 +70,7 @@ type NestedListBinding = {
   keyRead?: (scope: Record<string, unknown>) => unknown;
   keyReadItem?: (item: unknown) => unknown;
   itemName: string;
+  indexName?: string;
   templateHtml: string;
   bindings: ConditionalBinding[];
   read?: (scope: Record<string, unknown>) => unknown;
@@ -110,6 +112,12 @@ type ConditionalState = {
 };
 
 const states = new WeakMap<Comment, ConditionalState>();
+const ownerCleanupDisposers = new WeakMap<Comment, () => void>();
+
+const detachOwnerCleanup = (anchor: Comment): void => {
+  ownerCleanupDisposers.get(anchor)?.();
+  ownerCleanupDisposers.delete(anchor);
+};
 
 export const nodeAt = (root: Node, path: readonly number[]): Node => {
   let current = root;
@@ -148,7 +156,7 @@ const signatureFor = (options: ConditionalOptions): string => options.signature 
 const readBinding = (
   scope: Record<string, unknown>,
   binding: Exclude<ConditionalBinding, EventBinding | RefBinding | NestedListBinding | NestedConditionalBinding>,
-): unknown => (binding.read ? binding.read(scope) : readPath(scope, binding.expression));
+): unknown => read(binding.read ? binding.read(scope) : readPath(scope, binding.expression));
 
 const readExpression = (
   scope: Record<string, unknown>,
@@ -164,21 +172,39 @@ const writeBinding = (scope: Record<string, unknown>, binding: ModelBinding, val
     binding.write(scope, value);
     return;
   }
-  writePath(scope, binding.expression, value);
+  const target = binding.read ? binding.read(scope) : readPath(scope, binding.expression);
+  writeModelValue(target, value, () => writePath(scope, binding.expression, value));
 };
 
 const cleanup = (state: ConditionalState): void => {
-  for (const cleanupFn of state.cleanups) {
-    cleanupFn();
+  let firstError: unknown;
+  let failed = false;
+  try {
+    runCleanups(state.cleanups);
+  } catch (error) {
+    firstError = error;
+    failed = true;
   }
-  state.cleanups.length = 0;
-  for (const cleanupRef of state.refCleanups.values()) cleanupRef();
+  const refCleanups = Array.from(state.refCleanups.values());
   state.refCleanups.clear();
+  try {
+    runCleanups(refCleanups);
+  } catch (error) {
+    if (!failed) firstError = error;
+    failed = true;
+  }
   for (const node of state.nodes) {
-    cleanupOwnedSubtree(node);
-    node.parentNode?.removeChild(node);
+    try {
+      cleanupOwnedSubtree(node);
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
+    } finally {
+      node.parentNode?.removeChild(node);
+    }
   }
   state.nodes.length = 0;
+  if (failed) throw firstError;
 };
 
 const createNodes = (templateHtml: string): Node[] => {
@@ -200,10 +226,6 @@ const bindNodes = (
   options: ConditionalOptions,
 ): void => {
   state.scope = scope;
-  const firstElement = state.nodes.find((node): node is Element => node instanceof Element);
-  if (!firstElement) {
-    return;
-  }
   for (const [bindingIndex, binding] of options.bindings.entries()) {
     if (binding.kind === "text") {
       setText(nodeAtState(state, binding.path) as Text, readBinding(scope, binding));
@@ -269,7 +291,8 @@ const bindNodes = (
       }
     }
   }
-  if (!firstElement.isConnected) {
+  const firstElement = state.nodes.find((node): node is Element => node instanceof Element);
+  if (!firstElement?.isConnected) {
     anchor.after(...state.nodes);
   }
 };
@@ -289,7 +312,11 @@ export const mountConditional = (
   const current = states.get(anchor);
   if (!visible) {
     if (current) {
-      cleanupOwnedSubtree(anchor);
+      try {
+        cleanupOwnedSubtree(anchor);
+      } finally {
+        states.delete(anchor);
+      }
     }
     return;
   }
@@ -310,9 +337,16 @@ export const mountConditional = (
   if (state !== current) {
     registerOwnedSubtree(anchor, () => {
       if (states.get(anchor) !== state) return;
-      cleanup(state);
       states.delete(anchor);
+      detachOwnerCleanup(anchor);
+      cleanup(state);
     });
+  }
+  if (!ownerCleanupDisposers.has(anchor)) {
+    const disposer = onOwnerCleanup(() => {
+      cleanupOwnedSubtree(anchor);
+    });
+    if (disposer) ownerCleanupDisposers.set(anchor, disposer);
   }
   bindNodes(anchor, state, scope, options);
 };

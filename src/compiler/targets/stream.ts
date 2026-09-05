@@ -1,4 +1,5 @@
-import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
+import { err, ok, type Result } from "../../result.js";
+import type { CompiledTemplate, CompilerError, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
 import { emptyTextMarker } from "../../text-marker.js";
 import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
@@ -52,13 +53,17 @@ const renderForYieldStatements = (
 ): string[] => {
   const each = attrExpression(node, "each") ?? "[]";
   const key = attrExpression(node, "key") ?? "item";
-  const itemName = itemNameFromKey(key);
+  const itemName = attrString(node, "as")?.trim() || itemNameFromKey(key);
+  const indexName = attrString(node, "index")?.trim();
   const eachAccess = expressionToScopeAccess(each, locals);
   const childLocals = new Set(locals);
   childLocals.add(itemName);
+  if (indexName) childLocals.add(indexName);
   const statements = [
     `${indent}if (Array.isArray(${eachAccess})) {`,
-    `${indent}  for (const ${itemName} of ${eachAccess}) {`,
+    indexName
+      ? `${indent}  for (const [${itemName}, ${indexName}] of ${eachAccess}.entries()) {`
+      : `${indent}  for (const ${itemName} of ${eachAccess}) {`,
   ];
   for (const entry of childPathEntries(node.children, path)) {
     statements.push(...renderNodeYieldStatements(entry.child, childLocals, `${indent}    `, entry.path));
@@ -215,10 +220,51 @@ const renderNodeYieldStatements = (
   return renderElementYieldStatements(node, locals, indent, path);
 };
 
-const streamModuleCache = new WeakMap<CompiledTemplate, string>();
+export type ServerStreamModuleOptions = {
+  defaultScopeName?: string;
+};
 
-export const generateServerStreamModule = (template: CompiledTemplate): string => {
-  const cached = streamModuleCache.get(template);
+const unsupportedReorderError = (node: ElementNode): CompilerError => {
+  const attribute = node.attrs.find((candidate) => candidate.name === "reorder");
+  return {
+    message: '<await reorder="resolve"> is not supported by the stream target; use reorder="preserve" or omit it.',
+    offset: attribute?.start ?? node.start ?? 0,
+    ...(attribute?.end === undefined ? {} : { endOffset: attribute.end }),
+  };
+};
+
+const findUnsupportedReorder = (node: TemplateNode): CompilerError | undefined => {
+  if (node.type === "text") return undefined;
+  if (node.tagName === "await" && attrString(node, "reorder") === "resolve") {
+    return unsupportedReorderError(node);
+  }
+  for (const child of node.children) {
+    const error = findUnsupportedReorder(child);
+    if (error) return error;
+  }
+  return undefined;
+};
+
+export const validateServerStreamTemplate = (template: CompiledTemplate): Result<void, CompilerError> => {
+  const error = findUnsupportedReorder(template.root);
+  return error ? err(error) : ok(undefined);
+};
+
+const streamModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
+
+export const generateServerStreamModule = (
+  template: CompiledTemplate,
+  options: ServerStreamModuleOptions = {},
+): string => {
+  const validation = validateServerStreamTemplate(template);
+  if (!validation.ok) {
+    const error = new Error(validation.error.message);
+    Object.assign(error, validation.error);
+    throw error;
+  }
+  const cacheKey = options.defaultScopeName ?? "";
+  const cachedByOptions = streamModuleCache.get(template);
+  const cached = cachedByOptions?.get(cacheKey);
   if (cached) {
     return cached;
   }
@@ -243,7 +289,13 @@ export const generateServerStreamModule = (template: CompiledTemplate): string =
     ...generatedEscapeHtmlHelperLines,
     ...(hasDynamicUrlAttribute(template.root) ? generatedUrlAttributeHelperLines : []),
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
-    `export const stream = async function* (scope) {`,
+    `export const stream = async function* (${options.defaultScopeName ? "inputScope = {}" : "scope"}) {`,
+    ...(options.defaultScopeName
+      ? [
+          `  const localScope = typeof ${options.defaultScopeName} === "function" ? ${options.defaultScopeName}(inputScope) : ${options.defaultScopeName};`,
+          `  const scope = localScope && typeof localScope === "object" ? { ...localScope, ...inputScope } : inputScope;`,
+        ]
+      : []),
     `  const __tachyonFlushBytes = 8192;`,
     `  const __tachyonTextEncoder = new TextEncoder();`,
     `  let __tachyonBuffer = "";`,
@@ -254,6 +306,8 @@ export const generateServerStreamModule = (template: CompiledTemplate): string =
     `};`,
   ];
   const code = `${lines.join("\n")}\n`;
-  streamModuleCache.set(template, code);
+  const nextCache = cachedByOptions ?? new Map<string, string>();
+  nextCache.set(cacheKey, code);
+  streamModuleCache.set(template, nextCache);
   return code;
 };

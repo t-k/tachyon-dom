@@ -92,6 +92,7 @@ export type ListBinding = {
   path: number[];
   each: string;
   itemName: string;
+  indexName?: string;
   key: string;
   templateHtml: string;
   bindings: ClientBinding[];
@@ -144,7 +145,7 @@ export type ComponentBoundary = {
 };
 
 export type TemplateDirective =
-  | { kind: "for"; path: number[]; each: string; key: string; itemName: string }
+  | { kind: "for"; path: number[]; each: string; key: string; itemName: string; indexName?: string }
   | { kind: "if"; path: number[]; test: string }
   | { kind: "store"; path: number[]; stores: StoreDefinition[] }
   | { kind: "event"; path: number[]; eventName: string; handler: string }

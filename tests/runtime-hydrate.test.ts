@@ -63,6 +63,22 @@ describe("hydrate boundary runtime", () => {
     expect(button?.textContent).toBe("8");
   });
 
+  it("disposes a hydrated boundary once even when disposed repeatedly", () => {
+    document.body.innerHTML = `<main><!--tachyon-hydrate:counter:start--><section></section><!--tachyon-hydrate:counter:end--></main>`;
+    const main = document.querySelector("main");
+    if (!main) throw new Error("Missing main.");
+    const cleanup = vi.fn();
+    const result = createHydrationBoundary(main, "counter", () => cleanup);
+    if (!result.ok) throw new Error(result.error.message);
+
+    result.value.hydrate();
+    result.value.dispose();
+    result.value.dispose();
+
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(result.value.hydrated()).toBe(false);
+  });
+
   it("serializes and reads hydration state without changing boundary DOM", () => {
     document.body.innerHTML = `<main><!--tachyon-hydrate:counter:start--><section><button>7</button></section><!--tachyon-hydrate:counter:end-->${serializeHydrationState("counter", { count: 7, rows: ["a", "<b>"] })}</main>`;
     const main = document.querySelector("main");

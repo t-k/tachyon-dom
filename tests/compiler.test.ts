@@ -791,6 +791,28 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`__tachyonBindControl(__tachyonElementAt(root, [1,0]), "checked"`);
   });
 
+  it("preserves explicit row and index names while keeping legacy key inference", () => {
+    const result = compileTemplate(
+      `<ul><for each={rows} as="entry" index="position" key={entry.id}><li>{entry.id}:{position}</li></for></ul>`,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+
+    expect(result.value.ir.directives).toContainEqual({
+      kind: "for",
+      path: [0],
+      each: "rows",
+      key: "entry.id",
+      itemName: "entry",
+      indexName: "position",
+    });
+    expect(result.value.client.bindings[0]).toMatchObject({
+      kind: "list",
+      itemName: "entry",
+      indexName: "position",
+    });
+  });
+
   it("generates modular client code that imports only needed runtime helpers", () => {
     const result = compileTemplate(`<button class:danger={selected} on:click={select}>{label}</button>`);
     if (!result.ok) {
@@ -806,6 +828,20 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`__tachyonSetText(__tachyonTextAt(root, [0]), scope.label);`);
     expect(code).toContain(`__tachyonSetClassPresence(root, "danger", scope.selected);`);
     expect(code).toContain(`cleanups.push(__tachyonDelegate(root, "click", [], scope.select));`);
+  });
+
+  it("wraps every generated bind in an ownership root", () => {
+    const result = compileTemplate(`<button>{label}</button>`);
+    if (!result.ok) throw new Error(result.error.message);
+
+    const code = generateClientModule(result.value);
+
+    expect(code).toContain(`import { createRoot as __tachyonCreateRoot } from "tachyon-dom/runtime/signal";`);
+    expect(code).toContain(
+      `export const bind = (root, inputScope = {}) => __tachyonCreateRoot((__tachyonDisposeRoot) => {`,
+    );
+    expect(code).toContain(`const scope = inputScope;`);
+    expect(code).toContain(`__tachyonDisposeRoot();`);
   });
 
   it("generates class bindings against nested element paths", () => {
@@ -833,7 +869,7 @@ describe("HTML-first compiler", () => {
     const code = generateClientModule(result.value, { reactive: true });
 
     expect(code).toContain(
-      `import { effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
+      `import { createRoot as __tachyonCreateRoot, effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
     );
     expect(code).toContain(`const cleanups = [];`);
     expect(code).toContain(`const __tachyonTarget0 = __tachyonTextAt(root, [0,0]);`);
@@ -1554,5 +1590,16 @@ describe("HTML-first compiler", () => {
       errorChunks.push(chunk);
     }
     expect(errorChunks.join("")).toBe(`<main>LoadingFailed</main>`);
+  });
+
+  it("rejects resolve-order await fragments in the streaming target", () => {
+    const result = compileTemplate(
+      `<main><await value={messagePromise} then="message" reorder="resolve"><p>{message}</p></await></main>`,
+    );
+    if (!result.ok) throw new Error(result.error.message);
+
+    expect(() => generateServerStreamModule(result.value)).toThrow(
+      '<await reorder="resolve"> is not supported by the stream target',
+    );
   });
 });

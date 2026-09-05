@@ -5,14 +5,21 @@ export { rawHtml, type ClientHtml } from "./html.js";
 
 export type ClientRouteParams = Record<string, string>;
 
-export type ClientRouteContext<Data = unknown> = {
+export type ClientRouteContext<Data = unknown, Params extends ClientRouteParams = ClientRouteParams> = {
   url: URL;
-  params: ClientRouteParams;
+  params: Params;
   data: Data;
   signal: AbortSignal;
 };
 
-type ClientRenderValue = string | ClientHtml | Node | readonly Node[] | DocumentFragment;
+export type ClientRenderValue = string | ClientHtml | Node | readonly Node[] | DocumentFragment;
+
+export type ClientMountedView = {
+  value: ClientRenderValue;
+  dispose: () => void;
+};
+
+export type ClientRenderResult = ClientRenderValue | ClientMountedView;
 
 export type ClientHeadDescriptor = {
   title?: string;
@@ -21,28 +28,65 @@ export type ClientHeadDescriptor = {
   scripts?: Array<Record<string, string>>;
 };
 
-export type ClientRouteDefinition<Data = unknown> = {
+export type ClientRouteDefinition<Data = unknown, Params extends ClientRouteParams = ClientRouteParams> = {
   id?: string;
   path: string;
-  children?: readonly ClientRouteDefinition[];
+  children?: readonly ClientRouteDefinition<any, any>[];
   target?:
     | string
     | Element
-    | ((context: { root: Element; url: URL; params: ClientRouteParams; data: Data }) => Element | undefined | null);
-  load?: (context: Omit<ClientRouteContext<Data>, "data">) => Data | Promise<Data>;
-  head?: (context: ClientRouteContext<Data>) => ClientHeadDescriptor | Promise<ClientHeadDescriptor>;
-  action?: (context: Omit<ClientRouteContext<Data>, "data"> & { request: Request }) => Response | Promise<Response>;
+    | ((context: { root: Element; url: URL; params: Params; data: Data }) => Element | undefined | null);
+  load?: (context: Omit<ClientRouteContext<Data, Params>, "data">) => Data | Promise<Data>;
+  head?: (context: ClientRouteContext<Data, Params>) => ClientHeadDescriptor | Promise<ClientHeadDescriptor>;
+  action?: (context: Omit<ClientRouteContext<Data, Params>, "data"> & { request: Request }) => Response | Promise<Response>;
   revalidateOnAction?:
     | "self"
     | "all"
     | readonly string[]
     | ((context: { url: URL; response: Response }) => readonly string[]);
-  render: (context: ClientRouteContext<Data>) => ClientRenderValue | Promise<ClientRenderValue>;
+  render: (context: ClientRouteContext<Data, Params>) => ClientRenderResult | Promise<ClientRenderResult>;
 };
+
+export type ClientParamsForPath<Path extends string> = Path extends `${string}:${infer Param}/${infer Rest}`
+  ? { [Key in Param | keyof ClientParamsForPath<`/${Rest}`>]: string }
+  : Path extends `${string}:${infer Param}`
+    ? { [Key in Param]: string }
+    : Path extends `${string}*${infer Param}/${infer Rest}`
+      ? { [Key in Param | keyof ClientParamsForPath<`/${Rest}`>]: string }
+      : Path extends `${string}*${infer Param}`
+        ? { [Key in Param]: string }
+        : {};
+
+export type ClientRouteDefinitionInput<Path extends string, Data> = Omit<
+  ClientRouteDefinition<Data, ClientParamsForPath<Path>>,
+  "path" | "children"
+> & {
+  path: Path;
+  children?: readonly ClientRouteDefinition<any, any>[];
+};
+
+type ClientRouteDefinitionWithLoader<Path extends string, Data> = Omit<
+  ClientRouteDefinition<Data, ClientParamsForPath<Path>>,
+  "path" | "children" | "load"
+> & {
+  path: Path;
+  load: (context: Omit<ClientRouteContext<unknown, ClientParamsForPath<Path>>, "data">) => Data | Promise<Data>;
+  children?: readonly ClientRouteDefinition<any, any>[];
+};
+
+export function defineClientRoute<const Path extends string, Data>(
+  definition: ClientRouteDefinitionWithLoader<Path, Data>,
+): ClientRouteDefinition<Data, ClientParamsForPath<Path>>;
+export function defineClientRoute<const Path extends string>(
+  definition: ClientRouteDefinitionInput<Path, unknown>,
+): ClientRouteDefinition<unknown, ClientParamsForPath<Path>>;
+export function defineClientRoute(definition: ClientRouteDefinition<any, any>): ClientRouteDefinition<any, any> {
+  return definition;
+}
 
 export type ClientRouterOptions = {
   root: Element;
-  routes: readonly ClientRouteDefinition[];
+  routes: readonly ClientRouteDefinition<any, any>[];
   baseUrl?: string;
   notFound?: (context: { url: URL }) => ClientRenderValue;
   error?: (context: { url: URL; error: unknown }) => ClientRenderValue;
@@ -124,6 +168,19 @@ type CompiledClientRoute = RankedClientRoute & {
   names: string[];
   wildcard: boolean;
   specificity: number[];
+};
+
+type LayoutState = {
+  root: Element;
+  loaded: LoadedClientBranch;
+  paramsKey: string;
+  searchKey: string;
+  dispose: () => void;
+};
+
+type PrefetchEntry = {
+  controller: AbortController;
+  promise: Promise<void>;
 };
 
 const trimSlashes = (value: string): string => value.replace(/^\/+|\/+$/g, "");
@@ -250,25 +307,50 @@ const matchClientRoute = (routes: readonly CompiledClientRoute[], pathname: stri
 
 const toUrl = (href: string, baseUrl: string): URL => new URL(href, baseUrl);
 
-const renderInto = (root: Element, value: ClientRenderValue): void => {
+const isClientMountedView = (value: ClientRenderResult): value is ClientMountedView =>
+  typeof value === "object" &&
+  value !== null &&
+  "value" in value &&
+  "dispose" in value &&
+  typeof value.dispose === "function";
+
+const viewValue = (value: ClientRenderResult): ClientRenderValue => (isClientMountedView(value) ? value.value : value);
+
+const disposeRenderResult = (value: ClientRenderResult | undefined): void => {
+  if (value && isClientMountedView(value)) value.dispose();
+};
+
+const once = (dispose: () => void): (() => void) => {
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    dispose();
+  };
+};
+
+const renderInto = (root: Element, value: ClientRenderResult): (() => void) => {
+  const mountedDispose = isClientMountedView(value) ? once(value.dispose) : undefined;
+  const renderedValue = viewValue(value);
   root.replaceChildren();
-  if (isClientHtml(value)) {
-    root.innerHTML = value.toString();
-    return;
+  if (isClientHtml(renderedValue)) {
+    root.innerHTML = renderedValue.toString();
+    return mountedDispose ?? (() => undefined);
   }
-  if (typeof value === "string") {
-    root.textContent = value;
-    return;
+  if (typeof renderedValue === "string") {
+    root.textContent = renderedValue;
+    return mountedDispose ?? (() => undefined);
   }
-  if (value instanceof DocumentFragment) {
-    root.appendChild(value);
-    return;
+  if (renderedValue instanceof DocumentFragment) {
+    root.appendChild(renderedValue);
+    return mountedDispose ?? (() => undefined);
   }
-  if (value instanceof Node) {
-    root.appendChild(value);
-    return;
+  if (renderedValue instanceof Node) {
+    root.appendChild(renderedValue);
+    return mountedDispose ?? (() => undefined);
   }
-  root.append(...value);
+  root.append(...renderedValue);
+  return mountedDispose ?? (() => undefined);
 };
 
 const focusRouteContent = (root: Element, selector: string): void => {
@@ -358,7 +440,11 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   let controller: AbortController | undefined;
   let actionController: AbortController | undefined;
   let actionVersion = 0;
+  let navigationGeneration = 0;
+  let disposed = false;
+  let started = false;
   let currentNavigation: Promise<void> = Promise.resolve();
+  let committedView: { target: Element; dispose: () => void } | undefined;
   const cache = new Map<string, unknown>();
   const cacheLimit =
     options.cache === true
@@ -368,15 +454,19 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
           ? Math.max(0, Math.floor(options.cache.maxEntries ?? 100))
           : 100
         : 0;
-  const layoutStates = new WeakMap<
-    ClientRouteDefinition,
-    { root: Element; loaded: LoadedClientBranch; paramsKey: string; searchKey: string }
-  >();
-  const prefetchControllers = new Map<string, AbortController>();
+  const layoutStates = new Map<ClientRouteDefinition, LayoutState>();
+  const prefetchEntries = new Map<string, PrefetchEntry>();
   const eagerlyNavigated = new WeakSet<HTMLAnchorElement>();
   const scrollPositions = new Map<number, { x: number; y: number }>();
   let nextScrollKey = 1;
   const cacheKey = (url: URL): string => `${url.pathname}${url.search}`;
+  const isCurrentNavigation = (signal: AbortSignal, generation: number): boolean =>
+    !disposed && !signal.aborted && navigationGeneration === generation;
+  const disposeCommittedView = (): void => {
+    const current = committedView;
+    committedView = undefined;
+    current?.dispose();
+  };
   const writeCache = (key: string, value: unknown): void => {
     if (cacheLimit === 0) return;
     cache.delete(key);
@@ -399,11 +489,15 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   }
 
   const renderNotFound = (url: URL): void => {
-    renderInto(options.root, options.notFound ? options.notFound({ url }) : rawHtml(`<h1>Not Found</h1>`));
+    disposeCommittedView();
+    const value = options.notFound ? options.notFound({ url }) : rawHtml(`<h1>Not Found</h1>`);
+    committedView = { target: options.root, dispose: renderInto(options.root, value) };
   };
 
   const renderError = (url: URL, error: unknown): void => {
-    renderInto(options.root, options.error ? options.error({ url, error }) : rawHtml(`<h1>Navigation Error</h1>`));
+    disposeCommittedView();
+    const value = options.error ? options.error({ url, error }) : rawHtml(`<h1>Navigation Error</h1>`);
+    committedView = { target: options.root, dispose: renderInto(options.root, value) };
   };
 
   const isLoadedClientBranch = (value: unknown): value is LoadedClientBranch =>
@@ -458,17 +552,18 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     match: ClientMatch,
     loaded: LoadedClientBranch,
     signal: AbortSignal,
+    generation: number,
   ): Promise<void> => {
     const heads: ClientHeadDescriptor[] = [];
     for (const route of match.branch) {
-      if (signal.aborted) {
+      if (!isCurrentNavigation(signal, generation)) {
         return;
       }
       if (route.head) {
         heads.push(await route.head({ url, params: match.params, data: loaded.dataByRoute.get(route), signal }));
       }
     }
-    if (!signal.aborted) {
+    if (isCurrentNavigation(signal, generation)) {
       applyHead(mergeHead(heads));
     }
   };
@@ -491,10 +586,15 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     url: URL,
     match: ClientMatch,
     loaded: LoadedClientBranch,
-    rendered: ClientRenderValue,
+    rendered: ClientRenderResult,
     navigateOptions: NavigateOptions,
     signal: AbortSignal,
+    generation: number,
   ): Promise<void> => {
+    if (!isCurrentNavigation(signal, generation)) {
+      disposeRenderResult(rendered);
+      return;
+    }
     const target = routeTargetFor(options.root, match, url, loaded.leafData);
     let committedTarget = target;
     const renderNestedBranch = async (): Promise<void> => {
@@ -510,18 +610,20 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
           layoutState?.searchKey !== searchKey ||
           (layoutRoute.load !== undefined && layoutState?.loaded !== loaded)
         ) {
+          layoutState?.dispose();
           const layoutValue = await layoutRoute.render({
             url,
             params: match.params,
             data: loaded.dataByRoute.get(layoutRoute),
             signal,
           } as ClientRouteContext);
-          if (signal.aborted) {
+          if (!isCurrentNavigation(signal, generation)) {
+            disposeRenderResult(layoutValue);
             return;
           }
-          renderInto(parentTarget, layoutValue);
+          const layoutDispose = renderInto(parentTarget, layoutValue);
           layoutRoot = parentTarget.firstElementChild ?? parentTarget;
-          layoutStates.set(layoutRoute, { root: layoutRoot, loaded, paramsKey, searchKey });
+          layoutStates.set(layoutRoute, { root: layoutRoot, loaded, paramsKey, searchKey, dispose: layoutDispose });
         }
         const outlet = outletFor(layoutRoot);
         if (!outlet) {
@@ -529,17 +631,32 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
         }
         parentTarget = outlet;
       }
-      renderInto(parentTarget, rendered);
+      if (!isCurrentNavigation(signal, generation)) {
+        disposeRenderResult(rendered);
+        return;
+      }
+      committedView?.dispose();
+      const leafDispose = renderInto(parentTarget, rendered);
+      committedView = { target: parentTarget, dispose: leafDispose };
       committedTarget = parentTarget;
     };
     const commit = async (): Promise<void> => {
+      if (!isCurrentNavigation(signal, generation)) {
+        disposeRenderResult(rendered);
+        return;
+      }
       if (match.branch.length > 1) {
         await renderNestedBranch();
       } else {
-        renderInto(target, rendered);
+        if (!isCurrentNavigation(signal, generation)) {
+          disposeRenderResult(rendered);
+          return;
+        }
+        disposeCommittedView();
+        committedView = { target, dispose: renderInto(target, rendered) };
       }
-      await updateHead(url, match, loaded, signal);
-      if (signal.aborted) {
+      await updateHead(url, match, loaded, signal, generation);
+      if (!isCurrentNavigation(signal, generation)) {
         return;
       }
       restoreOrScroll(url, navigateOptions);
@@ -649,40 +766,46 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   };
 
   const prefetch = async (href: string): Promise<void> => {
+    if (disposed) return;
     const url = toUrl(href, location.href || baseUrl);
     const match = matchClientRoute(routes, url.pathname);
     if (!match) {
       return;
     }
     const key = cacheKey(url);
-    prefetchControllers.get(key)?.abort();
+    const existing = prefetchEntries.get(key);
+    if (existing) {
+      await existing.promise;
+      return;
+    }
     const prefetchController = new AbortController();
-    prefetchControllers.set(key, prefetchController);
+    const promise = loadData(url, match, prefetchController.signal).then(() => undefined);
+    const entry = { controller: prefetchController, promise };
+    prefetchEntries.set(key, entry);
     try {
-      await loadData(url, match, prefetchController.signal);
+      await promise;
     } finally {
-      if (prefetchControllers.get(key) === prefetchController) {
-        prefetchControllers.delete(key);
-      }
+      if (prefetchEntries.get(key) === entry) prefetchEntries.delete(key);
     }
   };
 
   const revalidate = async (hrefs?: string | readonly string[]): Promise<void> => {
+    if (disposed) return;
     if (!hrefs) {
       cache.clear();
-      prefetchControllers.forEach((controller) => controller.abort());
-      prefetchControllers.clear();
+      prefetchEntries.forEach((entry) => entry.controller.abort());
+      prefetchEntries.clear();
     } else if (typeof hrefs === "string") {
       const key = cacheKey(toUrl(hrefs, location.href || baseUrl));
       cache.delete(key);
-      prefetchControllers.get(key)?.abort();
-      prefetchControllers.delete(key);
+      prefetchEntries.get(key)?.controller.abort();
+      prefetchEntries.delete(key);
     } else {
       for (const href of hrefs) {
         const key = cacheKey(toUrl(href, location.href || baseUrl));
         cache.delete(key);
-        prefetchControllers.get(key)?.abort();
-        prefetchControllers.delete(key);
+        prefetchEntries.get(key)?.controller.abort();
+        prefetchEntries.delete(key);
       }
     }
     await navigate(location.pathname + location.search + location.hash, { replace: true });
@@ -703,6 +826,9 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   };
 
   const submit = async (href: string, init: RequestInit = {}): Promise<Response> => {
+    if (disposed) {
+      throw new Error("Client router is disposed.");
+    }
     const url = toUrl(href, location.href || baseUrl);
     const match = matchClientRoute(routes, url.pathname);
     if (!match?.route.action) {
@@ -746,15 +872,18 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
   };
 
   const navigate = async (href: string, navigateOptions: NavigateOptions = {}): Promise<void> => {
+    if (disposed) return;
     controller?.abort();
     actionController?.abort();
     const nextController = new AbortController();
     controller = nextController;
+    const generation = ++navigationGeneration;
     const url = toUrl(href, location.href || baseUrl);
     if (!navigateOptions.restoreScroll) {
       saveCurrentScrollPosition();
     }
     if (location.pathname === url.pathname && location.search === url.search && location.hash !== url.hash) {
+      if (!isCurrentNavigation(nextController.signal, generation)) return;
       writeHistory(url, navigateOptions);
       restoreOrScroll(url, navigateOptions);
       return;
@@ -762,6 +891,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     const match = matchClientRoute(routes, url.pathname);
     const task = (async () => {
       if (!match) {
+        if (!isCurrentNavigation(nextController.signal, generation)) return;
         writeHistory(url, navigateOptions);
         renderNotFound(url);
         restoreOrScroll(url, navigateOptions);
@@ -771,7 +901,7 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
       let loaded: LoadedClientBranch;
       try {
         loaded = await loadData(url, match, nextController.signal);
-        if (nextController.signal.aborted) {
+        if (!isCurrentNavigation(nextController.signal, generation)) {
           return;
         }
         const rendered = await match.route.render({
@@ -780,13 +910,14 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
           data: loaded.leafData,
           signal: nextController.signal,
         });
-        if (nextController.signal.aborted) {
+        if (!isCurrentNavigation(nextController.signal, generation)) {
+          disposeRenderResult(rendered);
           return;
         }
         writeHistory(url, navigateOptions);
-        await commitNavigation(url, match, loaded, rendered, navigateOptions, nextController.signal);
+        await commitNavigation(url, match, loaded, rendered, navigateOptions, nextController.signal, generation);
       } catch (error) {
-        if (!nextController.signal.aborted) {
+        if (isCurrentNavigation(nextController.signal, generation)) {
           renderError(url, error);
         }
       }
@@ -861,6 +992,8 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
 
   return {
     start: async () => {
+      if (disposed || started) return;
+      started = true;
       options.root.addEventListener("click", onClick);
       options.root.addEventListener("pointerdown", onPointerDown);
       options.root.addEventListener("mousedown", onPointerDown);
@@ -873,23 +1006,34 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     prefetch,
     revalidate,
     invalidate: (href?: string) => {
+      if (disposed) return;
       if (!href) {
         cache.clear();
-        prefetchControllers.forEach((prefetchController) => prefetchController.abort());
-        prefetchControllers.clear();
+        prefetchEntries.forEach((entry) => entry.controller.abort());
+        prefetchEntries.clear();
         return;
       }
       const key = cacheKey(toUrl(href, location.href || baseUrl));
       cache.delete(key);
-      prefetchControllers.get(key)?.abort();
-      prefetchControllers.delete(key);
+      prefetchEntries.get(key)?.controller.abort();
+      prefetchEntries.delete(key);
     },
     settled: () => currentNavigation,
     dispose: () => {
+      if (disposed) return;
+      disposed = true;
+      navigationGeneration++;
+      actionVersion++;
       controller?.abort();
       actionController?.abort();
-      prefetchControllers.forEach((prefetchController) => prefetchController.abort());
-      prefetchControllers.clear();
+      prefetchEntries.forEach((entry) => entry.controller.abort());
+      prefetchEntries.clear();
+      cache.clear();
+      for (const layout of layoutStates.values()) layout.dispose();
+      layoutStates.clear();
+      disposeCommittedView();
+      scrollPositions.clear();
+      currentNavigation = Promise.resolve();
       options.root.removeEventListener("click", onClick);
       options.root.removeEventListener("pointerdown", onPointerDown);
       options.root.removeEventListener("mousedown", onPointerDown);

@@ -35,6 +35,7 @@ import { loadRouteApp, packageCloudflarePages, tachyonApp, tachyonDom, tachyonDo
 import * as viteIntegration from "../src/vite";
 import { diagnosticsForTachyonDocument } from "../src/language-server";
 import { renderTdForTest } from "../src/testing";
+import { transformSfcScript } from "../src/compiler/sfc";
 
 type PanelScope = {
   title: string;
@@ -140,15 +141,17 @@ describe("DX helpers", () => {
     const imports = await collectPublicMarkdownImports(markdownFiles);
 
     for (const imported of imports) {
-      const exportKey = imported.specifier === "tachyon-dom" ? "." : `.${imported.specifier.slice("tachyon-dom".length)}`;
+      const exportKey =
+        imported.specifier === "tachyon-dom" ? "." : `.${imported.specifier.slice("tachyon-dom".length)}`;
       const target = manifest.exports[exportKey]?.import;
       expect(target, `${imported.file}:${imported.line}: ${imported.specifier} is not exported`).toBeDefined();
       if (!target) continue;
       const exports = (await import(pathToFileURL(path.resolve(target)).href)) as Record<string, unknown>;
       for (const name of imported.names) {
-        expect(exports, `${imported.file}:${imported.line}: ${name} is not exported by ${imported.specifier}`).toHaveProperty(
-          name,
-        );
+        expect(
+          exports,
+          `${imported.file}:${imported.line}: ${name} is not exported by ${imported.specifier}`,
+        ).toHaveProperty(name);
       }
     }
   });
@@ -315,12 +318,7 @@ describe("DX helpers", () => {
       peerDependencies?: Record<string, string>;
       peerDependenciesMeta?: Record<string, { optional?: boolean }>;
     };
-    for (const name of [
-      "typescript",
-      "oxc-parser",
-      "vscode-languageserver",
-      "vscode-languageserver-textdocument",
-    ]) {
+    for (const name of ["typescript", "oxc-parser", "vscode-languageserver", "vscode-languageserver-textdocument"]) {
       expect(manifest.dependencies?.[name], `${name} must not be a runtime dependency`).toBeUndefined();
       expect(manifest.devDependencies?.[name], `${name} must remain available to repository development`).toBeDefined();
       expect(manifest.peerDependencies?.[name], `${name} must declare its consumer-compatible range`).toBeDefined();
@@ -461,14 +459,15 @@ describe("DX helpers", () => {
     expect(release).not.toContain("finalize-release-tags.mjs");
     expect(release).not.toContain("NPM_TOKEN");
     expect(releaseContract).not.toContain('"--provenance"');
-    expect(publisher).toMatch(
-      /"publish",\s*entry\.filename,\s*"--access",\s*"public",\s*"--tag",\s*verified\.npmTag/,
-    );
+    expect(publisher).toMatch(/"publish",\s*entry\.filename,\s*"--access",\s*"public",\s*"--tag",\s*verified\.npmTag/);
     expect(publisher).not.toContain("stagingTagFor");
     expect(publisher).toContain("if (confirmed.integrity !== entry.integrity) throw error");
     const artifactReverification = publisher.indexOf("const reverified = await verifyReleaseArtifacts");
-    const registryRecheck = publisher.indexOf("const confirmedRegistry = await readRegistryState", artifactReverification);
-    const npmPublish = publisher.indexOf('output = await execFile(', artifactReverification);
+    const registryRecheck = publisher.indexOf(
+      "const confirmedRegistry = await readRegistryState",
+      artifactReverification,
+    );
+    const npmPublish = publisher.indexOf("output = await execFile(", artifactReverification);
     expect(artifactReverification).toBeGreaterThan(-1);
     expect(registryRecheck).toBeGreaterThan(artifactReverification);
     expect(registryRecheck).toBeLessThan(npmPublish);
@@ -762,26 +761,26 @@ export const scope = (input: Partial<AppState> = {}) => ({
     }
   });
 
-  it.each([
-    `<main><script src="/client.js"></script></main>`,
-    `<script type="application/ld+json">[]</script>`,
-  ])("keeps a non-component script in the template: %s", async (source) => {
-    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-nested-script-"));
-    try {
-      const input = path.join(dir, "page.td");
-      const output = path.join(dir, "page.js");
-      await writeFile(input, source);
+  it.each([`<main><script src="/client.js"></script></main>`, `<script type="application/ld+json">[]</script>`])(
+    "keeps a non-component script in the template: %s",
+    async (source) => {
+      const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-nested-script-"));
+      try {
+        const input = path.join(dir, "page.td");
+        const output = path.join(dir, "page.js");
+        await writeFile(input, source);
 
-      const result = await compileFile({ input, output, target: "server", reactive: false, sourcemap: false });
+        const result = await compileFile({ input, output, target: "server", reactive: false, sourcemap: false });
 
-      expect(result.ok).toBe(true);
-      const code = await readFile(output, "utf8");
-      expect(code).toContain("<script");
-      expect(code).toContain(source.includes("client.js") ? "/client.js" : "application/ld+json");
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
+        expect(result.ok).toBe(true);
+        const code = await readFile(output, "utf8");
+        expect(code).toContain("<script");
+        expect(code).toContain(source.includes("client.js") ? "/client.js" : "application/ld+json");
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("reports invalid plain JavaScript in a leading SFC script", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-invalid-js-"));
@@ -794,6 +793,23 @@ export const scope = (input: Partial<AppState> = {}) => ({
       expect(result.ok).toBe(false);
       if (result.ok) throw new Error("Expected JavaScript diagnostic.");
       expect(result.error).toContain(":2:16: Expression expected.");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports unsupported stream await reordering at the source attribute", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-stream-await-diagnostic-"));
+    try {
+      const input = path.join(dir, "page.td");
+      await writeFile(input, `<main>\n  <await value={message} then="value" reorder="resolve">Ready</await>\n</main>`);
+
+      const result = await compileFile({ input, target: "stream", reactive: false, sourcemap: false });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected stream target diagnostic.");
+      expect(result.error).toContain(`${input}:2:39:`);
+      expect(result.error).toContain('<await reorder="resolve"> is not supported by the stream target');
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -836,12 +852,35 @@ const increment = (): void => {
       expect(result.ok).toBe(true);
       const code = await readFile(output, "utf8");
       expect(code).toContain(`import { createSignal } from "tachyon-dom";`);
-      expect(code).toContain(`const __tachyonSfcSetupScope = { count: count, increment: increment };`);
+      expect(code).toContain(`const __tachyonSfcSetupScope = (inputScope = {}) => {`);
+      expect(code).toContain(`return { count: count, increment: increment };`);
       expect(code).toContain(`typeof __tachyonSfcSetupScope === "function"`);
       expect(code).toContain(`scope.increment`);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  it("creates independent setup state for each client bind invocation", () => {
+    const transformed = transformSfcScript({
+      attrs: "setup",
+      content: `const state = { count: 0 }; const increment = () => { state.count += 1; };`,
+      offset: 0,
+    });
+    expect(transformed.ok).toBe(true);
+    if (!transformed.ok) throw new Error(transformed.error.message);
+    const factory = new Function(`${transformed.value.code}; return __tachyonSfcSetupScope;`)() as () => {
+      state: { count: number };
+      increment: () => void;
+    };
+
+    const first = factory();
+    const second = factory();
+    first.increment();
+
+    expect(first.state.count).toBe(1);
+    expect(second.state.count).toBe(0);
+    expect(first.state).not.toBe(second.state);
   });
 
   it("builds a file route manifest through the CLI helper", async () => {
@@ -1494,7 +1533,7 @@ export const bindRows = (root, rows, options) => effect(() => {
       `import { cleanupTextKeyedList as __tachyonCleanupTextKeyedList, mountTextKeyedList as __tachyonMountTextKeyedList } from "tachyon-dom/runtime/list-text";`,
     );
     expect(code).toContain(
-      `import { effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
+      `import { createRoot as __tachyonCreateRoot, effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,
     );
     expect(code).toContain(`__tachyonMountTextKeyedList(__tachyonTarget0, [], __tachyonRead(scope.rows)`);
     expect(code).toContain(`__tachyonCleanupTextKeyedList(__tachyonTarget0, [])`);
@@ -1517,7 +1556,9 @@ export const bindRows = (root, rows, options) => effect(() => {
 
     expect(typeof server === "object" && server?.code).toContain(`export const render = (scope) =>`);
     expect(typeof stream === "object" && stream?.code).toContain(`export const stream = async function*`);
-    expect(typeof client === "object" && client?.code).toContain(`export const bind = (root, scope) =>`);
+    expect(typeof client === "object" && client?.code).toContain(
+      `export const bind = (root, inputScope = {}) => __tachyonCreateRoot`,
+    );
   });
 
   it("applies one template whitespace policy to every Vite target", async () => {

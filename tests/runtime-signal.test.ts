@@ -91,6 +91,41 @@ describe("signal runtime", () => {
     expect(seen).toEqual([1, 2]);
   });
 
+  it("replaces effect-run cleanups before rerunning and disposes the latest run", () => {
+    const source = createSignal(0);
+    const events: string[] = [];
+
+    const dispose = effect(() => {
+      const value = source();
+      onCleanup(() => events.push(`registered:${value}`));
+      return () => events.push(`returned:${value}`);
+    });
+
+    source.set(1);
+    dispose();
+
+    expect(events).toEqual(["returned:0", "registered:0", "returned:1", "registered:1"]);
+  });
+
+  it("continues an effect rerun cleanup sequence after one cleanup throws", () => {
+    const source = createSignal(0);
+    const events: string[] = [];
+
+    const dispose = effect(() => {
+      const value = source();
+      onCleanup(() => {
+        events.push(`throws:${value}`);
+        if (value === 0) throw new Error("run cleanup failed");
+      });
+      onCleanup(() => events.push(`after:${value}`));
+    });
+
+    expect(() => source.set(1)).toThrow("run cleanup failed");
+    expect(events).toEqual(["after:0", "throws:0"]);
+    dispose();
+    expect(events).toEqual(["after:0", "throws:0", "after:1", "throws:1"]);
+  });
+
   it("detaches an effect that throws during initial registration", () => {
     const value = createSignal(0);
     let runs = 0;
@@ -440,5 +475,39 @@ describe("signal runtime", () => {
     expect(signal?.aborted).toBe(true);
     expect(resource.loading()).toBe(false);
     expect(calls).toEqual(["first"]);
+  });
+
+  it("distinguishes successful undefined data, errors, and cancellation outcomes", async () => {
+    let resolveFirst: ((value: undefined) => void) | undefined;
+    let rejectSecond: ((reason: Error) => void) | undefined;
+    let request = 0;
+    const resource = createResource("source", () => {
+      request++;
+      if (request === 1) {
+        return new Promise<undefined>((resolve) => {
+          resolveFirst = resolve;
+        });
+      }
+      if (request === 2) {
+        return new Promise<never>((_resolve, reject) => {
+          rejectSecond = reject;
+        });
+      }
+      return new Promise<string>(() => undefined);
+    });
+
+    await Promise.resolve();
+    resolveFirst?.(undefined);
+    expect(await resource.refetchOutcome()).toEqual({ status: "success", data: undefined });
+
+    const errorOutcome = resource.refetchOutcome();
+    await Promise.resolve();
+    rejectSecond?.(new Error("broken"));
+    expect(await errorOutcome).toMatchObject({ status: "error", error: expect.any(Error) });
+
+    const cancelled = resource.refetchOutcome();
+    await Promise.resolve();
+    resource.dispose();
+    expect(await cancelled).toMatchObject({ status: "cancelled" });
   });
 });

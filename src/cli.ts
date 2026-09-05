@@ -312,7 +312,7 @@ export const parseArgs = (argv: readonly string[]): Result<CliOptions, string> =
 
 export const compileFile = async (options: Omit<CliCompileOptions, "command">): Promise<Result<string, string>> => {
   const source = await readFile(options.input, "utf8");
-  const result = diagnoseTachyonSfc(source);
+  const result = diagnoseTachyonSfc(source, { target: options.target });
   if (!result.ok) {
     return err(formatDiagnostic(result.error, options.input));
   }
@@ -321,11 +321,11 @@ export const compileFile = async (options: Omit<CliCompileOptions, "command">): 
     return err(formatDiagnostic(diagnosticFromCompilerError(source, script.error), options.input));
   }
   const code = result.value.scriptOnly
-    ? generateScriptOnlyModule(options.target)
-    : options.target === "server"
-      ? generateServerModule(result.value.template)
+      ? generateScriptOnlyModule(options.target)
+      : options.target === "server"
+      ? generateServerModule(result.value.template, script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {})
       : options.target === "stream"
-        ? generateServerStreamModule(result.value.template)
+        ? generateServerStreamModule(result.value.template, script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {})
         : generateClientModule(result.value.template, {
             reactive: options.reactive,
             ...(script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {}),

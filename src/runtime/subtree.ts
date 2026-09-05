@@ -2,6 +2,21 @@ type OwnedCleanup = () => void;
 
 const ownedCleanups = new WeakMap<Node, OwnedCleanup>();
 
+export const runCleanups = (cleanups: Array<() => void>): void => {
+  const pending = cleanups.splice(0).reverse();
+  let firstError: unknown;
+  let failed = false;
+  for (const cleanup of pending) {
+    try {
+      cleanup();
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
+    }
+  }
+  if (failed) throw firstError;
+};
+
 export const registerOwnedSubtree = (owner: Node, cleanup: OwnedCleanup): void => {
   ownedCleanups.set(owner, cleanup);
 };

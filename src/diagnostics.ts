@@ -1,5 +1,6 @@
 import { compileTemplate } from "./compiler/index.js";
 import { compileTachyonSfc } from "./compiler/sfc.js";
+import { validateServerStreamTemplate } from "./compiler/targets/stream.js";
 import { err, ok, type Result } from "./result.js";
 import type { CompiledTemplate, CompilerError, CompileTemplateOptions } from "./compiler/types.js";
 
@@ -12,6 +13,10 @@ export type TemplateDiagnostic = {
   endLine: number;
   endColumn: number;
   sourceLine: string;
+};
+
+export type DiagnoseOptions = CompileTemplateOptions & {
+  target?: "client" | "server" | "stream";
 };
 
 export const locateOffset = (
@@ -43,9 +48,17 @@ export const diagnosticFromCompilerError = (source: string, error: CompilerError
   };
 };
 
-export const diagnoseTemplate = (source: string): Result<CompiledTemplate, TemplateDiagnostic> => {
-  const result = compileTemplate(source);
+export const diagnoseTemplate = (
+  source: string,
+  options: DiagnoseOptions = {},
+): Result<CompiledTemplate, TemplateDiagnostic> => {
+  const { target, ...compileOptions } = options;
+  const result = compileTemplate(source, compileOptions);
   if (result.ok) {
+    if (target === "stream") {
+      const validation = validateServerStreamTemplate(result.value);
+      if (!validation.ok) return err(diagnosticFromCompilerError(source, validation.error));
+    }
     return ok(result.value);
   }
   return err(diagnosticFromCompilerError(source, result.error));
@@ -53,13 +66,27 @@ export const diagnoseTemplate = (source: string): Result<CompiledTemplate, Templ
 
 export const diagnoseTachyonSfc = (
   source: string,
-  options: CompileTemplateOptions = {},
+  options: DiagnoseOptions = {},
 ): Result<
   ReturnType<typeof compileTachyonSfc> extends Result<infer Value, CompilerError> ? Value : never,
   TemplateDiagnostic
 > => {
-  const result = compileTachyonSfc(source, options);
+  const { target, ...compileOptions } = options;
+  const result = compileTachyonSfc(source, compileOptions);
   if (result.ok) {
+    if (target === "stream") {
+      const validation = validateServerStreamTemplate(result.value.template);
+      if (!validation.ok) {
+        const mappedError = {
+          ...validation.error,
+          offset: result.value.descriptor.mapTemplateOffset(validation.error.offset),
+          ...(validation.error.endOffset === undefined
+            ? {}
+            : { endOffset: result.value.descriptor.mapTemplateOffset(validation.error.endOffset) }),
+        };
+        return err(diagnosticFromCompilerError(source, mappedError));
+      }
+    }
     return ok(result.value);
   }
   return err(diagnosticFromCompilerError(source, result.error));

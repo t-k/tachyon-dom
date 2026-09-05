@@ -7,6 +7,8 @@ type EffectRunner = {
   children: Set<EffectRunner>;
   parent: EffectRunner | undefined;
   errorOwner: ReactiveErrorOwner | undefined;
+  runOwner: Owner;
+  registration: CleanupRegistration | undefined;
   run: () => void;
 };
 
@@ -19,23 +21,108 @@ type ReactiveErrorOwner = {
 
 type Owner = {
   disposed: boolean;
-  cleanups: Array<() => void>;
+  head: CleanupRegistration | undefined;
+  tail: CleanupRegistration | undefined;
+  parentRegistration: CleanupRegistration | undefined;
+};
+
+type CleanupRegistration = {
+  owner: Owner;
+  cleanup: () => void;
+  active: boolean;
+  previous: CleanupRegistration | undefined;
+  next: CleanupRegistration | undefined;
 };
 
 const signalBrand = Symbol("tachyon.signal");
 
 let activeEffect: EffectRunner | undefined;
 let currentOwner: Owner | undefined;
+let currentEffectOwner: Owner | undefined;
 let currentErrorOwner: ReactiveErrorOwner | undefined;
 let batchDepth = 0;
 let flushing = false;
 const pendingComputedEffects = new Set<EffectRunner>();
 const pendingEffects = new Set<EffectRunner>();
 
-export const onCleanup = (cleanup: () => void): void => {
-  if (currentOwner && !currentOwner.disposed) {
-    currentOwner.cleanups.push(cleanup);
+const createOwner = (): Owner => ({
+  disposed: false,
+  head: undefined,
+  tail: undefined,
+  parentRegistration: undefined,
+});
+
+const detachCleanup = (registration: CleanupRegistration): void => {
+  if (!registration.active) return;
+  const { owner } = registration;
+  if (registration.previous) {
+    registration.previous.next = registration.next;
+  } else {
+    owner.head = registration.next;
   }
+  if (registration.next) {
+    registration.next.previous = registration.previous;
+  } else {
+    owner.tail = registration.previous;
+  }
+  registration.active = false;
+  registration.previous = undefined;
+  registration.next = undefined;
+};
+
+const registerCleanup = (owner: Owner | undefined, cleanup: () => void): CleanupRegistration | undefined => {
+  if (!owner || owner.disposed) return undefined;
+  const registration: CleanupRegistration = {
+    owner,
+    cleanup,
+    active: true,
+    previous: owner.tail,
+    next: undefined,
+  };
+  if (owner.tail) {
+    owner.tail.next = registration;
+  } else {
+    owner.head = registration;
+  }
+  owner.tail = registration;
+  return registration;
+};
+
+const disposeOwner = (owner: Owner): void => {
+  if (owner.disposed) return;
+  owner.disposed = true;
+  if (owner.parentRegistration) {
+    detachCleanup(owner.parentRegistration);
+    owner.parentRegistration = undefined;
+  }
+  let firstError: unknown;
+  let failed = false;
+  let registration = owner.tail;
+  while (registration) {
+    const previous = registration.previous;
+    detachCleanup(registration);
+    try {
+      registration.cleanup();
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
+    }
+    registration = previous;
+  }
+  owner.head = undefined;
+  owner.tail = undefined;
+  if (failed) throw firstError;
+};
+
+export const onCleanup = (cleanup: () => void): void => {
+  registerCleanup(currentEffectOwner ?? currentOwner, cleanup);
+};
+
+/** Registers cleanup for the current enclosing mount owner. */
+export const onOwnerCleanup = (cleanup: () => void): (() => void) | undefined => {
+  const registration = registerCleanup(currentOwner, cleanup);
+  if (!registration) return undefined;
+  return () => detachCleanup(registration);
 };
 
 export type ReactiveErrorScope = {
@@ -73,32 +160,24 @@ export const createReactiveErrorScope = (handle: (error: unknown) => void): Reac
 
 export const createRoot = <T>(fn: (dispose: () => void) => T): T => {
   const parent = currentOwner;
-  const owner: Owner = { disposed: false, cleanups: [] };
-  const dispose = (): void => {
-    if (owner.disposed) return;
-    owner.disposed = true;
-    let firstError: unknown;
-    let failed = false;
-    for (let index = owner.cleanups.length - 1; index >= 0; index--) {
-      try {
-        owner.cleanups[index]?.();
-      } catch (error) {
-        if (!failed) firstError = error;
-        failed = true;
-      }
-    }
-    owner.cleanups.length = 0;
-    if (failed) throw firstError;
-  };
-  if (parent && !parent.disposed) parent.cleanups.push(dispose);
+  const owner = createOwner();
+  const dispose = (): void => disposeOwner(owner);
+  owner.parentRegistration = registerCleanup(parent, dispose);
   currentOwner = owner;
+  const previousEffectOwner = currentEffectOwner;
+  currentEffectOwner = undefined;
   try {
     return fn(dispose);
   } catch (error) {
-    dispose();
+    try {
+      dispose();
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Root initialization and cleanup failed.");
+    }
     throw error;
   } finally {
     currentOwner = parent;
+    currentEffectOwner = previousEffectOwner;
   }
 };
 
@@ -111,15 +190,32 @@ export type Signal<T> = Accessor<T> & {
   update: (updater: (value: T) => T) => void;
 };
 
-const cleanup = (runner: EffectRunner): void => {
+const cleanup = (runner: EffectRunner, createNextRunOwner: boolean): void => {
+  let firstError: unknown;
+  let failed = false;
   for (const child of Array.from(runner.children)) {
-    disposeRunner(child);
+    try {
+      disposeRunner(child);
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
+    }
   }
   runner.children.clear();
   for (const dependency of runner.dependencies) {
     dependency.delete(runner);
   }
   runner.dependencies.clear();
+  try {
+    disposeOwner(runner.runOwner);
+  } catch (error) {
+    if (!failed) firstError = error;
+    failed = true;
+  }
+  if (createNextRunOwner) {
+    runner.runOwner = createOwner();
+  }
+  if (failed) throw firstError;
 };
 
 const disposeRunner = (runner: EffectRunner): void => {
@@ -129,9 +225,19 @@ const disposeRunner = (runner: EffectRunner): void => {
   runner.disposed = true;
   pendingComputedEffects.delete(runner);
   pendingEffects.delete(runner);
-  cleanup(runner);
+  if (runner.registration) {
+    detachCleanup(runner.registration);
+    runner.registration = undefined;
+  }
+  let firstError: unknown;
+  try {
+    cleanup(runner, false);
+  } catch (error) {
+    firstError = error;
+  }
   runner.parent?.children.delete(runner);
   runner.errorOwner?.runners.delete(runner);
+  if (firstError) throw firstError;
 };
 
 const track = (subscribers: SubscriberSet): void => {
@@ -224,11 +330,14 @@ export function read<T>(value: T | Accessor<T>): T {
 
 export const untrack = <T>(fn: () => T): T => {
   const previous = activeEffect;
+  const previousOwner = currentEffectOwner;
   activeEffect = undefined;
+  currentEffectOwner = undefined;
   try {
     return fn();
   } finally {
     activeEffect = previous;
+    currentEffectOwner = previousOwner;
   }
 };
 
@@ -288,7 +397,9 @@ export const createStore = <T extends Record<PropertyKey, unknown>>(initial: T):
       if (property === Symbol.toStringTag) {
         return "TachyonStore";
       }
-      track(subscribersFor(property));
+      if (activeEffect) {
+        track(subscribersFor(property));
+      }
       return Reflect.get(target, property, receiver);
     },
     set(target, property, value, receiver) {
@@ -298,14 +409,17 @@ export const createStore = <T extends Record<PropertyKey, unknown>>(initial: T):
       }
       const didSet = Reflect.set(target, property, value, receiver);
       if (didSet) {
-        notify(subscribersFor(property));
+        const propertySubscribers = subscribers.get(property);
+        if (propertySubscribers) notify(propertySubscribers);
       }
       return didSet;
     },
   }) as T;
 };
 
-const createEffect = (fn: () => void, computed: boolean): (() => void) => {
+type EffectCallback = () => unknown;
+
+const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
   const parent = activeEffect && !activeEffect.disposed ? activeEffect : undefined;
   const errorOwner = currentErrorOwner;
   const runner: EffectRunner = {
@@ -315,24 +429,45 @@ const createEffect = (fn: () => void, computed: boolean): (() => void) => {
     children: new Set(),
     parent,
     errorOwner,
+    runOwner: createOwner(),
+    registration: undefined,
     run: () => {
       if (runner.disposed) {
         return;
       }
-      cleanup(runner);
+      let cleanupError: unknown;
+      try {
+        cleanup(runner, true);
+      } catch (error) {
+        cleanupError = error;
+      }
       const previous = activeEffect;
+      const previousEffectOwner = currentEffectOwner;
       const previousErrorOwner = currentErrorOwner;
       activeEffect = runner;
+      currentEffectOwner = runner.runOwner;
       currentErrorOwner = runner.errorOwner;
+      let callbackError: unknown;
       try {
-        fn();
+        const returned = fn();
+        if (typeof returned === "function") {
+          registerCleanup(runner.runOwner, returned as () => void);
+        }
+      } catch (error) {
+        callbackError = error;
       } finally {
         activeEffect = previous;
+        currentEffectOwner = previousEffectOwner;
         currentErrorOwner = previousErrorOwner;
         if (!previous) {
           scheduleFlush();
         }
       }
+      if (cleanupError && callbackError) {
+        throw new AggregateError([cleanupError, callbackError], "Reactive effect cleanup and callback failed.");
+      }
+      if (cleanupError) throw cleanupError;
+      if (callbackError) throw callbackError;
     },
   };
   parent?.children.add(runner);
@@ -347,11 +482,11 @@ const createEffect = (fn: () => void, computed: boolean): (() => void) => {
     }
   }
   const dispose = (): void => disposeRunner(runner);
-  onCleanup(dispose);
+  runner.registration = registerCleanup(currentEffectOwner ?? currentOwner, dispose);
   return dispose;
 };
 
-export const effect = (fn: () => void): (() => void) => createEffect(fn, false);
+export const effect = (fn: EffectCallback): (() => void) => createEffect(fn, false);
 
 export const catchError = (fn: () => void, onError: (error: unknown) => void): (() => void) =>
   effect(() => {
@@ -362,11 +497,17 @@ export const catchError = (fn: () => void, onError: (error: unknown) => void): (
     }
   });
 
+export type ResourceOutcome<T> =
+  | { status: "success"; data: T }
+  | { status: "error"; error: unknown }
+  | { status: "cancelled"; reason?: unknown };
+
 export type Resource<T> = {
   data: Accessor<T | undefined>;
   error: Accessor<unknown | undefined>;
   loading: Accessor<boolean>;
   refetch: () => Promise<T | undefined>;
+  refetchOutcome: () => Promise<ResourceOutcome<T>>;
   dispose: () => void;
 };
 
@@ -381,23 +522,25 @@ export const createResource = <Source, T>(
   const data = createSignal<T | undefined>(undefined);
   const error = createSignal<unknown | undefined>(undefined);
   const loading = createSignal(true);
-  let current: Promise<T | undefined> | undefined;
+  let currentOutcome: Promise<ResourceOutcome<T>> | undefined;
   let version = 0;
   let disposed = false;
   let controller: AbortController | undefined;
+  let cancelCurrent: ((reason: unknown) => void) | undefined;
   let disposeTracking: (() => void) | undefined;
   let hasSource = false;
   let lastSource: Source;
   const sourceValue = (): Source => (isSignal(source) ? source() : source);
-  const run = (value = sourceValue()): Promise<T | undefined> => {
+  const runOutcome = (value = sourceValue()): Promise<ResourceOutcome<T>> => {
     if (disposed) {
-      return Promise.resolve(undefined);
+      return Promise.resolve({ status: "cancelled" });
     }
-    if (loading() && current && hasSource && Object.is(lastSource, value)) {
-      return current;
+    if (loading() && currentOutcome && hasSource && Object.is(lastSource, value)) {
+      return currentOutcome;
     }
     hasSource = true;
     lastSource = value;
+    cancelCurrent?.("superseded");
     controller?.abort();
     const nextController = new AbortController();
     controller = nextController;
@@ -406,30 +549,53 @@ export const createResource = <Source, T>(
       loading.set(true);
       error.set(undefined);
     });
-    current = Promise.resolve()
-      .then(() => fetcher(value, { signal: nextController.signal }))
-      .then(
-        (value) => {
-          if (!disposed && runVersion === version) {
-            batch(() => {
-              data.set(value);
-              error.set(undefined);
-              loading.set(false);
-            });
-          }
-          return value;
-        },
-        (reason) => {
-          if (!disposed && runVersion === version) {
-            batch(() => {
-              error.set(reason);
-              loading.set(false);
-            });
-          }
-          return undefined;
-        },
-      );
-    return current;
+    let settled = false;
+    let settle!: (result: ResourceOutcome<T>) => void;
+    const cancel = (reason: unknown): void => settle({ status: "cancelled", reason });
+    const outcome = new Promise<ResourceOutcome<T>>((resolve) => {
+      settle = (result) => {
+        if (settled) return;
+        settled = true;
+        if (cancelCurrent === cancel) cancelCurrent = undefined;
+        resolve(result);
+      };
+      void Promise.resolve()
+        .then(() => fetcher(value, { signal: nextController.signal }))
+        .then(
+          (result) => {
+            if (settled) return;
+            if (!disposed && runVersion === version) {
+              batch(() => {
+                data.set(result);
+                error.set(undefined);
+                loading.set(false);
+              });
+              settle({ status: "success", data: result });
+            } else {
+              settle({ status: "cancelled", reason: "superseded" });
+            }
+          },
+          (reason) => {
+            if (settled) return;
+            if (!disposed && runVersion === version) {
+              batch(() => {
+                error.set(reason);
+                loading.set(false);
+              });
+              settle({ status: "error", error: reason });
+            } else {
+              settle({ status: "cancelled", reason });
+            }
+          },
+        );
+    });
+    cancelCurrent = cancel;
+    currentOutcome = outcome;
+    return outcome;
+  };
+  const run = (value = sourceValue()): Promise<T | undefined> => {
+    const outcome = runOutcome(value);
+    return outcome.then((result) => (result.status === "success" ? result.data : undefined));
   };
   if (isSignal(source)) {
     disposeTracking = effect(() => {
@@ -446,15 +612,18 @@ export const createResource = <Source, T>(
     error,
     loading,
     refetch: run,
+    refetchOutcome: runOutcome,
     dispose: () => {
       if (disposed) {
         return;
       }
       disposed = true;
       version += 1;
+      cancelCurrent?.("disposed");
+      cancelCurrent = undefined;
       controller?.abort();
       disposeTracking?.();
-      current = undefined;
+      currentOutcome = undefined;
       loading.set(false);
     },
   };

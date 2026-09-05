@@ -9,6 +9,31 @@ afterEach(() => {
 });
 
 describe("mountTextKeyedList", () => {
+  it("exposes an explicit row index while reusing keyed records", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const options = {
+      key: "entry.id",
+      itemName: "entry",
+      indexName: "position",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "position",
+          read: (scope: Record<string, unknown>) => scope.position,
+        },
+      ],
+    };
+
+    mountTextKeyedList(root, [], [{ id: "a" }, { id: "b" }], options);
+    mountTextKeyedList(root, [], [{ id: "b" }, { id: "a" }], options);
+
+    expect(root.textContent).toBe("01");
+  });
+
   it("reuses, moves, updates, inserts, and removes keyed rows", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

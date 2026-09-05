@@ -101,14 +101,15 @@ const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
 const renderFor = (node: ElementNode, scope: Record<string, unknown>, path: number[]): string => {
   const each = attrExpression(node, "each");
   const key = attrExpression(node, "key") ?? "item";
-  const itemName = itemNameFromKey(key);
+  const itemName = attrString(node, "as")?.trim() || itemNameFromKey(key);
+  const indexName = attrString(node, "index")?.trim();
   const items = each ? readPath(scope, each) : undefined;
   if (!Array.isArray(items)) {
     return "";
   }
   return items
-    .map((item) => {
-      const childScope = { ...scope, [itemName]: item };
+    .map((item, index) => {
+      const childScope = { ...scope, [itemName]: item, ...(indexName ? { [indexName]: index } : {}) };
       return childPathEntries(node.children, path)
         .map((entry) => renderNode(entry.child, childScope, entry.path))
         .join("");
@@ -368,14 +369,17 @@ export const renderNodeExpression = (
 const renderForExpression = (node: ElementNode, locals: ReadonlySet<string>, path: number[]): string => {
   const each = attrExpression(node, "each") ?? "[]";
   const key = attrExpression(node, "key") ?? "item";
-  const itemName = itemNameFromKey(key);
+  const itemName = attrString(node, "as")?.trim() || itemNameFromKey(key);
+  const indexName = attrString(node, "index")?.trim();
   const eachAccess = expressionToScopeAccess(each, locals);
   const childLocals = new Set(locals);
   childLocals.add(itemName);
+  if (indexName) childLocals.add(indexName);
   const childExpression = childPathEntries(node.children, path)
     .map((entry) => renderNodeExpression(entry.child, childLocals, entry.path))
     .join(" + ");
-  return `(Array.isArray(${eachAccess}) ? ${eachAccess}.map((${itemName}) => ${childExpression || `""`}).join("") : "")`;
+  const callbackParameters = indexName ? `(${itemName}, ${indexName})` : `(${itemName})`;
+  return `(Array.isArray(${eachAccess}) ? ${eachAccess}.map(${callbackParameters} => ${childExpression || `""`}).join("") : "")`;
 };
 
 const renderElementExpression = (
@@ -473,7 +477,11 @@ const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string
   return `(() => { ${declarations.join(" ")} return ${expression}; })()`;
 };
 
-const serverModuleCache = new WeakMap<CompiledTemplate, string>();
+export type ServerModuleOptions = {
+  defaultScopeName?: string;
+};
+
+const serverModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
 
 export const hasDynamicUrlAttribute = (node: TemplateNode): boolean =>
   node.type === "element" &&
@@ -485,11 +493,23 @@ export const hasDynamicUrlAttribute = (node: TemplateNode): boolean =>
   ) ||
     node.children.some(hasDynamicUrlAttribute));
 
-export const generateServerModule = (template: CompiledTemplate): string => {
-  const cached = serverModuleCache.get(template);
+export const generateServerModule = (template: CompiledTemplate, options: ServerModuleOptions = {}): string => {
+  const cacheKey = options.defaultScopeName ?? "";
+  const cachedByOptions = serverModuleCache.get(template);
+  const cached = cachedByOptions?.get(cacheKey);
   if (cached) {
     return cached;
   }
+  const renderExpression = renderElementExpression(template.root);
+  const render = options.defaultScopeName
+    ? [
+        `export const render = (inputScope = {}) => {`,
+        `  const localScope = typeof ${options.defaultScopeName} === "function" ? ${options.defaultScopeName}(inputScope) : ${options.defaultScopeName};`,
+        `  const scope = localScope && typeof localScope === "object" ? { ...localScope, ...inputScope } : inputScope;`,
+        `  return ${renderExpression};`,
+        `};`,
+      ]
+    : [`export const render = (scope) => ${renderExpression};`];
   const lines = [
     ...generatedEscapeHtmlHelperLines,
     ...(hasDynamicUrlAttribute(template.root) ? generatedUrlAttributeHelperLines : []),
@@ -499,10 +519,12 @@ export const generateServerModule = (template: CompiledTemplate): string => {
     `const escapeAttribute = (value) => String(value).replace(/[&"<]/g, (char) => ATTRIBUTE_ESCAPE[char]);`,
     `export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`,
     `export const renderHydrationState = (id, state) => '<script type="application/json" data-tachyon-state="' + escapeAttribute(id) + '">' + escapeScriptJson(JSON.stringify(state) ?? "null") + '</script>';`,
-    `export const render = (scope) => ${renderElementExpression(template.root)};`,
+    ...render,
   ];
   const code = `${lines.join("\n")}\n`;
-  serverModuleCache.set(template, code);
+  const nextCache = cachedByOptions ?? new Map<string, string>();
+  nextCache.set(cacheKey, code);
+  serverModuleCache.set(template, nextCache);
   return code;
 };
 

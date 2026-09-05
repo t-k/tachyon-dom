@@ -1,6 +1,7 @@
 import { setText, textAt } from "./text.js";
-import { createSignal, effect, onCleanup, untrack, type Signal } from "./signal.js";
-import { cleanupOwnedSubtree, registerOwnedSubtree } from "./subtree.js";
+import { createSignal, effect, onOwnerCleanup, read, untrack, type Signal } from "./signal.js";
+import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
+import { normalizeListKey } from "./key.js";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 
@@ -17,6 +18,7 @@ type TextKeyedListOptions = {
   keyRead?: ExpressionReader;
   keyReadItem?: (item: unknown) => unknown;
   itemName: string;
+  indexName?: string;
   scope?: Record<string, unknown>;
   templateHtml: string;
   bindings: TextBinding[];
@@ -38,7 +40,7 @@ type ListState = {
   records: Map<PropertyKey, RowRecord>;
   template: HTMLTemplateElement;
   elementIndices: number[];
-  ownerCleanupRegistered: boolean;
+  ownerCleanupDispose: (() => void) | undefined;
 };
 
 type MoveBeforeElement = Element & {
@@ -66,8 +68,10 @@ const readItemPath = (item: unknown, expression: string, itemName: string): unkn
 const scopedItem = (
   itemName: string,
   item: unknown,
+  indexName: string | undefined,
+  index: number,
   scope: Record<string, unknown> | undefined,
-): Record<string, unknown> => ({ ...scope, [itemName]: item });
+): Record<string, unknown> => ({ ...scope, [itemName]: item, ...(indexName ? { [indexName]: index } : {}) });
 
 const nodeAt = (root: Node, path: readonly number[]): Node => {
   let current = root;
@@ -86,22 +90,48 @@ const optionsSignature = (options: TextKeyedListOptions): string =>
   JSON.stringify({
     key: options.key,
     itemName: options.itemName,
+    indexName: options.indexName,
     templateHtml: options.templateHtml,
     bindings: options.bindings,
   });
 
 const cleanupRecord = (record: RowRecord): void => {
-  for (const cleanup of record.cleanups) cleanup();
-  record.cleanups.length = 0;
-  for (const node of record.nodes) {
-    cleanupOwnedSubtree(node);
-    node.parentNode?.removeChild(node);
+  let firstError: unknown;
+  let failed = false;
+  try {
+    runCleanups(record.cleanups);
+  } catch (error) {
+    firstError = error;
+    failed = true;
   }
+  for (const node of record.nodes) {
+    try {
+      cleanupOwnedSubtree(node);
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
+    } finally {
+      node.parentNode?.removeChild(node);
+    }
+  }
+  if (failed) throw firstError;
 };
 
 const cleanupListState = (state: ListState): void => {
-  state.records.forEach(cleanupRecord);
+  state.ownerCleanupDispose?.();
+  state.ownerCleanupDispose = undefined;
+  let firstError: unknown;
+  let failed = false;
+  for (const record of state.records.values()) {
+    try {
+      cleanupRecord(record);
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
+    }
+  }
   state.records.clear();
+  if (failed) throw firstError;
 };
 
 const getListState = (container: Element, options: TextKeyedListOptions): ListState => {
@@ -123,23 +153,25 @@ const getListState = (container: Element, options: TextKeyedListOptions): ListSt
     elementIndices: Array.from(template.content.childNodes).flatMap((node, index) =>
       node instanceof Element ? [index] : [],
     ),
-    ownerCleanupRegistered: current?.ownerCleanupRegistered ?? false,
+    ownerCleanupDispose: undefined,
   };
   listStates.set(container, next);
   registerOwnedSubtree(container, () => {
     if (listStates.get(container) !== next) return;
-    cleanupListState(next);
-    listStates.delete(container);
+    try {
+      cleanupListState(next);
+    } finally {
+      listStates.delete(container);
+    }
   });
-  if (!next.ownerCleanupRegistered) {
-    next.ownerCleanupRegistered = true;
-    onCleanup(() => cleanupOwnedSubtree(container));
-  }
+  next.ownerCleanupDispose = onOwnerCleanup(() => {
+    cleanupOwnedSubtree(container);
+  });
   return next;
 };
 
 const readBinding = (scope: Record<string, unknown>, binding: TextBinding): unknown =>
-  binding.read ? binding.read(scope) : readPath(scope, binding.expression);
+  read(binding.read ? binding.read(scope) : readPath(scope, binding.expression));
 
 const bindRow = (record: RowRecord, options: TextKeyedListOptions): void => {
   if (options.bindings.length === 0) return;
@@ -159,13 +191,13 @@ const bindRow = (record: RowRecord, options: TextKeyedListOptions): void => {
   );
 };
 
-const keyFor = (item: unknown, options: TextKeyedListOptions): PropertyKey => {
+const keyFor = (item: unknown, index: number, options: TextKeyedListOptions): PropertyKey => {
   const key = options.keyReadItem
     ? options.keyReadItem(item)
     : options.keyRead
-      ? options.keyRead(scopedItem(options.itemName, item, options.scope))
+      ? options.keyRead(scopedItem(options.itemName, item, options.indexName, index, options.scope))
       : readItemPath(item, options.key, options.itemName);
-  return typeof key === "string" || typeof key === "number" || typeof key === "symbol" ? key : String(key);
+  return normalizeListKey(read(key));
 };
 
 const warnDuplicateKey = (key: PropertyKey, options: TextKeyedListOptions): void => {
@@ -184,6 +216,7 @@ const createRecord = (
   item: unknown,
   options: TextKeyedListOptions,
   existingElements?: readonly Element[],
+  index = 0,
 ): RowRecord | undefined => {
   const nodes = Array.from(state.template.content.childNodes).map((node) => node.cloneNode(true));
   if (existingElements) {
@@ -198,7 +231,7 @@ const createRecord = (
     key,
     element,
     nodes,
-    scope: scopedItem(options.itemName, item, options.scope),
+    scope: scopedItem(options.itemName, item, options.indexName, index, options.scope),
     cleanups: [],
     lastValues: [],
     revision: createSignal(0),
@@ -207,9 +240,10 @@ const createRecord = (
   return record;
 };
 
-const updateRecord = (record: RowRecord, item: unknown, options: TextKeyedListOptions): void => {
+const updateRecord = (record: RowRecord, item: unknown, index: number, options: TextKeyedListOptions): void => {
   if (options.scope) Object.assign(record.scope, options.scope);
   record.scope[options.itemName] = item;
+  if (options.indexName) record.scope[options.indexName] = index;
   record.revision.update((value) => value + 1);
 };
 
@@ -309,8 +343,8 @@ export const mountTextKeyedList = (
     state.elementIndices.length > 0 &&
     serverElements.length >= items.length * state.elementIndices.length;
   const seenKeys = new Set<PropertyKey>();
-  for (const item of items) {
-    const key = keyFor(item, options);
+  for (const [index, item] of items.entries()) {
+    const key = keyFor(item, index, options);
     if (seenKeys.has(key)) {
       warnDuplicateKey(key, options);
       continue;
@@ -323,9 +357,9 @@ export const mountTextKeyedList = (
           (orderedRecords.length + 1) * state.elementIndices.length,
         )
       : undefined;
-    const record = existing ?? createRecord(state, key, item, options, adoptable);
+    const record = existing ?? createRecord(state, key, item, options, adoptable, index);
     if (!record) continue;
-    if (existing) updateRecord(record, item, options);
+    if (existing) updateRecord(record, item, index, options);
     nextRecords.set(key, record);
     orderedRecords.push(record);
   }

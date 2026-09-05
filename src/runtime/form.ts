@@ -1,3 +1,5 @@
+import { isSignal, type Accessor } from "./signal.js";
+
 export type BoundControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 
 export const setControlValue = (element: BoundControl, property: "value" | "checked", value: unknown): void => {
@@ -6,6 +8,18 @@ export const setControlValue = (element: BoundControl, property: "value" | "chec
     return;
   }
   element.value = value == null ? "" : String(value);
+};
+
+export const writeModelValue = (target: unknown, value: unknown, fallback: () => void): void => {
+  if (!isSignal(target)) {
+    fallback();
+    return;
+  }
+  const setter = (target as Accessor<unknown> & { set?: (next: unknown) => void }).set;
+  if (typeof setter !== "function") {
+    throw new TypeError("Cannot write to a readonly signal accessor.");
+  }
+  setter(value);
 };
 
 export const bindControl = (

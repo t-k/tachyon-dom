@@ -1,4 +1,5 @@
 import type {
+  ClientBinding,
   CompiledTemplate,
   ConditionalBinding,
   ElementNode,
@@ -143,6 +144,8 @@ const lowerIf = (node: ElementNode, path: number[], context: LoweringContext): s
 
 const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
   const key = attrExpression(node, "key") ?? "item";
+  const itemName = attrString(node, "as")?.trim() || itemNameFromKey(key);
+  const indexName = attrString(node, "index")?.trim();
   const childContext: LoweringContext = {
     bindings: [],
     stores: [],
@@ -161,7 +164,8 @@ const lowerList = (node: ElementNode, containerPath: number[]): ListBinding => {
     kind: "list",
     path: [...containerPath],
     each: attrExpression(node, "each") ?? "[]",
-    itemName: itemNameFromKey(key),
+    itemName,
+    ...(indexName ? { indexName } : {}),
     key,
     templateHtml,
     bindings: childContext.bindings,
@@ -315,6 +319,7 @@ const runtimeNames = {
   setAttributeValue: "__tachyonSetAttributeValue",
   setClassPresence: "__tachyonSetClassPresence",
   setControlValue: "__tachyonSetControlValue",
+  writeModelValue: "__tachyonWriteModelValue",
   setRef: "__tachyonSetRef",
   setStyleValue: "__tachyonSetStyleValue",
   setText: "__tachyonSetText",
@@ -342,6 +347,13 @@ const runtimeValueExpression = (expression: string, reactive: boolean, sourceNam
 const isTextOnlyList = (binding: ListBinding): boolean =>
   binding.bindings.length > 0 && binding.bindings.every((child) => child.kind === "text");
 
+const hasModelBinding = (binding: ClientBinding): boolean => {
+  if (binding.kind === "model") {
+    return true;
+  }
+  return (binding.kind === "list" || binding.kind === "if") && binding.bindings.some(hasModelBinding);
+};
+
 const clientModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
 
 const clientModuleCacheKey = (options: GenerateClientModuleOptions): string =>
@@ -364,7 +376,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsAttr = bindings.some(
     (binding) => binding.kind === "attr" || binding.kind === "style" || binding.kind === "ref",
   );
-  const needsModel = bindings.some((binding) => binding.kind === "model");
+  const needsModel = bindings.some(hasModelBinding);
   const needsEvent = bindings.some((binding) => binding.kind === "event");
   const needsRef = bindings.some((binding) => binding.kind === "ref");
   const needsList = bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding));
@@ -373,6 +385,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const needsElementAt = needsClass || needsAttr || needsModel || needsTextList || (reactive && needsList);
   const needsNodeAt = reactive && needsConditional;
+  const needsManualCleanup = reactive || needsEvent || needsModel || needsRef || needsTextList || hasDefaultScope;
   const lines: string[] = [];
   if (needsText) {
     lines.push(
@@ -393,7 +406,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (needsModel) {
     lines.push(
-      `import { bindControl as ${runtimeNames.bindControl}, setControlValue as ${runtimeNames.setControlValue} } from "tachyon-dom/runtime/form";`,
+      `import { bindControl as ${runtimeNames.bindControl}, setControlValue as ${runtimeNames.setControlValue}, writeModelValue as ${runtimeNames.writeModelValue} } from "tachyon-dom/runtime/form";`,
     );
   }
   if (needsEvent) {
@@ -414,9 +427,13 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         : `import { mountConditional as ${runtimeNames.mountConditional} } from "tachyon-dom/runtime/conditional";`,
     );
   }
-  if (needsSignal || hasDefaultScope) {
+  {
+    const signalImports = [
+      `createRoot as ${runtimeNames.createRoot}`,
+      ...(needsSignal ? [`effect as ${runtimeNames.effect}`, `read as ${runtimeNames.read}`] : []),
+    ];
     lines.push(
-      `import { ${hasDefaultScope ? `createRoot as ${runtimeNames.createRoot}, ` : ""}${needsSignal ? `effect as ${runtimeNames.effect}, read as ${runtimeNames.read}` : ""} } from "tachyon-dom/runtime/signal";`,
+      `import { ${signalImports.join(", ")} } from "tachyon-dom/runtime/signal";`,
     );
   }
   if (needsStore) {
@@ -436,12 +453,12 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`};`);
   }
   lines.push(
-    hasDefaultScope
-      ? `export const bind = (root, inputScope = {}) => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`
-      : `export const bind = (root, scope) => {`,
+    `export const bind = (root, inputScope = {}) => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`,
   );
   if (hasDefaultScope) {
     lines.push(`  const scope = __tachyonCreateScope(inputScope);`);
+  } else {
+    lines.push(`  const scope = inputScope;`);
   }
   if (needsStore) {
     const fields = template.client.stores
@@ -449,7 +466,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       .join(", ");
     lines.push(`  const state = ${runtimeNames.createStore}({ ...scope, ${fields} });`);
   }
-  if (reactive || needsEvent || needsModel || needsRef || needsTextList || hasDefaultScope) {
+  if (needsManualCleanup) {
     lines.push(`  const cleanups = [];`);
   }
   let listIndex = 0;
@@ -522,14 +539,14 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         const targetName = `__tachyonTarget${targetIndex++}`;
         lines.push(`  const ${targetName} = ${target};`);
         lines.push(
-          `  cleanups.push(${runtimeNames.bindControl}(${targetName}, ${JSON.stringify(binding.property)}, () => ${value}, (value) => { ${expressionToScopeAccess(binding.expression, new Set(), sourceName)} = value; }));`,
+          `  cleanups.push(${runtimeNames.bindControl}(${targetName}, ${JSON.stringify(binding.property)}, () => ${value}, (value) => ${runtimeNames.writeModelValue}(${expressionToScopeAccess(binding.expression, new Set(), sourceName)}, value, () => { ${expressionToScopeAccess(binding.expression, new Set(), sourceName)} = value; })));`,
         );
         lines.push(
           `  cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setControlValue}(${targetName}, ${JSON.stringify(binding.property)}, ${runtimeValueExpression(binding.expression, true, sourceName)})));`,
         );
       } else {
         lines.push(
-          `  cleanups.push(${runtimeNames.bindControl}(${target}, ${JSON.stringify(binding.property)}, () => ${value}, (value) => { ${expressionToScopeAccess(binding.expression, new Set(), sourceName)} = value; }));`,
+          `  cleanups.push(${runtimeNames.bindControl}(${target}, ${JSON.stringify(binding.property)}, () => ${value}, (value) => ${runtimeNames.writeModelValue}(${expressionToScopeAccess(binding.expression, new Set(), sourceName)}, value, () => { ${expressionToScopeAccess(binding.expression, new Set(), sourceName)} = value; })));`,
         );
       }
     } else if (binding.kind === "list") {
@@ -540,8 +557,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       lines.push(emitConditionalBinding(binding, reactive, sourceName, conditionalIndex++, targetName));
     }
   }
-  if (reactive || needsEvent || needsModel || needsRef || needsTextList || hasDefaultScope) {
-    lines.push(`  return () => {`);
+  lines.push(`  return () => {`);
+  if (needsManualCleanup) {
     lines.push(`    let __tachyonCleanupError;`);
     lines.push(`    let __tachyonCleanupFailed = false;`);
     lines.push(`    for (const cleanup of cleanups) {`);
@@ -550,16 +567,19 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`        __tachyonCleanupFailed = true;`);
     lines.push(`      }`);
     lines.push(`    }`);
-    if (hasDefaultScope) {
-      lines.push(`    try { __tachyonDisposeRoot(); } catch (error) {`);
-      lines.push(`      if (!__tachyonCleanupFailed) __tachyonCleanupError = error;`);
-      lines.push(`      __tachyonCleanupFailed = true;`);
-      lines.push(`    }`);
-    }
-    lines.push(`    if (__tachyonCleanupFailed) throw __tachyonCleanupError;`);
-    lines.push(`  };`);
   }
-  lines.push(hasDefaultScope ? `});` : `};`);
+  lines.push(`    try { __tachyonDisposeRoot(); } catch (error) {`);
+  if (needsManualCleanup) {
+    lines.push(`      if (!__tachyonCleanupFailed) __tachyonCleanupError = error;`);
+    lines.push(`      __tachyonCleanupFailed = true;`);
+    lines.push(`    }`);
+    lines.push(`    if (__tachyonCleanupFailed) throw __tachyonCleanupError;`);
+  } else {
+    lines.push(`      throw error;`);
+    lines.push(`    }`);
+  }
+  lines.push(`  };`);
+  lines.push(`});`);
   const code = `${lines.join("\n")}\n`;
   const nextCache = cachedByOptions ?? new Map<string, string>();
   nextCache.set(cacheKey, code);
@@ -573,6 +593,7 @@ const listSignature = (binding: ListBinding): string =>
     each: binding.each,
     key: binding.key,
     itemName: binding.itemName,
+    indexName: binding.indexName,
     templateHtml: binding.templateHtml,
     bindings: binding.bindings.map((child) => {
       if (child.kind === "list" || child.kind === "if") {
@@ -619,13 +640,16 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     fields.push(`property: ${JSON.stringify(binding.property)}`);
     fields.push(`expression: ${JSON.stringify(binding.expression)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression)}`);
-    fields.push(`write: (scope, value) => { ${bindingReadExpression(binding.expression)} = value; }`);
+    fields.push(
+      `write: (scope, value) => ${runtimeNames.writeModelValue}(${bindingReadExpression(binding.expression)}, value, () => { ${bindingReadExpression(binding.expression)} = value; })`,
+    );
   } else if (binding.kind === "list") {
     const itemKeyExpression = simpleItemKeyExpression(binding.key, binding.itemName);
     fields.push(`signature: ${JSON.stringify(listSignature(binding))}`);
     fields.push(`each: ${JSON.stringify(binding.each)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.each)}`);
     fields.push(`itemName: ${JSON.stringify(binding.itemName)}`);
+    if (binding.indexName) fields.push(`indexName: ${JSON.stringify(binding.indexName)}`);
     fields.push(`key: ${JSON.stringify(binding.key)}`);
     fields.push(
       itemKeyExpression
@@ -661,6 +685,7 @@ const emitListBinding = (
       ? `    keyReadItem: (${binding.itemName}) => ${itemKeyExpression},`
       : `    keyRead: (scope) => ${bindingReadExpression(binding.key)},`,
     `    itemName: ${JSON.stringify(binding.itemName)},`,
+    ...(binding.indexName ? [`    indexName: ${JSON.stringify(binding.indexName)},`] : []),
     `    scope: ${sourceName},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,

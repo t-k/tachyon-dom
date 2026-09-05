@@ -190,6 +190,12 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     if (!key) {
       return semanticError("<for> requires key={item.id}.", openingTagSpan(node));
     }
+    for (const name of ["as", "index"] as const) {
+      const attribute = node.attrs.find((candidate) => candidate.name === name);
+      if (attribute && (typeof attribute.value !== "string" || !identifierNamePattern.test(attribute.value.trim()))) {
+        return semanticError(`<for> ${name} must be a valid identifier string.`, attributeSpan(attribute));
+      }
+    }
   }
   if (node.tagName === "if" && !attrExpression(node, "test")) {
     return semanticError("<if> requires test={condition}.", openingTagSpan(node));
@@ -312,12 +318,15 @@ const collectDirectives = (node: TemplateNode, path: number[], directives: Templ
   }
   if (node.tagName === "for") {
     const key = attrExpression(node, "key") ?? "item";
+    const itemName = attrString(node, "as")?.trim() || itemNameFromKey(key);
+    const indexName = attrString(node, "index")?.trim();
     directives.push({
       kind: "for",
       path: [...path],
       each: attrExpression(node, "each") ?? "[]",
       key,
-      itemName: itemNameFromKey(key),
+      itemName,
+      ...(indexName ? { indexName } : {}),
     });
   }
   if (node.tagName === "await") {

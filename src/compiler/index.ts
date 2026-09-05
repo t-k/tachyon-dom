@@ -71,5 +71,14 @@ export const compileTemplate = (
 
 export * from "./types.js";
 export { generateClientModule } from "./targets/client.js";
-export { compileServerTemplate, generateServerModule, renderServerTemplate } from "./targets/server.js";
-export { generateServerStreamModule } from "./targets/stream.js";
+export {
+  compileServerTemplate,
+  generateServerModule,
+  renderServerTemplate,
+  type ServerModuleOptions,
+} from "./targets/server.js";
+export {
+  generateServerStreamModule,
+  validateServerStreamTemplate,
+  type ServerStreamModuleOptions,
+} from "./targets/stream.js";

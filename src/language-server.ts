@@ -17,7 +17,7 @@ type DiagnosticPayload = {
 };
 
 export const diagnosticsForTachyonDocument = (text: string): Diagnostic[] => {
-  const result = diagnoseTachyonSfc(text);
+  const result = diagnoseTachyonSfc(text, { target: "stream" });
   if (result.ok) {
     return [];
   }
