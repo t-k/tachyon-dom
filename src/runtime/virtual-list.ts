@@ -24,19 +24,14 @@ export type VirtualizedList<T> = {
   destroy: () => void;
 };
 
-const viewportHeightFor = <T>(options: VirtualizedListOptions<T>): number => {
-  if (typeof options.viewportHeight === "function") {
-    return options.viewportHeight();
-  }
-  return options.viewportHeight ?? options.scroller.clientHeight;
-};
-
 const clamp = (value: number, min: number, max: number): number => Math.max(min, Math.min(max, value));
 
 type RenderedRow = {
   element: Element;
   dispose: (() => void) | undefined;
 };
+
+type CleanupOutcome = { failed: false } | { failed: true; error: unknown };
 
 const elementAndDisposer = (value: VirtualizedListItem): RenderedRow => {
   if (value instanceof Element) {
@@ -49,36 +44,69 @@ const elementAndDisposer = (value: VirtualizedListItem): RenderedRow => {
 };
 
 export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): VirtualizedList<T> => {
+  const {
+    scroller,
+    itemHeight,
+    renderItem,
+    updateItem,
+    getKey,
+    viewportHeight: viewportHeightOption,
+    items: initialItems,
+  } = options;
   const overscan = options.overscan ?? 3;
-  if (!Number.isFinite(options.itemHeight) || options.itemHeight <= 0) {
+  if (!Number.isFinite(itemHeight) || itemHeight <= 0) {
     throw new RangeError("Virtual list itemHeight must be a finite number greater than zero.");
   }
   if (!Number.isInteger(overscan) || overscan < 0) {
     throw new RangeError("Virtual list overscan must be a non-negative integer.");
   }
+  const viewportHeightForList = (): number =>
+    typeof viewportHeightOption === "function" ? viewportHeightOption() : (viewportHeightOption ?? scroller.clientHeight);
+  const validateViewportHeight = (viewportHeight: number): number => {
+    if (!Number.isFinite(viewportHeight) || viewportHeight < 0) {
+      throw new RangeError("Virtual list viewportHeight must be a finite non-negative number.");
+    }
+    return viewportHeight;
+  };
   const validateItems = (nextItems: readonly T[]): T[] => {
     const copy = [...nextItems];
-    if (!options.getKey) return copy;
+    if (!getKey) return copy;
     const keys = new Set<PropertyKey>();
     for (let index = 0; index < copy.length; index++) {
-      const key = normalizeListKey(options.getKey(copy[index] as T, index));
+      const key = normalizeListKey(getKey(copy[index] as T, index));
       if (keys.has(key)) throw new Error(`Duplicate virtual list key: ${String(key)}`);
       keys.add(key);
     }
     return copy;
   };
-  let items = validateItems(options.items);
+  const initialViewportHeight = validateViewportHeight(viewportHeightForList());
+  const previousChildren = Array.from(scroller.childNodes);
+  let items = validateItems(initialItems);
   let rendered = new Map<PropertyKey, RenderedRow>();
   let lastRangeKey = "";
   let animationFrame: number | undefined;
   let disposed = false;
+  let listenerAttached = false;
   const spacer = document.createElement("div");
   const windowEl = document.createElement("div");
   spacer.style.position = "relative";
   windowEl.style.position = "absolute";
   windowEl.style.insetInline = "0";
   windowEl.style.insetBlockStart = "0";
-  options.scroller.replaceChildren(spacer);
+
+  const disposeRows = (rows: Iterable<RenderedRow>): CleanupOutcome => {
+    let firstError: unknown;
+    let failed = false;
+    for (const row of rows) {
+      try {
+        row.dispose?.();
+      } catch (error) {
+        if (!failed) firstError = error;
+        failed = true;
+      }
+    }
+    return failed ? { failed: true, error: firstError } : { failed: false };
+  };
 
   const reconcileWindow = (elements: readonly Element[]): void => {
     let cursor = windowEl.firstElementChild;
@@ -96,54 +124,63 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
     }
   };
 
-  const renderWindow = (force = false): void => {
+  const renderWindow = (force = false, measuredViewportHeight?: number): void => {
     if (disposed) return;
-    const viewportHeight = viewportHeightFor(options);
-    if (!Number.isFinite(viewportHeight) || viewportHeight < 0) {
-      throw new RangeError("Virtual list viewportHeight must be a finite non-negative number.");
-    }
-    const visibleCount = Math.ceil(viewportHeight / options.itemHeight);
-    const start = clamp(Math.floor(options.scroller.scrollTop / options.itemHeight) - overscan, 0, items.length);
+    const viewportHeight = validateViewportHeight(measuredViewportHeight ?? viewportHeightForList());
+    const visibleCount = Math.ceil(viewportHeight / itemHeight);
+    const start = clamp(Math.floor(scroller.scrollTop / itemHeight) - overscan, 0, items.length);
     const end = clamp(start + visibleCount + overscan * 2, start, items.length);
     const rangeKey = `${start}:${end}:${items.length}`;
     if (!force && rangeKey === lastRangeKey) {
       return;
     }
-    lastRangeKey = rangeKey;
-    spacer.style.height = `${items.length * options.itemHeight}px`;
-    windowEl.style.transform = `translateY(${start * options.itemHeight}px)`;
     const nextRendered = new Map<PropertyKey, RenderedRow>();
     const nextElements: Element[] = [];
-    for (let index = start; index < end; index++) {
-      const item = items[index] as T;
-      const key = options.getKey ? normalizeListKey(options.getKey(item, index)) : index;
-      const existing = rendered.get(key);
-      const row = existing ?? elementAndDisposer(options.renderItem(item, index));
-      if (existing) options.updateItem?.(row.element, item, index);
-      const element = row.element;
-      element.setAttribute("data-tachyon-virtual-item", String(key));
-      element.setAttribute("aria-posinset", String(index + 1));
-      element.setAttribute("aria-setsize", String(items.length));
-      nextRendered.set(key, row);
-      nextElements.push(element);
-    }
-    let firstDisposeError: unknown;
-    let disposeFailed = false;
-    for (const [key, row] of rendered) {
-      if (nextRendered.has(key)) continue;
-      try {
-        row.dispose?.();
-      } catch (error) {
-        if (!disposeFailed) firstDisposeError = error;
-        disposeFailed = true;
+    const createdRows: RenderedRow[] = [];
+    try {
+      for (let index = start; index < end; index++) {
+        const item = items[index] as T;
+        const key = getKey ? normalizeListKey(getKey(item, index)) : index;
+        const existing = rendered.get(key);
+        const row = existing ?? elementAndDisposer(renderItem(item, index));
+        if (!existing) createdRows.push(row);
+        if (existing) updateItem?.(row.element, item, index);
+        const element = row.element;
+        element.setAttribute("data-tachyon-virtual-item", String(key));
+        element.setAttribute("aria-posinset", String(index + 1));
+        element.setAttribute("aria-setsize", String(items.length));
+        nextRendered.set(key, row);
+        nextElements.push(element);
       }
+    } catch (error) {
+      const cleanupResult = disposeRows(createdRows);
+      for (const row of createdRows) row.element.parentNode?.removeChild(row.element);
+      if (cleanupResult.failed) {
+        throw new AggregateError([error, cleanupResult.error], "Virtual list render and rollback failed.");
+      }
+      throw error;
     }
-    rendered = nextRendered;
-    reconcileWindow(nextElements);
-    if (!windowEl.parentNode) {
-      spacer.appendChild(windowEl);
+    const disposeResult = disposeRows(
+      Array.from(rendered).flatMap(([key, row]) => (nextRendered.has(key) ? [] : [row])),
+    );
+    try {
+      spacer.style.height = `${items.length * itemHeight}px`;
+      windowEl.style.transform = `translateY(${start * itemHeight}px)`;
+      rendered = nextRendered;
+      reconcileWindow(nextElements);
+      if (!windowEl.parentNode) {
+        spacer.appendChild(windowEl);
+      }
+      lastRangeKey = rangeKey;
+    } catch (error) {
+      const cleanupResult = disposeRows(createdRows);
+      for (const row of createdRows) row.element.parentNode?.removeChild(row.element);
+      if (cleanupResult.failed) {
+        throw new AggregateError([error, cleanupResult.error], "Virtual list render and rollback failed.");
+      }
+      throw error;
     }
-    if (disposeFailed) throw firstDisposeError;
+    if (disposeResult.failed) throw disposeResult.error;
   };
 
   const scheduleRenderWindow = (): void => {
@@ -161,10 +198,30 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
   };
 
   const onScroll = (): void => scheduleRenderWindow();
-  options.scroller.addEventListener("scroll", onScroll, { passive: true });
-  const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => renderWindow());
-  resizeObserver?.observe(options.scroller);
-  renderWindow();
+  let resizeObserver: ResizeObserver | undefined;
+  try {
+    renderWindow(false, initialViewportHeight);
+    scroller.replaceChildren(spacer);
+    scroller.addEventListener("scroll", onScroll, { passive: true });
+    listenerAttached = true;
+    resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => renderWindow());
+    resizeObserver?.observe(scroller);
+  } catch (error) {
+    if (animationFrame !== undefined && typeof cancelAnimationFrame === "function") {
+      cancelAnimationFrame(animationFrame);
+    }
+    animationFrame = undefined;
+    if (listenerAttached) scroller.removeEventListener("scroll", onScroll);
+    resizeObserver?.disconnect();
+    const cleanupResult = disposeRows(rendered.values());
+    rendered.clear();
+    windowEl.replaceChildren();
+    scroller.replaceChildren(...previousChildren);
+    if (cleanupResult.failed) {
+      throw new AggregateError([error, cleanupResult.error], "Virtual list initialization and rollback failed.");
+    }
+    throw error;
+  }
 
   return {
     update: (nextItems) => {
@@ -178,7 +235,7 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
       if (!Number.isInteger(index) || !Number.isFinite(index)) {
         throw new RangeError("Virtual list scrollToIndex must be a finite integer.");
       }
-      options.scroller.scrollTop = clamp(index, 0, Math.max(0, items.length - 1)) * options.itemHeight;
+      scroller.scrollTop = clamp(index, 0, Math.max(0, items.length - 1)) * itemHeight;
       renderWindow(true);
     },
     destroy: () => {
@@ -188,22 +245,14 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
         cancelAnimationFrame(animationFrame);
       }
       animationFrame = undefined;
-      options.scroller.removeEventListener("scroll", onScroll);
+      if (listenerAttached) scroller.removeEventListener("scroll", onScroll);
       resizeObserver?.disconnect();
-      let firstDisposeError: unknown;
-      let disposeFailed = false;
-      for (const row of rendered.values()) {
-        try {
-          row.dispose?.();
-        } catch (error) {
-          if (!disposeFailed) firstDisposeError = error;
-          disposeFailed = true;
-        }
-      }
+      const disposeResult = disposeRows(rendered.values());
       rendered.clear();
+      items = [];
       windowEl.replaceChildren();
-      options.scroller.replaceChildren();
-      if (disposeFailed) throw firstDisposeError;
+      scroller.replaceChildren();
+      if (disposeResult.failed) throw disposeResult.error;
     },
   };
 };

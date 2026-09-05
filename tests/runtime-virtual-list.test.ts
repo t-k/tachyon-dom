@@ -22,6 +22,61 @@ describe("virtualized list runtime", () => {
     }
   });
 
+  it("keeps the original DOM and listeners untouched for an invalid viewport", () => {
+    document.body.innerHTML = `<div id="scroller"><p>original</p></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    let viewportHeight = Number.NaN;
+    let renders = 0;
+
+    expect(() =>
+      createVirtualizedList({
+        scroller,
+        items: ["row"],
+        itemHeight: 20,
+        viewportHeight: () => viewportHeight,
+        renderItem: () => {
+          renders++;
+          return document.createElement("div");
+        },
+      }),
+    ).toThrow("viewportHeight");
+
+    viewportHeight = 20;
+    scroller.dispatchEvent(new Event("scroll"));
+
+    expect(scroller.innerHTML).toBe(`<p>original</p>`);
+    expect(renders).toBe(0);
+  });
+
+  it("cleans rows created before a later virtual row fails", () => {
+    document.body.innerHTML = `<div id="scroller"><p>original</p></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const disposed: number[] = [];
+    let renders = 0;
+
+    expect(() =>
+      createVirtualizedList({
+        scroller,
+        items: [0, 1],
+        itemHeight: 20,
+        viewportHeight: 100,
+        renderItem: (item) => {
+          renders++;
+          if (item === 1) throw new Error("virtual row failed");
+          return { element: document.createElement("div"), dispose: () => disposed.push(item) };
+        },
+      }),
+    ).toThrow("virtual row failed");
+
+    scroller.dispatchEvent(new Event("scroll"));
+
+    expect(scroller.innerHTML).toBe(`<p>original</p>`);
+    expect(disposed).toEqual([0]);
+    expect(renders).toBe(2);
+  });
+
   it("keeps keyed elements and refreshes their content on update", () => {
     document.body.innerHTML = `<div id="scroller"></div>`;
     const scroller = document.querySelector("#scroller");
