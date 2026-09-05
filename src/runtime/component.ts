@@ -2,7 +2,10 @@ import { err, ok, type Result } from "../result.js";
 import { hydrate, mount, type ClientTemplateModule, type HydrateError, type MountHandle } from "./mount.js";
 import { createStore } from "./signal.js";
 
-export type TemplateComponentOptions<Props extends object, Scope extends Record<string, unknown> = Record<string, unknown>> = {
+export type TemplateComponentOptions<
+  Props extends object,
+  Scope extends Record<string, unknown> = Record<string, unknown>,
+> = {
   client: ClientTemplateModule<Scope>;
   scope?: (props: Props) => Scope;
   render?: (props: Props) => string;
@@ -24,7 +27,7 @@ export type TemplateComponent<Props extends object, Scope extends Record<string,
 const scopeFor = <Props extends object, Scope extends Record<string, unknown>>(
   options: TemplateComponentOptions<Props, Scope>,
   props: Props,
-): Scope => options.scope ? options.scope(props) : ({ ...props } as unknown as Scope);
+): Scope => (options.scope ? options.scope(props) : ({ ...props } as unknown as Scope));
 
 const instanceFor = <Props extends object, Scope extends Record<string, unknown>>(
   scope: Scope,
@@ -33,7 +36,6 @@ const instanceFor = <Props extends object, Scope extends Record<string, unknown>
 ): TemplateComponentInstance<Props> => {
   let scopeKeys = new Set<PropertyKey>(Reflect.ownKeys(scope));
   return {
-    client: options.client,
     ...handle,
     update: (nextProps) => {
       if (handle.disposed()) return;
@@ -52,7 +54,9 @@ const instanceFor = <Props extends object, Scope extends Record<string, unknown>
 export const createTemplateComponent = <
   Props extends object,
   Scope extends Record<string, unknown> = Record<string, unknown>,
->(options: TemplateComponentOptions<Props, Scope>): TemplateComponent<Props, Scope> => {
+>(
+  options: TemplateComponentOptions<Props, Scope>,
+): TemplateComponent<Props, Scope> => {
   const createScope = (props: Props): Scope => createStore(scopeFor(options, props)) as Scope;
   const mountInstance = (root: Element, props: Props): TemplateComponentInstance<Props> => {
     const scope = createScope(props);
@@ -65,6 +69,7 @@ export const createTemplateComponent = <
     return result.ok ? ok(instanceFor(scope, result.value, options)) : err(result.error);
   };
   return {
+    client: options.client,
     mount: mountInstance,
     hydrate: hydrateInstance,
     render: (props) => {
