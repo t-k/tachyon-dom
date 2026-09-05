@@ -55,9 +55,9 @@ See the [syntax specification](docs/syntax-spec.md) for supported expressions an
 
 ## Measured Size
 
-`import { createSignal } from "tachyon-dom"` bundles to **1147 bytes minified** in the current esbuild contract.
+`import { createSignal } from "tachyon-dom"` bundles to **960 bytes minified** in the current esbuild contract.
 
-Quick example client bundle: 12263 bytes minified, 4451 bytes Brotli, including the counter, text-only keyed-list binding code, and browser runtime. CI requires the minified baseline exactly, permits 1% Brotli variance across Node/zlib patch versions, enforces absolute 16000-byte minified and 5200-byte Brotli budgets, and rejects TypeScript, parse5, compiler, server, app, language-server, and runtime diagnostics modules from both browser metafiles.
+Quick example client bundle: 12740 bytes minified, 4625 bytes Brotli, including the counter, text-only keyed-list binding code, and browser runtime. CI requires the minified baseline exactly, permits 1% Brotli variance across Node/zlib patch versions, enforces absolute 16000-byte minified and 5200-byte Brotli budgets, and rejects TypeScript, parse5, compiler, server, app, language-server, and runtime diagnostics modules from both browser metafiles.
 
 ```sh
 pnpm build
@@ -173,6 +173,7 @@ pnpm check:exports
 pnpm check:size
 pnpm check:browser-entry
 pnpm check:browser-feature-budgets
+pnpm check:template-types
 pnpm check:quick-example-size
 pnpm test:property
 pnpm test:mutation

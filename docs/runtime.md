@@ -8,7 +8,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/form`: `bind:value`, `bind:checked`, validation, and progressive form helpers.
 - `runtime/enhancement`: small progressive enhancement registry for SSR markup that opts in with `data-td-enhance`.
 - `runtime/event`: direct event listener binding.
-- `runtime/list`: keyed list mounting, reuse, move, multi-root item support, and row-scoped binding effects that avoid re-reading unchanged rows after a single row signal changes.
+- `runtime/list`: keyed list mounting, reuse, move, multi-root item support, row-local stores/components/hydration boundaries, and precomputed binding plans that avoid rebuilding per-row binding subsets.
 - `runtime/keyed-rows`: dependency-free keyed table-row list where the live DOM is the single source of truth (no shadow item/row arrays). Bulk creation binds and clones a reusable multi-row chunk; remove/swap/select are O(1) DOM operations. Suited to large data tables that do not need per-row reactivity.
 - `runtime/virtual-list`: fixed-height virtualized lists with overscan, imperative updates, index scrolling, and ARIA position metadata.
 - `runtime/conditional`: conditional DOM mounting.
@@ -20,7 +20,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/stream-client`: browser stream chunk reading.
 - `runtime/error-boundary`: DOM-mounted client fallback boundaries.
 
-Browser feature bundles have independent minified budgets for `runtime/list`, `runtime/form`, `runtime/conditional`, and `runtime/router`. Run `pnpm check:browser-feature-budgets` after changing one of these modules; the check also rejects compiler, server, TypeScript, parse5, and language-server inputs from the browser graph.
+Browser feature bundles have independent minified and Brotli budgets for `runtime/list`, `runtime/form`, `runtime/conditional`, and `runtime/router`. The current generated-list baselines are 32880 minified/9976 Brotli bytes and 32696 minified/9961 Brotli bytes for conditional bindings; the checks leave a small Brotli variance margin while rejecting compiler, server, TypeScript, parse5, and language-server inputs from the browser graph. Run `pnpm check:browser-feature-budgets` after changing one of these modules.
 
 ## Mount and Hydrate Entrypoints
 
@@ -47,8 +47,6 @@ instance.dispose();
 ```
 
 The renderer is supplied by the application or compiler output and is responsible for escaping or sanitizing any user-controlled values. The component interface does not make arbitrary HTML trusted.
-
-Browser feature bundles have independent minified budgets for `runtime/list`, `runtime/form`, `runtime/conditional`, and `runtime/router`. Run `pnpm check:browser-feature-budgets` after changing one of these modules; the check also rejects compiler, server, TypeScript, parse5, and language-server inputs from the browser graph.
 
 `runtime/keyed-rows` rejects invalid numeric controls before changing the DOM. `chunks`, generated-row `count`, and update `stride` must be positive finite integers. Zero, negative values, fractions, `NaN`, and infinities throw a `TypeError` that names the invalid parameter. Empty arrays remain valid for `replace([])` and `append([])` because those methods do not accept a generated-row count.
 
@@ -103,17 +101,17 @@ The compiler records hydration boundaries with `hydrate:id={id}`. Runtime schedu
 
 `scheduleHydrationBoundaries(root, boundaries, bind, options)` consumes compiled hydration metadata, creates each boundary handle, and schedules it according to the boundary strategy. Static auto-generated ids can be scheduled directly. Expression-based ids can be resolved with `options.resolveId(boundary)`.
 
-`createLazyHydrationBoundary(root, id, load, options)` keeps the SSR subtree untouched until hydration is triggered, then loads a boundary chunk once and binds it. Concurrent triggers share the same load promise. A dispose during import prevents the binder from running; a rejected load is reported through `onError` and can be retried. With `replayInteraction: true`, the first interaction is replayed after the asynchronous bind completes. The loader is application code and should only import trusted build output.
+`createLazyHydrationBoundary(root, id, load, options)` keeps the SSR subtree untouched until hydration is triggered, then loads a boundary chunk once and binds it. Concurrent triggers share the same load promise. A dispose during import prevents the binder from running; a rejected load is reported through `onError` and can be retried. With `replayInteraction: true`, the first interaction is replayed after the asynchronous bind completes without allowing the original event's default action to run twice. The Vite plugin emits one dynamic import per top-level compiler hydration boundary and serves a boundary-only module for that import. The loader is application code and should only import trusted build output.
 
 `diagnoseHydrationBoundaries(root, expectedIds)` reports missing, duplicate, or empty boundary markers so SSR/client mismatches can fail loudly in tests and development builds.
 
 ## Development Runtime Diagnostics
 
-`tachyon-dom/runtime/diagnostics` is an opt-in development entry. `createRuntimeDiagnostics({ bindings, onEvent })` observes aggregate owner, effect, subscription, and cleanup counts, records lifecycle events, and maps a `(templateId, path)` pair to a source location supplied by the compiler or integration. It retains event data and source descriptors, not runtime owners or DOM nodes. Multiple diagnostic consumers can be attached independently and disposing one does not affect the others. Normal compiler-generated production modules do not import this entry; verify the browser metafile before shipping a custom diagnostic integration.
+`tachyon-dom/runtime/diagnostics` is an opt-in development entry. `createRuntimeDiagnostics({ bindings, onEvent })` observes aggregate owner, effect, subscription, and cleanup counts, records lifecycle events, and maps a `(templateId, path)` pair to a source location supplied by the compiler or integration. It retains event data and source descriptors, not runtime owners or DOM nodes. Multiple diagnostic consumers can be attached independently and disposing one does not affect the others. Normal compiler-generated production modules do not import this entry, and the production build flag removes lifecycle counters and hook calls from the signal hot path. Verify the browser metafile before shipping a custom diagnostic integration.
 
 ## Template Language Tooling
 
-`tachyon-dom/template-language` provides a dependency-light first semantic layer shared by editor integrations: script/template symbol completion, hover, definition, and rename with UTF-16 positions. The language server uses the same compiler diagnostic path as CLI and Vite for syntax and target errors, including source offsets from `.td` script/template files. Full TypeScript property and event-parameter checking remains a separate compiler integration concern; `TypedTemplate` carries a scope type but does not by itself type-check expressions inside a string.
+`tachyon-dom/template-language` provides a dependency-light semantic layer shared by editor integrations: script/template symbol completion, hover, definition, and scope-aware rename with UTF-16 positions. The language server uses the same compiler and TypeScript template diagnostic paths as the CLI and Vite, including source offsets from `.td` script/template files. `tachyon-dom/template-typecheck` builds a virtual TypeScript program for scope, property, event-handler, model, list, conditional, and await expressions; use `tachyon-dom typecheck <file>` or `tachyonDom({ typecheck: true })` to enable the same checker in CI and Vite. `TypedTemplate` carries a scope type but does not by itself type-check expressions inside a string.
 
 ## Progressive Forms
 
