@@ -49,15 +49,31 @@ export type ClientRouteDefinition<Data = unknown, Params extends ClientRoutePara
   render: (context: ClientRouteContext<Data, Params>) => ClientRenderResult | Promise<ClientRenderResult>;
 };
 
-export type ClientParamsForPath<Path extends string> = Path extends `${string}:${infer Param}/${infer Rest}`
-  ? { [Key in Param | keyof ClientParamsForPath<`/${Rest}`>]: string }
-  : Path extends `${string}:${infer Param}`
-    ? { [Key in Param]: string }
-    : Path extends `${string}*${infer Param}/${infer Rest}`
-      ? { [Key in Param | keyof ClientParamsForPath<`/${Rest}`>]: string }
-      : Path extends `${string}*${infer Param}`
-        ? { [Key in Param]: string }
-        : {};
+type TrimRoutePath<Path extends string> = Path extends `/${infer Rest}`
+  ? TrimRoutePath<Rest>
+  : Path extends `${infer Rest}/`
+    ? TrimRoutePath<Rest>
+    : Path;
+
+type ClientParamsForSegment<Segment extends string> = Segment extends `:${infer Param}`
+  ? Param extends ""
+    ? {}
+    : { [Key in Param]: string }
+  : Segment extends `*${infer Param}`
+    ? { [Key in Param extends "" ? "wildcard" : Param]: string }
+    : {};
+
+type ClientParamsForSegments<Path extends string> = Path extends `${infer Segment}/${infer Rest}`
+  ? ClientParamsForSegment<Segment> & ClientParamsForSegments<Rest>
+  : ClientParamsForSegment<Path>;
+
+type ExpandClientParams<Params> = { [Key in keyof Params]: Params[Key] };
+
+export type ClientParamsForPath<Path extends string> = string extends Path
+  ? ClientRouteParams
+  : Path extends "*"
+    ? {}
+    : ExpandClientParams<ClientParamsForSegments<TrimRoutePath<Path>>>;
 
 export type ClientRouteDefinitionInput<Path extends string, Data> = Omit<
   ClientRouteDefinition<Data, ClientParamsForPath<Path>>,
@@ -654,47 +670,126 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
     const target = routeTargetFor(options.root, match, url, loaded.leafData);
     let committedTarget = target;
     const renderNestedBranch = async (): Promise<void> => {
+      const previousStates = new Map(layoutStates);
+      const nextStates = new Map<ClientRouteDefinition, LayoutState>();
+      const preparedLayoutDisposers: Array<() => void> = [];
+      let leafDispose: (() => void) | undefined;
+      let leafPrepared = false;
+      let committed = false;
+      let cleanupAttempted = false;
+      let commitTarget: Element | undefined;
+      const cleanupPrepared = (): void => {
+        if (cleanupAttempted) return;
+        cleanupAttempted = true;
+        const disposers = [...preparedLayoutDisposers];
+        if (leafPrepared && leafDispose) {
+          disposers.push(leafDispose);
+        } else {
+          disposers.push(() => disposeRenderResult(rendered));
+        }
+        runDisposers(disposers);
+      };
       let parentTarget = target;
       const paramsKey = JSON.stringify(match.params);
       const searchKey = url.search;
-      for (const layoutRoute of match.branch.slice(0, -1)) {
-        const layoutState = layoutStates.get(layoutRoute);
-        let layoutRoot = layoutState?.root;
-        if (
-          !layoutRoot?.isConnected ||
-          layoutState?.paramsKey !== paramsKey ||
-          layoutState?.searchKey !== searchKey ||
-          (layoutRoute.load !== undefined && layoutState?.loaded !== loaded)
-        ) {
-          if (layoutState) disposeLayoutState(layoutRoute);
-          const layoutValue = await layoutRoute.render({
-            url,
-            params: match.params,
-            data: loaded.dataByRoute.get(layoutRoute),
-            signal,
-          } as ClientRouteContext);
-          if (!isCurrentNavigation(signal, generation)) {
-            disposeRenderResult(layoutValue);
-            return;
+      try {
+        let stagingTarget: Element | undefined;
+        for (const layoutRoute of match.branch.slice(0, -1)) {
+          const layoutState = previousStates.get(layoutRoute);
+          let layoutRoot = layoutState?.root;
+          const canReuse =
+            !stagingTarget &&
+            !!layoutRoot?.isConnected &&
+            layoutState?.paramsKey === paramsKey &&
+            layoutState?.searchKey === searchKey &&
+            (layoutRoute.load === undefined || layoutState?.loaded === loaded);
+          if (canReuse && layoutState) {
+            nextStates.set(layoutRoute, layoutState);
+          } else {
+            const layoutValue = await layoutRoute.render({
+              url,
+              params: match.params,
+              data: loaded.dataByRoute.get(layoutRoute),
+              signal,
+            } as ClientRouteContext);
+            if (!isCurrentNavigation(signal, generation)) {
+              disposeRenderResult(layoutValue);
+              cleanupPrepared();
+              return;
+            }
+            const layoutHost = document.createElement("div");
+            let layoutDispose: () => void;
+            try {
+              layoutDispose = renderInto(layoutHost, layoutValue);
+            } catch (error) {
+              disposeRenderResult(layoutValue);
+              throw error;
+            }
+            preparedLayoutDisposers.push(layoutDispose);
+            layoutRoot = layoutHost.firstElementChild ?? layoutHost;
+            if (!stagingTarget) {
+              stagingTarget = layoutHost;
+              commitTarget = parentTarget;
+            }
+            else parentTarget.replaceChildren(...Array.from(layoutHost.childNodes));
+            const nextState: LayoutState = { root: layoutRoot, loaded, paramsKey, searchKey, dispose: layoutDispose };
+            nextStates.set(layoutRoute, nextState);
           }
-          const layoutDispose = renderInto(parentTarget, layoutValue);
-          layoutRoot = parentTarget.firstElementChild ?? parentTarget;
-          layoutStates.set(layoutRoute, { root: layoutRoot, loaded, paramsKey, searchKey, dispose: layoutDispose });
+          if (!layoutRoot) {
+            throw new Error(`Nested client route ${layoutRoute.id ?? layoutRoute.path} has no layout root.`);
+          }
+          const outlet = outletFor(layoutRoot);
+          if (!outlet) {
+            throw new Error(`Nested client route ${layoutRoute.id ?? layoutRoute.path} must render a route outlet.`);
+          }
+          parentTarget = outlet;
         }
-        const outlet = outletFor(layoutRoot);
-        if (!outlet) {
-          throw new Error(`Nested client route ${layoutRoute.id ?? layoutRoute.path} must render a route outlet.`);
+        if (!isCurrentNavigation(signal, generation)) {
+          cleanupPrepared();
+          return;
         }
-        parentTarget = outlet;
+        const leafHost = document.createElement("div");
+        try {
+          leafDispose = renderInto(leafHost, rendered);
+        } catch (error) {
+          disposeRenderResult(rendered);
+          throw error;
+        }
+        leafPrepared = true;
+        if (stagingTarget) parentTarget.replaceChildren(...Array.from(leafHost.childNodes));
+        else {
+          stagingTarget = leafHost;
+          commitTarget = parentTarget;
+        }
+        if (!isCurrentNavigation(signal, generation) || !leafDispose) {
+          cleanupPrepared();
+          return;
+        }
+        const oldCommitted = committedView;
+        const oldStates = Array.from(previousStates.values());
+        const retainedStates = new Set(nextStates.values());
+        if (!commitTarget) throw new Error("Nested client route did not produce a commit target.");
+        commitTarget.replaceChildren(...Array.from(stagingTarget.childNodes));
+        layoutStates.clear();
+        for (const [route, state] of nextStates) layoutStates.set(route, state);
+        committedView = { target: parentTarget, dispose: leafDispose };
+        committedTarget = parentTarget;
+        committed = true;
+        const obsoleteDisposers = oldStates
+          .reverse()
+          .filter((state) => !retainedStates.has(state))
+          .map((state) => state.dispose);
+        runDisposers([...(oldCommitted ? [oldCommitted.dispose] : []), ...obsoleteDisposers]);
+      } catch (error) {
+        if (!committed) {
+          try {
+            cleanupPrepared();
+          } catch (cleanupError) {
+            throw new AggregateError([error, cleanupError], "Nested route preparation and cleanup failed.");
+          }
+        }
+        throw error;
       }
-      if (!isCurrentNavigation(signal, generation)) {
-        disposeRenderResult(rendered);
-        return;
-      }
-      committedView?.dispose();
-      const leafDispose = renderInto(parentTarget, rendered);
-      committedView = { target: parentTarget, dispose: leafDispose };
-      committedTarget = parentTarget;
     };
     const commit = async (): Promise<void> => {
       if (!isCurrentNavigation(signal, generation)) {
@@ -708,8 +803,25 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
           disposeRenderResult(rendered);
           return;
         }
-        disposeCommittedView();
-        committedView = { target, dispose: renderInto(target, rendered) };
+        const leafHost = document.createElement("div");
+        let leafDispose: () => void;
+        try {
+          leafDispose = renderInto(leafHost, rendered);
+        } catch (error) {
+          disposeRenderResult(rendered);
+          throw error;
+        }
+        if (!isCurrentNavigation(signal, generation)) {
+          leafDispose();
+          return;
+        }
+        const oldCommitted = committedView;
+        const oldStates = Array.from(layoutStates.values()).reverse();
+        target.replaceChildren(...Array.from(leafHost.childNodes));
+        layoutStates.clear();
+        committedView = { target, dispose: leafDispose };
+        committedTarget = target;
+        runDisposers([...(oldCommitted ? [oldCommitted.dispose] : []), ...oldStates.map((state) => state.dispose)]);
       }
       await updateHead(url, match, loaded, signal, generation);
       if (!isCurrentNavigation(signal, generation)) {

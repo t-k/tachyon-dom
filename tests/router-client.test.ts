@@ -5,8 +5,18 @@ import {
   defineClientRoute,
   rawHtml,
   type ClientMountedView,
+  type ClientParamsForPath,
   type ClientRouteDefinition,
 } from "../src/runtime/router";
+
+type Equal<Left, Right> = (<Value>() => Value extends Left ? 1 : 2) extends <Value>() =>
+  Value extends Right ? 1 : 2
+  ? true
+  : false;
+type Expect<T extends true> = T;
+type _WildcardWithoutName = Expect<Equal<ClientParamsForPath<"/files/*">, { wildcard: string }>>;
+type _WildcardAndParam = Expect<Equal<ClientParamsForPath<"/*rest/:id">, { rest: string; id: string }>>;
+type _LiteralColon = Expect<Equal<ClientParamsForPath<"/literal:tag">, {}>>;
 
 const createWindow = (path = "/") => {
   const domWindow = window;
@@ -290,6 +300,139 @@ describe("client router", () => {
     expect(root.querySelector("[data-layout]")).toBe(layout);
     expect(root.querySelector("[data-tachyon-outlet]")?.innerHTML).toBe("<h1>Orders</h1>");
     expect(layoutRenders).toBe(1);
+    router.dispose();
+  });
+
+  it("disposes every exited layout when navigating out of a nested branch", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/app/section/page");
+    const disposed: string[] = [];
+    const view = (name: string): ClientMountedView => ({
+      value:
+        name === "page"
+          ? rawHtml(`<p>${name}</p>`)
+          : rawHtml(`<section data-layout="${name}"><div data-tachyon-outlet></div></section>`),
+      dispose: () => disposed.push(name),
+    });
+    const router = createClientRouter({
+      root,
+      routes: [
+        {
+          id: "app",
+          path: "/app",
+          render: () => view("app"),
+          children: [
+            {
+              id: "section",
+              path: "section",
+              render: () => view("section"),
+              children: [{ id: "page", path: "page", render: () => view("page") }],
+            },
+          ],
+        },
+        { id: "other", path: "/other", render: () => view("other") },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    await router.navigate("/other");
+
+    expect(disposed).toHaveLength(3);
+    expect(disposed).toEqual(expect.arrayContaining(["page", "section", "app"]));
+    router.dispose();
+  });
+
+  it("disposes a pending leaf when an async layout navigation becomes stale", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    let releaseLayout: ((value: ClientMountedView) => void) | undefined;
+    const disposed: string[] = [];
+    const view = (name: string): ClientMountedView => ({
+      value: rawHtml(`<p>${name}</p>`),
+      dispose: () => disposed.push(name),
+    });
+    const router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => view("home") },
+        {
+          id: "app",
+          path: "/app",
+          render: () =>
+            new Promise((resolve) => {
+              releaseLayout = resolve;
+            }),
+          children: [{ id: "page", path: "page", render: () => view("page") }],
+        },
+        { path: "/other", render: () => view("other") },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    const pending = router.navigate("/app/page");
+    await Promise.resolve();
+    await router.navigate("/other");
+    releaseLayout?.(view("app"));
+    await pending;
+
+    expect(disposed.filter((name) => name === "page")).toEqual(["page"]);
+    expect(root.textContent).toBe("other");
+    router.dispose();
+  });
+
+  it("keeps the displayed nested layout until a replacement layout is ready", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/app/page?q=one");
+    let releaseLayout: ((value: ClientMountedView) => void) | undefined;
+    const layoutTwo = new Promise<ClientMountedView>((resolve) => {
+      releaseLayout = resolve;
+    });
+    const disposed: string[] = [];
+    const view = (name: string): ClientMountedView => ({
+      value: rawHtml(
+        name.startsWith("layout")
+          ? `<section data-layout="${name}"><div data-tachyon-outlet></div></section>`
+          : `<p>${name}</p>`,
+      ),
+      dispose: () => disposed.push(name),
+    });
+    const router = createClientRouter({
+      root,
+      routes: [
+        {
+          id: "app",
+          path: "/app",
+          render: ({ url }) => {
+            if (url.search === "?q=one") return view("layout-one");
+            return layoutTwo;
+          },
+          children: [{ id: "page", path: "page", render: () => view("page") }],
+        },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    const pending = router.navigate("/app/page?q=two");
+    await Promise.resolve();
+
+    expect(root.querySelector("[data-layout=layout-one]")).not.toBeNull();
+    expect(root.textContent).toBe("page");
+    expect(disposed).toEqual([]);
+    releaseLayout?.(view("layout-two"));
+    await pending;
+
+    expect(root.querySelector("[data-layout=layout-two]")).not.toBeNull();
+    expect(root.textContent).toBe("page");
+    expect(disposed).toEqual(["page", "layout-one"]);
     router.dispose();
   });
 
