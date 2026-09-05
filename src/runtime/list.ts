@@ -132,6 +132,23 @@ type Binding =
   | NestedListBinding
   | NestedConditionalBinding;
 
+type BindingPlanEntry = {
+  binding: Binding;
+  index: number;
+};
+
+type BindingPlan = {
+  all: readonly BindingPlanEntry[];
+  nonEvent: readonly BindingPlanEntry[];
+  events: readonly BindingPlanEntry[];
+  controls: readonly BindingPlanEntry[];
+};
+
+type HydrationPlan = {
+  boundary: CompiledHydrationBoundary;
+  bindings: BindingPlan;
+};
+
 type KeyedListOptions = {
   signature?: string;
   key: string;
@@ -179,6 +196,10 @@ type ListState = {
   records: Map<PropertyKey, RowRecord>;
   template: HTMLTemplateElement;
   elementIndices: number[];
+  bindingPlan: BindingPlan;
+  eagerPlan: BindingPlan;
+  hydrationPlans: readonly HydrationPlan[];
+  initialized: boolean;
   cleanups: Array<() => void>;
   ownerCleanupDispose: (() => void) | undefined;
 };
@@ -355,6 +376,37 @@ const nodeAtRecord = (record: RowRecord, path: readonly number[]): Node => {
   return nodeAtIgnoringHydrationMarkers(root, rest);
 };
 
+const bindingWithin = (boundaryPath: readonly number[], bindingPath: readonly number[]): boolean =>
+  boundaryPath.length <= bindingPath.length && boundaryPath.every((part, index) => bindingPath[index] === part);
+
+const bindingPlanFromEntries = (all: readonly BindingPlanEntry[]): BindingPlan => ({
+  all,
+  nonEvent: all.filter(({ binding }) => binding.kind !== "event"),
+  events: all.filter(({ binding }) => binding.kind === "event"),
+  controls: all.filter(({ binding }) => binding.kind === "model"),
+});
+
+const bindingPlanFor = (bindings: readonly Binding[]): BindingPlan =>
+  bindingPlanFromEntries(bindings.map((binding, index) => ({ binding, index })));
+
+const listPlansFor = (
+  options: KeyedListOptions,
+): { bindingPlan: BindingPlan; eagerPlan: BindingPlan; hydrationPlans: readonly HydrationPlan[] } => {
+  const bindingPlan = bindingPlanFor(options.bindings);
+  const hydrationPlans = (options.hydrationBoundaries ?? []).map((boundary) => ({
+    boundary,
+    bindings: bindingPlanFromEntries(
+      bindingPlan.all.filter(({ binding }) => bindingWithin(boundary.path ?? [], binding.path)),
+    ),
+  }));
+  const deferred = new Set(hydrationPlans.flatMap(({ bindings }) => bindings.all.map(({ binding }) => binding)));
+  return {
+    bindingPlan,
+    eagerPlan: bindingPlanFromEntries(bindingPlan.all.filter(({ binding }) => !deferred.has(binding))),
+    hydrationPlans,
+  };
+};
+
 const textAtRecord = (record: RowRecord, path: readonly number[]): Text => {
   const node = nodeAtRecord(record, path);
   if (node.nodeType === Node.COMMENT_NODE && node.nodeValue === "td:text") {
@@ -382,7 +434,18 @@ const optionsSignature = (options: KeyedListOptions): string =>
     region: options.region,
     templateHtml: options.templateHtml,
     bindings: options.bindings,
+    stores: options.stores ?? [],
+    hydrationBoundaries: options.hydrationBoundaries ?? [],
+    components: options.components ?? [],
   });
+
+const updateListPlans = (state: ListState, options: KeyedListOptions): void => {
+  const plans = listPlansFor(options);
+  state.options = options;
+  state.bindingPlan = plans.bindingPlan;
+  state.eagerPlan = plans.eagerPlan;
+  state.hydrationPlans = plans.hydrationPlans;
+};
 
 const cleanupListState = (state: ListState): void => {
   state.ownerCleanupDispose?.();
@@ -414,7 +477,7 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
   }
   const signature = optionsSignature(options);
   if (current && current.signature === signature) {
-    current.options = options;
+    updateListPlans(current, options);
     return current;
   }
   if (current) {
@@ -431,6 +494,15 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
     records: new Map<PropertyKey, RowRecord>(),
     template,
     elementIndices,
+    ...(() => {
+      const plans = listPlansFor(options);
+      return {
+        bindingPlan: plans.bindingPlan,
+        eagerPlan: plans.eagerPlan,
+        hydrationPlans: plans.hydrationPlans,
+      };
+    })(),
+    initialized: false,
     cleanups: [] as Array<() => void>,
     ownerCleanupDispose: undefined,
   };
@@ -552,21 +624,16 @@ const applyRowBinding = (
 const bindRowBindings = (
   record: RowRecord,
   options: KeyedListOptions,
-  bindings: readonly Binding[],
+  plan: BindingPlan,
   cleanups: Array<() => void>,
 ): void => {
-  const rowBindings = bindings
-    .map((binding, index) => ({ binding, index }))
-    .filter(
-      (entry): entry is { binding: Exclude<Binding, EventBinding>; index: number } => entry.binding.kind !== "event",
-    );
-  if (rowBindings.length === 0) {
+  if (plan.nonEvent.length === 0) {
     return;
   }
   cleanups.push(
     untrack(() =>
       effect(() => {
-        for (const { binding, index } of rowBindings) {
+        for (const { binding, index } of plan.nonEvent) {
           applyRowBinding(record, record.scope, options, binding, index);
         }
       }),
@@ -574,9 +641,9 @@ const bindRowBindings = (
   );
 };
 
-const bindRowEvents = (record: RowRecord, bindings: readonly Binding[], cleanups: Array<() => void>): void => {
+const bindRowEvents = (record: RowRecord, plan: BindingPlan, cleanups: Array<() => void>): void => {
   const delegateKeys = new Set<string>();
-  for (const binding of bindings) {
+  for (const { binding } of plan.events) {
     if (binding.kind !== "event") {
       continue;
     }
@@ -600,8 +667,8 @@ const bindRowEvents = (record: RowRecord, bindings: readonly Binding[], cleanups
   }
 };
 
-const bindRowControls = (record: RowRecord, bindings: readonly Binding[], cleanups: Array<() => void>): void => {
-  for (const binding of bindings) {
+const bindRowControls = (record: RowRecord, plan: BindingPlan, cleanups: Array<() => void>): void => {
+  for (const { binding } of plan.controls) {
     if (binding.kind !== "model") {
       continue;
     }
@@ -624,18 +691,15 @@ const bindRowControls = (record: RowRecord, bindings: readonly Binding[], cleanu
   }
 };
 
-const bindingWithin = (boundaryPath: readonly number[], bindingPath: readonly number[]): boolean =>
-  boundaryPath.length <= bindingPath.length && boundaryPath.every((part, index) => bindingPath[index] === part);
-
 const bindRow = (
   record: RowRecord,
   options: KeyedListOptions,
-  bindings: readonly Binding[],
+  plan: BindingPlan,
   cleanups: Array<() => void>,
 ): void => {
-  bindRowEvents(record, bindings, cleanups);
-  bindRowBindings(record, options, bindings, cleanups);
-  untrack(() => bindRowControls(record, bindings, cleanups));
+  bindRowEvents(record, plan, cleanups);
+  bindRowBindings(record, options, plan, cleanups);
+  untrack(() => bindRowControls(record, plan, cleanups));
 };
 
 const keyFor = (item: unknown, index: number, options: KeyedListOptions): PropertyKey => {
@@ -697,14 +761,13 @@ const createRecord = (
   };
   try {
     const deferredBindings = new Set<Binding>();
-    for (const boundary of options.hydrationBoundaries ?? []) {
+    for (const hydrationPlan of state.hydrationPlans) {
+      const { boundary, bindings: boundaryPlan } = hydrationPlan;
       const resolvedId = boundary.idKind === "expression" ? readPath(scope, boundary.id) : boundary.id;
       if (resolvedId === undefined || resolvedId === null) continue;
-      const boundaryPath = boundary.path ?? [];
-      const boundaryBindings = options.bindings.filter((binding) => bindingWithin(boundaryPath, binding.path));
       const handle = createHydrationBoundary(record.element.parentElement ?? record.element, String(resolvedId), () => {
         const cleanups: Array<() => void> = [];
-        bindRow(record, options, boundaryBindings, cleanups);
+        bindRow(record, options, boundaryPlan, cleanups);
         return () => runCleanups(cleanups);
       });
       if (handle.ok) {
@@ -719,15 +782,14 @@ const createRecord = (
           }),
         );
         record.hydrationCleanups.push(() => handle.value.dispose());
-        for (const binding of boundaryBindings) deferredBindings.add(binding);
+        for (const { binding } of boundaryPlan.all) deferredBindings.add(binding);
       }
     }
-    bindRow(
-      record,
-      options,
-      options.bindings.filter((binding) => !deferredBindings.has(binding)),
-      record.cleanups,
-    );
+    const eagerPlan =
+      deferredBindings.size === 0
+        ? state.eagerPlan
+        : bindingPlanFromEntries(state.bindingPlan.all.filter(({ binding }) => !deferredBindings.has(binding)));
+    bindRow(record, options, eagerPlan, record.cleanups);
     return record;
   } catch (error) {
     try {
@@ -828,14 +890,32 @@ const positionRecords = (
   previousRecords: ReadonlyMap<PropertyKey, RowRecord>,
   region?: KeyedListRegion,
 ): void => {
+  const previousKeys = Array.from(previousRecords.keys());
+  const nextKeys = orderedRecords.map((record) => record.key);
+  const sharedLength = Math.min(previousKeys.length, nextKeys.length);
+  let prefixLength = 0;
+  while (prefixLength < sharedLength && previousKeys[prefixLength] === nextKeys[prefixLength]) {
+    prefixLength++;
+  }
+  let suffixLength = 0;
+  while (
+    suffixLength < sharedLength - prefixLength &&
+    previousKeys[previousKeys.length - suffixLength - 1] === nextKeys[nextKeys.length - suffixLength - 1]
+  ) {
+    suffixLength++;
+  }
   const previousOrder = new Map<PropertyKey, number>();
-  Array.from(previousRecords.keys()).forEach((key, index) => previousOrder.set(key, index));
+  for (let index = prefixLength; index < previousKeys.length - suffixLength; index++) {
+    previousOrder.set(previousKeys[index] as PropertyKey, index);
+  }
   const stablePositions = longestIncreasingSubsequencePositions(
-    orderedRecords.map((record) => previousOrder.get(record.key) ?? -1),
+    nextKeys.map((key, index) =>
+      index < prefixLength || index >= nextKeys.length - suffixLength ? -1 : (previousOrder.get(key) ?? -1),
+    ),
   );
   const staticAfter = region && region.after > 0 ? (Array.from(container.children).at(-region.after) ?? null) : null;
-  let anchor: Node | null = staticAfter;
-  for (let index = orderedRecords.length - 1; index >= 0; index--) {
+  let anchor: Node | null = orderedRecords[nextKeys.length - suffixLength]?.nodes[0] ?? staticAfter;
+  for (let index = nextKeys.length - suffixLength - 1; index >= prefixLength; index--) {
     const record = orderedRecords[index] as RowRecord;
     if (stablePositions.has(index)) {
       anchor = record.nodes[0] ?? anchor;
@@ -941,11 +1021,11 @@ export const mountKeyedList = (
   const orderedRecords: RowRecord[] = [];
   const createdRecords: RowRecord[] = [];
   const previousRecords = state.records;
-  const serverElements = Array.from(container.children);
-  const serverDynamicElements = dynamicElementsFor(container, options.region);
+  const inspectServerRows = !state.initialized && state.records.size === 0 && state.elementIndices.length > 0;
+  const serverElements = inspectServerRows ? Array.from(container.children) : [];
+  const serverDynamicElements = inspectServerRows ? dynamicElementsFor(container, options.region) : [];
   const canAdoptServerRows =
-    state.records.size === 0 &&
-    state.elementIndices.length > 0 &&
+    inspectServerRows &&
     (options.region
       ? serverDynamicElements.length > 0
       : serverElements.length >= entries.length * state.elementIndices.length);
@@ -994,6 +1074,7 @@ export const mountKeyedList = (
       positionRecords(container, orderedRecords, previousRecords, options.region);
     }
     state.records = nextRecords;
+    state.initialized = true;
     createdRecords.length = 0;
     const cleanupResult = cleanupRecordsNotIn(previousRecords, nextRecords);
     if (cleanupResult.failed) throw cleanupResult.error;

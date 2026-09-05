@@ -51,6 +51,7 @@ type ListState = {
   records: Map<PropertyKey, RowRecord>;
   template: HTMLTemplateElement;
   elementIndices: number[];
+  initialized: boolean;
   ownerCleanupDispose: (() => void) | undefined;
 };
 
@@ -74,10 +75,7 @@ const readPath = (scope: Record<string, unknown>, expression: string): unknown =
 const sourceScopeSnapshotFor = (scope: Record<string, unknown> | undefined): Map<string, unknown> =>
   new Map(scope ? Object.keys(scope).map((key) => [key, scope[key]] as const) : []);
 
-const sourceScopeChanged = (
-  previous: ReadonlyMap<string, unknown>,
-  next: ReadonlyMap<string, unknown>,
-): boolean => {
+const sourceScopeChanged = (previous: ReadonlyMap<string, unknown>, next: ReadonlyMap<string, unknown>): boolean => {
   if (previous.size !== next.size) return true;
   for (const [key, value] of previous) {
     if (!next.has(key) || !Object.is(next.get(key), value)) return true;
@@ -182,6 +180,7 @@ const getListState = (container: Element, options: TextKeyedListOptions): ListSt
     elementIndices: Array.from(template.content.childNodes).flatMap((node, index) =>
       node instanceof Element ? [index] : [],
     ),
+    initialized: false,
     ownerCleanupDispose: undefined,
   };
   listStates.set(container, next);
@@ -344,14 +343,32 @@ const positionRecords = (
   previousRecords: ReadonlyMap<PropertyKey, RowRecord>,
   region?: TextKeyedListRegion,
 ): void => {
+  const previousKeys = Array.from(previousRecords.keys());
+  const nextKeys = orderedRecords.map((record) => record.key);
+  const sharedLength = Math.min(previousKeys.length, nextKeys.length);
+  let prefixLength = 0;
+  while (prefixLength < sharedLength && previousKeys[prefixLength] === nextKeys[prefixLength]) {
+    prefixLength++;
+  }
+  let suffixLength = 0;
+  while (
+    suffixLength < sharedLength - prefixLength &&
+    previousKeys[previousKeys.length - suffixLength - 1] === nextKeys[nextKeys.length - suffixLength - 1]
+  ) {
+    suffixLength++;
+  }
   const previousOrder = new Map<PropertyKey, number>();
-  Array.from(previousRecords.keys()).forEach((key, index) => previousOrder.set(key, index));
+  for (let index = prefixLength; index < previousKeys.length - suffixLength; index++) {
+    previousOrder.set(previousKeys[index] as PropertyKey, index);
+  }
   const stablePositions = longestIncreasingSubsequencePositions(
-    orderedRecords.map((record) => previousOrder.get(record.key) ?? -1),
+    nextKeys.map((key, index) =>
+      index < prefixLength || index >= nextKeys.length - suffixLength ? -1 : (previousOrder.get(key) ?? -1),
+    ),
   );
   const staticAfter = region && region.after > 0 ? (Array.from(container.children).at(-region.after) ?? null) : null;
-  let anchor: Node | null = staticAfter;
-  for (let index = orderedRecords.length - 1; index >= 0; index--) {
+  let anchor: Node | null = orderedRecords[nextKeys.length - suffixLength]?.nodes[0] ?? staticAfter;
+  for (let index = nextKeys.length - suffixLength - 1; index >= prefixLength; index--) {
     const record = orderedRecords[index] as RowRecord;
     if (stablePositions.has(index)) {
       anchor = record.nodes[0] ?? anchor;
@@ -462,11 +479,11 @@ export const mountTextKeyedList = (
   const orderedRecords: RowRecord[] = [];
   const createdRecords: RowRecord[] = [];
   const previousRecords = state.records;
-  const serverElements = Array.from(container.children);
-  const serverDynamicElements = dynamicElementsFor(container, options.region);
+  const inspectServerRows = !state.initialized && state.records.size === 0 && state.elementIndices.length > 0;
+  const serverElements = inspectServerRows ? Array.from(container.children) : [];
+  const serverDynamicElements = inspectServerRows ? dynamicElementsFor(container, options.region) : [];
   const canAdoptServerRows =
-    state.records.size === 0 &&
-    state.elementIndices.length > 0 &&
+    inspectServerRows &&
     (options.region
       ? serverDynamicElements.length > 0
       : serverElements.length >= entries.length * state.elementIndices.length);
@@ -507,6 +524,7 @@ export const mountTextKeyedList = (
       }
     } else positionRecords(container, orderedRecords, previousRecords, options.region);
     state.records = nextRecords;
+    state.initialized = true;
     createdRecords.length = 0;
     const cleanupResult = cleanupRecordsNotIn(previousRecords, nextRecords);
     if (cleanupResult.failed) throw cleanupResult.error;
