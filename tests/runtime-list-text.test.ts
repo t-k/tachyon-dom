@@ -34,6 +34,25 @@ describe("mountTextKeyedList", () => {
     expect(root.textContent).toBe("01");
   });
 
+  it("refreshes a reference-policy row when the same source scope mutates", () => {
+    const root = document.createElement("ul");
+    const scope = { label: "A" };
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      updatePolicy: "reference" as const,
+      scope,
+      templateHtml: `<li> </li>`,
+      bindings: [{ kind: "text" as const, path: [0], expression: "label" }],
+    };
+
+    mountTextKeyedList(root, [], [{ id: "a" }], options);
+    scope.label = "B";
+    mountTextKeyedList(root, [], [{ id: "a" }], options);
+
+    expect(root.textContent).toBe("B");
+  });
+
   it("continues removing every text row after one cleanup throws", () => {
     const root = document.createElement("ul");
     const cleaned: number[] = [];

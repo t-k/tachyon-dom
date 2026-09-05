@@ -271,6 +271,39 @@ describe("hydrate boundary runtime", () => {
     interactionCleanup();
   });
 
+  it("prevents the original submit default action before replaying a lazy click", async () => {
+    document.body.innerHTML = `<form id="form"><!--tachyon-hydrate:panel:start--><button type="submit">Send</button><!--tachyon-hydrate:panel:end--></form>`;
+    const form = document.querySelector("#form");
+    if (!(form instanceof HTMLFormElement)) throw new Error("Missing form.");
+    let submissions = 0;
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      submissions++;
+    });
+    let resolveChunk!: (value: { bind: (element: Element) => void }) => void;
+    const result = createLazyHydrationBoundary(
+      form,
+      "panel",
+      () => new Promise<{ bind: (element: Element) => void }>((resolve) => {
+        resolveChunk = resolve;
+      }),
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    const stop = scheduleHydration(result.value, {
+      strategy: "interaction",
+      interaction: "click",
+      replayInteraction: true,
+    });
+
+    form.querySelector("button")?.click();
+    resolveChunk({ bind: () => undefined });
+    await result.value.hydrate();
+    await Promise.resolve();
+
+    expect(submissions).toBe(1);
+    stop();
+  });
+
   it("shares an in-flight lazy chunk, cancels it on dispose, and retries failures", async () => {
     document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--><section></section><!--tachyon-hydrate:panel:end--></main>`;
     const main = document.querySelector("main");

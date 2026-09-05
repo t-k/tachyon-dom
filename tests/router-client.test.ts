@@ -158,6 +158,39 @@ describe("client router", () => {
     expect(root.childElementCount).toBe(0);
   });
 
+  it("disposes a newly navigated view once when connectedCallback re-enters navigation", async () => {
+    document.body.innerHTML = `<main id="app"></main>`;
+    const root = document.querySelector("#app");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
+    createWindow("/");
+    const tagName = `td-reenter-navigation-${Math.random().toString(36).slice(2)}`;
+    let router: ReturnType<typeof createClientRouter> | undefined;
+    let nextDisposeCount = 0;
+    customElements.define(
+      tagName,
+      class extends HTMLElement {
+        connectedCallback(): void {
+          void router?.navigate("/next");
+        }
+      },
+    );
+    router = createClientRouter({
+      root,
+      routes: [
+        { path: "/", render: () => rawHtml(`<${tagName}></${tagName}>`) },
+        { path: "/next", render: () => ({ value: rawHtml("<p>next</p>"), dispose: () => nextDisposeCount++ }) },
+      ],
+      scrollTo: () => undefined,
+    });
+
+    await router.start();
+    await router.settled();
+
+    expect(nextDisposeCount).toBe(1);
+    router.dispose();
+    expect(nextDisposeCount).toBe(1);
+  });
+
   it("intercepts same-origin links while preserving modified clicks", async () => {
     document.body.innerHTML = `<main id="app"></main>`;
     const root = document.querySelector("#app");

@@ -40,4 +40,38 @@ describe("Tachyon template language features", () => {
     expect(rename?.edits).toHaveLength(3);
     expect(rename?.edits.every((edit) => edit.newText === "heading")).toBe(true);
   });
+
+  it("renames only lexical references and leaves strings, comments, properties, and shadowed locals unchanged", () => {
+    const source = `<script>
+const title = "title";
+const object = { title: "property", value: title };
+// title
+function local() { const title = "local"; return title; }
+</script>
+<main><p>{title}</p></main>`;
+    const rename = templateRenameAt(source, positionAt(source, source.lastIndexOf("{title") + 2), "heading");
+    expect(rename).toBeDefined();
+    const rewritten = [...(rename?.edits ?? [])]
+      .sort((left, right) => right.range.start.line - left.range.start.line || right.range.start.character - left.range.start.character)
+      .reduce((value, edit) => {
+        const start = value.split(/\r?\n/).slice(0, edit.range.start.line).reduce((total, line) => total + line.length + 1, 0) + edit.range.start.character;
+        const end = value.split(/\r?\n/).slice(0, edit.range.end.line).reduce((total, line) => total + line.length + 1, 0) + edit.range.end.character;
+        return value.slice(0, start) + edit.newText + value.slice(end);
+      }, source);
+
+    expect(rewritten).toContain(`const heading = "title"`);
+    expect(rewritten).toContain(`title: "property"`);
+    expect(rewritten).toContain(`const title = "local"`);
+    expect(rewritten).toContain(`return title`);
+    expect(rewritten).toContain(`{heading}</p>`);
+    expect(rewritten).toContain(`value: heading`);
+  });
+
+  it("resolves a for alias definition in its lexical template scope", () => {
+    const source = `<script>const row = 1;</script><ul><for each={rows} as="row" key={row.id}><li>{row.name}</li></for></ul>`;
+    const reference = source.indexOf("row.name");
+    const definition = templateDefinitionAt(source, positionAt(source, reference + 1), "file:///page.td");
+
+    expect(definition?.range.start).toEqual(positionAt(source, source.indexOf(`as="row"`) + 4));
+  });
 });

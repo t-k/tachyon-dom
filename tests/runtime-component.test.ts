@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createTemplateComponent } from "../src/runtime/component";
-import { effect } from "../src/runtime/signal";
+import { createSignal, effect, onCleanup } from "../src/runtime/signal";
 
 describe("reusable template component interface", () => {
   it("keeps instances independent and applies reactive prop updates", () => {
@@ -73,6 +73,58 @@ describe("reusable template component interface", () => {
     component.mount(root, { label: "ignored", slots: { default: "child" } });
 
     expect(root.textContent).toBe("child");
+  });
+
+  it("owns effects and cleanup registrations created by the scope factory", () => {
+    const signal = createSignal(0);
+    let reads = 0;
+    let cleanupCalls = 0;
+    const component = createTemplateComponent({
+      client: {
+        templateHtml: "<p></p>",
+        bind: () => undefined,
+      },
+      scope: () => {
+        effect(() => {
+          signal();
+          reads++;
+        });
+        onCleanup(() => {
+          cleanupCalls++;
+        });
+        return {};
+      },
+    });
+    const instance = component.mount(document.createElement("div"), {});
+    const readsBeforeDispose = reads;
+
+    instance.dispose();
+    signal.set(1);
+
+    expect(reads).toBe(readsBeforeDispose);
+    expect(cleanupCalls).toBe(1);
+  });
+
+  it("batches component prop updates so observers do not see an intermediate scope", () => {
+    const observed: Array<[number, number]> = [];
+    const component = createTemplateComponent({
+      client: {
+        templateHtml: "<p></p>",
+        bind: (_root, scope) =>
+          effect(() => {
+            observed.push([Number(scope.first), Number(scope.second)]);
+          }),
+      },
+    });
+    const instance = component.mount(document.createElement("div"), { first: 1, second: 1 });
+
+    instance.update({ first: 2, second: 2 });
+
+    expect(observed).toEqual([
+      [1, 1],
+      [2, 2],
+    ]);
+    instance.dispose();
   });
 
   it("disposes nested component instances through the parent owner exactly once", () => {

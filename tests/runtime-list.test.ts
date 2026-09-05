@@ -123,6 +123,59 @@ describe("mountKeyedList", () => {
     expect(root.textContent).toBe("AB");
   });
 
+  it("refreshes a reference-policy row when the same source scope mutates", () => {
+    const root = document.createElement("ul");
+    const scope = { label: "A" };
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      updatePolicy: "reference" as const,
+      scope,
+      templateHtml: `<li> </li>`,
+      bindings: [{ kind: "text" as const, path: [0], expression: "label" }],
+    };
+
+    mountKeyedList(root, [], [{ id: "a" }], options);
+    scope.label = "B";
+    mountKeyedList(root, [], [{ id: "a" }], options);
+
+    expect(root.textContent).toBe("B");
+  });
+
+  it("keeps row-local stores shadowing the parent scope during reorder", () => {
+    const root = document.createElement("ul");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      scope: { count: 99 },
+      templateHtml: `<li> </li>`,
+      stores: [{ name: "count", initial: "item.count" }],
+      bindings: [{ kind: "text" as const, path: [0], expression: "count" }],
+    };
+    const first = { id: "a", count: 12 };
+    const second = { id: "b", count: 21 };
+
+    mountKeyedList(root, [], [first, second], options);
+    mountKeyedList(root, [], [second, first], options);
+
+    expect(Array.from(root.children, (row) => row.textContent)).toEqual(["21", "12"]);
+  });
+
+  it("uses generated readers for literal row store initializers", () => {
+    const root = document.createElement("ul");
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      stores: [{ name: "count", initial: "0", read: () => 0 }],
+      bindings: [{ kind: "text" as const, path: [0], expression: "count" }],
+    };
+
+    mountKeyedList(root, [], [{ id: "a" }], options);
+
+    expect(root.textContent).toBe("0");
+  });
+
   it("refreshes a reference-policy row when its index changes", () => {
     const root = document.createElement("ul");
     const options = {
