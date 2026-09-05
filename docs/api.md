@@ -12,7 +12,7 @@ The `runtime/*` layer is intentionally low-level. It may accept DOM paths, compi
 
 | Import | Layer | Intended use and compatibility contract |
 | --- | --- | --- |
-| `tachyon-dom` | application | Signals, resources, stores, forms, router, mount/hydrate, error boundaries, enhancement registry, and Result helpers. Named exports and their public types are supported. |
+| `tachyon-dom` | application | Signals, resources, stores, forms, router, mount/hydrate, lazy hydration, reusable template components, error boundaries, enhancement registry, and Result helpers. Named exports and their public types are supported. |
 | `tachyon-dom/compiler` | toolchain | Parse and compile templates and emit client, server, and stream modules. Compiler IR types are supported for integrations that consume compiler output. |
 | `tachyon-dom/cli` | toolchain | Command-line compilation, type generation, and project commands. CLI behavior is compatible at the documented command boundary. |
 | `tachyon-dom/app` | application/toolchain | App definitions, route files, and request-scoped document rendering. |
@@ -22,6 +22,7 @@ The `runtime/*` layer is intentionally low-level. It may accept DOM paths, compi
 | `tachyon-dom/adapters/node` | server | Node fetch handlers and static asset integration. |
 | `tachyon-dom/adapters/lambda` | server | AWS Lambda response and streaming adapters. |
 | `tachyon-dom/diagnostics` | tooling | Positioned compiler and target diagnostics. Diagnostics are data contracts and may be rendered by editor or CLI integrations. |
+| `tachyon-dom/template-language` | editor tooling | Dependency-light completion, hover, definition, and rename features for script/template symbols. |
 | `tachyon-dom/env` | server/application | Environment schema declaration and runtime validation. |
 | `tachyon-dom/typed` | application/tooling | `TypedTemplate` and scope-carrying template helpers. |
 | `tachyon-dom/testing` | test tooling | Template test rendering and test-only helpers. |
@@ -41,6 +42,8 @@ The `runtime/*` layer is intentionally low-level. It may accept DOM paths, compi
 | `tachyon-dom/runtime/fragment` | generated/browser | Wrapper-free fragment mounting. |
 | `tachyon-dom/runtime/hydrate` | generated/browser | Hydration marker location, state handoff, scheduling, and diagnostics. |
 | `tachyon-dom/runtime/mount` | application/browser | Mount and hydrate entrypoints for compiler-produced client modules, with idempotent handles. |
+| `tachyon-dom/runtime/component` | application/browser | Reusable component instances with independent scopes, prop updates, SSR renderers, stream renderers, and idempotent disposal. |
+| `tachyon-dom/runtime/diagnostics` | development/browser | Opt-in aggregate ownership/resource observation and template binding location lookup. It is not part of normal generated imports. |
 | `tachyon-dom/runtime/list` | generated/browser | Generic keyed list binding. Inputs are compiler-owned binding records and trusted template HTML. |
 | `tachyon-dom/runtime/list-text` | generated/browser | Text-only keyed list binding. |
 | `tachyon-dom/runtime/keyed-rows` | browser | Low-level DOM-source keyed table-row operations. |

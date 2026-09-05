@@ -52,7 +52,11 @@ Expressions inside `script` and `style` are rejected because ordinary HTML escap
 </ul>
 ```
 
-Hydration boundaries, nested `<component>` boundaries, and `<store>` declarations are not supported inside `<for>`. Their row-local ownership metadata cannot yet be represented without duplicate hydration identities or leaked cleanup ownership, so the compiler reports a positioned error instead of silently dropping it. Ordinary text, attributes, events, models, styles, refs, and nested control flow remain supported in list rows.
+Use `update="reference"` when the list follows immutable update discipline and an unchanged item reference should not re-evaluate that row. The default is `update="always"`, which preserves in-place mutation behavior. Index changes and changes to the outer scope still invalidate rows in either mode.
+
+The client compiler records static element siblings around a direct `<for>` so SSR rows can be adopted without consuming those siblings. This applies to the unambiguous case of one direct list dynamic region; ambiguous combinations of multiple direct `<for>` or `<if>` regions retain the ordinary binding path.
+
+Row-local `<component>` boundaries, `<store>` declarations, and explicit hydration boundaries are supported. Row stores and component props belong to the keyed row and survive reorder while being disposed when the key leaves the list. A row hydration boundary must use an explicit row-scoped expression such as `hydrate:id={row.id}`; an automatically generated static id inside a row is rejected because it would be duplicated. The runtime does not silently drop unsupported metadata.
 
 ## Stores
 

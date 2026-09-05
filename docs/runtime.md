@@ -26,7 +26,27 @@ Browser feature bundles have independent minified budgets for `runtime/list`, `r
 
 `mount(root, module, scope)` replaces the root contents with trusted compiler output, passes the rendered template's first element to `module.bind()`, and returns a `MountHandle` whose `root` remains the container supplied by the caller. Calling `dispose()` more than once is harmless; it releases the module's resources but intentionally leaves the rendered DOM in place. `module.bind()` may return a cleanup function, and the generated client binding owns its reactive root through the same handle.
 
-`hydrate(root, module, scope)` accepts either the rendered template element itself or a container holding exactly one rendered template element. It validates the template's element structure and static attributes, allows only compiler-declared dynamic attributes, and rejects unsafe extra nodes or inline event attributes before binding. It also validates the module's hydration markers without replacing server-rendered DOM. It returns a `Result`: an `ok` value contains the same idempotent `MountHandle`, while an `err` value contains a hydration diagnostic when the structure or markers do not match. Both functions expect `templateHtml` and binding metadata produced by the compiler or another trusted build step. They do not sanitize arbitrary HTML.
+`hydrate(root, module, scope)` accepts either the rendered template element itself or a container holding exactly one rendered template element. It validates the template's element structure and static attributes, allows only compiler-declared dynamic attributes, and rejects unsafe extra nodes or inline event attributes before binding. It also validates compiler-declared dynamic list and conditional regions, including SSR rows between static siblings, and validates the module's hydration markers without replacing server-rendered DOM. It returns a `Result`: an `ok` value contains the same idempotent `MountHandle`, while an `err` value contains a hydration diagnostic when the structure or markers do not match. Both functions expect `templateHtml` and binding metadata produced by the compiler or another trusted build step. They do not sanitize arbitrary HTML.
+
+## Reusable Template Components
+
+`createTemplateComponent({ client, scope, render, stream })` separates a reusable component interface from the compiler's transparent `<component>` boundary. Each `mount()` or `hydrate()` call creates an independent reactive scope and returns a `TemplateComponentInstance` with an idempotent `dispose()` and an `update(props)` method. `scope(props)` can map public props to the names consumed by the client module; pass slot content through that scope when using `<slot>`.
+
+```ts
+import { createTemplateComponent } from "tachyon-dom";
+
+const card = createTemplateComponent({
+  client: { templateHtml: "<article></article>", bind: (root, scope) => {
+    root.textContent = String(scope.title);
+  } },
+  render: (props: { title: string }) => `<article>${props.title}</article>`,
+});
+const instance = card.mount(document.querySelector("#app")!, { title: "Hello" });
+instance.update({ title: "Updated" });
+instance.dispose();
+```
+
+The renderer is supplied by the application or compiler output and is responsible for escaping or sanitizing any user-controlled values. The component interface does not make arbitrary HTML trusted.
 
 Browser feature bundles have independent minified budgets for `runtime/list`, `runtime/form`, `runtime/conditional`, and `runtime/router`. Run `pnpm check:browser-feature-budgets` after changing one of these modules; the check also rejects compiler, server, TypeScript, parse5, and language-server inputs from the browser graph.
 
@@ -83,7 +103,17 @@ The compiler records hydration boundaries with `hydrate:id={id}`. Runtime schedu
 
 `scheduleHydrationBoundaries(root, boundaries, bind, options)` consumes compiled hydration metadata, creates each boundary handle, and schedules it according to the boundary strategy. Static auto-generated ids can be scheduled directly. Expression-based ids can be resolved with `options.resolveId(boundary)`.
 
+`createLazyHydrationBoundary(root, id, load, options)` keeps the SSR subtree untouched until hydration is triggered, then loads a boundary chunk once and binds it. Concurrent triggers share the same load promise. A dispose during import prevents the binder from running; a rejected load is reported through `onError` and can be retried. With `replayInteraction: true`, the first interaction is replayed after the asynchronous bind completes. The loader is application code and should only import trusted build output.
+
 `diagnoseHydrationBoundaries(root, expectedIds)` reports missing, duplicate, or empty boundary markers so SSR/client mismatches can fail loudly in tests and development builds.
+
+## Development Runtime Diagnostics
+
+`tachyon-dom/runtime/diagnostics` is an opt-in development entry. `createRuntimeDiagnostics({ bindings, onEvent })` observes aggregate owner, effect, subscription, and cleanup counts, records lifecycle events, and maps a `(templateId, path)` pair to a source location supplied by the compiler or integration. It retains event data and source descriptors, not runtime owners or DOM nodes. Multiple diagnostic consumers can be attached independently and disposing one does not affect the others. Normal compiler-generated production modules do not import this entry; verify the browser metafile before shipping a custom diagnostic integration.
+
+## Template Language Tooling
+
+`tachyon-dom/template-language` provides a dependency-light first semantic layer shared by editor integrations: script/template symbol completion, hover, definition, and rename with UTF-16 positions. The language server uses the same compiler diagnostic path as CLI and Vite for syntax and target errors, including source offsets from `.td` script/template files. Full TypeScript property and event-parameter checking remains a separate compiler integration concern; `TypedTemplate` carries a scope type but does not by itself type-check expressions inside a string.
 
 ## Progressive Forms
 
