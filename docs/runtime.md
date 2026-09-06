@@ -224,7 +224,7 @@ export const loginAction = formAction({
 
 In-flight prefetches are aborted when their cache entry is invalidated or when the router is disposed.
 
-Client route renderers may return a `ClientMountedView` with `{ value, dispose }`. The router keeps the committed view alive while a next navigation loads, disposes the old view only after the next view commits, disposes uncommitted stale results, and disposes the committed view from `router.dispose()`. `defineClientRoute()` connects a literal path to its loader result so `data` is inferred in `render`, `head`, `target`, and actions while named path segments are inferred in `params`.
+Client route renderers may return a `ClientMountedView` with `{ value, dispose }`. The router keeps the committed view alive while a next navigation loads, disposes the old view only after the next view commits, disposes uncommitted stale results, and disposes the committed view from `router.dispose()`. `defineClientRoute()` connects a literal path to its loader result so `data` is inferred in `render`, `head`, `target`, and actions while named path segments are inferred in `params`. See [Client Route Type Inference](./routing.md#client-route-type-inference) for a complete example and the limits of widened paths.
 
 `createRouteHotReloader()` invalidates the current route cache entry and re-navigates with `replace: true` when a route module update arrives from a dev server.
 

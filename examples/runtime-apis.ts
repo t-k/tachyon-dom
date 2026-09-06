@@ -1,12 +1,6 @@
-import {
-  catchError,
-  createErrorBoundary,
-  createResource,
-  createSignal,
-  effect,
-} from "../src/index";
+import { catchError, createErrorBoundary, createResource, createSignal, effect } from "../src/index";
 import { createI18n, localeMiddleware } from "../src/i18n";
-import { createClientRouter } from "../src/runtime/router";
+import { createClientRouter, defineClientRoute } from "../src/runtime/router";
 
 type ExampleUser = {
   id: string;
@@ -52,6 +46,11 @@ export const mountErrorBoundaryExample = (root: Element) =>
   });
 
 export const mountClientRouterExample = (root: Element) => {
+  const userRoute = defineClientRoute({
+    path: "/users/:id",
+    load: ({ params }) => ({ id: params.id }),
+    render: ({ data, params }) => `<h1>User ${params.id}: ${data.id}</h1>`,
+  });
   const router = createClientRouter({
     root,
     viewTransition: ({ url }) => url.pathname !== "/settings",
@@ -60,11 +59,7 @@ export const mountClientRouterExample = (root: Element) => {
         path: "/",
         render: () => "<h1>Home</h1>",
       },
-      {
-        path: "/users/:id",
-        load: ({ params }) => ({ id: params.id }),
-        render: ({ data }) => `<h1>User ${(data as { id: string }).id}</h1>`,
-      },
+      userRoute,
     ],
   });
   return router;

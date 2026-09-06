@@ -22,6 +22,28 @@ Template routes may use `.td`, `.tachyon`, or `.tachyon.html` extensions. Route 
 
 `createClientRouter({ cache: true })` retains up to 100 loader results using least-recently-used eviction. Use `cache: { maxEntries }` to choose another bound; `maxEntries: 0`, `cache: false`, and an omitted option disable loader caching. Successful navigation, prefetch, and `initialCache` seeds share the same bound, and a cache hit refreshes its recency. Query strings are part of the cache key. `invalidate()` and `revalidate()` continue to remove selected entries or the whole cache.
 
+## Client Route Type Inference
+
+Use `defineClientRoute()` when a client route has a literal path and a loader result. The helper infers named path parameters from the literal and carries the loader result into `render`, `head`, `target`, and actions without a data cast:
+
+```ts
+import { createClientRouter, defineClientRoute } from "tachyon-dom";
+
+const userRoute = defineClientRoute({
+  path: "/users/:id",
+  load: ({ params }) => ({ id: params.id, name: `User ${params.id}` }),
+  head: ({ data }) => ({ title: data.name }),
+  render: ({ params, data }) => `${params.id}: ${data.name}`,
+});
+
+const router = createClientRouter({
+  root,
+  routes: [userRoute],
+});
+```
+
+Here `params` is `{ id: string }` and `data` is `{ id: string; name: string }`. A route without `load` keeps `data` as `unknown`. A path widened to `string`, such as one returned by a `fullPath()` helper, keeps `params` as `Record<string, string>` because its named segments are no longer available as a literal type. Call `defineClientRoute()` before registering the route with `createClientRouter()` so the inferred type is preserved.
+
 ## Route Modules
 
 Use `defineRouteModule()` for route modules:
