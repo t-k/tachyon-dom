@@ -88,6 +88,8 @@ type Reference = Word & {
 type CollectedSymbols = {
   symbols: Map<string, SymbolInfo>;
   references: Reference[];
+  /** True when the script contains syntax whose scope cannot be resolved safely. */
+  unsafeRename: boolean;
 };
 
 const reservedWords = new Set([
@@ -315,8 +317,9 @@ const scriptSymbols = (
   script: string,
   symbols: Map<string, SymbolInfo>,
   references: Reference[],
-): BindingScope => {
+): { root: BindingScope; unsafeRename: boolean } => {
   const root: BindingScope = { start: scriptOffset, end: scriptOffset + script.length, bindings: new Map() };
+  let unsafeRename = false;
   const tokens = tokenise(script, scriptOffset);
   const scopes: BindingScope[] = [root];
   const stack: BindingScope[] = [root];
@@ -387,6 +390,33 @@ const scriptSymbols = (
     return -1;
   };
   const isArrowAt = (index: number): boolean => tokens[index]?.punct === "=" && tokens[index + 1]?.punct === ">";
+  const parameterListBeforeReturnType = (arrowIndex: number): number | "unsafe" | undefined => {
+    let depth = 0;
+    for (let index = arrowIndex - 1; index >= 0; index -= 1) {
+      const token = tokens[index]!;
+      if (token.punct === ")" || token.punct === "]" || token.punct === "}" || token.punct === ">") {
+        if (token.punct === ">" && tokens[index - 1]?.punct === "=") {
+          // Another arrow inside the annotation: a function return type. The
+          // parameter boundary cannot be determined reliably.
+          return "unsafe";
+        }
+        depth += 1;
+        continue;
+      }
+      if (token.punct === "(" || token.punct === "[" || token.punct === "{" || token.punct === "<") {
+        if (depth === 0) return undefined;
+        depth -= 1;
+        continue;
+      }
+      if (depth > 0) continue;
+      if (token.punct === ":") {
+        return tokens[index - 1]?.punct === ")" ? index - 1 : undefined;
+      }
+      if (token.punct === "," || token.punct === ";" || token.punct === "=" || token.punct === "?") return undefined;
+      if (token.name && reservedWords.has(token.name)) return undefined;
+    }
+    return undefined;
+  };
   const parameterTokens = (openIndex: number, closeIndex: number): LexToken[] => {
     const names: LexToken[] = [];
     let depth = 0;
@@ -428,8 +458,14 @@ const scriptSymbols = (
     const end = block ? block.end : expressionEndFrom(bodyStart);
     const parent = scopeAt(start);
     const parameterScope: BindingScope = { start, end, parent, bindings: new Map() };
+    // Reparent every block scope that lies inside the parameter scope so
+    // references in expression bodies such as `({ value: title })` resolve
+    // to the parameters first.
+    for (const candidate of scopes) {
+      if (candidate === parameterScope || candidate.parent !== parent) continue;
+      if (candidate.start >= start && candidate.end <= end) candidate.parent = parameterScope;
+    }
     scopes.push(parameterScope);
-    if (block) block.parent = parameterScope;
     for (const parameter of parameters) declare(parameter, "Function parameter", parameterScope);
   };
   for (let index = 0; index < tokens.length; index += 1) {
@@ -463,7 +499,23 @@ const scriptSymbols = (
       if (openIndex < 0) continue;
       const parameters = parameterTokens(openIndex, index - 1);
       registerParameters(parameters, tokens[openIndex]!.start, index);
-    } else if (previous?.name && !reservedWords.has(previous.name)) {
+      continue;
+    }
+    // The arrow may carry a return type annotation: `(params): Type => body`.
+    // Walk backwards over the annotation to the `:` that follows the closing
+    // parenthesis of the parameter list.
+    const closeIndex = parameterListBeforeReturnType(index);
+    if (closeIndex === "unsafe") {
+      unsafeRename = true;
+      continue;
+    }
+    if (closeIndex !== undefined) {
+      const openIndex = openingParenIndex(closeIndex);
+      if (openIndex < 0) continue;
+      registerParameters(parameterTokens(openIndex, closeIndex), tokens[openIndex]!.start, index);
+      continue;
+    }
+    if (previous?.name && !reservedWords.has(previous.name) && tokens[index - 2]?.punct !== ":") {
       registerParameters([previous], previous.start, index);
     }
   }
@@ -540,7 +592,7 @@ const scriptSymbols = (
     const binding = resolveBinding(scopeAt(token.start), token.name);
     if (binding) references.push({ name: token.name, start: token.start, end: token.end, binding });
   }
-  return root;
+  return { root, unsafeRename };
 };
 
 const collectSymbols = (source: string): CollectedSymbols => {
@@ -550,7 +602,8 @@ const collectSymbols = (source: string): CollectedSymbols => {
   const script = descriptor.ok ? descriptor.value.script : undefined;
   const template = descriptor.ok ? descriptor.value.template : source;
   const templateOffset = script ? templateOffsetFor(source, script.offset, script.content.length) : 0;
-  const scriptRoot = script ? scriptSymbols(script.offset, script.content, symbols, references) : undefined;
+  const collected = script ? scriptSymbols(script.offset, script.content, symbols, references) : undefined;
+  const scriptRoot = collected?.root;
   const templateRoot: BindingScope = {
     start: templateOffset,
     end: source.length,
@@ -601,7 +654,8 @@ const collectSymbols = (source: string): CollectedSymbols => {
     // The key expression is evaluated per row, so it resolves in the row scope
     // even though it sits inside the opening tag. The each expression stays in
     // the outer scope.
-    const keyMatch = /\bkey\s*=\s*\{/i.exec(rawAttrs);
+    // Both `key={expr}` and `key="{expr}"` are accepted by the compiler.
+    const keyMatch = /\bkey\s*=\s*(?:["']\s*)?\{/i.exec(rawAttrs);
     if (!keyMatch) continue;
     const keyStart = attrsOffset + keyMatch.index + keyMatch[0].length;
     const keyRange = expressionRanges(source, keyStart - 1).find((range) => range.start === keyStart);
@@ -621,7 +675,7 @@ const collectSymbols = (source: string): CollectedSymbols => {
     const attrs = match[2] as string;
     const scope = scopeFor(templateScopes, absolute);
     const attrsOffset = absolute + (match[0]?.indexOf(attrs) ?? 0);
-    const attrPattern = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*\{/g;
+    const attrPattern = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:["']\s*)?\{/g;
     for (const attr of attrs.matchAll(attrPattern)) {
       const name = attr[1] as string;
       const start = attrsOffset + (attr.index ?? 0);
@@ -637,11 +691,11 @@ const collectSymbols = (source: string): CollectedSymbols => {
       if (binding) remember(word, binding);
     }
   }
-  return { symbols, references };
+  return { symbols, references, unsafeRename: collected?.unsafeRename ?? false };
 };
 
 const featuresFor = (source: string, uri?: string): TemplateLanguageFeatures => {
-  const { symbols, references } = collectSymbols(source);
+  const { symbols, references, unsafeRename } = collectSymbols(source);
   const referenceAt = (position: TemplateLanguagePosition): Reference | undefined => {
     const offset = positionToOffset(source, position);
     return references.find((reference) => reference.start <= offset && offset < reference.end);
@@ -673,6 +727,8 @@ const featuresFor = (source: string, uri?: string): TemplateLanguageFeatures => 
   };
   const rename = (position: TemplateLanguagePosition, newName: string): TemplateRename | undefined => {
     if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(newName)) return undefined;
+    // Refuse instead of producing edits that could change program meaning.
+    if (unsafeRename) return undefined;
     const reference = referenceAt(position);
     if (!reference) return undefined;
     const edits = references

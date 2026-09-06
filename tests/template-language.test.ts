@@ -138,4 +138,38 @@ function local() { const title = "local"; return title; }
       `<script>const args = [];const value = 1;const f = (...args) => args.length;const o = { m(v) { return v; }, n: value };</script><p>{args}{value}</p>`,
     );
   });
+
+  it("keeps parameters of arrows with return type annotations in their own scope", () => {
+    const source = `<script lang="ts">const title="outer";const f=(title: string): string => title;const g=(title: string): { value: string } => ({ value: title });const h=<T,>(title: T): Promise<T> => Promise.resolve(title);const k=(title: string): string => { return title; };</script><p>{title}</p>`;
+    const rename = templateRenameAt(source, positionAt(source, source.lastIndexOf("{title") + 2), "heading");
+    expect(rename).toBeDefined();
+    expect(applyEdits(source, rename?.edits ?? [])).toBe(
+      `<script lang="ts">const heading="outer";const f=(title: string): string => title;const g=(title: string): { value: string } => ({ value: title });const h=<T,>(title: T): Promise<T> => Promise.resolve(title);const k=(title: string): string => { return title; };</script><p>{heading}</p>`,
+    );
+    const parameterDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf("=> title") + 4), "file:///page.td");
+    expect(parameterDefinition?.range.start).toEqual(positionAt(source, source.indexOf("(title: string)") + 1));
+  });
+
+  it("refuses to rename when an arrow return type contains a function type", () => {
+    const source = `<script lang="ts">const title="outer";const f=(title: string): (next: string) => string => (next) => title + next;</script><p>{title}</p>`;
+    expect(templateRenameAt(source, positionAt(source, source.lastIndexOf("{title") + 2), "heading")).toBeUndefined();
+  });
+
+  it("renames quoted key expressions together with the for alias and keeps quoted each in the outer scope", () => {
+    const source = `<script>const row = 1;const rows = [];</script><ul><for each="{rows}" as="row" key="{row.id}"><li>{row.name}</li></for></ul>`;
+    const rename = templateRenameAt(source, positionAt(source, source.indexOf("row.name") + 1), "entry");
+    expect(applyEdits(source, rename?.edits ?? [])).toBe(
+      `<script>const row = 1;const rows = [];</script><ul><for each="{rows}" as="entry" key="{entry.id}"><li>{entry.name}</li></for></ul>`,
+    );
+    const keyDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf('key="{row') + 6), "file:///page.td");
+    expect(keyDefinition?.range.start).toEqual(positionAt(source, source.indexOf(`as="row"`) + 4));
+    const eachDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf('each="{rows') + 7), "file:///page.td");
+    expect(eachDefinition?.range.start).toEqual(positionAt(source, source.indexOf("const rows") + 6));
+
+    const implicit = `<ul><for each="{rows}" key='{row.id}'><li>{row.name}</li></for></ul>`;
+    const implicitRename = templateRenameAt(implicit, positionAt(implicit, implicit.indexOf("row.name") + 1), "entry");
+    expect(applyEdits(implicit, implicitRename?.edits ?? [])).toBe(
+      `<ul><for each="{rows}" key='{entry.id}'><li>{entry.name}</li></for></ul>`,
+    );
+  });
 });
