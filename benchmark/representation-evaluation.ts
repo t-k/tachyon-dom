@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { JSDOM } from "jsdom";
-import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler/index.js";
+import { compileTemplate, renderServerTemplate } from "../src/compiler/index.js";
 import { hydrate as hydrateClientModule, type ClientTemplateModule } from "../src/runtime/mount.js";
 import {
   batch as productionBatch,
@@ -266,7 +266,9 @@ const runRowStages = (
         if (identities.get(item.id) === element) identityPreserved++;
         identities.set(item.id, element);
       });
-      for (const id of [...identities.keys()]) if (!current.some((item) => item.id === id)) identities.delete(id);
+      for (const id of Array.from(identities.keys())) {
+        if (!current.some((item) => item.id === id)) identities.delete(id);
+      }
       return {
         stage,
         values: elements.map((element) => element.textContent ?? ""),
@@ -447,7 +449,7 @@ const createCandidateAdapter = (representation: "set" | "array"): SignalAdapter 
     if (unhandled.length > 1) throw new AggregateError(unhandled, "Reactive effects failed.");
   };
   const notify = (subscribers: CandidateDependency): void => {
-    for (const subscriber of [...subscribers]) {
+    for (const subscriber of Array.from(subscribers)) {
       if (subscriber.disposed) continue;
       (subscriber.computed ? pendingComputed : pendingEffects).add(subscriber);
     }

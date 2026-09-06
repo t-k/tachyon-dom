@@ -1,17 +1,18 @@
-/** Child at a template path index, ignoring SSR hydration marker comments. */
-const childAt = (node: Node, index: number): Node | undefined => {
-  let cursor = 0;
-  for (const child of Array.from(node.childNodes)) {
-    if (child.nodeType === 8 && (child.nodeValue ?? "").startsWith("tachyon-hydrate:")) continue;
-    if (cursor++ === index) return child;
-  }
-  return undefined;
-};
-
+// Self-contained (no module-level helpers): tests serialise this function
+// with toString() and run it inside a real browser page.
 export const textAt = (root: Node, path: readonly number[]): Text => {
   let current: Node = root;
   for (const index of path) {
-    const next = childAt(current, index);
+    // Skip SSR hydration marker comments so template paths stay valid.
+    let cursor = 0;
+    let next: Node | undefined;
+    for (const child of Array.from(current.childNodes)) {
+      if (child.nodeType === 8 && (child.nodeValue ?? "").startsWith("tachyon-hydrate:")) continue;
+      if (cursor++ === index) {
+        next = child;
+        break;
+      }
+    }
     if (!next) {
       throw new TypeError(`Missing text binding node at path ${path.join(".")}.`);
     }

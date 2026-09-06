@@ -160,20 +160,20 @@ const detachOwnerCleanup = (anchor: Comment): void => {
   ownerCleanupDisposers.delete(anchor);
 };
 
-/** Child at a template path index, ignoring SSR hydration marker comments. */
-const childAt = (node: Node, index: number): Node | undefined => {
-  let cursor = 0;
-  for (const child of Array.from(node.childNodes)) {
-    if (child.nodeType === 8 && (child.nodeValue ?? "").startsWith("tachyon-hydrate:")) continue;
-    if (cursor++ === index) return child;
-  }
-  return undefined;
-};
-
 export const nodeAt = (root: Node, path: readonly number[]): Node => {
   let current = root;
   for (const index of path) {
-    current = childAt(current, index) as Node;
+    // Skip SSR hydration marker comments so template paths stay valid.
+    let cursor = 0;
+    let next: Node | undefined;
+    for (const child of Array.from(current.childNodes)) {
+      if (child.nodeType === 8 && (child.nodeValue ?? "").startsWith("tachyon-hydrate:")) continue;
+      if (cursor++ === index) {
+        next = child;
+        break;
+      }
+    }
+    current = next as Node;
   }
   return current;
 };
