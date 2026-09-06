@@ -847,13 +847,17 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
   if (node.operator === "??") {
     return left ?? evaluateExpressionNode(node.right, scope);
   }
+  if (node.operator === "&&") {
+    return left && evaluateExpressionNode(node.right, scope);
+  }
+  if (node.operator === "||") {
+    return left || evaluateExpressionNode(node.right, scope);
+  }
   const right = evaluateExpressionNode(node.right, scope);
   if (node.operator === "===") return left === right;
   if (node.operator === "!==") return left !== right;
   if (node.operator === "==") return left == right;
   if (node.operator === "!=") return left != right;
-  if (node.operator === "&&") return left && right;
-  if (node.operator === "||") return left || right;
   if (node.operator === "+") {
     return (left as any) + (right as any);
   }

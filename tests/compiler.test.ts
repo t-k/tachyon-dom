@@ -513,6 +513,27 @@ describe("HTML-first compiler", () => {
     expect(generateServerStreamModule(result.value)).toContain(`__tachyonPush("<!---->");`);
   });
 
+  it("keeps short-circuit text expressions aligned across SSR targets", async () => {
+    const result = compileTemplate("<p>{user && user.name}</p>");
+    if (!result.ok) throw new Error(result.error.message);
+    const scope = { user: null };
+    const expected = "<p><!--td:text--></p>";
+
+    expect(renderServerTemplate(result.value, scope)).toBe(expected);
+
+    const serverModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerModule(result.value)).toString("base64")}`
+    )) as { render(scope: Record<string, unknown>): string };
+    expect(serverModule.render(scope)).toBe(expected);
+
+    const streamModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerStreamModule(result.value)).toString("base64")}`
+    )) as { stream(scope: Record<string, unknown>): AsyncIterable<string> };
+    const chunks: string[] = [];
+    for await (const chunk of streamModule.stream(scope)) chunks.push(chunk);
+    expect(chunks.join("")).toBe(expected);
+  });
+
   it.each(["", null, undefined])(
     "preserves an empty text hydration anchor for %j across server targets",
     async (value) => {

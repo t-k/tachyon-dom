@@ -55,6 +55,51 @@ describe("compiler expression OXC backend", () => {
     );
   });
 
+  it.each([
+    ["false && fail()", false],
+    ["0 && fail()", 0],
+    ['"" && fail()', ""],
+    ["null && fail()", null],
+    ["undefined && fail()", undefined],
+    ["true || fail()", true],
+  ])("short-circuits %s without evaluating the right operand", (source, expected) => {
+    let rightCalls = 0;
+    const scope = {
+      fail: () => {
+        rightCalls += 1;
+        throw new Error("right operand evaluated");
+      },
+    };
+
+    const interpreted = evaluateExpression(source, scope);
+    const generated = Function("scope", `return ${expressionToJs(source, new Set(), "scope")}`)(scope);
+
+    expect(interpreted).toBe(expected);
+    expect(generated).toBe(expected);
+    expect(rightCalls).toBe(0);
+  });
+
+  it("evaluates logical operands in order and preserves operand values", () => {
+    let leftCalls = 0;
+    let rightCalls = 0;
+    const scope = {
+      left: () => {
+        leftCalls += 1;
+        return "left";
+      },
+      right: () => {
+        rightCalls += 1;
+        return "right";
+      },
+    };
+    const source = "left() && right()";
+
+    expect(evaluateExpression(source, scope)).toBe("right");
+    expect(Function("scope", `return ${expressionToJs(source, new Set(), "scope")}`)(scope)).toBe("right");
+    expect(leftCalls).toBe(2);
+    expect(rightCalls).toBe(2);
+  });
+
   it("keeps comparison semantics aligned between SSR evaluation and generated client JS", () => {
     const scope = { count: "10", limit: "2" };
     const js = expressionToJs("count > limit", new Set(), "scope");
