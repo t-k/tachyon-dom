@@ -120,6 +120,12 @@ export const findUnwantedFeatureInputs = (inputs) =>
   );
 
 export const checkBundleBudget = ({ minifiedBytes, brotliBytes, budget }) => {
+  if (!budget || !Number.isSafeInteger(budget.maxMinifiedBytes) || budget.maxMinifiedBytes <= 0) {
+    return { ok: false, reason: "invalid budget" };
+  }
+  if (!Number.isSafeInteger(budget.maxBrotliBytes) || budget.maxBrotliBytes <= 0) {
+    return { ok: false, reason: "invalid budget" };
+  }
   if (minifiedBytes > budget.maxMinifiedBytes) return { ok: false, reason: "minified budget" };
   if (brotliBytes > budget.maxBrotliBytes) return { ok: false, reason: "Brotli budget" };
   return { ok: true };
@@ -146,6 +152,11 @@ const quickTemplateSource = `<main>
 const generatedTemplateFixture = (source, options = {}, compileOptions = {}) =>
   generatedClientSource(source, options, compileOptions);
 
+const generatedFixtureOptions = (generateOptions = {}, compileOptions = {}) => ({
+  compileOptions,
+  generateOptions: { instrumentBindings: false, ...generateOptions },
+});
+
 export const createClientBundleFixtures = () => {
   const staticGenerated = generatedTemplateFixture("<main><h1>Static</h1></main>");
   const signalOnlyEntry =
@@ -170,36 +181,43 @@ export const createClientBundleFixtures = () => {
       source: "<main><h1>Static</h1></main>",
       generatedSource: staticGenerated,
       entrySource: staticGenerated,
+      ...generatedFixtureOptions(),
     },
     {
       name: "signal-only",
       source: "createSignal()",
       generatedSource: signalOnlyEntry,
       entrySource: signalOnlyEntry,
+      compileOptions: undefined,
+      generateOptions: undefined,
     },
     {
       name: "reactive-text",
       source: "<p>{message}</p>",
       generatedSource: reactiveTextGenerated,
       entrySource: reactiveTextGenerated,
+      ...generatedFixtureOptions({ reactive: true }),
     },
     {
       name: "event-only",
       source: "<button on:click={save}>Save</button>",
       generatedSource: eventGenerated,
       entrySource: eventGenerated,
+      ...generatedFixtureOptions(),
     },
     {
       name: "text-only-list",
       source: "<ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul>",
       generatedSource: textListGenerated,
       entrySource: textListGenerated,
+      ...generatedFixtureOptions({ reactive: true }),
     },
     {
       name: "minimal-if",
       source: "<main><if test={visible}><span>Visible</span></if></main>",
       generatedSource: minimalIfGenerated,
       entrySource: minimalIfGenerated,
+      ...generatedFixtureOptions({ reactive: true }),
     },
     {
       name: "composite-quick-example",
@@ -214,8 +232,26 @@ export const scope = {
 scope.increment = () => scope.count.update((value) => value + 1);
 export const mount = (root) => bind(root, scope);
 `,
+      ...generatedFixtureOptions({ reactive: true }, { whitespace: "condense" }),
     },
   ];
+};
+
+export const validateFixtureBudgets = (budgets, fixtures) => {
+  const expectedNames = fixtures.map((fixture) => fixture.name);
+  const missing = expectedNames.filter((name) => !budgets || typeof budgets[name] !== "object" || budgets[name] === null);
+  if (missing.length > 0) return { ok: false, reason: "missing fixture budget", fixtures: missing };
+  const invalid = expectedNames.filter((name) => {
+    const budget = budgets[name];
+    return (
+      !Number.isSafeInteger(budget.maxMinifiedBytes) ||
+      budget.maxMinifiedBytes <= 0 ||
+      !Number.isSafeInteger(budget.maxBrotliBytes) ||
+      budget.maxBrotliBytes <= 0
+    );
+  });
+  if (invalid.length > 0) return { ok: false, reason: "invalid fixture budget", fixtures: invalid };
+  return { ok: true };
 };
 
 const fixtureBudgetsPath = (cwd) => join(cwd, "scripts", "client-bundle-attribution-budgets.json");
@@ -271,6 +307,8 @@ const writeFixtureArtifacts = async ({
     generatedSourceSha256: hashText(fixture.generatedSource),
     entrySource: fixture.entrySource,
     generatedSource: fixture.generatedSource,
+    compileOptions: fixture.compileOptions ?? null,
+    generateOptions: fixture.generateOptions ?? null,
     minifiedBytes: summary.minifiedBytes,
     brotliBytes: summary.brotliBytes,
     outputs: summary.outputs.map((output, index) => ({
@@ -295,13 +333,19 @@ const writeFixtureArtifacts = async ({
 export const runClientBundleAttribution = async ({
   cwd = process.cwd(),
   artifactRoot = join(cwd, "benchmark", "client-bundle-attribution-results"),
+  fixtures = createClientBundleFixtures(),
 } = {}) => {
   const resolvedCwd = resolve(cwd);
   const resolvedArtifactRoot = resolve(artifactRoot);
   const { runId, directory: runDirectory } = await createRunDirectory(resolvedArtifactRoot);
   const budgets = await readJsonIfPresent(await fixtureBudgetsPath(resolvedCwd));
-  const fixtures = [];
-  for (const fixture of createClientBundleFixtures()) {
+  const budgetValidation = validateFixtureBudgets(budgets, fixtures);
+  if (!budgetValidation.ok) {
+    throw new Error(`${budgetValidation.reason}: ${budgetValidation.fixtures.join(", ")}`);
+  }
+  const fixtureReports = [];
+  const validationFailures = [];
+  for (const fixture of fixtures) {
     const result = await buildClientBundle(fixture.entrySource, { cwd: resolvedCwd });
     const summary = summarizeClientBundle(result);
     const inputNames = Object.keys(result.metafile.inputs ?? {});
@@ -314,13 +358,20 @@ export const runClientBundleAttribution = async ({
     }
     const unwantedFeatureInputs = fixture.name === "minimal-if" ? findUnwantedFeatureInputs(summary.inputs) : [];
     const budget = budgets[fixture.name];
-    const budgetResult = budget ? checkBundleBudget({ ...summary, budget }) : undefined;
-    if (budgetResult && !budgetResult.ok) {
-      throw new Error(
+    const budgetResult = checkBundleBudget({ ...summary, budget });
+    if (!budgetResult.ok) {
+      validationFailures.push(
         `${fixture.name} fixture exceeds its ${budgetResult.reason}: ${summary.minifiedBytes} minified/${summary.brotliBytes} Brotli bytes.`,
       );
     }
-    fixtures.push({
+    if (unwantedFeatureInputs.length > 0) {
+      validationFailures.push(
+        `${fixture.name} fixture includes unwanted feature dependencies: ${unwantedFeatureInputs
+          .map((input) => input.path)
+          .join(", ")}`,
+      );
+    }
+    fixtureReports.push({
       ...(await writeFixtureArtifacts({
         artifactRoot: resolvedArtifactRoot,
         runDirectory,
@@ -329,7 +380,8 @@ export const runClientBundleAttribution = async ({
         summary,
         unwantedFeatureInputs,
       })),
-      ...(budget ? { budget, budgetResult } : {}),
+      budget,
+      budgetResult,
     });
   }
   const report = {
@@ -347,11 +399,16 @@ export const runClientBundleAttribution = async ({
       write: false,
       metafile: true,
       resolveDir: resolvedCwd,
+      brotli: { algorithm: "brotliCompressSync", params: {} },
     },
-    fixtures,
+    validation: { ok: validationFailures.length === 0, failures: validationFailures },
+    fixtures: fixtureReports,
   };
   const artifactPath = join(runDirectory, "report.json");
   await writeFile(artifactPath, `${JSON.stringify(report, null, 2)}\n`);
+  if (validationFailures.length > 0) {
+    throw new Error(`Client bundle attribution validation failed:\n${validationFailures.join("\n")}`);
+  }
   return { runId, artifactPath, report };
 };
 

@@ -7,9 +7,11 @@ import { describe, expect, it } from "vitest";
 import {
   attributionForMetafile,
   checkBundleBudget,
+  createClientBundleFixtures,
   findForbiddenInputs,
   findUnwantedFeatureInputs,
   runClientBundleAttribution,
+  validateFixtureBudgets,
 } from "../scripts/client-bundle-attribution.mjs";
 
 describe("client bundle attribution", () => {
@@ -72,6 +74,53 @@ describe("client bundle attribution", () => {
         budget: { maxMinifiedBytes: 100, maxBrotliBytes: 20 },
       }),
     ).toEqual({ ok: false, reason: "Brotli budget" });
+  });
+
+  it("requires every fixture to have a positive finite budget", () => {
+    const fixtures = [{ name: "static" }, { name: "minimal-if" }];
+
+    expect(validateFixtureBudgets({}, fixtures)).toMatchObject({ ok: false, reason: "missing fixture budget" });
+    expect(
+      validateFixtureBudgets(
+        {
+          static: { maxMinifiedBytes: 100, maxBrotliBytes: 100 },
+          "minimal-if": { maxMinifiedBytes: 0, maxBrotliBytes: Number.POSITIVE_INFINITY },
+        },
+        fixtures,
+      ),
+    ).toMatchObject({ ok: false, reason: "invalid fixture budget" });
+    expect(
+      validateFixtureBudgets(
+        {
+          static: { maxMinifiedBytes: 100, maxBrotliBytes: 100 },
+          "minimal-if": { maxMinifiedBytes: 200, maxBrotliBytes: 200 },
+        },
+        fixtures,
+      ),
+    ).toEqual({ ok: true });
+  });
+
+  it("fails the attribution runner when an unwanted feature contributes bytes", async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), "tachyon-client-bundles-policy-"));
+    try {
+      const fixtures = createClientBundleFixtures().map((fixture) =>
+        fixture.name === "minimal-if"
+          ? {
+              ...fixture,
+              entrySource: `${fixture.entrySource}
+import { bindControl } from "./dist/runtime/form.js";
+export const unwanted = bindControl;
+`,
+            }
+          : fixture,
+      );
+
+      await expect(runClientBundleAttribution({ cwd: process.cwd(), artifactRoot, fixtures })).rejects.toThrow(
+        /minimal-if.*unwanted feature/i,
+      );
+    } finally {
+      await rm(artifactRoot, { recursive: true, force: true });
+    }
   });
 
   it("writes seven attributed fixtures with provenance and unique run artifacts", async () => {
