@@ -222,4 +222,6 @@ export type GenerateClientModuleOptions = {
   defaultScopeName?: string;
   hydrationChunkImports?: Readonly<Record<string, string>>;
   hydrationBoundaryId?: string;
+  /** Internal: the module is a boundary chunk that binds with an entry-provided hydration context. */
+  hydrationChunk?: boolean;
 };

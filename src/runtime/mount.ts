@@ -4,7 +4,7 @@ import {
   type CompiledHydrationBoundary,
   type HydrationBoundaryChunk,
 } from "./hydrate.js";
-import { createRoot } from "./signal.js";
+import { createRoot, onCleanup } from "./signal.js";
 
 export type ClientHydrationDynamicAttribute = {
   path: readonly number[];
@@ -39,44 +39,40 @@ export type HydrateError = {
   diagnostics?: ReturnType<typeof diagnoseHydrationBoundaries>;
 };
 
-const handleFor = (root: Element, cleanup: void | (() => void)): MountHandle => {
+type OwnedCleanup = {
+  dispose: () => void;
+  disposed: () => boolean;
+};
+
+/**
+ * Runs `bind` inside its own reactive root and registers the returned cleanup
+ * with that root, so disposing the enclosing owner runs the binding cleanup
+ * exactly once, just like an explicit `dispose()`.
+ */
+const ownCleanup = (bind: () => void | (() => void)): OwnedCleanup => {
   let isDisposed = false;
-  return {
-    root,
-    disposed: () => isDisposed,
-    dispose: () => {
-      if (isDisposed) return;
+  const dispose = createRoot((disposeRoot) => {
+    const cleanup = bind();
+    onCleanup(() => {
       isDisposed = true;
       cleanup?.();
-    },
-  };
+    });
+    return disposeRoot;
+  });
+  return { dispose, disposed: () => isDisposed };
 };
+
+const handleFor = (root: Element, owned: OwnedCleanup): MountHandle => ({
+  root,
+  disposed: owned.disposed,
+  dispose: owned.dispose,
+});
 
 const bindWithOwner = <Scope extends Record<string, unknown>>(
   root: Element,
   module: ClientTemplateModule<Scope>,
   scope: Scope,
-): (() => void) =>
-  createRoot((disposeRoot) => {
-    const bindCleanup = module.bind(root, scope);
-    return () => {
-      let firstError: unknown;
-      let failed = false;
-      try {
-        bindCleanup?.();
-      } catch (error) {
-        firstError = error;
-        failed = true;
-      }
-      try {
-        disposeRoot();
-      } catch (error) {
-        if (!failed) firstError = error;
-        failed = true;
-      }
-      if (failed) throw firstError;
-    };
-  });
+): OwnedCleanup => ownCleanup(() => module.bind(root, scope));
 
 const templateRootFor = (templateHtml: string): Element | undefined => {
   const template = document.createElement("template");
@@ -301,10 +297,10 @@ export const hydrate = <Scope extends Record<string, unknown>>(
     return err({ message: structureError });
   }
   try {
-    const cleanup = module.hydrate
-      ? module.hydrate(bindRoot, root, scope as Scope)
+    const owned = module.hydrate
+      ? ownCleanup(() => module.hydrate!(bindRoot, root, scope as Scope))
       : bindWithOwner(bindRoot, module, scope as Scope);
-    return ok(handleFor(root, cleanup));
+    return ok(handleFor(root, owned));
   } catch (error) {
     return err({ message: error instanceof Error ? error.message : String(error) });
   }

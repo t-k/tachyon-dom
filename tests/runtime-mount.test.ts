@@ -5,23 +5,55 @@ import { cleanupTextKeyedList, mountTextKeyedList } from "../src/runtime/list-te
 import { mountKeyedList } from "../src/runtime/list";
 import { createRoot, createSignal, effect } from "../src/runtime/signal";
 import { setText, textAt } from "../src/runtime/text";
+import * as attrRuntime from "../src/runtime/attr";
+import * as classRuntime from "../src/runtime/class";
+import * as conditionalRuntime from "../src/runtime/conditional";
+import * as eventRuntime from "../src/runtime/event";
+import * as formRuntime from "../src/runtime/form";
+import * as hydrateRuntime from "../src/runtime/hydrate";
+import * as listTextRuntime from "../src/runtime/list-text";
+import * as listRuntime from "../src/runtime/list";
+import * as signalRuntime from "../src/runtime/signal";
+import * as storeRuntime from "../src/runtime/store";
+import * as textRuntime from "../src/runtime/text";
 
+const runtimeModules: Record<string, Record<string, unknown>> = {
+  "tachyon-dom/runtime/attr": attrRuntime,
+  "tachyon-dom/runtime/class": classRuntime,
+  "tachyon-dom/runtime/conditional": conditionalRuntime,
+  "tachyon-dom/runtime/event": eventRuntime,
+  "tachyon-dom/runtime/form": formRuntime,
+  "tachyon-dom/runtime/hydrate": hydrateRuntime,
+  "tachyon-dom/runtime/list-text": listTextRuntime,
+  "tachyon-dom/runtime/list": listRuntime,
+  "tachyon-dom/runtime/signal": signalRuntime,
+  "tachyon-dom/runtime/store": storeRuntime,
+  "tachyon-dom/runtime/text": textRuntime,
+};
+
+// Evaluates generated client code against the real runtime modules by
+// resolving every `import { name as alias } from "tachyon-dom/runtime/..."`.
 const evaluateGeneratedClientModule = (code: string): ClientTemplateModule<Record<string, unknown>> => {
+  const names: string[] = [];
+  const values: unknown[] = [];
+  for (const match of code.matchAll(/^import \{([^}]*)\} from "([^"]+)";$/gm)) {
+    const runtime = runtimeModules[match[2] as string];
+    if (!runtime) throw new Error(`Unknown generated import ${match[2]}.`);
+    for (const specifier of (match[1] as string).split(",")) {
+      const [exported, alias] = specifier.trim().split(/\s+as\s+/);
+      if (!exported) continue;
+      names.push((alias ?? exported).trim());
+      values.push(runtime[exported.trim()]);
+    }
+  }
   const executable = code
     .replace(/^import .*$/gm, "")
     .replace(/^export default /m, "return ")
     .replace(/^export const /gm, "const ");
   return new Function(
-    "__tachyonCreateRoot",
-    "__tachyonSetText",
-    "__tachyonTextAt",
-    "__tachyonCleanupTextKeyedList",
-    "__tachyonMountTextKeyedList",
-    "__tachyonMountKeyedList",
+    ...names,
     `${executable}; return { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind };`,
-  )(createRoot, setText, textAt, cleanupTextKeyedList, mountTextKeyedList, mountKeyedList) as ClientTemplateModule<
-    Record<string, unknown>
-  >;
+  )(...values) as ClientTemplateModule<Record<string, unknown>>;
 };
 
 describe("client mount entrypoints", () => {
@@ -167,6 +199,111 @@ describe("client mount entrypoints", () => {
     mount(root, module, { rows: [{ id: "a", label: "A", count: 7 }] });
 
     expect(root.textContent).toBe("A:7");
+  });
+
+  it("runs mount and hydrate cleanups once when the enclosing owner is disposed", () => {
+    let mountCleanups = 0;
+    let hydrateCleanups = 0;
+    const module: ClientTemplateModule<Record<string, unknown>> = {
+      templateHtml: "<p></p>",
+      bind: () => () => mountCleanups++,
+      hydrate: () => () => hydrateCleanups++,
+    };
+    const mountRoot = document.createElement("div");
+    const hydrateRoot = document.createElement("div");
+    hydrateRoot.innerHTML = "<p></p>";
+    let mounted: ReturnType<typeof mount> | undefined;
+    let hydrated: ReturnType<typeof mount> | undefined;
+    const stop = createRoot((dispose) => {
+      mounted = mount(mountRoot, module, {});
+      const result = hydrate(hydrateRoot, module, {});
+      if (!result.ok) throw new Error(result.error.message);
+      hydrated = result.value;
+      return dispose;
+    });
+
+    stop();
+
+    expect(mountCleanups).toBe(1);
+    expect(hydrateCleanups).toBe(1);
+    expect(mounted?.disposed()).toBe(true);
+    expect(hydrated?.disposed()).toBe(true);
+    mounted?.dispose();
+    hydrated?.dispose();
+    expect(mountCleanups).toBe(1);
+    expect(hydrateCleanups).toBe(1);
+  });
+
+  it("creates each declared store once per owner and keeps instances, shadowing, and branches independent", () => {
+    const compiled = compileTemplate(
+      `<main><store label={seed()}/><p>{label}</p><if test={show}><section><store local={seed()}/><span>{local}</span><input bind:value={local}></section></if><component name="Card" title={label}><article><store local={title}/><b>{local}</b></article></component></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const scopeFor = (name: string, counter: { reads: number }) => {
+      const show = createSignal(false);
+      const scope = {
+        seed: () => {
+          counter.reads += 1;
+          return name;
+        },
+        show,
+        label: "shadowed by the top-level store",
+      };
+      return { scope, show };
+    };
+    const first = { reads: 0 };
+    const second = { reads: 0 };
+    const firstScope = scopeFor("first", first);
+    const secondScope = scopeFor("second", second);
+    const firstRoot = document.createElement("div");
+    const secondRoot = document.createElement("div");
+    document.body.append(firstRoot, secondRoot);
+
+    let stopParent: (() => void) | undefined;
+    let firstHandle: ReturnType<typeof mount> | undefined;
+    createRoot((dispose) => {
+      firstHandle = mount(firstRoot, module, firstScope.scope);
+      stopParent = dispose;
+    });
+    const secondHandle = mount(secondRoot, module, secondScope.scope);
+
+    // Top-level store: initial expression evaluated once per instance and the
+    // hidden branch has not initialised its store yet. The component-owned
+    // store is created once with its own value.
+    expect(first.reads).toBe(1);
+    expect(second.reads).toBe(1);
+    expect(firstRoot.querySelector("p")?.textContent).toBe("first");
+    expect(secondRoot.querySelector("p")?.textContent).toBe("second");
+    expect(firstRoot.querySelector("b")?.textContent).toBe("first");
+    expect(firstRoot.querySelector("span")).toBeNull();
+
+    firstScope.show.set(true);
+    expect(first.reads).toBe(2);
+    expect(second.reads).toBe(1);
+    const input = firstRoot.querySelector("input");
+    if (!(input instanceof HTMLInputElement)) throw new Error("Missing branch input.");
+    input.value = "edited";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(firstRoot.querySelector("span")?.textContent).toBe("edited");
+    // Shadowing: the branch-local store does not leak into the component's
+    // store of the same name, nor into the other instance.
+    expect(firstRoot.querySelector("b")?.textContent).toBe("first");
+    expect(secondRoot.querySelector("span")).toBeNull();
+
+    firstScope.show.set(false);
+    expect(firstRoot.querySelector("span")).toBeNull();
+    firstScope.show.set(true);
+    // Re-entering the branch creates a fresh store from the initial expression.
+    expect(first.reads).toBe(3);
+    expect(firstRoot.querySelector("span")?.textContent).toBe("first");
+
+    stopParent?.();
+    expect(firstHandle?.disposed()).toBe(true);
+    expect(() => firstHandle?.dispose()).not.toThrow();
+    firstScope.show.set(false);
+    expect(first.reads).toBe(3);
+    secondHandle.dispose();
   });
 
   it("schedules compiler-generated row hydration boundaries and replays one interaction", async () => {

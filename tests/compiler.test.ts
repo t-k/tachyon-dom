@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compileTemplate,
+  generateClientHydrationChunkModule,
   compileServerTemplate,
   generateClientModule,
   generateServerModule,
@@ -1283,6 +1284,21 @@ describe("HTML-first compiler", () => {
         { path: [], id: "boundaryId", idKind: "expression", strategy: "interaction", interaction: "click" },
       ],
     });
+  });
+
+  it("generates boundary chunks from the element the DOM path points at when stores precede it", () => {
+    const result = compileTemplate(
+      `<main><store name={"Ada"}/><input bind:value={name}><component name="Wrap"><section hydrate><store note={"x"}/><output>{name}</output></section></component></main>`,
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    const boundary = result.value.client.hydrationBoundaries[0];
+    if (!boundary) throw new Error("Missing boundary.");
+    const chunk = generateClientHydrationChunkModule(result.value, boundary.id, { reactive: true });
+
+    expect(boundary.path).toEqual([1]);
+    expect(chunk).toContain(`export const templateHtml = "<section><output> </output></section>";`);
+    expect(chunk).toContain("__tachyonSetText");
+    expect(chunk).toContain("__tachyonContext");
   });
 
   it("rejects automatic row-local hydration ids that cannot be unique", () => {

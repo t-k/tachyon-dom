@@ -4,6 +4,7 @@ import type {
   ConditionalBinding,
   ElementNode,
   GenerateClientModuleOptions,
+  HydrationBoundary,
   ListBinding,
   LoweringContext,
   StoreDefinition,
@@ -232,6 +233,7 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
   const hydrateBoundary = hydrationBoundaryFor(node, path);
   if (hydrateBoundary) {
     context.hydrationBoundaries.push(hydrateBoundary);
+    hydrationBoundaryNodes.set(hydrateBoundary, node);
   }
 
   for (const attr of node.attrs) {
@@ -400,12 +402,28 @@ const hasModelBinding = (binding: ClientBinding): boolean => {
 const clientModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
 
 const clientModuleCacheKey = (options: GenerateClientModuleOptions): string =>
-  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}\0${options.hydrationBoundaryId ?? ""}\0${JSON.stringify(options.hydrationChunkImports ?? {})}`;
+  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}\0${options.hydrationBoundaryId ?? ""}\0${options.hydrationChunk === true ? "chunk" : ""}\0${JSON.stringify(options.hydrationChunkImports ?? {})}`;
+
+/** Maps each compiled boundary to the template node it was lowered from. */
+const hydrationBoundaryNodes = new WeakMap<HydrationBoundary, ElementNode>();
+
+/**
+ * Children of a node in DOM order. `<store>` emits no node and `<component>`
+ * is transparent, so boundary paths (which are DOM paths) must skip and
+ * flatten them respectively.
+ */
+const domChildren = (node: ElementNode): TemplateNode[] =>
+  renderableChildren(node).flatMap((child) => {
+    if (child.type !== "element") return [child];
+    if (child.tagName === "store") return [];
+    if (child.tagName === "component") return domChildren(child);
+    return [child];
+  });
 
 const nodeAtElementPath = (root: ElementNode, path: readonly number[]): ElementNode | undefined => {
   let current = root;
   for (const index of path) {
-    const child = current.children[index];
+    const child = domChildren(current)[index];
     if (!child || child.type !== "element") return undefined;
     current = child;
   }
@@ -415,7 +433,7 @@ const nodeAtElementPath = (root: ElementNode, path: readonly number[]): ElementN
 const templateForHydrationBoundary = (template: CompiledTemplate, id: string): CompiledTemplate | undefined => {
   const boundary = template.client.hydrationBoundaries.find((candidate) => candidate.id === id);
   if (!boundary) return undefined;
-  const root = nodeAtElementPath(template.root, boundary.path);
+  const root = hydrationBoundaryNodes.get(boundary) ?? nodeAtElementPath(template.root, boundary.path);
   if (!root) return undefined;
   return {
     ...template,
@@ -436,7 +454,10 @@ export const generateClientHydrationChunkModule = (
   }
   // A boundary chunk always receives the scope that the entry module already
   // resolved, so it must never run the SFC setup factory again.
-  return generateClientModule(boundaryTemplate, options.reactive === undefined ? {} : { reactive: options.reactive });
+  return generateClientModule(boundaryTemplate, {
+    hydrationChunk: true,
+    ...(options.reactive === undefined ? {} : { reactive: options.reactive }),
+  });
 };
 
 export const generateClientModule = (template: CompiledTemplate, options: GenerateClientModuleOptions = {}): string => {
@@ -468,6 +489,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const reactive = options.reactive === true;
   const hydrationChunkImports = options.hydrationChunkImports ?? {};
   const hasHydrationChunks = Object.keys(hydrationChunkImports).length > 0;
+  const isHydrationChunk = options.hydrationChunk === true;
   const needsStore = template.client.stores.length > 0;
   const hasDefaultScope = typeof options.defaultScopeName === "string" && options.defaultScopeName.length > 0;
   const sourceName = scopeName(needsStore);
@@ -539,7 +561,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (hasHydrationChunks) {
     lines.push(
-      `import { createLazyHydrationBoundary as __tachyonCreateLazyHydrationBoundary, scheduleHydration as __tachyonScheduleHydration } from "tachyon-dom/runtime/hydrate";`,
+      `import { createLazyHydrationBoundary as __tachyonCreateLazyHydrationBoundary, diagnoseHydrationBoundaries as __tachyonDiagnoseHydrationBoundaries, scheduleHydration as __tachyonScheduleHydration } from "tachyon-dom/runtime/hydrate";`,
     );
   }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
@@ -563,25 +585,67 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     );
     lines.push(`};`);
   }
-  const bindSignature = hasHydrationChunks
-    ? `(root, inputScope = {}, __tachyonSkipHydration = false, __tachyonResolvedScope = false)`
+  // A hydration context carries the scope and the instance-owned state that
+  // the entry's hydrate() resolved once. Eager bindings and boundary chunks
+  // bind with the same context instead of re-running setup or re-creating
+  // stores.
+  const acceptsContext = hasHydrationChunks || isHydrationChunk;
+  const bindSignature = acceptsContext
+    ? `(root, inputScope = {}, __tachyonSkipHydration = false, __tachyonContext = undefined)`
     : `(root, inputScope = {})`;
   lines.push(`export const bind = ${bindSignature} => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`);
-  if (hasDefaultScope) {
+  const createScope = hasDefaultScope ? `__tachyonCreateScope(inputScope)` : `inputScope`;
+  if (acceptsContext) {
     lines.push(
-      `  const scope = ${hasHydrationChunks ? "__tachyonResolvedScope ? inputScope : " : ""}__tachyonCreateScope(inputScope);`,
+      `  const scope = __tachyonContext ? (__tachyonContext.state ?? __tachyonContext.scope) : ${createScope};`,
     );
   } else {
-    lines.push(`  const scope = inputScope;`);
+    lines.push(`  const scope = ${createScope};`);
   }
-  if (needsStore) {
-    const fields = template.client.stores
+  // Stores declared inside a top-level <component> are owned by the template
+  // instance too, but they are initialised after the component props so their
+  // initial expressions can read those props.
+  const componentStoreNames = new Set(template.client.components.flatMap((component) => component.stores.map((store) => store.name)));
+  const instanceStoreFields = (): string =>
+    template.client.stores
+      .filter((store) => !componentStoreNames.has(store.name))
       .map((store) => `${store.name}: ${expressionToScopeAccess(store.initial)}`)
       .join(", ");
-    lines.push(`  const state = ${runtimeNames.createStore}({ ...scope, ${fields} });`);
+  const emitComponentScope = (indent: string, reactiveProps: boolean): string[] => {
+    const emitted: string[] = [];
+    for (const component of template.client.components) {
+      for (const prop of component.props) {
+        const value = runtimeValueExpression(prop.expression, reactiveProps, sourceName);
+        emitted.push(
+          reactiveProps
+            ? `${indent}cleanups.push(${runtimeNames.effect}(() => { ${sourceName}.${prop.name} = ${value}; }));`
+            : `${indent}${sourceName}.${prop.name} = ${value};`,
+        );
+      }
+      for (const store of component.stores) {
+        emitted.push(`${indent}${sourceName}.${store.name} = ${runtimeValueExpression(store.initial, false, sourceName)};`);
+      }
+    }
+    return emitted;
+  };
+  if (needsStore) {
+    const createState = `${runtimeNames.createStore}({ ...scope, ${instanceStoreFields()} })`;
+    lines.push(
+      acceptsContext
+        ? `  const state = __tachyonContext && __tachyonContext.state ? __tachyonContext.state : ${createState};`
+        : `  const state = ${createState};`,
+    );
   }
   if (needsManualCleanup) {
     lines.push(`  const cleanups = [];`);
+  }
+  if (template.client.components.length > 0 && needsStore) {
+    const componentLines = emitComponentScope("    ", reactive && needsManualCleanup);
+    if (componentLines.length > 0) {
+      lines.push(acceptsContext ? `  if (!(__tachyonContext && __tachyonContext.state)) {` : `  {`);
+      lines.push(...componentLines);
+      lines.push(`  }`);
+    }
   }
   let listIndex = 0;
   let conditionalIndex = 0;
@@ -707,12 +771,14 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   lines.push(`  };`);
   lines.push(`});`);
   if (hasHydrationChunks) {
-    lines.push(`const __tachyonLoadHydrationChunk = (loader, scope) => Promise.resolve(loader()).then((module) => ({`);
+    lines.push(
+      `const __tachyonLoadHydrationChunk = (loader, context) => Promise.resolve(loader()).then((module) => ({`,
+    );
     lines.push(`  bind: (element) => {`);
     lines.push(
       `    const binder = typeof module === "function" ? module : typeof module.bind === "function" ? module.bind : module.default;`,
     );
-    lines.push(`    return typeof binder === "function" ? binder(element, scope) : undefined;`);
+    lines.push(`    return typeof binder === "function" ? binder(element, context.scope, false, context) : undefined;`);
     lines.push(`  },`);
     lines.push(`}));`);
     lines.push(
@@ -724,24 +790,33 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       lines.push(`  const scope = inputScope;`);
     }
     if (needsStore) {
-      const fields = template.client.stores
-        .map((store) => `${store.name}: ${expressionToScopeAccess(store.initial)}`)
-        .join(", ");
-      lines.push(`  const state = ${runtimeNames.createStore}({ ...scope, ${fields} });`);
+      lines.push(`  const state = ${runtimeNames.createStore}({ ...scope, ${instanceStoreFields()} });`);
     }
     lines.push(`  const cleanups = [];`);
-    lines.push(`  const eagerCleanup = bind(bindRoot, scope, true, true);`);
+    if (needsStore) lines.push(...emitComponentScope("  ", reactive));
+    lines.push(`  const __tachyonContext = { scope, state: ${needsStore ? "state" : "undefined"} };`);
+    const boundaryIdExpressions = template.client.hydrationBoundaries.map((boundary) =>
+      boundary.idKind === "expression"
+        ? `String(${expressionToScopeAccess(boundary.id, new Set(), sourceName)})`
+        : JSON.stringify(boundary.id),
+    );
+    // Preflight: every boundary in the hydration root must be adoptable
+    // before any listener, loader, or effect starts.
+    lines.push(
+      `  const __tachyonBoundaryDiagnostics = __tachyonDiagnoseHydrationBoundaries(hydrationRoot, [${boundaryIdExpressions.join(", ")}]);`,
+    );
+    lines.push(
+      `  if (__tachyonBoundaryDiagnostics.length > 0) throw new Error(__tachyonBoundaryDiagnostics.map((diagnostic) => diagnostic.message).join(" "));`,
+    );
+    lines.push(`  const eagerCleanup = bind(bindRoot, scope, true, __tachyonContext);`);
     lines.push(`  cleanups.push(eagerCleanup);`);
     let hydrationIndex = 0;
-    for (const boundary of template.client.hydrationBoundaries) {
+    for (const [boundaryIndex, boundary] of template.client.hydrationBoundaries.entries()) {
       const key = boundary.id;
-      const idExpression =
-        boundary.idKind === "expression"
-          ? expressionToScopeAccess(boundary.id, new Set(), sourceName)
-          : JSON.stringify(boundary.id);
+      const idExpression = boundaryIdExpressions[boundaryIndex] as string;
       const resultName = `__tachyonBoundary${hydrationIndex++}`;
       lines.push(
-        `  const ${resultName} = __tachyonCreateLazyHydrationBoundary(hydrationRoot, String(${idExpression}), () => __tachyonLoadHydrationChunk(hydrationChunks[${JSON.stringify(key)}], scope));`,
+        `  const ${resultName} = __tachyonCreateLazyHydrationBoundary(hydrationRoot, ${idExpression}, () => __tachyonLoadHydrationChunk(hydrationChunks[${JSON.stringify(key)}], __tachyonContext));`,
       );
       lines.push(`  if (!${resultName}.ok) throw new Error(${resultName}.error.message);`);
       lines.push(

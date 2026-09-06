@@ -1754,6 +1754,98 @@ export const bindRows = (root, rows, options) => effect(() => {
     }
   });
 
+  it("shares one instance-owned store between the entry, eager bindings, and a boundary chunk", async () => {
+    await mkdir(path.join(process.cwd(), "node_modules", ".cache"), { recursive: true });
+    const dir = await mkdtemp(path.join(process.cwd(), "node_modules", ".cache", "tachyon-lazy-store-"));
+    try {
+      await mkdir(path.join(dir, "src"), { recursive: true });
+      await writeFile(
+        path.join(dir, "src", "shared.td"),
+        `<script setup>globalThis.__tachyonStoreInits = (globalThis.__tachyonStoreInits ?? 0) + 1; const initialName = "Ada";</script>` +
+          `<main><store name={initialName}/><input bind:value={name}><section hydrate><store note={"x"}/><output>{name}</output><input class="inner" bind:value={name}></section></main>`,
+      );
+      await writeFile(path.join(dir, "src", "main.js"), `export { hydrate, bind } from "./shared.td";\n`);
+      const sourceRoot = path.resolve(process.cwd(), "src");
+      await viteBuild({
+        configFile: false,
+        logLevel: "silent",
+        root: dir,
+        plugins: [tachyonDom({ reactive: true })],
+        resolve: {
+          alias: [
+            { find: /^tachyon-dom\/(.+)$/, replacement: `${sourceRoot}/$1.ts` },
+            { find: "tachyon-dom", replacement: path.resolve(sourceRoot, "index.ts") },
+          ],
+        },
+        build: {
+          outDir: "dist",
+          minify: false,
+          rollupOptions: {
+            input: path.join(dir, "src", "main.js"),
+            preserveEntrySignatures: "strict",
+            output: { entryFileNames: "entry.js", chunkFileNames: "[name].js", format: "es" },
+          },
+        },
+      });
+      const entryPath = path.join(dir, "dist", "entry.js");
+      const entrySource = await readFile(entryPath, "utf8");
+      const chunkImport = /import\("\.\/([^"]+\.js)"\)/.exec(entrySource);
+      if (!chunkImport) throw new Error("Missing dynamic boundary chunk import in the built entry.");
+      const chunkCode = await readFile(path.join(dir, "dist", chunkImport[1] as string), "utf8");
+      expect(chunkCode).not.toContain("__tachyonStoreInits");
+
+      (globalThis as { __tachyonStoreInits?: number }).__tachyonStoreInits = 0;
+      document.body.innerHTML =
+        `<main><input><!--tachyon-hydrate:td-h-1:start--><section><output>Ada</output><input class="inner"></section><!--tachyon-hydrate:td-h-1:end--></main>`;
+      const entry = (await import(/* @vite-ignore */ pathToFileURL(entryPath).href)) as {
+        hydrate: (bindRoot: Element, hydrationRoot: Element) => () => void;
+      };
+      const root = document.querySelector("main");
+      const outer = root?.querySelector("input");
+      const inner = root?.querySelector("input.inner");
+      const output = root?.querySelector("output");
+      if (!root || !(outer instanceof HTMLInputElement) || !(inner instanceof HTMLInputElement) || !output) {
+        throw new Error("Missing shared store fixture nodes.");
+      }
+      const stop = entry.hydrate(root, root);
+      try {
+        expect(outer.value).toBe("Ada");
+        // Update the instance store through an eager binding before the
+        // boundary chunk is loaded.
+        outer.value = "Grace";
+        outer.dispatchEvent(new Event("input", { bubbles: true }));
+        await new Promise((resolveTimer) => setTimeout(resolveTimer, 50));
+        expect(output.textContent).toBe("Grace");
+        expect(inner.value).toBe("Grace");
+        inner.value = "Linus";
+        inner.dispatchEvent(new Event("input", { bubbles: true }));
+        expect(outer.value).toBe("Linus");
+        expect(output.textContent).toBe("Linus");
+        expect((globalThis as { __tachyonStoreInits?: number }).__tachyonStoreInits).toBe(1);
+      } finally {
+        stop();
+        delete (globalThis as { __tachyonStoreInits?: number }).__tachyonStoreInits;
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("validates every boundary marker before binding when hydrating a generated entry", async () => {
+    const plugin = tachyonDom({ reactive: true });
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+    const context = {
+      error(error: string): never {
+        throw new Error(error);
+      },
+    } as never;
+    const source = `<main><button on:click={first}>Eager</button><section hydrate>One</section><aside hydrate>Two</aside></main>`;
+    const entry = await plugin.transform.call(context, source, "/src/preflight.td");
+    const code = typeof entry === "object" ? String(entry?.code ?? "") : "";
+    expect(code).toContain("__tachyonDiagnoseHydrationBoundaries(hydrationRoot");
+    expect(code.indexOf("__tachyonDiagnoseHydrationBoundaries(hydrationRoot")).toBeLessThan(code.indexOf("bind(bindRoot"));
+  });
+
   it("generates one lazy chunk request per top-level hydration boundary", async () => {
     const plugin = tachyonDom();
     if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
