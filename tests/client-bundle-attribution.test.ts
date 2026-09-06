@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -118,6 +118,17 @@ export const unwanted = bindControl;
       await expect(runClientBundleAttribution({ cwd: process.cwd(), artifactRoot, fixtures })).rejects.toThrow(
         /minimal-if.*unwanted feature/i,
       );
+      const [runDirectory] = await readdir(artifactRoot);
+      if (!runDirectory) throw new Error("Missing failed attribution run directory.");
+      const failedReport = JSON.parse(await readFile(join(artifactRoot, runDirectory, "report.json"), "utf8")) as {
+        validation: { ok: boolean; failures: string[] };
+        fixtures: Array<{ name: string; minimalFeaturePolicy?: { ok: boolean; unwantedInputs: string[] } }>;
+      };
+      expect(failedReport.validation.ok).toBe(false);
+      expect(failedReport.validation.failures.join("\n")).toMatch(/minimal-if.*unwanted feature/i);
+      expect(failedReport.fixtures.find((fixture) => fixture.name === "minimal-if")?.minimalFeaturePolicy).toMatchObject({
+        ok: false,
+      });
     } finally {
       await rm(artifactRoot, { recursive: true, force: true });
     }
@@ -141,11 +152,18 @@ export const unwanted = bindControl;
           esbuild: string;
           zlib: string;
         };
-        buildOptions: { define: Record<string, string>; minify: boolean; platform: string };
+        buildOptions: {
+          define: Record<string, string>;
+          minify: boolean;
+          platform: string;
+          brotli: { algorithm: string; params: Record<string, unknown> };
+        };
         fixtures: Array<{
           name: string;
           sourceSha256: string;
           generatedSource: string;
+          compileOptions: unknown;
+          generateOptions: unknown;
           minifiedBytes: number;
           brotliBytes: number;
           inputs: Array<{ path: string; bytesInOutput: number }>;
@@ -165,6 +183,7 @@ export const unwanted = bindControl;
         define: { __TACHYON_PRODUCTION__: "true" },
         minify: true,
         platform: "browser",
+        brotli: { algorithm: "brotliCompressSync", params: {} },
       });
       expect(report.fixtures.map((fixture) => fixture.name)).toEqual([
         "static",
@@ -183,6 +202,13 @@ export const unwanted = bindControl;
         expect(fixture.inputs.some((input) => input.bytesInOutput > 0)).toBe(true);
         expect(fixture.inputs.every((input) => !("brotliBytes" in input))).toBe(true);
       }
+      expect(report.fixtures.find((fixture) => fixture.name === "reactive-text")?.generateOptions).toEqual({
+        instrumentBindings: false,
+        reactive: true,
+      });
+      expect(report.fixtures.find((fixture) => fixture.name === "composite-quick-example")?.compileOptions).toEqual({
+        whitespace: "condense",
+      });
       const minimalIf = report.fixtures.find((fixture) => fixture.name === "minimal-if");
       expect(minimalIf).toBeDefined();
       expect(minimalIf?.minimalFeaturePolicy?.ok).toBe(true);
