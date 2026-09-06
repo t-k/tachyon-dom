@@ -1008,9 +1008,13 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     const classImports = [
       ...(needsElementAt ? [`elementAt as ${runtimeNames.elementAt}`] : []),
       ...(needsClass ? [`setClassPresence as ${runtimeNames.setClassPresence}`] : []),
-      ...(needsListPathResolver ? [`nodeAtWithDynamicLists as ${runtimeNames.nodeAtWithDynamicLists}`] : []),
     ];
     lines.push(`import { ${classImports.join(", ")} } from "tachyon-dom/runtime/class";`);
+  }
+  if (needsListPathResolver) {
+    lines.push(
+      `import { nodeAtWithDynamicLists as ${runtimeNames.nodeAtWithDynamicLists} } from "tachyon-dom/runtime/list-path";`,
+    );
   }
   if (needsAttr) {
     lines.push(

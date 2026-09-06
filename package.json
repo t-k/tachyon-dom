@@ -172,6 +172,10 @@
       "types": "./dist/runtime/list-text.d.ts",
       "import": "./dist/runtime/list-text.js"
     },
+    "./runtime/list-path": {
+      "types": "./dist/runtime/list-path.d.ts",
+      "import": "./dist/runtime/list-path.js"
+    },
     "./runtime/keyed-rows": {
       "types": "./dist/runtime/keyed-rows.d.ts",
       "import": "./dist/runtime/keyed-rows.js"
@@ -635,6 +639,14 @@
         "@size-limit/esbuild"
       ],
       "limit": "8 KB"
+    },
+    {
+      "name": "runtime/list-path",
+      "path": "dist/runtime/list-path.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "2 KB"
     },
     {
       "name": "runtime/keyed-rows",

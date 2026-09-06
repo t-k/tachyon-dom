@@ -6,6 +6,7 @@ import * as eventRuntime from "../src/runtime/event";
 import * as formRuntime from "../src/runtime/form";
 import * as hydrateRuntime from "../src/runtime/hydrate";
 import * as listTextRuntime from "../src/runtime/list-text";
+import * as listPathRuntime from "../src/runtime/list-path";
 import * as listRuntime from "../src/runtime/list";
 import type { ClientTemplateModule } from "../src/runtime/mount";
 import * as signalRuntime from "../src/runtime/signal";
@@ -21,6 +22,7 @@ const runtimeModules: Record<string, Record<string, unknown>> = {
   "tachyon-dom/runtime/form": formRuntime,
   "tachyon-dom/runtime/hydrate": hydrateRuntime,
   "tachyon-dom/runtime/list-text": listTextRuntime,
+  "tachyon-dom/runtime/list-path": listPathRuntime,
   "tachyon-dom/runtime/list": listRuntime,
   "tachyon-dom/runtime/signal": signalRuntime,
   "tachyon-dom/runtime/store": storeRuntime,
