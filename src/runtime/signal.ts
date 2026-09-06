@@ -535,18 +535,22 @@ const isPromiseLike = (value: unknown): value is PromiseLike<unknown> =>
     ? typeof (value as { then?: unknown }).then === "function"
     : false;
 
-const reportAsyncEffectError = (runner: EffectRunner, runOwner: Owner, error: unknown): void => {
-  if (runner.disposed || runOwner.disposed) return;
-  const delivered = deliverError(runner.errorOwner, error);
-  if (delivered.handled) return;
+const scheduleUnhandledError = (error: unknown): void => {
   const throwError = (): void => {
-    throw delivered.error;
+    throw error;
   };
   if (typeof globalThis.queueMicrotask === "function") {
     globalThis.queueMicrotask(throwError);
   } else {
     setTimeout(throwError, 0);
   }
+};
+
+const reportAsyncEffectError = (runner: EffectRunner, runOwner: Owner, error: unknown): void => {
+  if (runner.disposed || runOwner.disposed) return;
+  const delivered = deliverError(runner.errorOwner, error);
+  if (delivered.handled) return;
+  scheduleUnhandledError(delivered.error);
 };
 
 const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
@@ -678,6 +682,7 @@ export const createResource = <Source, T>(
   let controller: AbortController | undefined;
   let cancelCurrent: ((reason: unknown) => void) | undefined;
   let disposeTracking: (() => void) | undefined;
+  let resourceRegistration: CleanupRegistration | undefined;
   let hasSource = false;
   let lastSource: Source;
   const sourceValue = (): Source => (isSignal(source) ? source() : source);
@@ -695,10 +700,6 @@ export const createResource = <Source, T>(
     const nextController = new AbortController();
     controller = nextController;
     const runVersion = ++version;
-    batch(() => {
-      loading.set(true);
-      error.set(undefined);
-    });
     let settled = false;
     let settle!: (result: ResourceOutcome<T>) => void;
     const cancel = (reason: unknown): void => settle({ status: "cancelled", reason });
@@ -709,38 +710,72 @@ export const createResource = <Source, T>(
         if (cancelCurrent === cancel) cancelCurrent = undefined;
         resolve(result);
       };
-      void Promise.resolve()
-        .then(() => fetcher(value, { signal: nextController.signal }))
-        .then(
-          (result) => {
-            if (settled) return;
-            if (!disposed && runVersion === version) {
+    });
+    cancelCurrent = cancel;
+    currentOutcome = outcome;
+    const runStateUpdate = (update: () => void): void => {
+      try {
+        batch(update);
+      } catch (error) {
+        scheduleUnhandledError(error);
+      }
+    };
+    runStateUpdate(() => {
+      loading.set(true);
+      error.set(undefined);
+    });
+    void Promise.resolve()
+      .then(() => {
+        if (settled) return undefined;
+        if (disposed || runVersion !== version) {
+          settle({ status: "cancelled", reason: "superseded" });
+          return undefined;
+        }
+        return fetcher(value, { signal: nextController.signal });
+      })
+      .then(
+        (result) => {
+          if (settled) return;
+          if (!disposed && runVersion === version) {
+            let notificationFailed = false;
+            let notificationError: unknown;
+            try {
               batch(() => {
                 data.set(result);
                 error.set(undefined);
                 loading.set(false);
               });
-              settle({ status: "success", data: result });
-            } else {
-              settle({ status: "cancelled", reason: "superseded" });
+            } catch (error) {
+              notificationError = error;
+              notificationFailed = true;
             }
-          },
-          (reason) => {
-            if (settled) return;
-            if (!disposed && runVersion === version) {
+            settle({ status: "success", data: result });
+            if (notificationFailed) scheduleUnhandledError(notificationError);
+          } else {
+            settle({ status: "cancelled", reason: "superseded" });
+          }
+        },
+        (reason) => {
+          if (settled) return;
+          if (!disposed && runVersion === version) {
+            let notificationFailed = false;
+            let notificationError: unknown;
+            try {
               batch(() => {
                 error.set(reason);
                 loading.set(false);
               });
-              settle({ status: "error", error: reason });
-            } else {
-              settle({ status: "cancelled", reason });
+            } catch (error) {
+              notificationError = error;
+              notificationFailed = true;
             }
-          },
-        );
-    });
-    cancelCurrent = cancel;
-    currentOutcome = outcome;
+            settle({ status: "error", error: reason });
+            if (notificationFailed) scheduleUnhandledError(notificationError);
+          } else {
+            settle({ status: "cancelled", reason });
+          }
+        },
+      );
     return outcome;
   };
   const run = (value = sourceValue()): Promise<T | undefined> => {
@@ -769,14 +804,30 @@ export const createResource = <Source, T>(
       }
       disposed = true;
       version += 1;
-      cancelCurrent?.("disposed");
+      let firstError: unknown;
+      let failed = false;
+      const attempt = (operation: () => void): void => {
+        try {
+          operation();
+        } catch (error) {
+          if (!failed) firstError = error;
+          failed = true;
+        }
+      };
+      const registration = resourceRegistration;
+      resourceRegistration = undefined;
+      if (registration) attempt(() => detachCleanup(registration));
+      attempt(() => cancelCurrent?.("disposed"));
       cancelCurrent = undefined;
-      controller?.abort();
-      disposeTracking?.();
+      attempt(() => controller?.abort());
+      controller = undefined;
+      attempt(() => disposeTracking?.());
+      disposeTracking = undefined;
       currentOutcome = undefined;
-      loading.set(false);
+      attempt(() => loading.set(false));
+      if (failed) throw firstError;
     },
   };
-  onCleanup(resource.dispose);
+  resourceRegistration = registerCleanup(currentEffectOwner ?? currentOwner, resource.dispose);
   return resource;
 };

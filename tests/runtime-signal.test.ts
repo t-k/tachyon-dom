@@ -493,6 +493,202 @@ describe("signal runtime", () => {
     expect(largestSetSnapshot).toBeLessThanOrEqual(1);
   });
 
+  it("settles successful outcomes after an unhandled data notification error", async () => {
+    let resolveFetch: ((value: string) => void) | undefined;
+    const subscriberError = new Error("subscriber failed");
+    const resource = createResource(
+      "source",
+      () =>
+        new Promise<string>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    effect(() => {
+      if (resource.data() !== undefined) {
+        throw subscriberError;
+      }
+    });
+
+    const reported: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown): void => {
+      reported.push(reason);
+    };
+    const onUncaughtException = (error: unknown): void => {
+      reported.push(error);
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+    process.on("uncaughtException", onUncaughtException);
+    try {
+      const outcome = resource.refetchOutcome();
+      await Promise.resolve();
+      resolveFetch?.("payload");
+      const result = await Promise.race([
+        outcome,
+        new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("resource outcome did not settle")), 100);
+        }),
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(result).toEqual({ status: "success", data: "payload" });
+      expect(resource.data()).toBe("payload");
+      expect(resource.loading()).toBe(false);
+      expect(reported).toContain(subscriberError);
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+      process.off("uncaughtException", onUncaughtException);
+      resource.dispose();
+    }
+  });
+
+  it("keeps successful outcomes separate from handled data notification errors", async () => {
+    let resolveFetch: ((value: string) => void) | undefined;
+    const subscriberError = new Error("handled subscriber failed");
+    const errors: unknown[] = [];
+    const errorScope = createReactiveErrorScope((error) => errors.push(error));
+    const resource = createResource(
+      "source",
+      () =>
+        new Promise<string>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    errorScope.run(() =>
+      effect(() => {
+        if (resource.data() !== undefined) {
+          throw subscriberError;
+        }
+      }),
+    );
+
+    try {
+      const outcome = resource.refetchOutcome();
+      await Promise.resolve();
+      resolveFetch?.("payload");
+
+      await expect(outcome).resolves.toEqual({ status: "success", data: "payload" });
+      expect(resource.data()).toBe("payload");
+      expect(resource.loading()).toBe(false);
+      expect(errors).toEqual([subscriberError]);
+    } finally {
+      resource.dispose();
+      errorScope.dispose();
+    }
+  });
+
+  it("keeps fetch errors separate from handled error notification errors", async () => {
+    let rejectFetch: ((reason: unknown) => void) | undefined;
+    const fetchError = new Error("fetch failed");
+    const subscriberError = new Error("handled error subscriber failed");
+    const errors: unknown[] = [];
+    const errorScope = createReactiveErrorScope((error) => errors.push(error));
+    const resource = createResource(
+      "source",
+      () =>
+        new Promise<string>((_resolve, reject) => {
+          rejectFetch = reject;
+        }),
+    );
+    errorScope.run(() =>
+      effect(() => {
+        if (resource.error() !== undefined) {
+          throw subscriberError;
+        }
+      }),
+    );
+
+    try {
+      const outcome = resource.refetchOutcome();
+      await Promise.resolve();
+      rejectFetch?.(fetchError);
+
+      await expect(outcome).resolves.toEqual({ status: "error", error: fetchError });
+      expect(resource.error()).toBe(fetchError);
+      expect(resource.loading()).toBe(false);
+      expect(errors).toEqual([subscriberError]);
+    } finally {
+      resource.dispose();
+      errorScope.dispose();
+    }
+  });
+
+  it("settles the previous outcome when a data notification refetches", async () => {
+    const resolvers: Array<(value: string) => void> = [];
+    const resource = createResource(
+      "source",
+      () =>
+        new Promise<string>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    let nextOutcome: Promise<import("../src/runtime/signal").ResourceOutcome<string>> | undefined;
+    effect(() => {
+      if (resource.data() === "first") {
+        nextOutcome = resource.refetchOutcome();
+      }
+    });
+
+    try {
+      const firstOutcome = resource.refetchOutcome();
+      await Promise.resolve();
+      resolvers[0]?.("first");
+
+      await expect(firstOutcome).resolves.toEqual({ status: "cancelled", reason: "superseded" });
+      await Promise.resolve();
+      expect(resolvers).toHaveLength(2);
+
+      resolvers[1]?.("second");
+      await expect(nextOutcome).resolves.toEqual({ status: "success", data: "second" });
+      expect(resource.data()).toBe("second");
+      expect(resource.loading()).toBe(false);
+    } finally {
+      resource.dispose();
+    }
+  });
+
+  it("settles the current outcome when a data notification disposes the resource", async () => {
+    let resolveFetch: ((value: string) => void) | undefined;
+    const resource = createResource(
+      "source",
+      () =>
+        new Promise<string>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    effect(() => {
+      if (resource.data() === "payload") {
+        resource.dispose();
+      }
+    });
+
+    const outcome = resource.refetchOutcome();
+    await Promise.resolve();
+    resolveFetch?.("payload");
+
+    await expect(outcome).resolves.toEqual({ status: "cancelled", reason: "disposed" });
+    expect(resource.data()).toBe("payload");
+    expect(resource.loading()).toBe(false);
+    resource.dispose();
+  });
+
+  it("detaches a resource before a throwing dispose notification", () => {
+    const notificationError = new Error("dispose notification failed");
+    let resource!: ReturnType<typeof createResource<string, string>>;
+    const disposeRoot = createRoot((dispose) => {
+      resource = createResource("source", () => new Promise<string>(() => undefined));
+      effect(() => {
+        if (!resource.loading()) {
+          throw notificationError;
+        }
+      });
+      return dispose;
+    });
+
+    expect(() => resource.dispose()).toThrow(notificationError);
+    expect(() => resource.dispose()).not.toThrow();
+    expect(() => disposeRoot()).not.toThrow();
+  });
+
   it("tracks createResource loading, data, and error states through effects", async () => {
     const key = createSignal("ok");
     const resource = createResource(key, async (value) => {

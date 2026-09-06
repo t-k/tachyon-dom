@@ -1,11 +1,32 @@
 import { describe, expect, it } from "vitest";
 import { createRuntimeDiagnostics } from "../src/runtime/diagnostics";
-import { createRoot, createSignal, effect } from "../src/runtime/signal";
+import { createResource, createRoot, createSignal, effect } from "../src/runtime/signal";
 import { compileTemplate, generateClientHydrationChunkModule, generateClientModule } from "../src/compiler";
 import { mount } from "../src/runtime/mount";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
 
 describe("development runtime diagnostics", () => {
+  it("detaches individually disposed resource cleanups from a live root", () => {
+    const diagnostics = createRuntimeDiagnostics();
+    const before = diagnostics.snapshot();
+    const resources: Array<ReturnType<typeof createResource<string, never>>> = [];
+    const disposeRoot = createRoot((dispose) => {
+      for (let index = 0; index < 1000; index++) {
+        resources.push(createResource("source", () => new Promise<never>(() => undefined)));
+      }
+      return dispose;
+    });
+
+    const active = diagnostics.snapshot();
+    expect(active.cleanups).toBe(before.cleanups + 1000);
+    for (const resource of resources) resource.dispose();
+
+    expect(diagnostics.snapshot()).toEqual({ ...active, cleanups: before.cleanups });
+    disposeRoot();
+    expect(diagnostics.snapshot()).toEqual(before);
+    diagnostics.dispose();
+  });
+
   it("observes resource counts without retaining disposed owners", () => {
     const diagnostics = createRuntimeDiagnostics({
       bindings: [{ templateId: "page.td", path: [0, 1], sourceOffset: 24 }],
