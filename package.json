@@ -233,6 +233,7 @@
     "bench:stream-backpressure": "tsx benchmark/streaming-backpressure.ts",
     "bench:html-minification": "tsx benchmark/html-minification.ts",
     "bench:template-representative": "tsx benchmark/template-representative.ts",
+    "bench:conditional-representative": "tsx benchmark/conditional-representative.ts",
     "bench:representation-evaluation": "tsx benchmark/representation-evaluation.ts",
     "bench:local:stable": "tsx benchmark/local-compare/run-local-compare.ts --iterations 30 --warmup 5",
     "bench:local:trace": "tsx benchmark/local-compare/run-local-compare.ts --serve-mode dev --iterations 1 --warmup 1 --trace-implementation tachyon-dom --trace-scenario partialUpdate",
