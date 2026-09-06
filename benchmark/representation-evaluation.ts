@@ -27,7 +27,7 @@ import { collectBenchmarkProvenance, collectDependencyVersions, type BenchmarkEn
  * production runtime's trace; metadata candidates are decoded by the real
  * hydrate consumer. Adoption of a production representation is out of scope.
  */
-export const REPRESENTATION_EVALUATION_CONTRACT_VERSION = 3;
+export const REPRESENTATION_EVALUATION_CONTRACT_VERSION = 4;
 
 type Metric = {
   durationMs: number;
@@ -84,6 +84,15 @@ type MetadataSample = Metric & {
   compactSize: ArtifactSize;
   currentParseDurationMs: number;
   compactParseDurationMs: number;
+  /** Dynamic import and module evaluation, including metadata decoding. */
+  currentDecodeDurationMs: number;
+  compactDecodeDurationMs: number;
+  /** Hydration against a fresh DOM after the candidate module is decoded. */
+  currentHydrateDurationMs: number;
+  compactHydrateDurationMs: number;
+  /** Heap delta across each candidate's decode and hydrate phases. */
+  currentDecodeHydrateHeapDeltaBytes: number;
+  compactDecodeHydrateHeapDeltaBytes: number;
   consumerEquivalent: boolean;
   /** Hydrate failures observed while validating, if any (empty when equivalent). */
   consumerErrors: string[];
@@ -756,6 +765,52 @@ const hydrateConsumer = (
   };
 };
 
+type MetadataCandidateMeasurement = {
+  decodeDurationMs: number;
+  hydrateDurationMs: number;
+  decodeHydrateHeapDeltaBytes: number;
+};
+
+let metadataMeasurementId = 0;
+
+const importBundledModule = async <Module>(code: string): Promise<Module> => {
+  const encoded = Buffer.from(code).toString("base64");
+  metadataMeasurementId++;
+  return (await import(`data:text/javascript;base64,${encoded}#tachyon-metadata-${metadataMeasurementId}`)) as Module;
+};
+
+const measureMetadataCandidate = async (code: string, markup: string): Promise<MetadataCandidateMeasurement> => {
+  const dom = new JSDOM("<body></body>");
+  const restore = installDom(dom);
+  const startedHeap = heapUsed();
+  const decodeStarted = performance.now();
+  try {
+    const module = await importBundledModule<HydratableModule>(code);
+    const decodeDurationMs = performance.now() - decodeStarted;
+    const hydrateStarted = performance.now();
+    const result = hydrateConsumer(module, markup, {
+      title: module.createSignal("A"),
+      active: true,
+      panel: "p-a",
+      note: "shadowed",
+    });
+    if (!result.ok) {
+      result.dispose();
+      throw new Error(result.message ?? "Metadata candidate hydration failed.");
+    }
+    const hydrateDurationMs = performance.now() - hydrateStarted;
+    result.dispose();
+    return {
+      decodeDurationMs,
+      hydrateDurationMs,
+      decodeHydrateHeapDeltaBytes: heapUsed() - startedHeap,
+    };
+  } finally {
+    restore();
+    dom.window.close();
+  }
+};
+
 const metadataEvaluation = async (iterations: number, warmup: number) => {
   const currentArtifact = generatedClientArtifact(metadataSource);
   const compactCode = compactMetadataArtifact(currentArtifact.code);
@@ -839,11 +894,22 @@ const metadataEvaluation = async (iterations: number, warmup: number) => {
     parseWith(current.bundledCode);
     parseWith(compact.bundledCode);
   }
-  const rawSamples: MetadataSample[] = Array.from({ length: iterations }, () => {
-    const sample = measure(() => undefined);
-    return {
-      durationMs: sample.durationMs,
-      heapDeltaBytes: sample.heapDeltaBytes,
+  const measurementMarkup = ssrFor(metadataSource, { title: "A", active: true, panel: "p-a", note: "local" });
+  const rawSamples: MetadataSample[] = [];
+  for (let index = 0; index < warmup; index++) {
+    await measureMetadataCandidate(current.bundledCode, measurementMarkup);
+    await measureMetadataCandidate(compact.bundledCode, measurementMarkup);
+  }
+  for (let index = 0; index < iterations; index++) {
+    const currentMeasurement = await measureMetadataCandidate(current.bundledCode, measurementMarkup);
+    const compactMeasurement = await measureMetadataCandidate(compact.bundledCode, measurementMarkup);
+    rawSamples.push({
+      durationMs:
+        currentMeasurement.decodeDurationMs +
+        currentMeasurement.hydrateDurationMs +
+        compactMeasurement.decodeDurationMs +
+        compactMeasurement.hydrateDurationMs,
+      heapDeltaBytes: currentMeasurement.decodeHydrateHeapDeltaBytes + compactMeasurement.decodeHydrateHeapDeltaBytes,
       allocatedBytes: null,
       currentArtifactHash: currentHash,
       compactArtifactHash: compactHash,
@@ -851,14 +917,20 @@ const metadataEvaluation = async (iterations: number, warmup: number) => {
       compactSize: compact.size,
       currentParseDurationMs: parseWith(current.bundledCode),
       compactParseDurationMs: parseWith(compact.bundledCode),
+      currentDecodeDurationMs: currentMeasurement.decodeDurationMs,
+      compactDecodeDurationMs: compactMeasurement.decodeDurationMs,
+      currentHydrateDurationMs: currentMeasurement.hydrateDurationMs,
+      compactHydrateDurationMs: compactMeasurement.hydrateDurationMs,
+      currentDecodeHydrateHeapDeltaBytes: currentMeasurement.decodeHydrateHeapDeltaBytes,
+      compactDecodeHydrateHeapDeltaBytes: compactMeasurement.decodeHydrateHeapDeltaBytes,
       consumerEquivalent,
       consumerErrors,
       consumerTexts,
       twoInstancesIndependent,
       storeShadowingIndependent,
       hmrSafe,
-    };
-  });
+    });
+  }
   const validated = consumerEquivalent && twoInstancesIndependent && storeShadowingIndependent && hmrSafe;
   return {
     rawSamples,
@@ -892,7 +964,7 @@ export const runRepresentationEvaluation = async (
       candidateContracts: [
         "row:same-artifact-executed-and-sized:create-update-reorder-remove-dispose-identity-removed-nodes:fallback-generic-mixed",
         "signal:production-trace-oracle:batch-diamond-computed-priority-reentrant-resubscribe-throw-sibling-cleanup-throw-dispose",
-        "metadata:compact-decoded-artifact-consumed-by-hydrate:two-instances-store-shadowing-hmr-stale-rejection",
+        "metadata:compact-decoded-artifact-consumed-by-hydrate:parse-decode-hydrate:two-instances-store-shadowing-hmr-stale-rejection",
       ],
     },
     measurements: {

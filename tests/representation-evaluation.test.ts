@@ -43,6 +43,14 @@ describe("runtime representation evaluations", () => {
     const metadata = result.measurements.metadata;
     expect(metadata.rawSamples).toHaveLength(2);
     for (const sample of metadata.rawSamples) {
+      expect(sample.durationMs).toBeGreaterThanOrEqual(0);
+      expect(sample.heapDeltaBytes).toBeTypeOf("number");
+      expect(sample.currentDecodeDurationMs).toBeGreaterThanOrEqual(0);
+      expect(sample.compactDecodeDurationMs).toBeGreaterThanOrEqual(0);
+      expect(sample.currentHydrateDurationMs).toBeGreaterThanOrEqual(0);
+      expect(sample.compactHydrateDurationMs).toBeGreaterThanOrEqual(0);
+      expect(sample.currentDecodeHydrateHeapDeltaBytes).toBeTypeOf("number");
+      expect(sample.compactDecodeHydrateHeapDeltaBytes).toBeTypeOf("number");
       expect(sample.consumerEquivalent).toBe(true);
       expect(sample.twoInstancesIndependent).toBe(true);
       expect(sample.storeShadowingIndependent).toBe(true);
