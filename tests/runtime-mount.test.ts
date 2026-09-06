@@ -98,6 +98,45 @@ describe("client mount entrypoints", () => {
     expect(root.querySelector("li")).toBe(firstRow);
   });
 
+  it("reconciles generated text rows with indexes, outer signals, and nested signals", () => {
+    const compiled = compileTemplate(
+      `<ul><for each={rows} as="row" index="position" key={row.id}><li>{prefix()}:{position}:{row.label()}</li></for></ul>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const generated = generateClientModule(compiled.value, { reactive: true });
+    expect(generated).toContain(`mountGeneratedTextKeyedList as __tachyonMountTextKeyedList`);
+    const module = evaluateGeneratedClientModule(generated);
+    const root = document.createElement("div");
+    const prefix = createSignal("P");
+    type GeneratedRow = { id: string; label: ReturnType<typeof createSignal<string>> };
+    const rows = createSignal<GeneratedRow[]>([
+      { id: "a", label: createSignal("A") },
+      { id: "b", label: createSignal("B") },
+      { id: "c", label: createSignal("C") },
+    ]);
+
+    mount(root, module, { prefix, rows });
+    const firstRow = root.querySelectorAll("li")[0];
+    const thirdRow = root.querySelectorAll("li")[2];
+    expect(root.textContent).toBe("P:0:AP:1:BP:2:C");
+
+    rows()[0]?.label.set("A2");
+    prefix.set("Q");
+    expect(root.textContent).toBe("Q:0:A2Q:1:BQ:2:C");
+
+    const currentRows = rows();
+    const currentThird = currentRows[2];
+    const currentFirst = currentRows[0];
+    if (!currentThird || !currentFirst) throw new Error("Missing generated list rows.");
+    rows.set([currentThird, { id: "d", label: createSignal("D") }, currentFirst]);
+
+    expect(root.textContent).toBe("Q:0:CQ:1:DQ:2:A2");
+    expect(root.querySelectorAll("li")[0]).toBe(thirdRow);
+    expect(root.querySelectorAll("li")[2]).toBe(firstRow);
+    expect(root.querySelectorAll("li")[1]?.textContent).toBe("Q:1:D");
+    expect(root.querySelectorAll("li").length).toBe(3);
+  });
+
   it("rejects hydration when the existing root structure does not match", () => {
     const compiled = compileTemplate(`<p>{name}</p>`);
     if (!compiled.ok) throw new Error(compiled.error.message);
