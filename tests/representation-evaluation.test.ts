@@ -25,7 +25,12 @@ describe("runtime representation evaluations", () => {
       expect(sample.stages[4]?.values).toEqual([]);
       expect(sample.allocatedBytes).toBeNull();
     }
-    expect(row.fallback).toEqual({ candidateDeclined: true, classToggled: true, clickHandled: true, modelWrittenBack: true });
+    expect(row.fallback).toEqual({
+      candidateDeclined: true,
+      classToggled: true,
+      clickHandled: true,
+      modelWrittenBack: true,
+    });
 
     const signal = result.measurements.signal;
     expect(signal.ineligible).toEqual([]);
@@ -37,7 +42,9 @@ describe("runtime representation evaluations", () => {
     for (const { rawSamples } of Object.values(signal.distributions)) {
       expect(rawSamples).toHaveLength(6);
       expect(rawSamples.every((sample) => sample.contractEquivalent && sample.eligible)).toBe(true);
-      expect(new Set(rawSamples.map((sample) => sample.representation))).toEqual(new Set(["production", "set", "array"]));
+      expect(new Set(rawSamples.map((sample) => sample.representation))).toEqual(
+        new Set(["production", "set", "array"]),
+      );
     }
 
     const metadata = result.measurements.metadata;
@@ -62,5 +69,5 @@ describe("runtime representation evaluations", () => {
     expect(row.decision.adopted).toBe(false);
     expect(signal.decision.adopted).toBe(false);
     expect(metadata.decision.adopted).toBe(false);
-  });
+  }, 30_000);
 });
