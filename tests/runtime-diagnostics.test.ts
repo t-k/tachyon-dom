@@ -112,4 +112,42 @@ describe("development runtime diagnostics", () => {
     expect(diagnostics.liveBindings()).toEqual([]);
     diagnostics.dispose();
   });
+
+  it("assigns stable anonymous diagnostics identities to direct compilations", () => {
+    const source = `<main><h1>{title}</h1><p>{message}</p></main>`;
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const code = generateClientModule(compiled.value, { reactive: true });
+    const repeatedCode = generateClientModule(compiled.value, { reactive: true });
+    const other = compileTemplate(`<main><h1>{title}</h1><p>{other}</p></main>`);
+    if (!other.ok) throw new Error(other.error.message);
+    const otherCode = generateClientModule(other.value, { reactive: true });
+    const identityFrom = (value: string): { templateId: string; revision: string } => {
+      const match = value.match(/__tachyonRegisterBindings\("([^"]+)", "([^"]+)"/);
+      if (!match?.[1] || !match[2]) throw new Error("Missing anonymous diagnostics identity.");
+      return { templateId: match[1], revision: match[2] };
+    };
+    const identity = identityFrom(code);
+    const otherIdentity = identityFrom(otherCode);
+    expect(repeatedCode).toBe(code);
+    expect(identity.templateId).toMatch(/^anonymous:/);
+    expect(identity.revision).toMatch(/^[0-9a-f]+$/);
+    expect(identity).not.toEqual(otherIdentity);
+
+    const module = evaluateGeneratedClientModule(code);
+    const diagnostics = createRuntimeDiagnostics();
+    const root = document.createElement("div");
+    document.body.append(root);
+    const handle = mount(root, module, { title: "Ada", message: "Ready" });
+    try {
+      const locations = diagnostics.liveBindings().filter((location) => location.kind === "text");
+      expect(locations.filter((location) => location.effectId !== undefined)).toHaveLength(2);
+      expect(locations.every((location) => location.templateId === identity.templateId)).toBe(true);
+      expect(locations.every((location) => location.revision === identity.revision)).toBe(true);
+      expect(locations.every((location) => location.sourceOffset !== undefined)).toBe(true);
+    } finally {
+      handle.dispose();
+      diagnostics.dispose();
+    }
+  });
 });

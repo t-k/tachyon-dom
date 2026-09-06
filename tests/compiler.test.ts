@@ -1302,7 +1302,7 @@ describe("HTML-first compiler", () => {
     expect(chunk).toContain("__tachyonContext");
   });
 
-  it("records template source spans for client bindings and instruments modules only when a template id is given", () => {
+  it("records template source spans for client bindings and allows instrumentation to be disabled", () => {
     const source = `<main><h1 class:on={active}>{ title }</h1><if test={show}><p>{note}</p></if><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></main>`;
     const result = compileTemplate(source);
     if (!result.ok) throw new Error(result.error.message);
@@ -1322,7 +1322,7 @@ describe("HTML-first compiler", () => {
     if (ifBinding.kind !== "if") throw new Error("Expected an if binding.");
     expect(spanText(ifBinding.bindings[0] as (typeof result.value.client.bindings)[number])).toBe("note");
 
-    const plain = generateClientModule(result.value, { reactive: true });
+    const plain = generateClientModule(result.value, { reactive: true, instrumentBindings: false });
     expect(plain).not.toContain("__tachyonRegisterBindings");
     expect(plain).not.toContain("__tachyonEnterBinding");
 

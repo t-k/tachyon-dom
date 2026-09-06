@@ -27,6 +27,7 @@ import {
   renderAppResponse,
   type HtmlWhitespacePolicy,
 } from "../src/app";
+import { compileTemplate, generateClientModule } from "../src/compiler";
 import type { TemplateWhitespacePolicy } from "../src/compiler/types";
 import { diagnoseTachyonSfc, diagnoseTemplate, formatDiagnostic } from "../src/diagnostics";
 import { appendInlineSourceMap, createSourceMap, shouldEmitSourceMap, type SourceMap } from "../src/source-map";
@@ -2130,6 +2131,47 @@ export const bindRows = (root, rows, options) => effect(() => {
     const configHook = staging.config as (config: unknown, env: { command: string; mode: string }) => { define?: Record<string, string> } | undefined;
     expect(configHook.call({} as never, {}, { command: "build", mode: "staging" })?.define?.__TACHYON_PRODUCTION__).toBe("true");
     expect(configHook.call({} as never, {}, { command: "build", mode: "development" })).toBeUndefined();
+  });
+
+  it("removes direct generated diagnostics from a production bundle", async () => {
+    const compiled = compileTemplate(`<main><h1>{title}</h1><p>{message}</p></main>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const dir = await mkdtemp(path.join(process.cwd(), "node_modules", ".cache", "tachyon-diag-direct-prod-"));
+    try {
+      await mkdir(path.join(dir, "src"), { recursive: true });
+      await writeFile(
+        path.join(dir, "src", "generated.js"),
+        generateClientModule(compiled.value, {
+          reactive: true,
+          templateId: "direct-production-template",
+          sourceRevision: "direct-production-revision",
+        }),
+      );
+      const sourceRoot = path.resolve(process.cwd(), "src");
+      await viteBuild({
+        configFile: false,
+        logLevel: "silent",
+        root: dir,
+        mode: "production",
+        define: { __TACHYON_PRODUCTION__: "true" },
+        resolve: {
+          alias: [{ find: /^tachyon-dom\/(.+)$/, replacement: `${sourceRoot}/$1.ts` }],
+        },
+        build: {
+          outDir: "dist",
+          minify: true,
+          rollupOptions: { input: path.join(dir, "src", "generated.js"), output: { entryFileNames: "entry.js" } },
+        },
+      });
+      const output = await readFile(path.join(dir, "dist", "entry.js"), "utf8");
+      expect(output).not.toContain("direct-production-template");
+      expect(output).not.toContain("direct-production-revision");
+      expect(output).not.toContain("registerTemplateBindings");
+      expect(output).not.toContain("enterBindingLocation");
+      expect(output).not.toContain("exitBindingLocation");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("type checks templates that are only imported through hydrate-only", async () => {

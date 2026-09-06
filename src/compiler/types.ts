@@ -230,11 +230,13 @@ export type GenerateClientModuleOptions = {
    */
   hydrateOnly?: boolean;
   /**
-   * Development-only binding location instrumentation. When a template id is
-   * given, the module registers each top-level binding's source span and
-   * attributes owners/effects created while binding to that location. Omit it
-   * for production output; nothing is emitted without it.
+   * Binding location instrumentation. Direct compiler output enables it by
+   * default with a deterministic anonymous identity. Vite disables it for
+   * builds that do not have a development source root; production defines can
+   * also remove it from a generated module.
    */
+  instrumentBindings?: boolean;
+  /** Optional source identity for development binding diagnostics. */
   templateId?: string;
   /** Revision of the source the spans belong to (for example a content hash). */
   sourceRevision?: string;

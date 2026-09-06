@@ -257,6 +257,7 @@ const codeForTarget = (
   }
   return generateClientModule(template, {
     reactive,
+    instrumentBindings: instrumentation !== undefined,
     ...(defaultScopeName ? { defaultScopeName } : {}),
     ...(hydrationBoundaryId ? { hydrationBoundaryId } : {}),
     ...(hydrationChunkImports ? { hydrationChunkImports } : {}),

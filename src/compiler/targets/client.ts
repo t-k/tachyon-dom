@@ -13,6 +13,8 @@ import type {
   TemplateNode,
   TextNode,
 } from "../types.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { storeDefinitionsFor } from "../ir.js";
 import type { ExpressionSourceLocation } from "../utils.js";
 import {
@@ -611,8 +613,13 @@ const hasModelBinding = (binding: ClientBinding): boolean => {
 
 const clientModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
 
+const hexDigest = (bytes: Uint8Array): string =>
+  Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+
+const sourceRevisionFor = (source: string): string => hexDigest(sha256(utf8ToBytes(source)));
+
 const clientModuleCacheKey = (options: GenerateClientModuleOptions): string =>
-  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}\0${options.hydrationBoundaryId ?? ""}\0${options.hydrationChunk === true ? "chunk" : ""}\0${options.hydrateOnly === true ? "hydrate-only" : ""}\0${options.templateId ?? ""}\0${options.sourceRevision ?? ""}\0${JSON.stringify(options.hydrationChunkImports ?? {})}`;
+  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}\0${options.hydrationBoundaryId ?? ""}\0${options.hydrationChunk === true ? "chunk" : ""}\0${options.hydrateOnly === true ? "hydrate-only" : ""}\0${options.instrumentBindings === false ? "0" : "1"}\0${options.templateId ?? ""}\0${options.sourceRevision ?? ""}\0${JSON.stringify(options.hydrationChunkImports ?? {})}`;
 
 /** Maps each compiled boundary to the template node it was lowered from. */
 const hydrationBoundaryNodes = new WeakMap<HydrationBoundary, ElementNode>();
@@ -672,6 +679,7 @@ export const generateClientHydrationChunkModule = (
     ...(options.templateId ? { templateId: options.templateId } : {}),
     ...(options.sourceRevision ? { sourceRevision: options.sourceRevision } : {}),
     ...(options.mapSourceOffset ? { mapSourceOffset: options.mapSourceOffset } : {}),
+    ...(options.instrumentBindings === undefined ? {} : { instrumentBindings: options.instrumentBindings }),
   });
 };
 
@@ -715,9 +723,14 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const isHydrationChunk = options.hydrationChunk === true;
   const emitsHydrate = hasHydrationChunks || hydrateOnly;
   const bindName = hydrateOnly ? "__tachyonBindEager" : "bind";
-  const instrumentBindings = typeof options.templateId === "string" && options.templateId.length > 0;
+  const instrumentBindings = options.instrumentBindings !== false;
+  const sourceRevision = options.sourceRevision ?? sourceRevisionFor(template.source);
+  const templateId =
+    typeof options.templateId === "string" && options.templateId.length > 0
+      ? options.templateId
+      : `anonymous:${sourceRevision}`;
   const mapSourceOffset = options.mapSourceOffset ?? ((offset: number): number => offset);
-  const bindingLocationId = (index: number): string => `${options.templateId}#${options.sourceRevision ?? ""}#${index}`;
+  const bindingLocationId = (index: number): string => `${templateId}#${sourceRevision}#${index}`;
   const needsStore = template.client.stores.length > 0;
   const hasDefaultScope = typeof options.defaultScopeName === "string" && options.defaultScopeName.length > 0;
   const sourceName = scopeName(needsStore);
@@ -801,20 +814,18 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`export const hydrateOnly = true;`);
   }
   if (instrumentBindings) {
-    // Only development builds request instrumentation; the production define
-    // additionally folds every call away should it ever be present.
-    lines.push(
-      `const __tachyonDev = typeof __TACHYON_PRODUCTION__ === "undefined" || __TACHYON_PRODUCTION__ === false;`,
-    );
     const spans = bindings.map((binding, index) => {
       const span = bindingSourceSpan(binding);
       return `[${index}, ${JSON.stringify(binding.kind)}, ${JSON.stringify(binding.path)}, ${
         span ? `${mapSourceOffset(span.start)}, ${mapSourceOffset(span.end)}` : "-1, -1"
       }]`;
     });
+    lines.push(`const __tachyonRegisterTemplate = () => {`);
+    lines.push(`  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__) return;`);
     lines.push(
-      `const __tachyonRegisterTemplate = () => __tachyonDev && __tachyonRegisterBindings(${JSON.stringify(options.templateId)}, ${JSON.stringify(options.sourceRevision ?? "")}, [${spans.join(", ")}]);`,
+      `  __tachyonRegisterBindings(${JSON.stringify(templateId)}, ${JSON.stringify(sourceRevision)}, [${spans.join(", ")}]);`,
     );
+    lines.push(`};`);
   }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
@@ -932,7 +943,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     if (bindingInHydrationBoundary) lines.push(`  if (!__tachyonSkipHydration) {`);
     if (instrumentBindings) {
       lines.push(
-        `  const __tachyonPreviousBinding${bindingIndex} = __tachyonDev ? __tachyonEnterBinding(${JSON.stringify(bindingLocationId(bindingIndex))}) : undefined;`,
+        `  const __tachyonPreviousBinding${bindingIndex} = typeof __TACHYON_PRODUCTION__ === "undefined" || !__TACHYON_PRODUCTION__ ? __tachyonEnterBinding(${JSON.stringify(bindingLocationId(bindingIndex))}) : undefined;`,
       );
       lines.push(`  try {`);
     }
@@ -1021,7 +1032,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     }
     if (instrumentBindings) {
       lines.push(`  } finally {`);
-      lines.push(`    if (__tachyonDev) __tachyonExitBinding(__tachyonPreviousBinding${bindingIndex});`);
+      lines.push(
+        `    if (typeof __TACHYON_PRODUCTION__ === "undefined" || !__TACHYON_PRODUCTION__) __tachyonExitBinding(__tachyonPreviousBinding${bindingIndex});`,
+      );
       lines.push(`  }`);
     }
     if (bindingInHydrationBoundary) {
