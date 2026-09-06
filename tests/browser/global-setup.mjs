@@ -88,7 +88,7 @@ const buildLazyFixture = async () => {
 
 const buildConditionalFixture = async () => {
   const { compileTemplate, generateClientModule, renderServerTemplate } = await import(`${distRoot}/compiler.js`);
-  const source = `<main><if test={leftVisible}><button data-branch="left" on:click={saveLeft}>{left}</button></if><if test={rightVisible}><button data-branch="right" on:click={saveRight}>{right}</button></if><if test={ssrVisible}><p>{ssrLabel}<span>{ssrOther}</span></p></if><footer>Static</footer></main>`;
+  const source = `<main><if test={leftVisible}><button data-branch="left" on:click={saveLeft}>{left}</button></if><if test={rightVisible}><button data-branch="right" on:click={saveRight}>{right}</button></if><if test={ssrVisible}><p>{ssrLabel}<span>{ssrOther}</span></p></if><if test={genericVisible}><form><input bind:value={genericValue}></form></if><footer>{tail}</footer></main>`;
   const compiled = compileTemplate(source);
   if (!compiled.ok) throw new Error(compiled.error.message);
   const generated = generateClientModule(compiled.value, { reactive: true, instrumentBindings: false });
@@ -106,6 +106,8 @@ window.runConditionalFollowup = () => {
   const rightVisible = createSignal(true);
   const left = createSignal("A");
   const right = createSignal("B");
+  const genericVisible = createSignal(true);
+  const tail = createSignal("Static");
   let leftClicks = 0;
   let rightClicks = 0;
   const mounted = mount(mountRoot, clientModule, {
@@ -116,15 +118,25 @@ window.runConditionalFollowup = () => {
     ssrVisible: createSignal(false),
     ssrLabel: createSignal("unused"),
     ssrOther: createSignal("unused"),
+    genericVisible,
+    genericValue: "input",
+    tail,
     saveLeft: () => leftClicks++,
     saveRight: () => rightClicks++,
   });
   const firstRight = mountRoot.querySelector('[data-branch="right"]');
+  const firstForm = mountRoot.querySelector("form");
   leftVisible.set(false);
   firstRight?.click();
   leftVisible.set(true);
   left.set("A2");
   right.set("B2");
+  tail.set("Static2");
+  genericVisible.set(false);
+  const formRemoved = mountRoot.querySelector("form") === null;
+  genericVisible.set(true);
+  const secondForm = mountRoot.querySelector("form");
+  tail.set("Static3");
   const rightPreserved = mountRoot.querySelector('[data-branch="right"]') === firstRight;
   const mountedText = mountRoot.textContent;
   const beforeDisposeRightClicks = rightClicks;
@@ -136,6 +148,8 @@ window.runConditionalFollowup = () => {
     leftClicks,
     rightClicks,
     disposedRightListener: rightClicks === beforeDisposeRightClicks,
+    formRemoved,
+    formRecreated: secondForm !== firstForm,
   };
 
   const ssrRoot = document.querySelector("#conditional-ssr");
@@ -143,6 +157,10 @@ window.runConditionalFollowup = () => {
   const ssrVisible = createSignal(true);
   const ssrLabel = createSignal("");
   const ssrOther = createSignal(null);
+  const hydratedGenericVisible = createSignal(true);
+  const hydratedTail = createSignal("Hydrated footer");
+  const serverForm = ssrRoot.querySelector("form");
+  const serverFooter = ssrRoot.querySelector("footer");
   const hydrated = hydrate(ssrRoot, clientModule, {
     leftVisible: createSignal(false),
     rightVisible: createSignal(false),
@@ -151,6 +169,9 @@ window.runConditionalFollowup = () => {
     ssrVisible,
     ssrLabel,
     ssrOther,
+    genericVisible: hydratedGenericVisible,
+    genericValue: "hydrated input",
+    tail: hydratedTail,
     saveLeft: () => undefined,
     saveRight: () => undefined,
   });
@@ -165,12 +186,22 @@ window.runConditionalFollowup = () => {
   const multipleTextBindings = paragraph.textContent === "second";
   ssrVisible.set(false);
   ssrVisible.set(true);
+  const genericFormPreserved = ssrRoot.querySelector("form") === serverForm;
+  hydratedTail.set("Hydrated footer 2");
+  hydratedGenericVisible.set(false);
+  const genericFormRemoved = ssrRoot.querySelector("form") === null;
+  hydratedGenericVisible.set(true);
+  const recreatedForm = ssrRoot.querySelector("form");
   const recreatedParagraph = ssrRoot.querySelector("p");
   const hydrateResult = {
     materialized,
     multipleTextBindings,
     serverIdentity: serverParagraph === ssrRoot.querySelector("p"),
     recreated: recreatedParagraph !== serverParagraph,
+    genericFormPreserved,
+    genericFormRemoved,
+    genericFormRecreated: recreatedForm !== serverForm,
+    genericFooterUpdated: serverFooter?.textContent === "Hydrated footer 2",
     text: ssrRoot.textContent,
   };
   hydrated.value.dispose();
@@ -208,6 +239,9 @@ window.__conditionalReady = true;
     ssrVisible: true,
     ssrLabel: "",
     ssrOther: null,
+    genericVisible: true,
+    genericValue: "server input",
+    tail: "Server footer",
   });
   await writeFile(
     resolve(outDir, "conditional-fixture.html"),

@@ -187,10 +187,185 @@ describe("client mount entrypoints", () => {
     }
   });
 
-  it.each(["", null, undefined])("materializes generated conditional SSR text markers for %j", (initialValue) => {
+  it("keeps bindings after a generated conditional on their original nodes", () => {
+    const compiled = compileTemplate(`<main><if test={visible}><p>{left}</p></if><footer>{tail}</footer></main>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const visible = createSignal(true);
+    const left = createSignal("A");
+    const tail = createSignal("Footer");
+    const root = document.createElement("div");
+    const handle = mount(root, module, { visible, left, tail });
+    const paragraph = root.querySelector("p");
+    const footer = root.querySelector("footer");
+
+    expect(paragraph?.textContent).toBe("A");
+    expect(footer?.textContent).toBe("Footer");
+    tail.set("Footer2");
+    expect(paragraph?.textContent).toBe("A");
+    expect(footer?.textContent).toBe("Footer2");
+    visible.set(false);
+    expect(root.querySelector("p")).toBeNull();
+    expect(root.querySelector("footer")).toBe(footer);
+    tail.set("Footer3");
+    expect(footer?.textContent).toBe("Footer3");
+    handle.dispose();
+
+    const ssrRoot = document.createElement("div");
+    ssrRoot.innerHTML = renderServerTemplate(compiled.value, { visible: true, left: "SSR", tail: "Footer" });
+    const serverParagraph = ssrRoot.querySelector("p");
+    const serverFooter = ssrRoot.querySelector("footer");
+    const hydratedVisible = createSignal(true);
+    const hydratedLeft = createSignal("Hydrated");
+    const hydratedTail = createSignal("Hydrated footer");
+    const hydrated = hydrate(ssrRoot, module, {
+      visible: hydratedVisible,
+      left: hydratedLeft,
+      tail: hydratedTail,
+    });
+    if (!hydrated.ok) throw new Error(hydrated.error.message);
+
+    expect(ssrRoot.querySelector("p")).toBe(serverParagraph);
+    expect(ssrRoot.querySelector("footer")).toBe(serverFooter);
+    expect(serverParagraph?.textContent).toBe("Hydrated");
+    expect(serverFooter?.textContent).toBe("Hydrated footer");
+    hydratedTail.set("Hydrated footer 2");
+    expect(serverParagraph?.textContent).toBe("Hydrated");
+    expect(serverFooter?.textContent).toBe("Hydrated footer 2");
+    hydrated.value.dispose();
+  });
+
+  it("keeps events after a generated conditional on their original element", () => {
     const compiled = compileTemplate(
-      `<main><if test={visible}><p>{label}<span>{other}</span></p></if></main>`,
+      `<main><if test={visible}><p>Branch</p></if><button on:click={save}>{label}</button></main>`,
     );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const visible = createSignal(true);
+    const label = createSignal("Button");
+    let clicks = 0;
+    const root = document.createElement("div");
+    const handle = mount(root, module, { visible, label, save: () => clicks++ });
+    const button = root.querySelector("button");
+
+    button?.click();
+    expect(clicks).toBe(1);
+    visible.set(false);
+    label.set("Updated");
+    expect(root.querySelector("button")).toBe(button);
+    expect(button?.textContent).toBe("Updated");
+    button?.click();
+    expect(clicks).toBe(2);
+    handle.dispose();
+    button?.click();
+    expect(clicks).toBe(2);
+  });
+
+  it("maps SSR parents after an earlier conditional expands to multiple roots", () => {
+    const compiled = compileTemplate(
+      `<main><if test={firstVisible}><p>{left}</p><p>Extra</p></if><section><if test={secondVisible}><button>{right}</button></if></section></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      firstVisible: true,
+      secondVisible: true,
+      left: "L",
+      right: "R",
+    });
+    const serverButton = root.querySelector("section button");
+    const firstVisible = createSignal(true);
+    const secondVisible = createSignal(true);
+    const right = createSignal("Hydrated");
+    const result = hydrate(root, module, { firstVisible, secondVisible, left: "L", right });
+    if (!result.ok) throw new Error(result.error.message);
+
+    expect(root.querySelectorAll("button")).toHaveLength(1);
+    expect(root.querySelector("section button")).toBe(serverButton);
+    right.set("Updated");
+    expect(serverButton?.textContent).toBe("Updated");
+    expect(root.querySelector("p button")).toBeNull();
+    result.value.dispose();
+  });
+
+  it("keeps bindings after a generic conditional follows a lightweight conditional", () => {
+    const compiled = compileTemplate(
+      `<main><if test={core}><p>{left}</p></if><if test={generic}><form><input bind:value={value}></form></if><footer>{tail}</footer></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const core = createSignal(true);
+    const generic = createSignal(true);
+    const left = createSignal("A");
+    const tail = createSignal("Footer");
+    const root = document.createElement("div");
+    const handle = mount(root, module, { core, generic, left, tail, value: "Input" });
+    const footer = root.querySelector("footer");
+
+    expect(root.querySelector("form")).not.toBeNull();
+    expect(footer?.textContent).toBe("Footer");
+    tail.set("Footer2");
+    expect(footer?.textContent).toBe("Footer2");
+    generic.set(false);
+    expect(root.querySelector("form")).toBeNull();
+    tail.set("Footer3");
+    expect(footer?.textContent).toBe("Footer3");
+    generic.set(true);
+    expect(root.querySelector("form")).not.toBeNull();
+    handle.dispose();
+
+    const ssrRoot = document.createElement("div");
+    ssrRoot.innerHTML = renderServerTemplate(compiled.value, {
+      core: true,
+      generic: true,
+      left: "SSR",
+      tail: "SSR footer",
+      value: "SSR input",
+    });
+    const serverForm = ssrRoot.querySelector("form");
+    const serverFooter = ssrRoot.querySelector("footer");
+    const hydrated = hydrate(ssrRoot, module, {
+      core: createSignal(true),
+      generic: createSignal(true),
+      left: createSignal("Hydrated"),
+      tail: createSignal("Hydrated footer"),
+      value: "Hydrated input",
+    });
+    if (!hydrated.ok) throw new Error(hydrated.error.message);
+
+    expect(ssrRoot.querySelector("form")).toBe(serverForm);
+    expect(ssrRoot.querySelector("footer")).toBe(serverFooter);
+    expect(serverFooter?.textContent).toBe("Hydrated footer");
+    hydrated.value.dispose();
+  });
+
+  it("evaluates a generated conditional expression once during initial binding", () => {
+    const compiled = compileTemplate(`<main><if test={check()}><p>A</p></if></main>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+
+    let mountChecks = 0;
+    const mounted = document.createElement("div");
+    const mountHandle = mount(mounted, module, { check: () => (mountChecks++, true) });
+    expect(mountChecks).toBe(1);
+    mountHandle.dispose();
+
+    let serverChecks = 0;
+    const ssrRoot = document.createElement("div");
+    ssrRoot.innerHTML = renderServerTemplate(compiled.value, {
+      check: () => (serverChecks++, true),
+    });
+    let hydrateChecks = 0;
+    const hydrated = hydrate(ssrRoot, module, { check: () => (hydrateChecks++, true) });
+    if (!hydrated.ok) throw new Error(hydrated.error.message);
+    expect(serverChecks).toBe(1);
+    expect(hydrateChecks).toBe(1);
+    hydrated.value.dispose();
+  });
+
+  it.each(["", null, undefined])("materializes generated conditional SSR text markers for %j", (initialValue) => {
+    const compiled = compileTemplate(`<main><if test={visible}><p>{label}<span>{other}</span></p></if></main>`);
     if (!compiled.ok) throw new Error(compiled.error.message);
     const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
     const root = document.createElement("div");
@@ -354,7 +529,9 @@ describe("client mount entrypoints", () => {
       expect(secondRoot.textContent).toBe("B1");
       expect(secondRoot.querySelector("li")).toBe(secondRow);
 
-      const throwingCompiled = compileTemplate(`<ul><for each={rows} key={row.id}><li>{register(row.id)}</li></for></ul>`);
+      const throwingCompiled = compileTemplate(
+        `<ul><for each={rows} key={row.id}><li>{register(row.id)}</li></for></ul>`,
+      );
       if (!throwingCompiled.ok) throw new Error(throwingCompiled.error.message);
       const throwingModule = evaluateGeneratedClientModule(
         generateClientModule(throwingCompiled.value, { reactive: true }),
@@ -401,10 +578,8 @@ describe("client mount entrypoints", () => {
     expect(subscriptionCount).toBe(0);
   });
 
-  it("uses the generated keyRead adapter for composite keys and changes signatures safely", () => {
-    const compiled = compileTemplate(
-      `<ul><for each={rows} key={row.id + suffix}><li>{row.label}</li></for></ul>`,
-    );
+  it("uses the generated keyRead adapter for composite keys and changes row keys safely", () => {
+    const compiled = compileTemplate(`<ul><for each={rows} key={row.id + suffix}><li>{row.label}</li></for></ul>`);
     if (!compiled.ok) throw new Error(compiled.error.message);
     const generated = generateClientModule(compiled.value, { reactive: true });
     expect(generated).toContain(`keyRead: (scope) =>`);

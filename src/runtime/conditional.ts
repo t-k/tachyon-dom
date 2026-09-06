@@ -6,6 +6,7 @@ import { mountKeyedList } from "./list.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { setText } from "./text.js";
 import { createStore, onOwnerCleanup, read } from "./signal.js";
+import { setPreparedConditionalNodeCount, takePreparedConditionalNodes } from "./conditional-prepared.js";
 import {
   createHydrationBoundary,
   scheduleHydration,
@@ -537,17 +538,19 @@ export const mountConditional = (
         states.delete(anchor);
       }
     }
+    setPreparedConditionalNodeCount(anchor, 0);
     return;
   }
   if (current && current.signature !== signature) {
     cleanupOwnedSubtree(anchor);
   }
+  const adoptedNodes = current ? undefined : takePreparedConditionalNodes(anchor);
   const state =
     current && current.signature === signature
       ? current
       : {
           signature,
-          nodes: createNodes(options.templateHtml),
+          nodes: adoptedNodes ?? createNodes(options.templateHtml),
           cleanups: [],
           refCleanups: new Map<number, () => void>(),
           scope: scopeFor(scope, options),
@@ -565,6 +568,7 @@ export const mountConditional = (
       if (states.get(anchor) !== state) return;
       states.delete(anchor);
       detachOwnerCleanup(anchor);
+      setPreparedConditionalNodeCount(anchor, 0);
       cleanup(state);
     });
   }
@@ -575,11 +579,12 @@ export const mountConditional = (
     if (disposer) ownerCleanupDisposers.set(anchor, disposer);
   }
   if (state !== current) {
-    anchor.after(...state.nodes);
+    if (!adoptedNodes) anchor.after(...state.nodes);
     state.hydrationDeferredBindings = setupHydration(anchor, state, options);
   } else {
     updateScope(state, scope, options);
   }
+  setPreparedConditionalNodeCount(anchor, state.nodes.length);
   const entries = options.bindings.flatMap((binding, index) =>
     state.hydrationDeferredBindings.has(binding) ? [] : [{ binding, index }],
   );

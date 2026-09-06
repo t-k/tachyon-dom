@@ -4,6 +4,13 @@ import { delegate } from "./event.js";
 import { onOwnerCleanup, read } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { setText, textAt } from "./text.js";
+import {
+  preparedConditionalNodeCount,
+  registerPreparedAnchor,
+  setPreparedConditionalNodeCount,
+  setPreparedConditionalNodes,
+  takePreparedConditionalNodes,
+} from "./conditional-prepared.js";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 
@@ -71,13 +78,28 @@ export type ConditionalCoreAnchorDescriptor = {
   path: readonly number[];
   visible: unknown;
   templateHtml: string;
+  parentTagName?: string;
+};
+
+type PreparedConditional = {
+  path: readonly number[];
+  key: string;
+  parentKey: string;
+  index: number;
+  nodeCount: number;
+};
+
+type PreparedPathPlan = {
+  byParent: Map<string, PreparedConditional[]>;
+  modes: Map<string, "placeholder" | "expanded" | "omitted">;
+  invalid: Set<string>;
 };
 
 const states = new WeakMap<Comment, ConditionalCoreState>();
 const ownerCleanupDisposers = new WeakMap<Comment, () => void>();
 const anchorsByRoot = new WeakMap<Node, Map<string, Comment>>();
 const initialSnapshots = new WeakMap<Node, { topLevel: Node[]; nodes: Map<string, Node> }>();
-const preparedAdoptions = new WeakMap<Comment, Node[]>();
+const preparedPathPlans = new WeakMap<Node, PreparedPathPlan>();
 
 const pathKey = (path: readonly number[]): string => path.join(".");
 
@@ -128,52 +150,154 @@ const registerAnchor = (root: Node, path: readonly number[], anchor: Comment): v
   const anchors = anchorsByRoot.get(root) ?? new Map<string, Comment>();
   anchors.set(pathKey(path), anchor);
   anchorsByRoot.set(root, anchors);
+  registerPreparedAnchor(root, pathKey(path), anchor);
 };
 
 const expectedNodeCount = (templateHtml: string): number => createNodes(templateHtml).length;
+
+const orderedPreparedConditionals = (descriptors: readonly ConditionalCoreAnchorDescriptor[]): PreparedConditional[] =>
+  descriptors
+    .map((descriptor) => ({
+      path: descriptor.path,
+      key: pathKey(descriptor.path),
+      parentKey: pathKey(descriptor.path.slice(0, -1)),
+      index: descriptor.path.at(-1) ?? 0,
+      nodeCount: expectedNodeCount(descriptor.templateHtml),
+    }))
+    .sort((left, right) => {
+      if (left.path.length !== right.path.length) return left.path.length - right.path.length;
+      for (let index = 0; index < left.path.length; index++) {
+        const difference = (left.path[index] ?? 0) - (right.path[index] ?? 0);
+        if (difference !== 0) return difference;
+      }
+      return 0;
+    });
+
+const rawIndexFor = (plan: PreparedPathPlan, parentKey: string, logicalIndex: number): number => {
+  let index = logicalIndex;
+  for (const descriptor of plan.byParent.get(parentKey) ?? []) {
+    if (descriptor.index >= logicalIndex) continue;
+    const mode = plan.modes.get(descriptor.key);
+    if (mode === "expanded") index += descriptor.nodeCount - 1;
+    else if (mode === "omitted") index -= 1;
+  }
+  return index;
+};
+
+const insertedAnchorCountBefore = (plan: PreparedPathPlan, parentKey: string, logicalIndex: number): number => {
+  let count = 0;
+  for (const descriptor of plan.byParent.get(parentKey) ?? []) {
+    if (descriptor.index >= logicalIndex) continue;
+    const mode = plan.modes.get(descriptor.key);
+    if (mode === "expanded" || mode === "omitted") count++;
+  }
+  return count;
+};
+
+const initialNodeAt = (
+  root: Node,
+  path: readonly number[],
+  plan: PreparedPathPlan,
+  initialNodes: ReadonlyMap<string, Node>,
+): Node | undefined => {
+  const rawPath: number[] = [];
+  const parentPath: number[] = [];
+  for (const logicalIndex of path) {
+    rawPath.push(rawIndexFor(plan, pathKey(parentPath), logicalIndex));
+    parentPath.push(logicalIndex);
+  }
+  return initialNodes.get(pathKey(rawPath)) ?? (rawPath.length === 0 ? root : undefined);
+};
+
+const preparedNodeFor = (root: Node, path: readonly number[], plan: PreparedPathPlan): Node | undefined => {
+  let current: Node | undefined = root;
+  const parentPath: number[] = [];
+  for (const logicalIndex of path) {
+    if (!current) return undefined;
+    const parentKey = pathKey(parentPath);
+    let actualIndex = logicalIndex;
+    for (const descriptor of plan.byParent.get(parentKey) ?? []) {
+      if (descriptor.index >= logicalIndex) continue;
+      const anchor = anchorsByRoot.get(root)?.get(descriptor.key);
+      const state = anchor ? states.get(anchor) : undefined;
+      const preparedCount = preparedConditionalNodeCount(root, descriptor.key);
+      if (preparedCount !== undefined) actualIndex += preparedCount;
+      else if (state && state.nodes.length > 0) actualIndex += state.nodes.length;
+      else if (plan.modes.get(descriptor.key) === "expanded") actualIndex += descriptor.nodeCount;
+    }
+    current = logicalChildren(current)[actualIndex];
+    parentPath.push(logicalIndex);
+  }
+  return current;
+};
 
 /**
  * Reserves every lightweight conditional anchor before any branch is mounted.
  * SSR omits false branches, so the client path alone cannot identify a later
  * sibling until the active server branches have been accounted for.
  */
-export const prepareConditionalCore = (
-  root: Node,
-  descriptors: readonly ConditionalCoreAnchorDescriptor[],
-): void => {
+export const prepareConditionalCore = (root: Node, descriptors: readonly ConditionalCoreAnchorDescriptor[]): void => {
   const initialNodes = initialNodesFor(root);
-  const byParent = new Map<string, ConditionalCoreAnchorDescriptor[]>();
-  for (const descriptor of descriptors) {
-    const key = pathKey(descriptor.path.slice(0, -1));
-    const siblings = byParent.get(key) ?? [];
+  const ordered = orderedPreparedConditionals(descriptors);
+  const byParent = new Map<string, PreparedConditional[]>();
+  for (const descriptor of ordered) {
+    const siblings = byParent.get(descriptor.parentKey) ?? [];
     siblings.push(descriptor);
-    byParent.set(key, siblings);
+    byParent.set(descriptor.parentKey, siblings);
   }
-  for (const descriptorsForParent of byParent.values()) {
-    descriptorsForParent.sort((left, right) => (left.path.at(-1) ?? 0) - (right.path.at(-1) ?? 0));
-    const parentPath = descriptorsForParent[0]?.path.slice(0, -1) ?? [];
-    const parent = initialNodes.get(pathKey(parentPath)) ?? nodeAt(root, parentPath);
-    if (!parent) continue;
-    let adoptedBefore = 0;
-    for (const descriptor of descriptorsForParent) {
-      const index = (descriptor.path.at(-1) ?? 0) + adoptedBefore;
-      const children = logicalChildren(parent);
-      const candidate = children[index];
-      if (candidate instanceof Comment && !isHydrationMarker(candidate)) {
-        registerAnchor(root, descriptor.path, candidate);
-        continue;
-      }
-      const expected = createNodes(descriptor.templateHtml);
-      const adopted = descriptor.visible ? adoptableNodes(parent, index, expected) : undefined;
-      const anchor = document.createComment("");
-      parent.insertBefore(anchor, candidate ?? null);
-      registerAnchor(root, descriptor.path, anchor);
-      if (adopted) {
-        preparedAdoptions.set(anchor, adopted);
-        adoptedBefore += expectedNodeCount(descriptor.templateHtml);
-      }
+  const plan: PreparedPathPlan = { byParent, modes: new Map(), invalid: new Set() };
+  preparedPathPlans.set(root, plan);
+
+  for (const descriptor of ordered) {
+    const source = descriptors.find((candidate) => pathKey(candidate.path) === descriptor.key);
+    const parentPath = descriptor.path.slice(0, -1);
+    const parent = initialNodeAt(root, parentPath, plan, initialNodes);
+    const expectedParentTag = source?.parentTagName?.toLowerCase();
+    if (!parent || (expectedParentTag && (!(parent instanceof Element) || parent.localName !== expectedParentTag))) {
+      plan.invalid.add(descriptor.key);
+      continue;
+    }
+    const rawIndex = rawIndexFor(plan, descriptor.parentKey, descriptor.index);
+    const index = rawIndex + insertedAnchorCountBefore(plan, descriptor.parentKey, descriptor.index);
+    const candidate = logicalChildren(parent)[index];
+    if (candidate instanceof Comment && !isHydrationMarker(candidate)) {
+      plan.modes.set(descriptor.key, "placeholder");
+      registerAnchor(root, descriptor.path, candidate);
+      continue;
+    }
+    const expected = createNodes(source?.templateHtml ?? "");
+    const visible = Boolean(source?.visible);
+    const adopted = visible ? adoptableNodes(parent, index, expected) : undefined;
+    if (visible && !adopted) {
+      plan.invalid.add(descriptor.key);
+      continue;
+    }
+    const anchor = document.createComment("");
+    parent.insertBefore(anchor, candidate ?? null);
+    registerAnchor(root, descriptor.path, anchor);
+    if (adopted) {
+      plan.modes.set(descriptor.key, "expanded");
+      setPreparedConditionalNodes(anchor, adopted);
+    } else {
+      plan.modes.set(descriptor.key, "omitted");
     }
   }
+};
+
+/** Resolves a generated binding path after conditional anchors and SSR branches are prepared. */
+export const preparedNodeAt = (root: Node, path: readonly number[]): Node => {
+  const plan = preparedPathPlans.get(root);
+  if (!plan) {
+    const node = nodeAt(root, path);
+    if (!node) throw new TypeError(`Missing generated binding node at path ${path.join(".")}.`);
+    return node;
+  }
+  if (path.some((_, index) => plan.invalid.has(pathKey(path.slice(0, index + 1))))) {
+    throw new TypeError(`Cannot resolve generated binding path ${path.join(".")}.`);
+  }
+  const node = preparedNodeFor(root, path, plan);
+  if (!node) throw new TypeError(`Missing generated binding node at path ${path.join(".")}.`);
+  return node;
 };
 
 const childAt = (node: Node, index: number): Node | undefined => logicalChildren(node)[index];
@@ -227,10 +351,11 @@ const resolveAnchor = (
   visible: unknown,
   templateHtml: string,
 ): AnchorResolution | undefined => {
+  const preparedPlan = preparedPathPlans.get(root);
+  if (preparedPlan?.invalid.has(pathKey(path))) return undefined;
   const registered = registeredAnchorFor(root, path);
   if (registered) {
-    const adoptedNodes = preparedAdoptions.get(registered);
-    preparedAdoptions.delete(registered);
+    const adoptedNodes = takePreparedConditionalNodes(registered);
     return { anchor: registered, adoptedNodes };
   }
   const initialNodes = initialNodesFor(root);
@@ -305,6 +430,7 @@ const disposeState = (anchor: Comment, state: ConditionalCoreState): void => {
   if (states.get(anchor) !== state) return;
   states.delete(anchor);
   detachOwnerCleanup(anchor);
+  setPreparedConditionalNodeCount(anchor, 0);
   cleanupState(state);
 };
 
@@ -367,6 +493,7 @@ export const mountConditionalCore = (
         detachOwnerCleanup(anchor);
       }
     }
+    setPreparedConditionalNodeCount(anchor, 0);
     return;
   }
   const signature = signatureFor(options);
@@ -390,5 +517,6 @@ export const mountConditionalCore = (
   } else {
     state.scope = scope;
   }
+  setPreparedConditionalNodeCount(anchor, state.nodes.length);
   bindNodes(state, options, state !== current);
 };
