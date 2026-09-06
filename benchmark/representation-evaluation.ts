@@ -530,7 +530,7 @@ const consumeCompactMetadata = (encoded: string): MetadataShape => {
 };
 
 const scopeIndependence = async (source: string): Promise<boolean> => {
-  const module = await loadGeneratedClientModule(source);
+  const { module } = await loadGeneratedClientModule(source);
   const dom = new JSDOM("<main id=one><p> </p></main><main id=two><p> </p></main>");
   const restore = installDom(dom);
   try {
