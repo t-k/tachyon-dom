@@ -436,9 +436,7 @@ export const generateClientHydrationChunkModule = (
   }
   // A boundary chunk always receives the scope that the entry module already
   // resolved, so it must never run the SFC setup factory again.
-  return generateClientModule(boundaryTemplate, {
-    ...(options.reactive === undefined ? {} : { reactive: options.reactive }),
-  });
+  return generateClientModule(boundaryTemplate, options.reactive === undefined ? {} : { reactive: options.reactive });
 };
 
 export const generateClientModule = (template: CompiledTemplate, options: GenerateClientModuleOptions = {}): string => {
