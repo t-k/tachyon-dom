@@ -408,8 +408,10 @@ const scriptSymbols = (
         continue;
       }
       if (!token.name || reservedWords.has(token.name)) continue;
-      if (depth === 0 && (previous?.punct === "(" || previous?.punct === ",")) names.push(token);
-      else if (depth > 0 && previous?.punct !== "." && tokens[index + 1]?.punct !== ":") names.push(token);
+      const spread =
+        previous?.punct === "." && tokens[index - 2]?.punct === "." && tokens[index - 3]?.punct === ".";
+      if (depth === 0 && (previous?.punct === "(" || previous?.punct === "," || spread)) names.push(token);
+      else if (depth > 0 && (previous?.punct !== "." || spread) && tokens[index + 1]?.punct !== ":") names.push(token);
     }
     return names;
   };
@@ -440,6 +442,19 @@ const scriptSymbols = (
       if (closeIndex < 0) continue;
       registerParameters(parameterTokens(openIndex, closeIndex), tokens[openIndex]!.start, closeIndex + 1);
       continue;
+    }
+    // Method shorthand and class methods: `name(params) {`.
+    if (
+      token.name &&
+      !reservedWords.has(token.name) &&
+      tokens[index + 1]?.punct === "(" &&
+      tokens[index - 1]?.name !== "function"
+    ) {
+      const closeIndex = closingParenIndex(index + 1);
+      if (closeIndex >= 0 && tokens[closeIndex + 1]?.punct === "{") {
+        registerParameters(parameterTokens(index + 1, closeIndex), tokens[index + 1]!.start, closeIndex + 1);
+        continue;
+      }
     }
     if (!isArrowAt(index)) continue;
     const previous = tokens[index - 1];

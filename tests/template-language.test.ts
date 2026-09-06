@@ -126,4 +126,16 @@ function local() { const title = "local"; return title; }
       `<script>const initial = 1;const f = ({ a = initial, b: [c = initial] }) => a + c + initial;const g = (x = initial, y: number = initial) => x + y;</script><p>{initial}</p>`,
     );
   });
+
+  it("keeps rest parameters and method shorthand parameters in their own scope", () => {
+    const source = `<script>const args = [];const v = 1;const f = (...args) => args.length;const o = { m(v) { return v; }, n: v };</script><p>{args}{v}</p>`;
+    const renameArgs = templateRenameAt(source, positionAt(source, source.lastIndexOf("{args") + 2), "outerArgs");
+    expect(applyEdits(source, renameArgs?.edits ?? [])).toBe(
+      `<script>const outerArgs = [];const v = 1;const f = (...args) => args.length;const o = { m(v) { return v; }, n: v };</script><p>{outerArgs}{v}</p>`,
+    );
+    const renameV = templateRenameAt(source, positionAt(source, source.lastIndexOf("{v}") + 1), "value");
+    expect(applyEdits(source, renameV?.edits ?? [])).toBe(
+      `<script>const args = [];const value = 1;const f = (...args) => args.length;const o = { m(v) { return v; }, n: value };</script><p>{args}{value}</p>`,
+    );
+  });
 });
