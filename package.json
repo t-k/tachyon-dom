@@ -253,6 +253,7 @@
     "check:size": "size-limit",
     "check:browser-entry": "node scripts/verify-browser-entry.mjs",
     "check:browser-feature-budgets": "node scripts/verify-browser-feature-budgets.mjs",
+    "check:client-bundle-attribution": "node scripts/client-bundle-attribution.mjs",
     "check:template-types": "node scripts/verify-template-typecheck.mjs",
     "check:quick-example-size": "node scripts/verify-quick-example-bundle.mjs",
     "verify:package": "node scripts/verify-package-artifacts.mjs && node scripts/verify-middleware-context-types.mjs",

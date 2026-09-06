@@ -54,6 +54,8 @@ jobs:
 
       - run: pnpm check:browser-feature-budgets
 
+      - run: pnpm check:client-bundle-attribution
+
       - run: pnpm check:quick-example-size
 
       - run: pnpm verify:whitespace-types

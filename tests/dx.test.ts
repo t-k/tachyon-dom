@@ -438,6 +438,7 @@ describe("DX helpers", () => {
     expect(packageJson.scripts?.["check:browser-feature-budgets"]).toBe(
       "node scripts/verify-browser-feature-budgets.mjs",
     );
+    expect(packageJson.scripts?.["check:client-bundle-attribution"]).toBe("node scripts/client-bundle-attribution.mjs");
     expect(packageJson.scripts?.["check:template-types"]).toBe("node scripts/verify-template-typecheck.mjs");
     expect(packageJson["size-limit"]?.map((entry) => entry.name)).toEqual(publicJsExportNames);
     expect(packageJson["size-limit"]?.some((entry) => entry.name === "td-modules")).toBe(false);
@@ -446,6 +447,7 @@ describe("DX helpers", () => {
     expect(ci).toContain("pnpm check:size");
     expect(ci).toContain("pnpm check:browser-entry");
     expect(ci).toContain("pnpm check:browser-feature-budgets");
+    expect(ci).toContain("pnpm check:client-bundle-attribution");
     expect(ci).toContain("pnpm check:template-types");
     expect(ci).toContain("pnpm verify:clean-consumer");
     expect(ci).toContain("pnpm verify:whitespace-types");
@@ -456,6 +458,7 @@ describe("DX helpers", () => {
       "pnpm verify:starters",
       "pnpm check:browser-entry",
       "pnpm check:browser-feature-budgets",
+      "pnpm check:client-bundle-attribution",
       "pnpm check:quick-example-size",
       "pnpm verify:whitespace-types",
     ]) {
@@ -2586,6 +2589,7 @@ void chunks;
       "pnpm verify:starters",
       "pnpm check:browser-entry",
       "pnpm check:browser-feature-budgets",
+      "pnpm check:client-bundle-attribution",
       "pnpm check:quick-example-size",
       "pnpm verify:whitespace-types",
     ];

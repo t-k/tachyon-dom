@@ -1,10 +1,13 @@
 import { readFile } from "node:fs/promises";
-import { brotliCompressSync } from "node:zlib";
-import { build } from "esbuild";
 import { compileTemplate, generateClientModule } from "../dist/compiler.js";
+import {
+  buildClientBundle,
+  checkBundleBudget,
+  findForbiddenInputs,
+  summarizeClientBundle,
+} from "./client-bundle-attribution.mjs";
 
 const budgets = JSON.parse(await readFile(new URL("./browser-feature-budgets.json", import.meta.url), "utf8"));
-const productionDefines = { __TACHYON_PRODUCTION__: "true" };
 
 const generatedClientSource = (source, options = {}) => {
   const compiled = compileTemplate(source);
@@ -26,16 +29,6 @@ const features = {
   "runtime/router": `import { createClientRouter, rawHtml } from "./dist/runtime/router.js"; export { createClientRouter, rawHtml };`,
 };
 
-const forbiddenPatterns = [
-  /(?:^|[/\\])typescript(?:[/\\]|$)/,
-  /(?:^|[/\\])parse5(?:[/\\]|$)/,
-  /vscode-languageserver/,
-  /[/\\]runtime[/\\]diagnostics\.js$/,
-  /[/\\]compiler[/\\]/,
-  /[/\\]server[/\\]/,
-  /[/\\]app\.js$/,
-];
-
 for (const [name, contents] of Object.entries(features)) {
   const budget = budgets[name];
   if (
@@ -47,20 +40,9 @@ for (const [name, contents] of Object.entries(features)) {
   ) {
     throw new Error(`Missing valid browser feature budget for ${name}.`);
   }
-  const result = await build({
-    bundle: true,
-    format: "esm",
-    logLevel: "silent",
-    metafile: true,
-    minify: true,
-    platform: "browser",
-    define: productionDefines,
-    stdin: { contents, loader: "js", resolveDir: process.cwd() },
-    write: false,
-  });
-  const forbiddenInputs = Object.keys(result.metafile.inputs).filter((input) =>
-    forbiddenPatterns.some((pattern) => pattern.test(input)),
-  );
+  const result = await buildClientBundle(contents);
+  const summary = summarizeClientBundle(result);
+  const forbiddenInputs = findForbiddenInputs(Object.keys(result.metafile.inputs));
   if (forbiddenInputs.length > 0) {
     throw new Error(`${name} feature bundle includes forbidden dependencies:\n${forbiddenInputs.join("\n")}`);
   }
@@ -68,22 +50,13 @@ for (const [name, contents] of Object.entries(features)) {
   if (distributionInputs.length === 0) {
     throw new Error(`${name} feature bundle did not resolve any distribution module.`);
   }
-  const outputBytes = result.outputFiles.reduce((total, output) => total + output.contents.byteLength, 0);
-  const brotliBytes = result.outputFiles.reduce(
-    (total, output) => total + brotliCompressSync(output.contents).byteLength,
-    0,
-  );
-  if (outputBytes > budget.maxMinifiedBytes) {
+  const budgetResult = checkBundleBudget({ ...summary, budget });
+  if (!budgetResult.ok) {
     throw new Error(
-      `${name} feature bundle is ${outputBytes} bytes minified; expected at most ${budget.maxMinifiedBytes} bytes.`,
-    );
-  }
-  if (brotliBytes > budget.maxBrotliBytes) {
-    throw new Error(
-      `${name} feature bundle is ${brotliBytes} bytes Brotli; expected at most ${budget.maxBrotliBytes} bytes.`,
+      `${name} feature bundle exceeds its ${budgetResult.reason}: ${summary.minifiedBytes} minified/${summary.brotliBytes} Brotli bytes.`,
     );
   }
   console.log(
-    `${name}: ${outputBytes}/${budget.maxMinifiedBytes} minified bytes, ${brotliBytes}/${budget.maxBrotliBytes} Brotli bytes, ${Object.keys(result.metafile.inputs).length} distribution inputs.`,
+    `${name}: ${summary.minifiedBytes}/${budget.maxMinifiedBytes} minified bytes, ${summary.brotliBytes}/${budget.maxBrotliBytes} Brotli bytes, ${Object.keys(result.metafile.inputs).length} distribution inputs.`,
   );
 }

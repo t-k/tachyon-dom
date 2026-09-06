@@ -1,0 +1,9 @@
+{
+  "static": { "maxMinifiedBytes": 1385, "maxBrotliBytes": 596 },
+  "signal-only": { "maxMinifiedBytes": 988, "maxBrotliBytes": 526 },
+  "reactive-text": { "maxMinifiedBytes": 4589, "maxBrotliBytes": 1740 },
+  "event-only": { "maxMinifiedBytes": 1859, "maxBrotliBytes": 817 },
+  "text-only-list": { "maxMinifiedBytes": 12540, "maxBrotliBytes": 4568 },
+  "minimal-if": { "maxMinifiedBytes": 34881, "maxBrotliBytes": 10489 },
+  "composite-quick-example": { "maxMinifiedBytes": 13318, "maxBrotliBytes": 4771 }
+}
