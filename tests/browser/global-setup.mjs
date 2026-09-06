@@ -115,6 +115,7 @@ const buildConditionalFixture = async () => {
       source: `import { createSignal } from "tachyon-dom";
 import { hydrate } from "tachyon-dom/runtime/mount";
 ${sharedGenerated}
+const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
 export const runSharedParentGuard = () => {
   const root = document.createElement("div");
   root.innerHTML = ${JSON.stringify(sharedMarkup)};
@@ -146,6 +147,7 @@ export const runSharedParentGuard = () => {
 import { hydrate, mount } from "tachyon-dom/runtime/mount";
 ${sharedImports}
 ${generated}
+const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
 const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
 window.runConditionalFollowup = () => {
   const mountRoot = document.querySelector("#conditional-mount");

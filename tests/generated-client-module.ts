@@ -53,6 +53,6 @@ export const evaluateGeneratedClientModule = (
     .replace(/^export const /gm, "const ");
   return new Function(
     ...names,
-    `${executable}; return { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind: typeof bind === "function" ? bind : undefined, hydrate: typeof hydrate === "function" ? hydrate : undefined };`,
+    `${executable}; const hydrationDynamicRegionErrors = Array.isArray(hydrationDynamicRegions) ? hydrationDynamicRegions.errors : undefined; return { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind: typeof bind === "function" ? bind : undefined, hydrate: typeof hydrate === "function" ? hydrate : undefined };`,
   )(...values) as ClientTemplateModule<Record<string, unknown>>;
 };

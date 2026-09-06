@@ -654,6 +654,9 @@ const runtimeNames = {
   mountConditionalCore: "__tachyonMountConditionalCore",
   prepareConditionalCore: "__tachyonPrepareConditionalCore",
   prepareConditionalCoreWithAdoptionGuard: "__tachyonPrepareConditionalCoreWithAdoptionGuard",
+  prepareConditionalCoreWithStaticAttributes: "__tachyonPrepareConditionalCoreWithStaticAttributes",
+  prepareConditionalCoreWithAdoptionGuardAndStaticAttributes:
+    "__tachyonPrepareConditionalCoreWithAdoptionGuardAndStaticAttributes",
   preparedNodeAt: "__tachyonPreparedNodeAt",
   mountKeyedList: "__tachyonMountKeyedList",
   mountTextKeyedList: "__tachyonMountTextKeyedList",
@@ -724,6 +727,9 @@ const usesConditionalCore = (binding: ConditionalBinding): boolean =>
   (binding.hydrationBoundaries?.length ?? 0) === 0 &&
   (binding.components?.length ?? 0) === 0 &&
   binding.bindings.every(isConditionalCoreBinding);
+
+const hasStaticConditionalRootAttribute = (templateHtml: string): boolean =>
+  /<[A-Za-z][^\s/>]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)/.test(templateHtml);
 
 const hasModelBinding = (binding: ClientBinding): boolean => {
   if (binding.kind === "model") {
@@ -887,6 +893,14 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
             (candidate.path.at(-1) ?? -1) > (binding.path.at(-1) ?? -1),
         ),
     );
+  const needsConditionalCoreShapeMatcher =
+    needsConditionalCore &&
+    bindings.some(
+      (binding) =>
+        binding.kind === "if" &&
+        usesConditionalCore(binding) &&
+        hasStaticConditionalRootAttribute(binding.templateHtml),
+    );
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const needsElementAt = needsClass || needsAttr || needsModel || needsTextList || (reactive && needsList);
   const needsNodeAt = reactive && needsGenericConditional;
@@ -933,7 +947,15 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     if (needsConditionalCore) {
       const conditionalCoreImports = [
         `mountConditionalCore as ${runtimeNames.mountConditionalCore}`,
-        `${needsConditionalCoreAdoptionGuard ? "prepareConditionalCoreWithAdoptionGuard" : "prepareConditionalCore"} as ${runtimeNames.prepareConditionalCore}`,
+        `${
+          needsConditionalCoreShapeMatcher
+            ? needsConditionalCoreAdoptionGuard
+              ? "prepareConditionalCoreWithAdoptionGuardAndStaticAttributes"
+              : "prepareConditionalCoreWithStaticAttributes"
+            : needsConditionalCoreAdoptionGuard
+              ? "prepareConditionalCoreWithAdoptionGuard"
+              : "prepareConditionalCore"
+        } as ${runtimeNames.prepareConditionalCore}`,
         `preparedNodeAt as ${runtimeNames.preparedNodeAt}`,
       ];
       lines.push(`import { ${conditionalCoreImports.join(", ")} } from "tachyon-dom/runtime/conditional-core";`);
@@ -988,9 +1010,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
   lines.push(`export const hydrationDynamicAttributes = ${JSON.stringify(hydrationDynamicAttributes)};`);
   lines.push(`export const hydrationDynamicRegions = ${JSON.stringify(template.client.hydrationDynamicRegions)};`);
-  lines.push(
-    `export const hydrationDynamicRegionErrors = ${JSON.stringify(template.client.hydrationDynamicRegionErrors)};`,
-  );
+  if (template.client.hydrationDynamicRegionErrors.length > 0) {
+    lines.push(`hydrationDynamicRegions.errors = ${JSON.stringify(template.client.hydrationDynamicRegionErrors)};`);
+  }
   lines.push(`export const componentBoundaries = ${JSON.stringify(template.client.components)};`);
   if (hasHydrationChunks) {
     const loaders = Object.entries(hydrationChunkImports)

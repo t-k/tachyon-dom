@@ -14,12 +14,16 @@ export type ClientHydrationDynamicRegion = {
   kind: "list" | "conditional";
 };
 
+type ClientHydrationDynamicRegions = readonly ClientHydrationDynamicRegion[] & {
+  readonly errors?: readonly string[];
+};
+
 export type ClientTemplateModule<Scope extends Record<string, unknown> = Record<string, unknown>> = {
   templateHtml: string;
   hydrationBoundaries?: readonly CompiledHydrationBoundary[];
   hydrationChunks?: Readonly<Record<string, () => Promise<HydrationBoundaryChunk> | HydrationBoundaryChunk>>;
   hydrationDynamicAttributes?: readonly ClientHydrationDynamicAttribute[];
-  hydrationDynamicRegions?: readonly ClientHydrationDynamicRegion[];
+  hydrationDynamicRegions?: ClientHydrationDynamicRegions;
   hydrationDynamicRegionErrors?: readonly string[];
   hydrate?: (bindRoot: Element, hydrationRoot: ParentNode, scope: Scope) => void | (() => void);
   bind: (root: Element, scope: Scope) => void | (() => void);
@@ -335,7 +339,8 @@ export const hydrate = <Scope extends Record<string, unknown>>(
   if (dynamicRegionError) {
     return err({ message: dynamicRegionError });
   }
-  const dynamicRegionDiagnostic = module.hydrationDynamicRegionErrors?.[0];
+  const dynamicRegionDiagnostic =
+    module.hydrationDynamicRegionErrors?.[0] ?? module.hydrationDynamicRegions?.errors?.[0];
   if (dynamicRegionDiagnostic) {
     return err({ message: dynamicRegionDiagnostic });
   }

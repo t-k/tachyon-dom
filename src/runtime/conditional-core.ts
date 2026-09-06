@@ -61,6 +61,8 @@ export type ConditionalCoreOptions = {
   bindings: ConditionalCoreBinding[];
 };
 
+type ConditionalCoreNodeMatcher = (expected: Node, actual: Node) => boolean;
+
 type ConditionalCoreState = {
   signature: string;
   anchor: Comment;
@@ -295,6 +297,71 @@ export const prepareConditionalCore = (root: Node, descriptors: readonly Conditi
   }
 };
 
+const sameNodeShapeWithStaticAttributes: ConditionalCoreNodeMatcher = (expected, actual) => {
+  if (!sameNodeShape(expected, actual)) return false;
+  if (!(expected instanceof Element) || !(actual instanceof Element)) return true;
+  return [...expected.attributes].every((attribute) => actual.getAttribute(attribute.name) === attribute.value);
+};
+
+const adoptableNodesWithStaticAttributes = (
+  parent: Node,
+  index: number,
+  expected: readonly Node[],
+): Node[] | undefined => {
+  if (expected.length === 0) return undefined;
+  const actual = logicalChildren(parent).slice(index, index + expected.length);
+  return actual.length === expected.length &&
+    expected.every((node, nodeIndex) => sameNodeShapeWithStaticAttributes(node, actual[nodeIndex] as Node))
+    ? actual
+    : undefined;
+};
+
+export const prepareConditionalCoreWithStaticAttributes = (
+  root: Node,
+  descriptors: readonly ConditionalCoreAnchorDescriptor[],
+): void => {
+  const initialNodes = initialNodesFor(root);
+  const ordered = orderedPreparedConditionals(descriptors);
+  const byParent = new Map<string, PreparedConditional[]>();
+  for (const descriptor of ordered) {
+    const siblings = byParent.get(descriptor.parentKey) ?? [];
+    siblings.push(descriptor);
+    byParent.set(descriptor.parentKey, siblings);
+  }
+  const plan: PreparedPathPlan = { byParent, modes: new Map(), invalid: new Set() };
+  preparedPathPlans.set(root, plan);
+
+  for (const descriptor of ordered) {
+    const source = descriptors.find((candidate) => pathKey(candidate.path) === descriptor.key);
+    const parentPath = descriptor.path.slice(0, -1);
+    const parent = initialNodeAt(root, parentPath, plan, initialNodes);
+    const expectedParentTag = source?.parentTagName?.toLowerCase();
+    if (!parent || (expectedParentTag && (!(parent instanceof Element) || parent.localName !== expectedParentTag))) {
+      plan.invalid.add(descriptor.key);
+      continue;
+    }
+    const rawIndex = rawIndexFor(plan, descriptor.parentKey, descriptor.index);
+    const index = rawIndex + insertedAnchorCountBefore(plan, descriptor.parentKey, descriptor.index);
+    const candidate = logicalChildren(parent)[index];
+    if (candidate instanceof Comment && !isHydrationMarker(candidate)) {
+      plan.modes.set(descriptor.key, "placeholder");
+      registerAnchor(root, descriptor.path, candidate);
+      continue;
+    }
+    const expected = createNodes(source?.templateHtml ?? "");
+    const adopted = adoptableNodesWithStaticAttributes(parent, index, expected);
+    const anchor = document.createComment("");
+    parent.insertBefore(anchor, candidate ?? null);
+    registerAnchor(root, descriptor.path, anchor);
+    if (adopted) {
+      plan.modes.set(descriptor.key, "expanded");
+      setPreparedConditionalNodes(anchor, adopted);
+    } else {
+      plan.modes.set(descriptor.key, "omitted");
+    }
+  }
+};
+
 export const prepareConditionalCoreWithAdoptionGuard = (
   root: Node,
   descriptors: readonly ConditionalCoreAnchorDescriptor[],
@@ -330,6 +397,77 @@ export const prepareConditionalCoreWithAdoptionGuard = (
     const expected = createNodes(source?.templateHtml ?? "");
     const adopted = adoptableNodes(parent, index, expected);
     if (adopted && deferConditionalAdoption(parent, index, expected, source?.laterConditionals)) {
+      const anchor = document.createComment("");
+      parent.insertBefore(anchor, candidate ?? null);
+      registerAnchor(root, descriptor.path, anchor);
+      plan.modes.set(descriptor.key, "omitted");
+      continue;
+    }
+    const anchor = document.createComment("");
+    parent.insertBefore(anchor, candidate ?? null);
+    registerAnchor(root, descriptor.path, anchor);
+    if (adopted) {
+      plan.modes.set(descriptor.key, "expanded");
+      setPreparedConditionalNodes(anchor, adopted);
+    } else {
+      plan.modes.set(descriptor.key, "omitted");
+    }
+  }
+};
+
+const deferConditionalAdoptionWithStaticAttributes = (
+  parent: Node,
+  index: number,
+  expected: readonly Node[],
+  laterConditionals: readonly ConditionalCoreLaterDescriptor[] | undefined,
+): boolean => {
+  const candidate = laterConditionals?.find(
+    (later) =>
+      Boolean(later.visible) &&
+      adoptableNodesWithStaticAttributes(parent, index, createNodes(later.templateHtml)) !== undefined,
+  );
+  return (
+    candidate !== undefined &&
+    adoptableNodesWithStaticAttributes(parent, index + expected.length, createNodes(candidate.templateHtml)) ===
+      undefined
+  );
+};
+
+export const prepareConditionalCoreWithAdoptionGuardAndStaticAttributes = (
+  root: Node,
+  descriptors: readonly ConditionalCoreAnchorDescriptor[],
+): void => {
+  const initialNodes = initialNodesFor(root);
+  const ordered = orderedPreparedConditionals(descriptors);
+  const byParent = new Map<string, PreparedConditional[]>();
+  for (const descriptor of ordered) {
+    const siblings = byParent.get(descriptor.parentKey) ?? [];
+    siblings.push(descriptor);
+    byParent.set(descriptor.parentKey, siblings);
+  }
+  const plan: PreparedPathPlan = { byParent, modes: new Map(), invalid: new Set() };
+  preparedPathPlans.set(root, plan);
+
+  for (const descriptor of ordered) {
+    const source = descriptors.find((candidate) => pathKey(candidate.path) === descriptor.key);
+    const parentPath = descriptor.path.slice(0, -1);
+    const parent = initialNodeAt(root, parentPath, plan, initialNodes);
+    const expectedParentTag = source?.parentTagName?.toLowerCase();
+    if (!parent || (expectedParentTag && (!(parent instanceof Element) || parent.localName !== expectedParentTag))) {
+      plan.invalid.add(descriptor.key);
+      continue;
+    }
+    const rawIndex = rawIndexFor(plan, descriptor.parentKey, descriptor.index);
+    const index = rawIndex + insertedAnchorCountBefore(plan, descriptor.parentKey, descriptor.index);
+    const candidate = logicalChildren(parent)[index];
+    if (candidate instanceof Comment && !isHydrationMarker(candidate)) {
+      plan.modes.set(descriptor.key, "placeholder");
+      registerAnchor(root, descriptor.path, candidate);
+      continue;
+    }
+    const expected = createNodes(source?.templateHtml ?? "");
+    const adopted = adoptableNodesWithStaticAttributes(parent, index, expected);
+    if (adopted && deferConditionalAdoptionWithStaticAttributes(parent, index, expected, source?.laterConditionals)) {
       const anchor = document.createComment("");
       parent.insertBefore(anchor, candidate ?? null);
       registerAnchor(root, descriptor.path, anchor);
@@ -392,13 +530,10 @@ const createNodes = (templateHtml: string): Node[] => {
   return Array.from(template.content.childNodes).map((node) => node.cloneNode(true));
 };
 
-const sameNodeShape = (expected: Node, actual: Node): boolean => {
+const sameNodeShape: ConditionalCoreNodeMatcher = (expected, actual): boolean => {
   if (expected.nodeType !== actual.nodeType) return false;
   if (expected instanceof Element && actual instanceof Element) {
-    if (expected.localName !== actual.localName) return false;
-    return Array.from(expected.attributes).every(
-      (attribute) => actual.getAttribute(attribute.name) === attribute.value,
-    );
+    return expected.localName === actual.localName;
   }
   return expected.nodeType === Node.TEXT_NODE || expected.nodeType === Node.COMMENT_NODE;
 };
