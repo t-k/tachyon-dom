@@ -318,8 +318,26 @@ describe("mountTextKeyedList", () => {
       options,
     );
     expect(root.innerHTML).toBe(`<li class="row">One</li><li class="row">Two</li><li class="footer">Footer</li>`);
+    const footer = root.querySelector("li.footer");
+    const firstRow = root.querySelectorAll("li.row")[0];
+    mountTextKeyedList(
+      root,
+      [],
+      [
+        { id: 2, label: "Two updated" },
+        { id: 3, label: "Three" },
+        { id: 1, label: "One updated" },
+      ],
+      options,
+    );
+    expect(root.innerHTML).toBe(
+      `<li class="row">Two updated</li><li class="row">Three</li><li class="row">One updated</li><li class="footer">Footer</li>`,
+    );
+    expect(root.querySelector("li.footer")).toBe(footer);
+    expect(root.querySelectorAll("li.row")[2]).toBe(firstRow);
     mountTextKeyedList(root, [], [], options);
     expect(root.innerHTML).toBe(`<li class="footer">Footer</li>`);
+    expect(root.querySelector("li.footer")).toBe(footer);
   });
 
   it("skips duplicate keys when console.warn is unavailable", () => {
