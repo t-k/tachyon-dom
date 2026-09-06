@@ -1,4 +1,5 @@
 import { parseTachyonSfc } from "./compiler/sfc.js";
+import { itemNameFromKey } from "./compiler/utils.js";
 
 export type TemplateLanguagePosition = {
   line: number;
@@ -345,6 +346,103 @@ const scriptSymbols = (
     addSymbol(symbols, binding);
     return binding;
   };
+  const blockScopeStartingAt = (offset: number): BindingScope | undefined =>
+    scopes.find((scope) => scope !== root && scope.start === offset);
+  const expressionEndFrom = (startIndex: number): number => {
+    let depth = 0;
+    for (let index = startIndex; index < tokens.length; index += 1) {
+      const token = tokens[index]!;
+      if (token.punct === "(" || token.punct === "[" || token.punct === "{") depth += 1;
+      else if (token.punct === ")" || token.punct === "]" || token.punct === "}") {
+        if (depth === 0) return token.start;
+        depth -= 1;
+      } else if ((token.punct === ";" || token.punct === ",") && depth === 0) {
+        return token.start;
+      }
+    }
+    return root.end;
+  };
+  const closingParenIndex = (openIndex: number): number => {
+    let depth = 0;
+    for (let index = openIndex; index < tokens.length; index += 1) {
+      const token = tokens[index]!;
+      if (token.punct === "(") depth += 1;
+      else if (token.punct === ")") {
+        depth -= 1;
+        if (depth === 0) return index;
+      }
+    }
+    return -1;
+  };
+  const openingParenIndex = (closeIndex: number): number => {
+    let depth = 0;
+    for (let index = closeIndex; index >= 0; index -= 1) {
+      const token = tokens[index]!;
+      if (token.punct === ")") depth += 1;
+      else if (token.punct === "(") {
+        depth -= 1;
+        if (depth === 0) return index;
+      }
+    }
+    return -1;
+  };
+  const isArrowAt = (index: number): boolean => tokens[index]?.punct === "=" && tokens[index + 1]?.punct === ">";
+  const parameterTokens = (openIndex: number, closeIndex: number): LexToken[] => {
+    const names: LexToken[] = [];
+    let depth = 0;
+    let inType = false;
+    for (let index = openIndex + 1; index < closeIndex; index += 1) {
+      const token = tokens[index]!;
+      const previous = tokens[index - 1];
+      if (token.punct === "(" || token.punct === "[" || token.punct === "{") depth += 1;
+      else if (token.punct === ")" || token.punct === "]" || token.punct === "}") depth -= 1;
+      if (depth === 0 && token.punct === ",") inType = false;
+      if (depth === 0 && (token.punct === ":" || token.punct === "=")) inType = true;
+      if (inType || !token.name || reservedWords.has(token.name)) continue;
+      if (depth === 0 && (previous?.punct === "(" || previous?.punct === ",")) names.push(token);
+      else if (depth > 0 && previous?.punct !== "." && tokens[index + 1]?.punct !== ":") names.push(token);
+    }
+    return names;
+  };
+  const registerParameters = (parameters: readonly LexToken[], start: number, bodyIndex: number): void => {
+    if (parameters.length === 0) return;
+    let bodyStart = bodyIndex;
+    while (bodyStart < tokens.length && !isArrowAt(bodyStart) && tokens[bodyStart]?.punct !== "{") {
+      if (tokens[bodyStart]?.punct === ";") return;
+      bodyStart += 1;
+    }
+    if (isArrowAt(bodyStart)) bodyStart += 2;
+    const bodyToken = tokens[bodyStart];
+    const block = bodyToken?.punct === "{" ? blockScopeStartingAt(bodyToken.end) : undefined;
+    const end = block ? block.end : expressionEndFrom(bodyStart);
+    const parent = scopeAt(start);
+    const parameterScope: BindingScope = { start, end, parent, bindings: new Map() };
+    scopes.push(parameterScope);
+    if (block) block.parent = parameterScope;
+    for (const parameter of parameters) declare(parameter, "Function parameter", parameterScope);
+  };
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token.name === "function") {
+      let openIndex = index + 1;
+      if (tokens[openIndex]?.name) openIndex += 1;
+      if (tokens[openIndex]?.punct !== "(") continue;
+      const closeIndex = closingParenIndex(openIndex);
+      if (closeIndex < 0) continue;
+      registerParameters(parameterTokens(openIndex, closeIndex), tokens[openIndex]!.start, closeIndex + 1);
+      continue;
+    }
+    if (!isArrowAt(index)) continue;
+    const previous = tokens[index - 1];
+    if (previous?.punct === ")") {
+      const openIndex = openingParenIndex(index - 1);
+      if (openIndex < 0) continue;
+      const parameters = parameterTokens(openIndex, index - 1);
+      registerParameters(parameters, tokens[openIndex]!.start, index);
+    } else if (previous?.name && !reservedWords.has(previous.name)) {
+      registerParameters([previous], previous.start, index);
+    }
+  }
   const braceDepthAt = (offset: number): number => {
     let depth = 0;
     for (const token of tokens) {
@@ -436,6 +534,7 @@ const collectSymbols = (source: string): CollectedSymbols => {
     bindings: new Map(),
   };
   const templateScopes: BindingScope[] = [templateRoot];
+  const keyRanges: Array<{ start: number; end: number; scope: BindingScope }> = [];
   const blockStack: Array<{ tag: string; scope: BindingScope }> = [];
   const remember = (word: Word, binding: Binding): void => {
     references.push({ ...word, binding });
@@ -474,6 +573,22 @@ const collectSymbols = (source: string): CollectedSymbols => {
       const word = quotedBinding(rawAttrs, attrsOffset, alias);
       if (word) remember(word, declareTemplate(word, scope));
     }
+    if (tag !== "for") continue;
+    // The key expression is evaluated per row, so it resolves in the row scope
+    // even though it sits inside the opening tag. The each expression stays in
+    // the outer scope.
+    const keyMatch = /\bkey\s*=\s*\{/i.exec(rawAttrs);
+    if (!keyMatch) continue;
+    const keyStart = attrsOffset + keyMatch.index + keyMatch[0].length;
+    const keyRange = expressionRanges(source, keyStart - 1).find((range) => range.start === keyStart);
+    if (!keyRange) continue;
+    keyRanges.push({ ...keyRange, scope });
+    if (!quotedBinding(rawAttrs, attrsOffset, "as")) {
+      const keyExpression = source.slice(keyRange.start, keyRange.end);
+      const implicitName = itemNameFromKey(keyExpression.trim());
+      const implicitWord = expressionWords(keyExpression, keyRange.start).find((word) => word.name === implicitName);
+      if (implicitWord) declareTemplate(implicitWord, scope);
+    }
   }
   for (const entry of blockStack) entry.scope.end = source.length;
   const localTagPattern = /<\s*(component|store)\b([^>]*?)>/gi;
@@ -491,7 +606,8 @@ const collectSymbols = (source: string): CollectedSymbols => {
     }
   }
   for (const range of expressionRanges(source, templateOffset)) {
-    const scope = scopeFor(templateScopes, range.start);
+    const keyRange = keyRanges.find((candidate) => candidate.start <= range.start && range.end <= candidate.end);
+    const scope = keyRange ? keyRange.scope : scopeFor(templateScopes, range.start);
     for (const word of expressionWords(source.slice(range.start, range.end), range.start)) {
       const binding = resolveBinding(scope, word.name);
       if (binding) remember(word, binding);

@@ -12,6 +12,15 @@ const positionAt = (source: string, offset: number): { line: number; character: 
   return { line: lines.length - 1, character: lines.at(-1)?.length ?? 0 };
 };
 
+const applyEdits = (source: string, edits: readonly { range: { start: { line: number; character: number }; end: { line: number; character: number } }; newText: string }[]): string =>
+  [...edits]
+    .sort((left, right) => right.range.start.line - left.range.start.line || right.range.start.character - left.range.start.character)
+    .reduce((value, edit) => {
+      const offsetOf = (position: { line: number; character: number }): number =>
+        value.split(/\r?\n/).slice(0, position.line).reduce((total, line) => total + line.length + 1, 0) + position.character;
+      return value.slice(0, offsetOf(edit.range.start)) + edit.newText + value.slice(offsetOf(edit.range.end));
+    }, source);
+
 describe("Tachyon template language features", () => {
   it("shares script and template symbols for completion and hover", () => {
     const source = `<script lang="ts">\nconst title = "Hello";\nconst ready = true;\n</script>\n<main><if test={ready}><h1>{title}</h1></if></main>`;
@@ -73,5 +82,40 @@ function local() { const title = "local"; return title; }
     const definition = templateDefinitionAt(source, positionAt(source, reference + 1), "file:///page.td");
 
     expect(definition?.range.start).toEqual(positionAt(source, source.indexOf(`as="row"`) + 4));
+  });
+
+  it("renames a for alias together with its key expression and resolves key references to the alias", () => {
+    const source = `<script>const row = 1;</script><ul><for each={rows} as="row" key={row.id}><li>{row.name}</li></for></ul>`;
+    const rename = templateRenameAt(source, positionAt(source, source.indexOf("row.name") + 1), "entry");
+    expect(rename).toBeDefined();
+    expect(applyEdits(source, rename?.edits ?? [])).toBe(
+      `<script>const row = 1;</script><ul><for each={rows} as="entry" key={entry.id}><li>{entry.name}</li></for></ul>`,
+    );
+
+    const keyDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf("key={row") + 5), "file:///page.td");
+    expect(keyDefinition?.range.start).toEqual(positionAt(source, source.indexOf(`as="row"`) + 4));
+  });
+
+  it("resolves the for each expression in the outer scope and an implicit key alias in the row scope", () => {
+    const source = `<script>const rows = [];</script><ul><for each={rows} key={row.id}><li>{row.name}</li></for></ul>`;
+    const eachDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf("each={rows") + 6), "file:///page.td");
+    expect(eachDefinition?.range.start).toEqual(positionAt(source, source.indexOf("const rows") + 6));
+
+    const rename = templateRenameAt(source, positionAt(source, source.indexOf("row.name") + 1), "entry");
+    expect(applyEdits(source, rename?.edits ?? [])).toBe(
+      `<script>const rows = [];</script><ul><for each={rows} key={entry.id}><li>{entry.name}</li></for></ul>`,
+    );
+  });
+
+  it("does not rename function parameters that shadow the outer binding", () => {
+    const source = `<script>const title="outer";function f(title){return title;}const g=(title: string)=>title;const h=title=>title.length;const k=(x)=>{const title=x;return title;};</script><p>{title}</p>`;
+    const rename = templateRenameAt(source, positionAt(source, source.lastIndexOf("{title") + 2), "heading");
+    expect(rename).toBeDefined();
+    expect(applyEdits(source, rename?.edits ?? [])).toBe(
+      `<script>const heading="outer";function f(title){return title;}const g=(title: string)=>title;const h=title=>title.length;const k=(x)=>{const title=x;return title;};</script><p>{heading}</p>`,
+    );
+
+    const parameterDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf("return title") + 8), "file:///page.td");
+    expect(parameterDefinition?.range.start).toEqual(positionAt(source, source.indexOf("f(title") + 2));
   });
 });
