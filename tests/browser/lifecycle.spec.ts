@@ -48,6 +48,9 @@ declare global {
         before: { ok: boolean; unchanged: boolean; message: string };
         after: { ok: boolean; unchanged: boolean; message: string };
       };
+      conditionalShapes: Array<{ ok: boolean; staticPreserved: boolean; tailUpdated: boolean }>;
+      componentSplit: { ok: boolean; unchanged: boolean; identityPreserved: boolean; message: string };
+      listFooter: { mountCorrect: boolean; hydrateCorrect: boolean };
     };
     __conditionalReady?: boolean;
   }
@@ -161,5 +164,14 @@ test("runs generated adjacent conditional mount and SSR hydration regressions in
   expect(result.sharedParent.after.ok).toBe(false);
   expect(result.sharedParent.after.unchanged).toBe(true);
   expect(result.sharedParent.after.message).toContain("multiple direct dynamic regions");
+  expect(result.conditionalShapes).toEqual([
+    { ok: true, staticPreserved: true, tailUpdated: true },
+    { ok: true, staticPreserved: true, tailUpdated: true },
+  ]);
+  expect(result.componentSplit.ok).toBe(false);
+  expect(result.componentSplit.unchanged).toBe(true);
+  expect(result.componentSplit.identityPreserved).toBe(true);
+  expect(result.componentSplit.message).toContain("multiple direct dynamic regions");
+  expect(result.listFooter).toEqual({ mountCorrect: true, hydrateCorrect: true });
   expect(["chromium", "firefox", "webkit"]).toContain(browserName);
 });

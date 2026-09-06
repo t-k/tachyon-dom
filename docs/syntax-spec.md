@@ -56,6 +56,8 @@ Use `update="reference"` when the list follows immutable update discipline and a
 
 The client compiler records static element siblings around a direct `<for>` so SSR rows can be adopted without consuming those siblings. A direct `<for>` can be hydrated when it is the sole dynamic region under its parent. This rule is checked recursively inside list row templates as well. If a `<for>` shares its parent with another direct `<for>` or `<if>`, `hydrate()` reports an ambiguous dynamic-region error before binding and leaves the SSR DOM untouched. Place the dynamic regions under separate parent elements when they must be hydrated together. Conditional branches with the same client shape as a static or conditional sibling are also rejected before binding because SSR output cannot identify their ownership.
 
+Transparent `<component>` boundaries are flattened for this parent check. A list or conditional inside a transparent component therefore shares the surrounding DOM parent, and it is rejected by the same pre-hydration diagnostic when another dynamic region is present.
+
 Row-local `<component>` boundaries, `<store>` declarations, and explicit hydration boundaries are supported. Row stores and component props belong to the keyed row and survive reorder while being disposed when the key leaves the list. A row hydration boundary must use an explicit row-scoped expression such as `hydrate:id={row.id}`; an automatically generated static id inside a row is rejected because it would be duplicated. The runtime does not silently drop unsupported metadata.
 
 ## Stores

@@ -132,8 +132,144 @@ export const runSharedParentGuard = () => {
 `,
     };
   });
+  const conditionalShapeModules = [
+    `<main><if test={visible}><p class="shared">{left}</p></if><p class="shared" data-static="yes">{tail}</p></main>`,
+    `<main><if test={visible}><section><b>{left}</b></section></if><section><em>{tail}</em></section></main>`,
+  ].map((shapeSource, index) => {
+    const shapeCompiled = compileTemplate(shapeSource);
+    if (!shapeCompiled.ok) throw new Error(shapeCompiled.error.message);
+    const shapeGenerated = generateClientModule(shapeCompiled.value, { reactive: true, instrumentBindings: false });
+    const shapeMarkup = renderServerTemplate(shapeCompiled.value, {
+      visible: false,
+      left: "SSR branch",
+      tail: "SSR tail",
+    });
+    return {
+      fileName: `conditional-shape-${index}.js`,
+      source: `import { createSignal } from "tachyon-dom";
+import { hydrate } from "tachyon-dom/runtime/mount";
+${shapeGenerated}
+const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
+const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
+export const runConditionalShapeCase = () => {
+  const root = document.createElement("div");
+  root.innerHTML = ${JSON.stringify(shapeMarkup)};
+  const staticSibling = root.querySelector("main")?.lastElementChild;
+  const tail = createSignal("Client tail");
+  const hydrated = hydrate(root, clientModule, {
+    visible: createSignal(false),
+    left: createSignal("Client branch"),
+    tail,
+  });
+  if (!hydrated.ok) return { ok: false, staticPreserved: false, tailUpdated: false };
+  const staticPreserved = root.querySelector("main")?.lastElementChild === staticSibling;
+  tail.set("Client tail 2");
+  const tailUpdated = staticSibling?.textContent === "Client tail 2";
+  hydrated.value.dispose();
+  return { ok: true, staticPreserved, tailUpdated };
+};
+`,
+    };
+  });
+  const componentSplitSource = `<main><component name="Region"><for each={rows} key={row.id}><p>{row.label}</p></for></component><if test={active}><button>{label}</button></if><footer>{tail}</footer></main>`;
+  const componentSplitCompiled = compileTemplate(componentSplitSource);
+  if (!componentSplitCompiled.ok) throw new Error(componentSplitCompiled.error.message);
+  const componentSplitGenerated = generateClientModule(componentSplitCompiled.value, {
+    reactive: true,
+    instrumentBindings: false,
+  });
+  const componentSplitMarkup = renderServerTemplate(componentSplitCompiled.value, {
+    rows: [
+      { id: "a", label: "R1" },
+      { id: "b", label: "R2" },
+    ],
+    active: true,
+    label: "A",
+    tail: "F",
+  });
+  const componentSplitModule = {
+    fileName: "conditional-component-split.js",
+    source: `import { createSignal } from "tachyon-dom";
+import { hydrate } from "tachyon-dom/runtime/mount";
+${componentSplitGenerated}
+const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
+const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
+export const runComponentSplitCase = () => {
+  const root = document.createElement("div");
+  root.innerHTML = ${JSON.stringify(componentSplitMarkup)};
+  const before = root.innerHTML;
+  const serverRow = root.querySelector("p");
+  const serverButton = root.querySelector("button");
+  const serverFooter = root.querySelector("footer");
+  const result = hydrate(root, clientModule, {
+    rows: createSignal([{ id: "a", label: "R1" }, { id: "b", label: "R2" }]),
+    active: createSignal(true),
+    label: createSignal("A"),
+    tail: createSignal("F"),
+  });
+  if (result.ok) result.value.dispose();
+  return {
+    ok: result.ok,
+    unchanged: root.innerHTML === before,
+    identityPreserved: root.querySelector("p") === serverRow && root.querySelector("button") === serverButton && root.querySelector("footer") === serverFooter,
+    message: result.ok ? "" : result.error.message,
+  };
+};
+`,
+  };
+  const listFooterSource = `<main><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`;
+  const listFooterCompiled = compileTemplate(listFooterSource);
+  if (!listFooterCompiled.ok) throw new Error(listFooterCompiled.error.message);
+  const listFooterGenerated = generateClientModule(listFooterCompiled.value, {
+    reactive: true,
+    instrumentBindings: false,
+  });
+  const listFooterRows = [
+    { id: "a", label: "A" },
+    { id: "b", label: "B" },
+  ];
+  const listFooterModule = {
+    fileName: "generated-list-footer.js",
+    source: `import { createSignal } from "tachyon-dom";
+import { hydrate, mount } from "tachyon-dom/runtime/mount";
+${listFooterGenerated}
+const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
+const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
+const rowsFor = () => [{ id: "a", label: "A" }, { id: "b", label: "B" }];
+export const runListFooterCase = () => {
+  const root = document.createElement("div");
+  const rows = createSignal(rowsFor());
+  const tail = createSignal("F");
+  const mounted = mount(root, clientModule, { rows, tail });
+  const footer = root.querySelector("footer");
+  const firstRow = root.querySelector("p");
+  tail.set("F2");
+  rows.set([{ id: "b", label: "B" }, { id: "c", label: "C" }, { id: "a", label: "A" }]);
+  const mountCorrect = root.textContent === "BCAF2" && root.querySelector("footer") === footer && root.querySelectorAll("p")[2] === firstRow;
+  mounted.dispose();
+
+  const hydratedRoot = document.createElement("div");
+  hydratedRoot.innerHTML = ${JSON.stringify(renderServerTemplate(listFooterCompiled.value, { rows: listFooterRows, tail: "SSR footer" }))};
+  const serverFooter = hydratedRoot.querySelector("footer");
+  const hydratedRows = createSignal(rowsFor());
+  const hydratedTail = createSignal("Hydrated footer");
+  const hydrated = hydrate(hydratedRoot, clientModule, { rows: hydratedRows, tail: hydratedTail });
+  if (!hydrated.ok) return { mountCorrect, hydrateCorrect: false };
+  hydratedTail.set("Hydrated footer 2");
+  hydratedRows.set([{ id: "b", label: "B" }, { id: "c", label: "C" }, { id: "a", label: "A" }]);
+  const hydrateCorrect = hydratedRoot.textContent === "BCAHydrated footer 2" && hydratedRoot.querySelector("footer") === serverFooter;
+  hydrated.value.dispose();
+  return { mountCorrect, hydrateCorrect };
+};
+`,
+  };
   await Promise.all(
-    sharedParentModules.map(({ fileName, source: sharedSource }) => writeFile(resolve(outDir, fileName), sharedSource)),
+    [
+      ...sharedParentModules,
+      ...conditionalShapeModules,
+      componentSplitModule,
+      listFooterModule,
+    ].map(({ fileName, source: generatedSource }) => writeFile(resolve(outDir, fileName), generatedSource)),
   );
   const sharedImports = sharedParentModules
     .map(
@@ -141,11 +277,19 @@ export const runSharedParentGuard = () => {
         `import { runSharedParentGuard as runSharedParent${index === 0 ? "Before" : "After"} } from "./${fileName}";`,
     )
     .join("\n");
+  const followupImports = [
+    ...conditionalShapeModules.map(({ fileName }, index) =>
+      `import { runConditionalShapeCase as runConditionalShape${index} } from "./${fileName}";`,
+    ),
+    `import { runComponentSplitCase } from "./${componentSplitModule.fileName}";`,
+    `import { runListFooterCase } from "./${listFooterModule.fileName}";`,
+  ].join("\n");
   await writeFile(
     entrySource,
     `import { createSignal } from "tachyon-dom";
 import { hydrate, mount } from "tachyon-dom/runtime/mount";
 ${sharedImports}
+${followupImports}
 ${generated}
 const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
 const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
@@ -259,6 +403,9 @@ window.runConditionalFollowup = () => {
     mount: mountResult,
     hydrate: hydrateResult,
     sharedParent: { before: runSharedParentBefore(), after: runSharedParentAfter() },
+    conditionalShapes: [runConditionalShape0(), runConditionalShape1()],
+    componentSplit: runComponentSplitCase(),
+    listFooter: runListFooterCase(),
   };
 };
 window.__conditionalReady = true;
