@@ -229,4 +229,15 @@ export type GenerateClientModuleOptions = {
    * imports are removed from the module and `bind` is not exported.
    */
   hydrateOnly?: boolean;
+  /**
+   * Development-only binding location instrumentation. When a template id is
+   * given, the module registers each top-level binding's source span and
+   * attributes owners/effects created while binding to that location. Omit it
+   * for production output; nothing is emitted without it.
+   */
+  templateId?: string;
+  /** Revision of the source the spans belong to (for example a content hash). */
+  sourceRevision?: string;
+  /** Maps template offsets to source offsets (SFC scripts shift the template). */
+  mapSourceOffset?: (offset: number) => number;
 };

@@ -12,6 +12,7 @@ import type {
   TextNode,
 } from "../types.js";
 import { storeDefinitionsFor } from "../ir.js";
+import type { ExpressionSourceLocation } from "../utils.js";
 import {
   attrExpression,
   expressionToScopeAccess,
@@ -26,6 +27,8 @@ import {
   renderableChildren,
   serializeStaticAttr,
   textExpressionSegments,
+  expressionLocationForAttribute,
+  expressionLocationForText,
 } from "../utils.js";
 import { isAssignableExpression } from "../expression.js";
 
@@ -33,6 +36,18 @@ type LoweredNode = {
   html: string;
   nodeCount: number;
 };
+
+/** Template source spans of client bindings, kept beside the compiled objects. */
+const bindingSpans = new WeakMap<ClientBinding, ExpressionSourceLocation>();
+
+const recordSpan = <B extends ClientBinding>(binding: B, location: ExpressionSourceLocation | undefined): B => {
+  if (location) bindingSpans.set(binding, location);
+  return binding;
+};
+
+/** Returns the template offsets of the expression a client binding was lowered from. */
+export const bindingSourceSpan = (binding: ClientBinding): ExpressionSourceLocation | undefined =>
+  bindingSpans.get(binding);
 
 const lowerTextNode = (node: TextNode, path: number[], context: LoweringContext): LoweredNode => {
   let output = "";
@@ -56,11 +71,16 @@ const lowerTextNode = (node: TextNode, path: number[], context: LoweringContext)
       continue;
     }
     separateTextNode();
-    context.bindings.push({
-      kind: "text",
-      path: [...path.slice(0, -1), (path.at(-1) ?? 0) + nodeOffset],
-      expression: segment.value,
-    });
+    context.bindings.push(
+      recordSpan(
+        {
+          kind: "text",
+          path: [...path.slice(0, -1), (path.at(-1) ?? 0) + nodeOffset],
+          expression: segment.value,
+        },
+        expressionLocationForText(node, segment),
+      ),
+    );
     output += " ";
     nodeOffset++;
     lastEmittedWasText = true;
@@ -157,16 +177,23 @@ const lowerIf = (node: ElementNode, path: number[], context: LoweringContext): s
     templateHtml += lowered.html;
     domIndex += lowered.nodeCount;
   }
-  context.bindings.push({
-    kind: "if",
-    path: [...path],
-    test: attrExpression(node, "test") ?? "false",
-    templateHtml,
-    bindings: childContext.bindings,
-    ...(childContext.stores.length > 0 ? { stores: childContext.stores } : {}),
-    ...(childContext.hydrationBoundaries.length > 0 ? { hydrationBoundaries: childContext.hydrationBoundaries } : {}),
-    ...(childContext.components.length > 0 ? { components: childContext.components } : {}),
-  });
+  context.bindings.push(
+    recordSpan(
+      {
+        kind: "if",
+        path: [...path],
+        test: attrExpression(node, "test") ?? "false",
+        templateHtml,
+        bindings: childContext.bindings,
+        ...(childContext.stores.length > 0 ? { stores: childContext.stores } : {}),
+        ...(childContext.hydrationBoundaries.length > 0
+          ? { hydrationBoundaries: childContext.hydrationBoundaries }
+          : {}),
+        ...(childContext.components.length > 0 ? { components: childContext.components } : {}),
+      },
+      expressionLocationForAttribute(node.attrs.find((attr) => attr.name === "test") ?? { value: true }),
+    ),
+  );
   return "<!---->";
 };
 
@@ -189,7 +216,7 @@ const lowerList = (node: ElementNode, containerPath: number[], region?: ListBind
     templateHtml += lowered.html;
     domIndex += lowered.nodeCount;
   }
-  return {
+  return recordSpan({
     kind: "list",
     path: [...containerPath],
     each: attrExpression(node, "each") ?? "[]",
@@ -203,7 +230,7 @@ const lowerList = (node: ElementNode, containerPath: number[], region?: ListBind
     ...(childContext.stores.length > 0 ? { stores: childContext.stores } : {}),
     ...(childContext.hydrationBoundaries.length > 0 ? { hydrationBoundaries: childContext.hydrationBoundaries } : {}),
     ...(childContext.components.length > 0 ? { components: childContext.components } : {}),
-  };
+  }, expressionLocationForAttribute(node.attrs.find((attr) => attr.name === "each") ?? { value: true }));
 };
 
 const lowerElement = (node: ElementNode, path: number[], context: LoweringContext): string => {
@@ -243,7 +270,7 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
     if (attr.name.startsWith("on:")) {
       const handler = readExpressionAttribute(attr.value);
       if (handler) {
-        context.bindings.push({ kind: "event", path: [...path], eventName: attr.name.slice(3), handler });
+        context.bindings.push(recordSpan({ kind: "event", path: [...path], eventName: attr.name.slice(3), handler }, expressionLocationForAttribute(attr)));
       }
       continue;
     }
@@ -251,34 +278,34 @@ const lowerElement = (node: ElementNode, path: number[], context: LoweringContex
       const expression = readExpressionAttribute(attr.value);
       if (expression && isAssignableExpression(expression)) {
         const property = attr.name.slice(5) === "checked" ? "checked" : "value";
-        context.bindings.push({ kind: "model", path: [...path], property, expression });
+        context.bindings.push(recordSpan({ kind: "model", path: [...path], property, expression }, expressionLocationForAttribute(attr)));
       }
       continue;
     }
     if (attr.name === "ref") {
       const expression = readExpressionAttribute(attr.value);
       if (expression) {
-        context.bindings.push({ kind: "ref", path: [...path], expression });
+        context.bindings.push(recordSpan({ kind: "ref", path: [...path], expression }, expressionLocationForAttribute(attr)));
       }
       continue;
     }
     if (attr.name.startsWith("style:")) {
       const expression = readExpressionAttribute(attr.value);
       if (expression) {
-        context.bindings.push({ kind: "style", path: [...path], name: attr.name.slice(6), expression });
+        context.bindings.push(recordSpan({ kind: "style", path: [...path], name: attr.name.slice(6), expression }, expressionLocationForAttribute(attr)));
       }
       continue;
     }
     if (attr.name.startsWith("class:")) {
       const expression = readExpressionAttribute(attr.value);
       if (expression) {
-        context.bindings.push({ kind: "class", path: [...path], className: attr.name.slice(6), expression });
+        context.bindings.push(recordSpan({ kind: "class", path: [...path], className: attr.name.slice(6), expression }, expressionLocationForAttribute(attr)));
       }
       continue;
     }
     const expression = readExpressionAttribute(attr.value);
     if (expression) {
-      context.bindings.push({ kind: "attr", path: [...path], name: attr.name, expression });
+      context.bindings.push(recordSpan({ kind: "attr", path: [...path], name: attr.name, expression }, expressionLocationForAttribute(attr)));
       continue;
     }
     if (attr.name === "class" && attr.value !== true) {
@@ -402,7 +429,7 @@ const hasModelBinding = (binding: ClientBinding): boolean => {
 const clientModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
 
 const clientModuleCacheKey = (options: GenerateClientModuleOptions): string =>
-  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}\0${options.hydrationBoundaryId ?? ""}\0${options.hydrationChunk === true ? "chunk" : ""}\0${options.hydrateOnly === true ? "hydrate-only" : ""}\0${JSON.stringify(options.hydrationChunkImports ?? {})}`;
+  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}\0${options.hydrationBoundaryId ?? ""}\0${options.hydrationChunk === true ? "chunk" : ""}\0${options.hydrateOnly === true ? "hydrate-only" : ""}\0${options.templateId ?? ""}\0${options.sourceRevision ?? ""}\0${JSON.stringify(options.hydrationChunkImports ?? {})}`;
 
 /** Maps each compiled boundary to the template node it was lowered from. */
 const hydrationBoundaryNodes = new WeakMap<HydrationBoundary, ElementNode>();
@@ -454,9 +481,14 @@ export const generateClientHydrationChunkModule = (
   }
   // A boundary chunk always receives the scope that the entry module already
   // resolved, so it must never run the SFC setup factory again.
+  // The chunk registers its own template id so bindings created after the
+  // asynchronous load are attributed explicitly instead of via a global.
   return generateClientModule(boundaryTemplate, {
     hydrationChunk: true,
     ...(options.reactive === undefined ? {} : { reactive: options.reactive }),
+    ...(options.templateId ? { templateId: options.templateId } : {}),
+    ...(options.sourceRevision ? { sourceRevision: options.sourceRevision } : {}),
+    ...(options.mapSourceOffset ? { mapSourceOffset: options.mapSourceOffset } : {}),
   });
 };
 
@@ -500,6 +532,10 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const isHydrationChunk = options.hydrationChunk === true;
   const emitsHydrate = hasHydrationChunks || hydrateOnly;
   const bindName = hydrateOnly ? "__tachyonBindEager" : "bind";
+  const instrumentBindings = typeof options.templateId === "string" && options.templateId.length > 0;
+  const mapSourceOffset = options.mapSourceOffset ?? ((offset: number): number => offset);
+  const bindingLocationId = (index: number): string =>
+    `${options.templateId}#${options.sourceRevision ?? ""}#${index}`;
   const needsStore = template.client.stores.length > 0;
   const hasDefaultScope = typeof options.defaultScopeName === "string" && options.defaultScopeName.length > 0;
   const sourceName = scopeName(needsStore);
@@ -565,6 +601,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       ...(needsSignal ? [`effect as ${runtimeNames.effect}`, `read as ${runtimeNames.read}`] : []),
     ];
     lines.push(`import { ${signalImports.join(", ")} } from "tachyon-dom/runtime/signal";`);
+    if (instrumentBindings) {
+      lines.push(
+        `import { enterBindingLocation as __tachyonEnterBinding, exitBindingLocation as __tachyonExitBinding, registerTemplateBindings as __tachyonRegisterBindings } from "tachyon-dom/runtime/signal";`,
+      );
+    }
   }
   if (needsStore) {
     lines.push(`import { createStore as ${runtimeNames.createStore} } from "tachyon-dom/runtime/store";`);
@@ -576,6 +617,22 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (hydrateOnly) {
     lines.push(`export const hydrateOnly = true;`);
+  }
+  if (instrumentBindings) {
+    // Only development builds request instrumentation; the production define
+    // additionally folds every call away should it ever be present.
+    lines.push(
+      `const __tachyonDev = typeof __TACHYON_PRODUCTION__ === "undefined" || __TACHYON_PRODUCTION__ === false;`,
+    );
+    const spans = bindings.map((binding, index) => {
+      const span = bindingSourceSpan(binding);
+      return `[${index}, ${JSON.stringify(binding.kind)}, ${JSON.stringify(binding.path)}, ${
+        span ? `${mapSourceOffset(span.start)}, ${mapSourceOffset(span.end)}` : "-1, -1"
+      }]`;
+    });
+    lines.push(
+      `const __tachyonRegisterTemplate = () => __tachyonDev && __tachyonRegisterBindings(${JSON.stringify(options.templateId)}, ${JSON.stringify(options.sourceRevision ?? "")}, [${spans.join(", ")}]);`,
+    );
   }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
@@ -662,13 +719,20 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       lines.push(`  }`);
     }
   }
+  if (instrumentBindings) lines.push(`  __tachyonRegisterTemplate();`);
   let listIndex = 0;
   let conditionalIndex = 0;
   let targetIndex = 0;
-  for (const binding of bindings) {
+  for (const [bindingIndex, binding] of bindings.entries()) {
     const bindingInHydrationBoundary = hasHydrationChunks && !hydrateOnly && withinHydrationBoundary(binding);
     const bindingStart = lines.length;
     if (bindingInHydrationBoundary) lines.push(`  if (!__tachyonSkipHydration) {`);
+    if (instrumentBindings) {
+      lines.push(
+        `  const __tachyonPreviousBinding${bindingIndex} = __tachyonDev ? __tachyonEnterBinding(${JSON.stringify(bindingLocationId(bindingIndex))}) : undefined;`,
+      );
+      lines.push(`  try {`);
+    }
     if (binding.kind === "text") {
       const target = `${runtimeNames.textAt}(root, ${JSON.stringify(binding.path)})`;
       if (reactive) {
@@ -751,6 +815,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     } else {
       const targetName = reactive ? `__tachyonTarget${targetIndex++}` : undefined;
       lines.push(emitConditionalBinding(binding, reactive, sourceName, conditionalIndex++, targetName));
+    }
+    if (instrumentBindings) {
+      lines.push(`  } finally {`);
+      lines.push(`    if (__tachyonDev) __tachyonExitBinding(__tachyonPreviousBinding${bindingIndex});`);
+      lines.push(`  }`);
     }
     if (bindingInHydrationBoundary) {
       const emitted = lines.splice(bindingStart + 1);

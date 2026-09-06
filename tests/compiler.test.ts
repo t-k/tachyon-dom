@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  bindingSourceSpan,
   compileTemplate,
   generateClientHydrationChunkModule,
   compileServerTemplate,
@@ -1299,6 +1300,43 @@ describe("HTML-first compiler", () => {
     expect(chunk).toContain(`export const templateHtml = "<section><output> </output></section>";`);
     expect(chunk).toContain("__tachyonSetText");
     expect(chunk).toContain("__tachyonContext");
+  });
+
+  it("records template source spans for client bindings and instruments modules only when a template id is given", () => {
+    const source = `<main><h1 class:on={active}>{ title }</h1><if test={show}><p>{note}</p></if><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></main>`;
+    const result = compileTemplate(source);
+    if (!result.ok) throw new Error(result.error.message);
+    const [classBinding, textBinding, ifBinding, listBinding] = result.value.client.bindings;
+    if (!classBinding || !textBinding || !ifBinding || !listBinding) throw new Error("Missing bindings.");
+
+    const spanText = (binding: (typeof result.value.client.bindings)[number]): string | undefined => {
+      const span = bindingSourceSpan(binding);
+      return span ? source.slice(span.start, span.end) : undefined;
+    };
+    expect(spanText(classBinding)).toBe("active");
+    expect(spanText(textBinding)).toBe("title");
+    expect(spanText(ifBinding)).toBe("show");
+    expect(spanText(listBinding)).toBe("rows");
+    expect(bindingSourceSpan(textBinding)?.start).toBe(source.indexOf("title"));
+    // Bindings inside the branch keep spans too.
+    if (ifBinding.kind !== "if") throw new Error("Expected an if binding.");
+    expect(spanText(ifBinding.bindings[0] as (typeof result.value.client.bindings)[number])).toBe("note");
+
+    const plain = generateClientModule(result.value, { reactive: true });
+    expect(plain).not.toContain("__tachyonRegisterBindings");
+    expect(plain).not.toContain("__tachyonEnterBinding");
+
+    const instrumented = generateClientModule(result.value, {
+      reactive: true,
+      templateId: "src/page.td",
+      sourceRevision: "abcd1234",
+      mapSourceOffset: (offset) => offset + 10,
+    });
+    expect(instrumented).toContain(
+      `__tachyonRegisterBindings("src/page.td", "abcd1234", [[0, "class", [0], ${source.indexOf("active") + 10}, ${source.indexOf("active") + 16}], [1, "text", [0,0], ${source.indexOf("title") + 10}, ${source.indexOf("title") + 15}]`,
+    );
+    expect(instrumented).toContain(`__tachyonEnterBinding("src/page.td#abcd1234#3")`);
+    expect(instrumented.match(/} finally \{/g)).toHaveLength(4);
   });
 
   it("rejects automatic row-local hydration ids that cannot be unique", () => {

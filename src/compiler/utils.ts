@@ -289,3 +289,41 @@ export const jsOptionalPropertyAccess = (objectExpression: string, propertyName:
   identifierNamePattern.test(propertyName)
     ? `${objectExpression}?.${propertyName}`
     : `${objectExpression}?.[${jsString(propertyName)}]`;
+
+export type ExpressionSourceLocation = {
+  expression: string;
+  start: number;
+  end: number;
+};
+
+/** Template offsets of the expression inside `name={expression}` or `name="{expression}"`. */
+export const expressionLocationForAttribute = (attribute: {
+  value: string | true;
+  valueStart?: number;
+}): ExpressionSourceLocation | undefined => {
+  if (attribute.value === true || attribute.valueStart === undefined) return undefined;
+  const raw = attribute.value;
+  const open = raw.indexOf("{");
+  const close = raw.lastIndexOf("}");
+  if (open < 0 || close <= open) return undefined;
+  const inner = raw.slice(open + 1, close);
+  const leading = inner.search(/\S/);
+  if (leading < 0) return undefined;
+  const expression = inner.trim();
+  const start = attribute.valueStart + open + 1 + leading;
+  return { expression, start, end: start + expression.length };
+};
+
+/** Template offsets of one `{expression}` segment inside a text node. */
+export const expressionLocationForText = (
+  node: { value: string; start?: number },
+  segment: { value: string; start: number; end: number },
+): ExpressionSourceLocation | undefined => {
+  if (node.start === undefined) return undefined;
+  const raw = node.value.slice(segment.start + 1, segment.end - 1);
+  const leading = raw.search(/\S/);
+  if (leading < 0) return undefined;
+  const expression = raw.trim();
+  const start = node.start + segment.start + 1 + leading;
+  return { expression, start, end: start + expression.length };
+};

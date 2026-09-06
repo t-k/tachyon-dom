@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createRuntimeDiagnostics } from "../src/runtime/diagnostics";
 import { createRoot, createSignal, effect } from "../src/runtime/signal";
+import { compileTemplate, generateClientModule } from "../src/compiler";
+import { mount } from "../src/runtime/mount";
+import { evaluateGeneratedClientModule } from "./generated-client-module";
 
 describe("development runtime diagnostics", () => {
   it("observes resource counts without retaining disposed owners", () => {
@@ -49,5 +52,64 @@ describe("development runtime diagnostics", () => {
     dispose();
     nextDispose();
     second.dispose();
+  });
+
+  it("resolves live effects and owners of a generated module back to template source spans", () => {
+    const source = `<main><h1>{title}</h1><p class:on={active}>x</p><if test={show}><b>{note}</b></if><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></main>`;
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(
+      generateClientModule(compiled.value, { reactive: true, templateId: "src/page.td", sourceRevision: "rev1" }),
+    );
+    const diagnostics = createRuntimeDiagnostics();
+    const show = createSignal(false);
+    const rows = createSignal([{ id: 1, label: "one" }]);
+    const root = document.createElement("div");
+    document.body.append(root);
+    const handle = mount(root, module, { title: "T", active: true, show, rows });
+    try {
+      const spans = new Map<string, string>();
+      for (const location of diagnostics.liveBindings()) {
+        if (location.sourceOffset === undefined || location.sourceEnd === undefined) continue;
+        spans.set(location.bindingId ?? "", source.slice(location.sourceOffset, location.sourceEnd));
+      }
+      expect([...spans.values()].sort()).toEqual(["active", "rows", "show", "title"]);
+
+      const textEffect = diagnostics
+        .events()
+        .filter((event) => event.type === "effect-created")
+        .map((event) => diagnostics.bindingForEffect(event.effectId as number))
+        .find((location) => location?.kind === "text");
+      expect(textEffect?.templateId).toBe("src/page.td");
+      expect(textEffect?.revision).toBe("rev1");
+      expect(textEffect?.path).toEqual([0, 0]);
+
+      // Bindings created lazily by reruns (a branch, a new row) are attributed
+      // to the enclosing generated binding rather than leaking to another.
+      const listEffects = (): Set<number> =>
+        new Set(
+          diagnostics
+            .liveBindings()
+            .filter((location) => location.kind === "list" && location.effectId !== undefined)
+            .map((location) => location.effectId as number),
+        );
+      const before = listEffects();
+      show.set(true);
+      rows.set([...rows(), { id: 2, label: "two" }]);
+      const after = diagnostics.liveBindings();
+      // The second row's effect is created during the list effect's rerun and
+      // is attributed to the <for> binding, not to any other one.
+      const newListEffects = [...listEffects()].filter((effectId) => !before.has(effectId));
+      expect(newListEffects.length).toBeGreaterThan(0);
+      expect(new Set(after.map((location) => location.kind))).toEqual(new Set(["class", "text", "if", "list"]));
+      const listOwners = after.filter((location) => location.kind === "list" && location.ownerId !== undefined);
+      expect(listOwners.length).toBeGreaterThan(0);
+      const first = listOwners[0] as { ownerId: number };
+      expect(diagnostics.bindingsForOwner(first.ownerId).every((location) => location.kind === "list")).toBe(true);
+    } finally {
+      handle.dispose();
+    }
+    expect(diagnostics.liveBindings()).toEqual([]);
+    diagnostics.dispose();
   });
 });

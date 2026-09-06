@@ -3,6 +3,8 @@ import { compileTachyonSfc, isSfcSetupScript, sfcScriptLanguage } from "./compil
 import { isAssignableExpression, parseExpression } from "./compiler/expression.js";
 import {
   attrString,
+  expressionLocationForAttribute,
+  expressionLocationForText,
   expressionToScopeAccess,
   itemNameFromKey,
   readExpressionAttribute,
@@ -83,36 +85,6 @@ const sourceOffsetForExpression = (
   start: descriptor.mapTemplateOffset(location.start),
   end: descriptor.mapTemplateOffset(location.end),
 });
-
-const expressionLocationForAttribute = (attribute: {
-  value: string | true;
-  valueStart?: number;
-}): ExpressionLocation | undefined => {
-  if (attribute.value === true || attribute.valueStart === undefined) return undefined;
-  const raw = attribute.value;
-  const open = raw.indexOf("{");
-  const close = raw.lastIndexOf("}");
-  if (open < 0 || close <= open) return undefined;
-  const inner = raw.slice(open + 1, close);
-  const leading = inner.search(/\S/);
-  if (leading < 0) return undefined;
-  const expression = inner.trim();
-  const start = attribute.valueStart + open + 1 + leading;
-  return { expression, start, end: start + expression.length };
-};
-
-const expressionLocationForText = (
-  node: { value: string; start?: number },
-  segment: { value: string; start: number; end: number },
-): ExpressionLocation | undefined => {
-  if (node.start === undefined) return undefined;
-  const raw = node.value.slice(segment.start + 1, segment.end - 1);
-  const leading = raw.search(/\S/);
-  if (leading < 0) return undefined;
-  const expression = raw.trim();
-  const start = node.start + segment.start + 1 + leading;
-  return { expression, start, end: start + expression.length };
-};
 
 const hasExportModifier = (ts: TypeScriptModule, node: Node): boolean =>
   ts.canHaveModifiers(node) &&

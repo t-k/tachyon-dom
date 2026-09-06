@@ -4,6 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/p
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { createHash } from "node:crypto";
 import { createNodeFetchHandler, type NodeFetchHandlerOptions, type StaticAssetOptions } from "./adapters/node.js";
 import {
   defineApp,
@@ -243,6 +244,7 @@ const codeForTarget = (
   hydrationBoundaryId?: string,
   hydrationChunkImports?: Readonly<Record<string, string>>,
   hydrateOnly = false,
+  instrumentation?: { templateId: string; sourceRevision: string; mapSourceOffset: (offset: number) => number },
 ): string => {
   if (scriptOnly) {
     return generateScriptOnlyModule(target);
@@ -259,6 +261,7 @@ const codeForTarget = (
     ...(hydrationBoundaryId ? { hydrationBoundaryId } : {}),
     ...(hydrationChunkImports ? { hydrationChunkImports } : {}),
     ...(hydrateOnly ? { hydrateOnly: true } : {}),
+    ...instrumentation,
   });
 };
 
@@ -478,6 +481,20 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
           ? hydrationChunkImportsFor(id, result.value.template.client.hydrationBoundaries)
           : undefined;
       const hydrateOnly = resolvedTarget === "client" && hydrationBoundaryId === undefined && isHydrateOnlyRequest(id);
+      // Binding location instrumentation is a development aid: it names the
+      // template relative to the Vite root (never an absolute path) and is
+      // omitted entirely from production builds.
+      const isProductionBuild = command === "build" && mode === "production";
+      const instrumentation =
+        resolvedTarget === "client" && !isProductionBuild
+          ? {
+              templateId: `${
+                rootDir ? relative(rootDir, cleanId(id)).split(sep).join("/") : cleanId(id).split(sep).join("/")
+              }${hydrationBoundaryId === undefined ? "" : `?tachyon-hydration=${hydrationBoundaryId}`}`,
+              sourceRevision: createHash("sha256").update(source).digest("hex").slice(0, 8),
+              mapSourceOffset: result.value.descriptor.mapTemplateOffset,
+            }
+          : undefined;
       // Boundary chunks bind with the scope resolved by the entry module, so the
       // SFC script and its setup factory are only emitted into the entry.
       const code = `${hydrationBoundaryId === undefined ? script.value.code : ""}${codeForTarget(
@@ -491,6 +508,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         hydrationBoundaryId,
         hydrationChunkImports,
         hydrateOnly,
+        instrumentation,
       )}`;
       const emitSourceMap = shouldEmitSourceMap({
         sourcemap: options.sourcemap,

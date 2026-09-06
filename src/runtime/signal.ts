@@ -36,10 +36,19 @@ type Owner = {
 
 type OwnerRunner = <T>(fn: () => T) => T;
 
+export type TemplateBindingSpan = readonly [
+  index: number,
+  kind: string,
+  path: readonly number[],
+  sourceStart: number,
+  sourceEnd: number,
+];
+
 export type RuntimeLifecycleHooks = {
-  ownerCreated?: (id: number) => void;
+  templateBindingsRegistered?: (templateId: string, revision: string, bindings: readonly TemplateBindingSpan[]) => void;
+  ownerCreated?: (id: number, bindingLocation?: string) => void;
   ownerDisposed?: (id: number) => void;
-  effectCreated?: (id: number, ownerId: number | undefined) => void;
+  effectCreated?: (id: number, ownerId: number | undefined, bindingLocation?: string) => void;
   effectDisposed?: (id: number) => void;
   subscriptionChanged?: (delta: 1 | -1) => void;
   cleanupChanged?: (delta: 1 | -1) => void;
@@ -64,6 +73,29 @@ let flushing = false;
 let runtimeLifecycleHooks: RuntimeLifecycleHooks | undefined;
 let nextOwnerId = 0;
 let nextEffectId = 0;
+/** Development-only: the template binding currently being installed. */
+let currentBindingLocation: string | undefined;
+
+/** Marks the start of a generated binding; returns the previous location for `exitBindingLocation`. */
+export const enterBindingLocation = (location: string): string | undefined => {
+  if (!lifecycleDiagnosticsEnabled) return undefined;
+  const previous = currentBindingLocation;
+  currentBindingLocation = location;
+  return previous;
+};
+
+export const exitBindingLocation = (previous: string | undefined): void => {
+  if (lifecycleDiagnosticsEnabled) currentBindingLocation = previous;
+};
+
+/** Publishes a generated module's binding spans to the installed diagnostics hooks. */
+export const registerTemplateBindings = (
+  templateId: string,
+  revision: string,
+  bindings: readonly TemplateBindingSpan[],
+): void => {
+  if (lifecycleDiagnosticsEnabled) runtimeLifecycleHooks?.templateBindingsRegistered?.(templateId, revision, bindings);
+};
 const pendingComputedEffects = new Set<EffectRunner>();
 const pendingEffects = new Set<EffectRunner>();
 
@@ -84,7 +116,9 @@ const createOwner = (): Owner => {
     tail: undefined,
     parentRegistration: undefined,
   };
-  if (lifecycleDiagnosticsEnabled && owner.id !== undefined) runtimeLifecycleHooks?.ownerCreated?.(owner.id);
+  if (lifecycleDiagnosticsEnabled && owner.id !== undefined) {
+    runtimeLifecycleHooks?.ownerCreated?.(owner.id, currentBindingLocation);
+  }
   return owner;
 };
 
@@ -518,6 +552,7 @@ const reportAsyncEffectError = (runner: EffectRunner, runOwner: Owner, error: un
 const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
   const parent = activeEffect && !activeEffect.disposed ? activeEffect : undefined;
   const errorOwner = currentErrorOwner;
+  const bindingLocation = lifecycleDiagnosticsEnabled ? currentBindingLocation : undefined;
   const runner: EffectRunner = {
     id: lifecycleDiagnosticsEnabled && runtimeLifecycleHooks ? ++nextEffectId : undefined,
     disposed: false,
@@ -545,6 +580,10 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
       const previousOwner = currentOwner;
       const previousEffectOwner = currentEffectOwner;
       const previousErrorOwner = currentErrorOwner;
+      // Reruns restore the binding the effect was created under, so owners
+      // and effects created lazily (rows, branches) stay attributed to it.
+      const previousBindingLocation = currentBindingLocation;
+      if (lifecycleDiagnosticsEnabled) currentBindingLocation = bindingLocation;
       activeEffect = runner;
       const runOwner = runner.runOwner;
       currentOwner = runner.owner;
@@ -567,6 +606,7 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
         currentOwner = previousOwner;
         currentEffectOwner = previousEffectOwner;
         currentErrorOwner = previousErrorOwner;
+        if (lifecycleDiagnosticsEnabled) currentBindingLocation = previousBindingLocation;
         if (!previous) {
           scheduleFlush();
         }
@@ -579,7 +619,7 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
     },
   };
   if (lifecycleDiagnosticsEnabled && runner.id !== undefined)
-    runtimeLifecycleHooks?.effectCreated?.(runner.id, runner.runOwner.id);
+    runtimeLifecycleHooks?.effectCreated?.(runner.id, runner.runOwner.id, bindingLocation);
   parent?.children.add(runner);
   errorOwner?.runners.add(runner);
   try {

@@ -2030,6 +2030,80 @@ export const bindRows = (root, rows, options) => effect(() => {
     }
   });
 
+  it("instruments binding locations in development transforms but not in production builds", async () => {
+    await mkdir(path.join(process.cwd(), "node_modules", ".cache"), { recursive: true });
+    const dir = await mkdtemp(path.join(process.cwd(), "node_modules", ".cache", "tachyon-diag-prod-"));
+    try {
+      await mkdir(path.join(dir, "src"), { recursive: true });
+      const source = `<script setup>const title = "Dev";</script><main><h1>{title}</h1><section hydrate><p>{title}</p></section></main>`;
+      await writeFile(path.join(dir, "src", "page.td"), source);
+      const plugin = tachyonDom({ reactive: true, declarationOutput: false });
+      if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+      const transformHook = plugin.transform;
+      if (typeof plugin.configResolved === "function") {
+        await (plugin.configResolved as (config: unknown) => void).call({} as never, {
+          command: "serve",
+          mode: "development",
+          root: dir,
+        });
+      }
+      const context = {
+        error(error: string): never {
+          throw new Error(error);
+        },
+      } as never;
+      const dev = await transformHook.call(context, source, path.join(dir, "src", "page.td"));
+      const devCode = typeof dev === "object" ? String(dev?.code ?? "") : "";
+      expect(devCode).toContain(`__tachyonRegisterBindings("src/page.td", "`);
+      // Only the root-relative template id is embedded in the registration,
+      // never the absolute path (Vite module ids elsewhere stay absolute).
+      const registration = /__tachyonRegisterBindings\(([^;]*)\);/.exec(devCode)?.[1] ?? "";
+      expect(registration).not.toContain(dir);
+      const chunk = await transformHook.call(
+        context,
+        source,
+        `${path.join(dir, "src", "page.td")}?client&tachyon-hydration=td-h-1`,
+      );
+      const chunkCode = typeof chunk === "object" ? String(chunk?.code ?? "") : "";
+      expect(chunkCode).toContain(`__tachyonRegisterBindings("src/page.td?tachyon-hydration=td-h-1", "`);
+      await writeFile(path.join(dir, "src", "main.js"), `export { hydrate, bind } from "./page.td";\n`);
+      const sourceRoot = path.resolve(process.cwd(), "src");
+      await viteBuild({
+        configFile: false,
+        logLevel: "silent",
+        root: dir,
+        mode: "production",
+        plugins: [tachyonDom({ reactive: true })],
+        resolve: {
+          alias: [
+            { find: /^tachyon-dom\/(.+)$/, replacement: `${sourceRoot}/$1.ts` },
+            { find: "tachyon-dom", replacement: path.resolve(sourceRoot, "index.ts") },
+          ],
+        },
+        build: {
+          outDir: "dist",
+          minify: false,
+          rollupOptions: {
+            input: path.join(dir, "src", "main.js"),
+            preserveEntrySignatures: "strict",
+            output: { entryFileNames: "entry.js", chunkFileNames: "[name].js", format: "es" },
+          },
+        },
+      });
+      const files = await readdir(path.join(dir, "dist"));
+      for (const file of files.filter((name) => name.endsWith(".js"))) {
+        const code = await readFile(path.join(dir, "dist", file), "utf8");
+        expect(code, file).not.toContain("registerTemplateBindings");
+        expect(code, file).not.toContain("enterBindingLocation(");
+        expect(code, file).not.toContain(`"src/page.td"`);
+        expect(code, file).not.toContain("__tachyonDev");
+        expect(code, file).not.toContain("runtime/diagnostics");
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("generates one lazy chunk request per top-level hydration boundary", async () => {
     const plugin = tachyonDom();
     if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
