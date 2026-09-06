@@ -330,7 +330,13 @@ export const scheduleHydration = (
   handle: HydrationBoundaryHandle,
   options: HydrationScheduleOptions = { strategy: "load" },
 ): (() => void) => {
-  const trigger = (event?: Event): void => {
+  // `retry` re-arms the interaction trigger when hydration fails, so a failed
+  // chunk load does not leave the boundary permanently unresponsive.
+  const trigger = (event?: Event, retry?: () => void): void => {
+    const fail = (error: unknown): void => {
+      retry?.();
+      options.onError?.(hydrationErrorFor(error));
+    };
     try {
       const hydration = handle.hydrate();
       if (options.replayInteraction && event) {
@@ -342,15 +348,15 @@ export const scheduleHydration = (
           }
         };
         if (hydration && typeof hydration.then === "function") {
-          void hydration.then(replay).catch((error: unknown) => options.onError?.(hydrationErrorFor(error)));
+          void hydration.then(replay).catch(fail);
         } else {
           replay();
         }
       } else if (hydration && typeof hydration.then === "function") {
-        void hydration.catch((error: unknown) => options.onError?.(hydrationErrorFor(error)));
+        void hydration.catch(fail);
       }
     } catch (error) {
-      options.onError?.(hydrationErrorFor(error));
+      fail(error);
     }
   };
   if (options.strategy === "load") {
@@ -418,7 +424,9 @@ export const scheduleHydration = (
       event.stopImmediatePropagation();
       if (event.cancelable) event.preventDefault();
     }
-    trigger(event);
+    trigger(event, () => {
+      if (active) element.addEventListener(eventName, listener, true);
+    });
   };
   element.addEventListener(eventName, listener, true);
   return () => {

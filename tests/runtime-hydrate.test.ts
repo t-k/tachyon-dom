@@ -277,6 +277,43 @@ describe("hydrate boundary runtime", () => {
     document.removeEventListener("click", documentListener, true);
   });
 
+  it("re-arms the interaction trigger after a failed chunk load so the next interaction retries", async () => {
+    document.body.innerHTML = `<main><!--tachyon-hydrate:retry:start--><section><button>Open</button></section><!--tachyon-hydrate:retry:end--></main>`;
+    const main = document.querySelector("main");
+    const button = main?.querySelector("button");
+    if (!main || !(button instanceof HTMLButtonElement)) throw new Error("Missing retry button.");
+    let attempts = 0;
+    const bound: string[] = [];
+    const load = vi.fn(async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("chunk unavailable");
+      return { bind: (element: Element) => void bound.push(element.tagName) };
+    });
+    const boundary = createLazyHydrationBoundary(main, "retry", load);
+    if (!boundary.ok) throw new Error(boundary.error.message);
+    const errors: string[] = [];
+    const cleanup = scheduleHydration(boundary.value, {
+      strategy: "interaction",
+      interaction: "click",
+      replayInteraction: true,
+      onError: (error) => errors.push(error.message),
+    });
+
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(errors).toEqual(["chunk unavailable"]);
+    expect(boundary.value.hydrated()).toBe(false);
+
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(boundary.value.hydrated()).toBe(true);
+    expect(bound).toEqual(["SECTION"]);
+
+    cleanup();
+    boundary.value.dispose();
+  });
+
   it("loads a lazy boundary once and replays the first interaction", async () => {
     document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--><section><button>Open</button></section><!--tachyon-hydrate:panel:end--></main>`;
     const main = document.querySelector("main");

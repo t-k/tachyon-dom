@@ -118,4 +118,12 @@ function local() { const title = "local"; return title; }
     const parameterDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf("return title") + 8), "file:///page.td");
     expect(parameterDefinition?.range.start).toEqual(positionAt(source, source.indexOf("f(title") + 2));
   });
+
+  it("keeps default value expressions in parameter lists bound to the outer scope", () => {
+    const source = `<script>const fallback = 1;const f = ({ a = fallback, b: [c = fallback] }) => a + c + fallback;const g = (x = fallback, y: number = fallback) => x + y;</script><p>{fallback}</p>`;
+    const rename = templateRenameAt(source, positionAt(source, source.lastIndexOf("{fallback") + 2), "initial");
+    expect(applyEdits(source, rename?.edits ?? [])).toBe(
+      `<script>const initial = 1;const f = ({ a = initial, b: [c = initial] }) => a + c + initial;const g = (x = initial, y: number = initial) => x + y;</script><p>{initial}</p>`,
+    );
+  });
 });

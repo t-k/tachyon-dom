@@ -390,15 +390,24 @@ const scriptSymbols = (
   const parameterTokens = (openIndex: number, closeIndex: number): LexToken[] => {
     const names: LexToken[] = [];
     let depth = 0;
-    let inType = false;
+    // While defined, tokens belong to a default value or a type annotation
+    // that started at this depth. Those expressions reference outer bindings
+    // and must never be registered as parameter names.
+    let skipUntilDepth: number | undefined;
     for (let index = openIndex + 1; index < closeIndex; index += 1) {
       const token = tokens[index]!;
       const previous = tokens[index - 1];
       if (token.punct === "(" || token.punct === "[" || token.punct === "{") depth += 1;
       else if (token.punct === ")" || token.punct === "]" || token.punct === "}") depth -= 1;
-      if (depth === 0 && token.punct === ",") inType = false;
-      if (depth === 0 && (token.punct === ":" || token.punct === "=")) inType = true;
-      if (inType || !token.name || reservedWords.has(token.name)) continue;
+      if (skipUntilDepth !== undefined) {
+        if ((token.punct === "," && depth === skipUntilDepth) || depth < skipUntilDepth) skipUntilDepth = undefined;
+        else continue;
+      }
+      if (token.punct === "=" || (depth === 0 && token.punct === ":")) {
+        skipUntilDepth = depth;
+        continue;
+      }
+      if (!token.name || reservedWords.has(token.name)) continue;
       if (depth === 0 && (previous?.punct === "(" || previous?.punct === ",")) names.push(token);
       else if (depth > 0 && previous?.punct !== "." && tokens[index + 1]?.punct !== ":") names.push(token);
     }

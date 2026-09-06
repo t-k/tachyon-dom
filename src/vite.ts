@@ -393,7 +393,12 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       });
     },
     async transform(source, id) {
-      if (include.test(cleanId(id)) && !queryForId(id).has("url") && !isEntryRequest(id)) {
+      if (
+        include.test(cleanId(id)) &&
+        !queryForId(id).has("url") &&
+        !isEntryRequest(id) &&
+        hydrationBoundaryIdFor(id) === undefined
+      ) {
         const declarationOutput =
           options.declarationOutput === false
             ? undefined
@@ -452,6 +457,12 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         this.error(formatDiagnostic(diagnosticFromCompilerError(source, script.error), id));
       }
       const hydrationBoundaryId = resolvedTarget === "client" ? hydrationBoundaryIdFor(id) : undefined;
+      if (
+        hydrationBoundaryId !== undefined &&
+        !result.value.template.client.hydrationBoundaries.some((boundary) => boundary.id === hydrationBoundaryId)
+      ) {
+        this.error(`Cannot generate hydration chunk for boundary ${hydrationBoundaryId}.`);
+      }
       const hydrationChunkImports =
         resolvedTarget === "client" &&
         hydrationBoundaryId === undefined &&
