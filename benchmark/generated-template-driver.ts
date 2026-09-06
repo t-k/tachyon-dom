@@ -58,20 +58,37 @@ export type GeneratedModuleLoadTiming = {
   importMs: number;
 };
 
+export type GeneratedProductionBuildOptions = {
+  bundle: true;
+  format: "esm";
+  platform: "browser";
+  target: "es2022";
+  minify: true;
+  define: { __TACHYON_PRODUCTION__: "true" };
+};
+
 export type ArtifactSize = {
-  /** Minified bundle bytes of the artifact together with the runtime it imports. */
+  /** Minified bytes of a bundle together with the runtime it imports. */
   minifiedBytes: number;
   brotliBytes: number;
 };
 
 export type LoadedGeneratedModule = {
+  /** The non-production node artifact retained for existing supplemental benchmarks. */
   module: GeneratedClientModule;
   timing: GeneratedModuleLoadTiming;
-  /** The exact bundled code that was imported and executed. */
+  /** The non-minified node bundle retained for source and metafile inspection. */
   bundledCode: string;
-  /** The esbuild dependency graph for the same generated artifact. */
+  /** The esbuild dependency graph for the non-production reference artifact. */
   metafile: Record<string, unknown>;
   size: ArtifactSize;
+  /** The exact browser production bundle imported by production measurements. */
+  productionModule: GeneratedClientModule;
+  productionBundledCode: string;
+  productionMetafile: Record<string, unknown>;
+  productionSize: ArtifactSize;
+  productionTiming: GeneratedModuleLoadTiming;
+  productionBuildOptions: GeneratedProductionBuildOptions;
 };
 
 const nestedTags = `<td><ul><for each={row.tags} key={tag.id}><li>{tag.name}</li></for></ul></td>`;
@@ -95,9 +112,11 @@ const resolveRuntimeImports = (code: string): string =>
   );
 
 /**
- * Bundles one ESM artifact (with `tachyon-dom/runtime/*` imports resolved to
- * the source runtime), imports the bundled code, and measures the size of the
- * same bundle in minified form. Everything that is executed is what is sized.
+ * Builds the existing node reference artifact and a browser production
+ * artifact. The production artifact is imported by the production benchmark,
+ * and its own minified bytes, Brotli bytes, metafile, and hash are available to
+ * the report. The node artifact remains available for supplemental benchmarks
+ * and source inspection.
  */
 export const loadCandidateModule = async <Module>(
   code: string,
@@ -108,12 +127,20 @@ export const loadCandidateModule = async <Module>(
   bundledCode: string;
   metafile: Record<string, unknown>;
   size: ArtifactSize;
+  productionModule: Module;
+  productionBundledCode: string;
+  productionMetafile: Record<string, unknown>;
+  productionSize: ArtifactSize;
+  productionTiming: GeneratedModuleLoadTiming;
+  productionBuildOptions: GeneratedProductionBuildOptions;
 }> => {
   const directory = await mkdtemp(path.join(tmpdir(), "tachyon-generated-template-"));
   const input = path.join(directory, "entry.js");
   const output = path.join(directory, "entry.out.js");
   const minified = path.join(directory, "entry.min.js");
   const metafilePath = path.join(directory, "entry.meta.json");
+  const production = path.join(directory, "entry.production.min.js");
+  const productionMetafilePath = path.join(directory, "entry.production.meta.json");
   try {
     const bundleStarted = performance.now();
     await writeFile(input, resolveRuntimeImports(code));
@@ -139,12 +166,58 @@ export const loadCandidateModule = async <Module>(
     const encoded = Buffer.from(bundled).toString("base64");
     const module = (await import(`data:text/javascript;base64,${encoded}`)) as Module;
     const importMs = performance.now() - importStarted;
+    const productionBundleStarted = performance.now();
+    const productionBuildOptions: GeneratedProductionBuildOptions = {
+      bundle: true,
+      format: "esm",
+      platform: "browser",
+      target: "es2022",
+      minify: true,
+      define: { __TACHYON_PRODUCTION__: "true" },
+    };
+    await execFileAsync(
+      process.execPath,
+      [
+        esbuildCli,
+        input,
+        "--bundle",
+        "--format=esm",
+        "--platform=browser",
+        "--target=es2022",
+        "--minify",
+        "--define:__TACHYON_PRODUCTION__=true",
+        `--metafile=${productionMetafilePath}`,
+        `--outfile=${production}`,
+      ],
+      { cwd: projectRoot, maxBuffer: 16 * 1024 * 1024 },
+    );
+    const productionCode = await readFile(production, "utf8");
+    const productionMetafile = JSON.parse(await readFile(productionMetafilePath, "utf8")) as Record<string, unknown>;
+    const productionBundleMs = performance.now() - productionBundleStarted;
+    const productionImportStarted = performance.now();
+    const productionEncoded = Buffer.from(productionCode).toString("base64");
+    const productionModule = (await import(`data:text/javascript;base64,${productionEncoded}`)) as Module;
+    const productionImportMs = performance.now() - productionImportStarted;
+    const productionSize = {
+      minifiedBytes: Buffer.byteLength(productionCode),
+      brotliBytes: brotliCompressSync(Buffer.from(productionCode)).byteLength,
+    };
     return {
       module,
       timing: { compileMs, bundleMs, importMs },
       bundledCode: bundled,
       metafile,
       size: { minifiedBytes: minifiedCode.byteLength, brotliBytes: brotliCompressSync(minifiedCode).byteLength },
+      productionModule,
+      productionBundledCode: productionCode,
+      productionMetafile,
+      productionSize,
+      productionTiming: {
+        compileMs,
+        bundleMs: productionBundleMs,
+        importMs: productionImportMs,
+      },
+      productionBuildOptions,
     };
   } finally {
     await rm(directory, { recursive: true, force: true });

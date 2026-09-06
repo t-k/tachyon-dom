@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
@@ -12,7 +13,7 @@ import {
 } from "./generated-template-driver.js";
 import { collectBenchmarkProvenance, collectDependencyVersions, type BenchmarkEnvelope } from "./provenance.js";
 
-export const GENERATED_TEXT_LIST_ADAPTER_CONTRACT_VERSION = 1;
+export const GENERATED_TEXT_LIST_ADAPTER_CONTRACT_VERSION = 2;
 export const GENERATED_TEXT_LIST_ADAPTER_SPEED_THRESHOLD = 1.1;
 
 const GENERATED_ADAPTER_IMPORT = "mountGeneratedTextKeyedList as __tachyonMountTextKeyedList";
@@ -26,10 +27,19 @@ type AdapterItem = {
   label: string;
 };
 
+export type GeneratedTextListOperationOracle = {
+  rowCount: number;
+  keys: number[];
+  labels: string[];
+  preservedKeys: number[];
+  removedKeys: number[];
+};
+
 type AdapterSample = {
   sampleIndex: number;
   durationMs: number;
   operationDurationsMs: Record<OperationName, number>;
+  operationOracles: Record<OperationName, GeneratedTextListOperationOracle>;
 };
 
 type AdapterSummary = {
@@ -48,6 +58,15 @@ type AdapterArtifact = {
   minifiedBytes: number;
   brotliBytes: number;
   timing: LoadedGeneratedModule["timing"];
+  productionCodeHash: string;
+  productionBuildOptions: LoadedGeneratedModule["productionBuildOptions"];
+  productionMetafile: Record<string, unknown>;
+  nodeReference: {
+    minifiedBytes: number;
+    brotliBytes: number;
+    platform: "node";
+    minify: true;
+  };
 };
 
 export type GeneratedTextListAdapterWorkload = {
@@ -57,10 +76,12 @@ export type GeneratedTextListAdapterWorkload = {
   operations: readonly OperationName[];
   warmup: number;
   iterations: number;
-  buildMode: "generated-client-source";
+  buildMode: "production-browser-bundle";
+  supplementalBuildMode: "generated-client-source-node-reference";
   adapterComparison: "same-generated-source-import-switch";
   speedThresholdRatio: number;
-  timingScope: "warm-generated-dom-operations-excluding-oracles";
+  timingScope: "warm-production-bundle-dom-operations-excluding-oracles";
+  oracleScope: "after-each-operation-outside-timing";
 };
 
 export type GeneratedTextListAdapterMeasurements = {
@@ -74,6 +95,7 @@ export type GeneratedTextListAdapterMeasurements = {
     legacyDurationMs: number;
     totalRatio: number;
   }>;
+  negativeOracleCases: Record<string, boolean>;
   gates: {
     generatedImport: boolean;
     generatedBundle: boolean;
@@ -81,6 +103,8 @@ export type GeneratedTextListAdapterMeasurements = {
     listTextMetafileInput: boolean;
     minifiedSizeReduced: boolean;
     brotliSizeReduced: boolean;
+    operationOracle: boolean;
+    negativeOracle: boolean;
     speedWithinThreshold: boolean;
     decision: "candidate" | "indeterminate";
   };
@@ -151,6 +175,115 @@ const installDom = (dom: JSDOM): (() => void) => {
 const itemsFor = (count: number, suffix = ""): AdapterItem[] =>
   Array.from({ length: count }, (_, id) => ({ id, label: `Row ${id}${suffix}` }));
 
+const keyForLabel = (label: string): number => {
+  const match = /^Row (\d+)(?: updated| appended)?$/.exec(label);
+  if (!match) throw new Error(`The benchmark row label has no parseable key: ${label}`);
+  return Number(match[1]);
+};
+
+export const snapshotGeneratedTextListRows = (root: Element): Map<number, Element> => {
+  const rows = new Map<number, Element>();
+  for (const node of Array.from(root.children)) {
+    const label = node.textContent ?? "";
+    const key = keyForLabel(label);
+    if (rows.has(key)) throw new Error(`The benchmark DOM contains duplicate key ${key}.`);
+    rows.set(key, node);
+  }
+  return rows;
+};
+
+export const verifyGeneratedTextListOperation = (
+  root: Element,
+  expected: readonly AdapterItem[],
+  before: ReadonlyMap<number, Element>,
+): GeneratedTextListOperationOracle => {
+  const expectedKeys = expected.map((item) => item.id);
+  if (new Set(expectedKeys).size !== expectedKeys.length) {
+    throw new Error("The benchmark expectation contains duplicate keys.");
+  }
+  const actualNodes = Array.from(root.children);
+  if (actualNodes.length !== expected.length) {
+    throw new Error(`Expected ${expected.length} rows after an operation, received ${actualNodes.length}.`);
+  }
+  const actualKeys: number[] = [];
+  const labels: string[] = [];
+  const preservedKeys: number[] = [];
+  const expectedKeySet = new Set(expectedKeys);
+  for (const [index, node] of actualNodes.entries()) {
+    const label = node.textContent ?? "";
+    const key = keyForLabel(label);
+    const expectedItem = expected[index];
+    if (!expectedItem || key !== expectedItem.id || label !== expectedItem.label) {
+      throw new Error(
+        `Unexpected row at index ${index}: received ${JSON.stringify({ key, label })}, expected ${JSON.stringify(expectedItem)}.`,
+      );
+    }
+    actualKeys.push(key);
+    labels.push(label);
+    const previous = before.get(key);
+    if (previous) {
+      if (previous !== node) throw new Error(`Key ${key} lost its DOM node identity.`);
+      preservedKeys.push(key);
+    }
+  }
+  const removedKeys: number[] = [];
+  for (const [key, node] of before) {
+    if (expectedKeySet.has(key)) continue;
+    if (node.parentNode !== null) throw new Error(`Removed key ${key} still has a DOM parent.`);
+    removedKeys.push(key);
+  }
+  return {
+    rowCount: actualNodes.length,
+    keys: actualKeys,
+    labels,
+    preservedKeys,
+    removedKeys,
+  };
+};
+
+const renderOracleRows = (root: Element, items: readonly AdapterItem[]): void => {
+  root.replaceChildren(
+    ...items.map((item) => {
+      const row = root.ownerDocument.createElement("li");
+      const label = root.ownerDocument.createElement("span");
+      label.textContent = item.label;
+      row.append(label);
+      return row;
+    }),
+  );
+};
+
+export const verifyGeneratedTextListOracleNegativeCases = (itemCount: number): Record<string, boolean> => {
+  const initial = itemsFor(itemCount);
+  const update = itemsFor(itemCount, " updated");
+  const reordered = [...update].reverse();
+  const appended = [
+    ...reordered,
+    ...itemsFor(20).map((item, index) => ({ id: itemCount + index, label: `Row ${itemCount + index} appended` })),
+  ];
+  const removed = appended.filter((_, index) => index % 4 !== 0);
+  const cases: Array<[string, readonly AdapterItem[], readonly AdapterItem[]]> = [
+    ["update-no-op", initial, update],
+    ["reorder-no-op", update, reordered],
+    ["append-no-op", reordered, appended],
+    ["remove-no-op", appended, removed],
+  ];
+  return Object.fromEntries(
+    cases.map(([name, applied, expected]) => {
+      const root = document.createElement("ul");
+      renderOracleRows(root, applied);
+      const before = snapshotGeneratedTextListRows(root);
+      let rejected = false;
+      try {
+        verifyGeneratedTextListOperation(root, expected, before);
+      } catch {
+        rejected = true;
+      }
+      return [name, rejected];
+    }),
+  );
+};
+
 const inputFilesFor = (metafile: Record<string, unknown>): string[] => {
   const outputs = metafile.outputs;
   if (!outputs || typeof outputs !== "object") return [];
@@ -161,8 +294,8 @@ const inputFilesFor = (metafile: Record<string, unknown>): string[] => {
   });
 };
 
-const hasListTextInput = (loaded: LoadedGeneratedModule): boolean =>
-  inputFilesFor(loaded.metafile).some((file) => file.replaceAll("\\", "/").endsWith("src/runtime/list-text.ts"));
+const hasListTextInput = (metafile: Record<string, unknown>): boolean =>
+  inputFilesFor(metafile).some((file) => file.replaceAll("\\", "/").endsWith("src/runtime/list-text.ts"));
 
 const hasGeneratedAdapterImplementation = (loaded: LoadedGeneratedModule, adapter: AdapterName): boolean => {
   const marker = adapter === "generated" ? "resolveGeneratedOptions" : "resolveLegacyOptions";
@@ -170,7 +303,7 @@ const hasGeneratedAdapterImplementation = (loaded: LoadedGeneratedModule, adapte
 };
 
 const runSample = (loaded: LoadedGeneratedModule, sampleIndex: number, itemCount: number): AdapterSample => {
-  const module = loaded.module;
+  const module = loaded.productionModule;
   const root = document.createElement("ul");
   const initial = itemsFor(itemCount);
   const rows = module.createSignal<readonly AdapterItem[]>(initial);
@@ -179,7 +312,7 @@ const runSample = (loaded: LoadedGeneratedModule, sampleIndex: number, itemCount
   const reordered = [...update].reverse();
   const appended = [
     ...reordered,
-    ...itemsFor(20, " appended").map((item, index) => ({ ...item, id: itemCount + index })),
+    ...itemsFor(20).map((item, index) => ({ id: itemCount + index, label: `Row ${itemCount + index} appended` })),
   ];
   const removed = appended.filter((_, index) => index % 4 !== 0);
   const operations: Array<[OperationName, readonly AdapterItem[]]> = [
@@ -190,20 +323,20 @@ const runSample = (loaded: LoadedGeneratedModule, sampleIndex: number, itemCount
     ["restore", initial],
   ];
   const operationDurationsMs = {} as Record<OperationName, number>;
-  const started = performance.now();
+  const operationOracles = {} as Record<OperationName, GeneratedTextListOperationOracle>;
+  let durationMs = 0;
   for (const [operation, next] of operations) {
+    const before = snapshotGeneratedTextListRows(root);
     const operationStarted = performance.now();
     rows.set(next);
-    operationDurationsMs[operation] = performance.now() - operationStarted;
-  }
-  const durationMs = performance.now() - started;
-  const rendered = Array.from(root.children);
-  if (rendered.length !== itemCount || rendered.some((node, index) => node.textContent !== `Row ${index}`)) {
-    throw new Error(`Generated ${sampleIndex} produced an invalid final DOM.`);
+    const duration = performance.now() - operationStarted;
+    operationDurationsMs[operation] = duration;
+    durationMs += duration;
+    operationOracles[operation] = verifyGeneratedTextListOperation(root, next, before);
   }
   if (typeof cleanup === "function") cleanup();
   if (root.childElementCount !== 0) throw new Error(`Generated ${sampleIndex} left DOM after dispose.`);
-  return { sampleIndex, durationMs, operationDurationsMs };
+  return { sampleIndex, durationMs, operationDurationsMs, operationOracles };
 };
 
 const loadAdapterArtifacts = async (
@@ -255,6 +388,7 @@ export const runGeneratedTextListAdapterBenchmark = async (
   const restoreDom = installDom(dom);
   try {
     const loaded = await loadAdapterArtifacts(GENERATED_TEXT_LIST_ADAPTER_SOURCE);
+    const negativeOracleCases = verifyGeneratedTextListOracleNegativeCases(itemCount);
     const samples: Record<AdapterName, AdapterSample[]> = { generated: [], legacy: [] };
     const pairedSamples: GeneratedTextListAdapterMeasurements["pairedSamples"] = [];
     for (let cycle = 0; cycle < warmup + iterations; cycle++) {
@@ -286,11 +420,20 @@ export const runGeneratedTextListAdapterBenchmark = async (
       return {
         adapter,
         generatedSourceImport: adapter === "generated" ? GENERATED_ADAPTER_IMPORT : LEGACY_ADAPTER_IMPORT,
-        bundleIncludesListTextRuntime: hasListTextInput(loadedModule),
+        bundleIncludesListTextRuntime: hasListTextInput(loadedModule.productionMetafile),
         bundleIncludesAdapterImplementation: hasGeneratedAdapterImplementation(loadedModule, adapter),
-        minifiedBytes: loadedModule.size.minifiedBytes,
-        brotliBytes: loadedModule.size.brotliBytes,
-        timing: loadedModule.timing,
+        minifiedBytes: loadedModule.productionSize.minifiedBytes,
+        brotliBytes: loadedModule.productionSize.brotliBytes,
+        timing: loadedModule.productionTiming,
+        productionCodeHash: createHash("sha256").update(loadedModule.productionBundledCode).digest("hex"),
+        productionBuildOptions: loadedModule.productionBuildOptions,
+        productionMetafile: loadedModule.productionMetafile,
+        nodeReference: {
+          minifiedBytes: loadedModule.size.minifiedBytes,
+          brotliBytes: loadedModule.size.brotliBytes,
+          platform: "node",
+          minify: true,
+        },
       };
     };
     const artifacts = { generated: artifact("generated"), legacy: artifact("legacy") };
@@ -303,6 +446,12 @@ export const runGeneratedTextListAdapterBenchmark = async (
           summaries.generated.medianOperationDurationsMs[operation] <=
           summaries.legacy.medianOperationDurationsMs[operation] * GENERATED_TEXT_LIST_ADAPTER_SPEED_THRESHOLD,
       );
+    const operationOracle = Object.values(samples).every((adapterSamples) =>
+      adapterSamples.every((sample) =>
+        operationNames.every((operation) => Boolean(sample.operationOracles[operation])),
+      ),
+    );
+    const negativeOracle = Object.values(negativeOracleCases).every(Boolean);
     const gates = {
       generatedImport: loaded.generatedSource.includes(GENERATED_ADAPTER_IMPORT),
       generatedBundle: artifacts.generated.bundleIncludesAdapterImplementation,
@@ -311,10 +460,14 @@ export const runGeneratedTextListAdapterBenchmark = async (
         artifacts.generated.bundleIncludesListTextRuntime && artifacts.legacy.bundleIncludesListTextRuntime,
       minifiedSizeReduced: artifacts.generated.minifiedBytes < artifacts.legacy.minifiedBytes,
       brotliSizeReduced: artifacts.generated.brotliBytes < artifacts.legacy.brotliBytes,
+      operationOracle,
+      negativeOracle,
       speedWithinThreshold,
       decision:
         artifacts.generated.minifiedBytes < artifacts.legacy.minifiedBytes &&
         artifacts.generated.brotliBytes < artifacts.legacy.brotliBytes &&
+        operationOracle &&
+        negativeOracle &&
         speedWithinThreshold
           ? ("candidate" as const)
           : ("indeterminate" as const),
@@ -326,10 +479,12 @@ export const runGeneratedTextListAdapterBenchmark = async (
       operations: operationNames,
       warmup,
       iterations,
-      buildMode: "generated-client-source",
+      buildMode: "production-browser-bundle",
+      supplementalBuildMode: "generated-client-source-node-reference",
       adapterComparison: "same-generated-source-import-switch",
       speedThresholdRatio: GENERATED_TEXT_LIST_ADAPTER_SPEED_THRESHOLD,
-      timingScope: "warm-generated-dom-operations-excluding-oracles",
+      timingScope: "warm-production-bundle-dom-operations-excluding-oracles",
+      oracleScope: "after-each-operation-outside-timing",
     };
     const provenance = await collectBenchmarkProvenance({
       cwd: process.cwd(),
@@ -349,6 +504,7 @@ export const runGeneratedTextListAdapterBenchmark = async (
         samples,
         summaries,
         pairedSamples,
+        negativeOracleCases,
         gates,
       },
     };
@@ -370,7 +526,10 @@ const argument = (name: string): string | undefined => {
 };
 
 const main = async (): Promise<void> => {
-  const output = path.resolve(argument("--output") ?? "docs.local/review/20260906-generated-text-list-adapter.json");
+  const runId = `${new Date().toISOString().replaceAll(/[^0-9]/g, "")}-${process.pid}`;
+  const output = path.resolve(
+    argument("--output") ?? `docs.local/review/20260906-generated-text-list-adapter-${runId}.json`,
+  );
   const result = await runGeneratedTextListAdapterBenchmark({
     itemCount: Number(argument("--items") ?? 100),
     warmup: Number(argument("--warmup") ?? 5),
