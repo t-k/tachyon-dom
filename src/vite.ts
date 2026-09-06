@@ -458,12 +458,16 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         result.value.template.client.hydrationBoundaries.length > 0
           ? hydrationChunkImportsFor(id, result.value.template.client.hydrationBoundaries)
           : undefined;
-      const code = `${script.value.code}${codeForTarget(
+      // Boundary chunks bind with the scope resolved by the entry module, so the
+      // SFC script and its setup factory are only emitted into the entry.
+      const code = `${hydrationBoundaryId === undefined ? script.value.code : ""}${codeForTarget(
         resolvedTarget,
         result.value.template,
         options.reactive === true,
         result.value.scriptOnly,
-        resolvedTarget === "client" && script.value.defaultScopeName ? script.value.defaultScopeName : undefined,
+        resolvedTarget === "client" && hydrationBoundaryId === undefined && script.value.defaultScopeName
+          ? script.value.defaultScopeName
+          : undefined,
         hydrationBoundaryId,
         hydrationChunkImports,
       )}`;

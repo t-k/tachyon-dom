@@ -1690,6 +1690,70 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(chunkCode).not.toContain(`export const hydrationChunks =`);
   });
 
+  it("runs the SFC setup once when a Vite-built boundary chunk binds with the entry scope", async () => {
+    await mkdir(path.join(process.cwd(), "node_modules", ".cache"), { recursive: true });
+    const dir = await mkdtemp(path.join(process.cwd(), "node_modules", ".cache", "tachyon-lazy-setup-"));
+    try {
+      await mkdir(path.join(dir, "src"), { recursive: true });
+      await writeFile(
+        path.join(dir, "src", "lazy.td"),
+        `<script setup>globalThis.__tachyonSetupRuns = (globalThis.__tachyonSetupRuns ?? 0) + 1; const label = "ready";</script><main><section hydrate><button>{label}</button></section></main>`,
+      );
+      await writeFile(path.join(dir, "src", "main.js"), `export { hydrate } from "./lazy.td";\n`);
+      const sourceRoot = path.resolve(process.cwd(), "src");
+      await viteBuild({
+        configFile: false,
+        logLevel: "silent",
+        root: dir,
+        plugins: [tachyonDom({ reactive: true })],
+        resolve: {
+          alias: [
+            { find: /^tachyon-dom\/(.+)$/, replacement: `${sourceRoot}/$1.ts` },
+            { find: "tachyon-dom", replacement: path.resolve(sourceRoot, "index.ts") },
+          ],
+        },
+        build: {
+          outDir: "dist",
+          minify: false,
+          rollupOptions: {
+            input: path.join(dir, "src", "main.js"),
+            preserveEntrySignatures: "strict",
+            output: { entryFileNames: "entry.js", chunkFileNames: "[name].js", format: "es" },
+          },
+        },
+      });
+      const entryPath = path.join(dir, "dist", "entry.js");
+      expect(await readdir(path.join(dir, "dist"))).toContain("entry.js");
+      const entrySource = await readFile(entryPath, "utf8");
+      const chunkImport = /import\("\.\/([^"]+\.js)"\)/.exec(entrySource);
+      if (!chunkImport) throw new Error("Missing dynamic boundary chunk import in the built entry.");
+      const chunkCode = await readFile(path.join(dir, "dist", chunkImport[1] as string), "utf8");
+      expect(entrySource).toContain("__tachyonSetupRuns");
+      expect(chunkCode).not.toContain("__tachyonSetupRuns");
+      expect(chunkCode).not.toContain("__tachyonCreateScope");
+
+      (globalThis as { __tachyonSetupRuns?: number }).__tachyonSetupRuns = 0;
+      document.body.innerHTML = `<main><!--tachyon-hydrate:td-h-0:start--><section><button>ready</button></section><!--tachyon-hydrate:td-h-0:end--></main>`;
+      const entry = (await import(/* @vite-ignore */ pathToFileURL(entryPath).href)) as {
+        hydrate: (bindRoot: Element, hydrationRoot: Element) => () => void;
+      };
+      const root = document.querySelector("main");
+      if (!root) throw new Error("Missing hydration root.");
+      const stop = entry.hydrate(root, root);
+      try {
+        expect((globalThis as { __tachyonSetupRuns?: number }).__tachyonSetupRuns).toBe(1);
+        await new Promise((resolveTimer) => setTimeout(resolveTimer, 50));
+        expect((globalThis as { __tachyonSetupRuns?: number }).__tachyonSetupRuns).toBe(1);
+        expect(root.querySelector("button")?.textContent).toBe("ready");
+      } finally {
+        stop();
+        delete (globalThis as { __tachyonSetupRuns?: number }).__tachyonSetupRuns;
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("generates one lazy chunk request per top-level hydration boundary", async () => {
     const plugin = tachyonDom();
     if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");

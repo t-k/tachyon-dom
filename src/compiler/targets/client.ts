@@ -434,9 +434,10 @@ export const generateClientHydrationChunkModule = (
   if (!boundaryTemplate) {
     throw new Error(`Cannot generate hydration chunk for boundary ${boundaryId}.`);
   }
+  // A boundary chunk always receives the scope that the entry module already
+  // resolved, so it must never run the SFC setup factory again.
   return generateClientModule(boundaryTemplate, {
     ...(options.reactive === undefined ? {} : { reactive: options.reactive }),
-    ...(options.defaultScopeName ? { defaultScopeName: options.defaultScopeName } : {}),
   });
 };
 
