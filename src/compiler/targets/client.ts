@@ -892,22 +892,33 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         `  if (__tachyonBoundaryDiagnostics.length > 0) throw new Error(__tachyonBoundaryDiagnostics.map((diagnostic) => diagnostic.message).join(" "));`,
       );
     }
-    lines.push(`  const eagerCleanup = ${bindName}(bindRoot, scope, true, __tachyonContext);`);
-    lines.push(`  cleanups.push(eagerCleanup);`);
+    // Anything bound before a later failure is released again, so a failed
+    // hydrate never leaves listeners behind for a retry to duplicate.
+    lines.push(`  const __tachyonReleaseHydration = () => {`);
+    lines.push(`    for (const cleanup of cleanups.splice(0).reverse()) {`);
+    lines.push(`      try { cleanup?.(); } catch {}`);
+    lines.push(`    }`);
+    lines.push(`  };`);
+    lines.push(`  try {`);
+    lines.push(`    cleanups.push(${bindName}(bindRoot, scope, true, __tachyonContext));`);
     let hydrationIndex = 0;
     for (const [boundaryIndex, boundary] of hasHydrationChunks ? template.client.hydrationBoundaries.entries() : []) {
       const key = boundary.id;
       const idExpression = boundaryIdExpressions[boundaryIndex] as string;
       const resultName = `__tachyonBoundary${hydrationIndex++}`;
       lines.push(
-        `  const ${resultName} = __tachyonCreateLazyHydrationBoundary(hydrationRoot, ${idExpression}, () => __tachyonLoadHydrationChunk(hydrationChunks[${JSON.stringify(key)}], __tachyonContext));`,
+        `    const ${resultName} = __tachyonCreateLazyHydrationBoundary(hydrationRoot, ${idExpression}, () => __tachyonLoadHydrationChunk(hydrationChunks[${JSON.stringify(key)}], __tachyonContext));`,
       );
-      lines.push(`  if (!${resultName}.ok) throw new Error(${resultName}.error.message);`);
+      lines.push(`    if (!${resultName}.ok) throw new Error(${resultName}.error.message);`);
+      lines.push(`    cleanups.push(() => ${resultName}.value.dispose());`);
       lines.push(
-        `  cleanups.push(__tachyonScheduleHydration(${resultName}.value, { strategy: ${JSON.stringify(boundary.strategy ?? "load")},${boundary.media ? ` media: ${JSON.stringify(boundary.media)},` : ""}${boundary.interaction ? ` interaction: ${JSON.stringify(boundary.interaction)},` : ""}${boundary.rootMargin ? ` rootMargin: ${JSON.stringify(boundary.rootMargin)},` : ""} replayInteraction: true }));`,
+        `    cleanups.push(__tachyonScheduleHydration(${resultName}.value, { strategy: ${JSON.stringify(boundary.strategy ?? "load")},${boundary.media ? ` media: ${JSON.stringify(boundary.media)},` : ""}${boundary.interaction ? ` interaction: ${JSON.stringify(boundary.interaction)},` : ""}${boundary.rootMargin ? ` rootMargin: ${JSON.stringify(boundary.rootMargin)},` : ""} replayInteraction: true }));`,
       );
-      lines.push(`  cleanups.push(() => ${resultName}.value.dispose());`);
     }
+    lines.push(`  } catch (error) {`);
+    lines.push(`    __tachyonReleaseHydration();`);
+    lines.push(`    throw error;`);
+    lines.push(`  }`);
     lines.push(`  return () => {`);
     lines.push(`    let __tachyonCleanupError;`);
     lines.push(`    let __tachyonCleanupFailed = false;`);

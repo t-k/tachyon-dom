@@ -29,7 +29,10 @@ const runtimeModules: Record<string, Record<string, unknown>> = {
  * Evaluates generated client code against the real runtime modules by
  * resolving every `import { name as alias } from "tachyon-dom/runtime/..."`.
  */
-export const evaluateGeneratedClientModule = (code: string): ClientTemplateModule<Record<string, unknown>> => {
+export const evaluateGeneratedClientModule = (
+  code: string,
+  overrides: Record<string, Record<string, unknown>> = {},
+): ClientTemplateModule<Record<string, unknown>> => {
   const names: string[] = [];
   const values: unknown[] = [];
   for (const match of code.matchAll(/^import \{([^}]*)\} from "([^"]+)";$/gm)) {
@@ -39,7 +42,7 @@ export const evaluateGeneratedClientModule = (code: string): ClientTemplateModul
       const [exported, alias] = specifier.trim().split(/\s+as\s+/);
       if (!exported) continue;
       names.push((alias ?? exported).trim());
-      values.push(runtime[exported.trim()]);
+      values.push(overrides[match[2] as string]?.[exported.trim()] ?? runtime[exported.trim()]);
     }
   }
   const executable = code
@@ -48,6 +51,6 @@ export const evaluateGeneratedClientModule = (code: string): ClientTemplateModul
     .replace(/^export const /gm, "const ");
   return new Function(
     ...names,
-    `${executable}; return { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind };`,
+    `${executable}; return { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind: typeof bind === "function" ? bind : undefined, hydrate: typeof hydrate === "function" ? hydrate : undefined };`,
   )(...values) as ClientTemplateModule<Record<string, unknown>>;
 };

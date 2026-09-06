@@ -18,7 +18,7 @@ export type LocatedHydrationBoundary = {
 
 export type HydrationBoundaryDiagnostic = {
   id: string;
-  type: "missing-start" | "missing-end" | "duplicate" | "missing-element";
+  type: "missing-start" | "missing-end" | "duplicate" | "missing-element" | "malformed";
   message: string;
 };
 
@@ -173,8 +173,17 @@ export const diagnoseHydrationBoundaries = (
     if (starts.length > 1 || ends.length > 1) {
       diagnostics.push({ id, type: "duplicate", message: `Duplicate hydrate boundary markers for ${id}.` });
     }
-    if (starts.length === 1 && ends.length === 1 && !nextElementBetween(starts[0] as Comment, ends[0] as Comment)) {
-      diagnostics.push({ id, type: "missing-element", message: `Missing hydrate boundary element for ${id}.` });
+    if (starts.length === 1 && ends.length === 1) {
+      // Mirror locateHydrationBoundary exactly so a preflight pass guarantees
+      // that boundary creation cannot fail afterwards.
+      const located = locateHydrationBoundary(root, id, index);
+      if (!located.ok) {
+        diagnostics.push({
+          id,
+          type: located.error.message.startsWith("Missing hydrate boundary element") ? "missing-element" : "malformed",
+          message: located.error.message,
+        });
+      }
     }
   }
   return diagnostics;

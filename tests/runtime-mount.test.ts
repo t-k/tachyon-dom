@@ -3,6 +3,7 @@ import { compileTemplate, generateClientModule, renderServerTemplate } from "../
 import { hydrate, mount, type ClientTemplateModule } from "../src/runtime/mount";
 import { createRoot, createSignal, effect } from "../src/runtime/signal";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
+import * as hydrateRuntime from "../src/runtime/hydrate";
 
 describe("client mount entrypoints", () => {
   it("binds generated client modules against the generated template root", () => {
@@ -151,7 +152,7 @@ describe("client mount entrypoints", () => {
 
   it("resolves binding paths across SSR hydration markers when a boundary has siblings", () => {
     const compiled = compileTemplate(
-      `<main><section hydrate:id={panel}><p class:on={active}>{title}:{note}</p></section><h1>{title}</h1><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></main>`,
+      `<main><section hydrate:id={panel}><p class:on={active}>{title}:{note}</p></section><h1>{title}</h1><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul><button on:click={go}>go</button></main>`,
     );
     if (!compiled.ok) throw new Error(compiled.error.message);
     const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
@@ -162,18 +163,67 @@ describe("client mount entrypoints", () => {
       title: "A",
       note: "n",
       rows: [{ id: 1, label: "one" }],
+      go: () => undefined,
     });
     const title = createSignal("A");
     const rows = createSignal([{ id: 1, label: "one" }]);
 
-    const result = hydrate(root, module, { panel: "p-1", active: true, title, note: "n", rows });
+    let clicks = 0;
+    const result = hydrate(root, module, { panel: "p-1", active: true, title, note: "n", rows, go: () => clicks++ });
     if (!result.ok) throw new Error(result.error.message);
+    root.querySelector("h1")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(clicks).toBe(0);
+    root.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(clicks).toBe(1);
     title.set("B");
     expect(root.innerHTML).toContain("<h1>B</h1>");
     expect(root.querySelector("p")?.textContent).toBe("B:n");
     rows.set([{ id: 1, label: "uno" }, { id: 2, label: "two" }]);
     expect(Array.from(root.querySelectorAll("li")).map((li) => li.textContent)).toEqual(["uno", "two"]);
     result.value.dispose();
+  });
+
+  it("releases eager bindings when boundary creation fails so a retried hydrate does not double-bind", () => {
+    const compiled = compileTemplate(`<main><button on:click={go}>go</button><section hydrate><p>{title}</p></section></main>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const code = generateClientModule(compiled.value, {
+      reactive: true,
+      hydrationChunkImports: { "td-h-1": "./chunk.js" },
+    });
+    let failCreation = true;
+    const module = evaluateGeneratedClientModule(code, {
+      "tachyon-dom/runtime/hydrate": {
+        createLazyHydrationBoundary: (...args: unknown[]) =>
+          failCreation
+            ? { ok: false, error: { message: "synthetic boundary failure" } }
+            : (hydrateRuntime.createLazyHydrationBoundary as (...inner: unknown[]) => unknown)(...args),
+      },
+    });
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, { go: () => undefined, title: "T" });
+    let clicks = 0;
+    const scope = { go: () => clicks++, title: "T" };
+
+    const failed = hydrate(root, module, scope);
+    expect(failed.ok).toBe(false);
+    root.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(clicks).toBe(0);
+
+    failCreation = false;
+    const retried = hydrate(root, module, scope);
+    expect(retried.ok).toBe(true);
+    root.querySelector("button")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(clicks).toBe(1);
+    if (retried.ok) retried.value.dispose();
+  });
+
+  it("reports malformed boundary markers in preflight diagnostics", () => {
+    document.body.innerHTML = `<main><div><!--tachyon-hydrate:cross:start--></div><section>C</section><!--tachyon-hydrate:cross:end--></main>`;
+    const main = document.querySelector("main");
+    if (!main) throw new Error("Missing main.");
+    expect(hydrateRuntime.diagnoseHydrationBoundaries(main, ["cross"]).map((diagnostic) => diagnostic.type)).toEqual([
+      "malformed",
+    ]);
   });
 
   it("rejects mounting a hydrate-only module before touching the DOM and refuses to hydrate a root twice", () => {
