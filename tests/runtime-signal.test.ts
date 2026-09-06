@@ -12,6 +12,7 @@ import {
   read,
   untrack,
   type Resource,
+  type ResourceOutcome,
 } from "../src/runtime/signal";
 
 const arrayFrom = Array.from;
@@ -851,6 +852,47 @@ describe("signal runtime", () => {
     await expect(first).resolves.toEqual({ status: "cancelled", reason: "superseded" });
     await expect(nested).resolves.toEqual({ status: "success", data: "B" });
     expect(resource.data()).toBe("B");
+    expect(resource.loading()).toBe(false);
+    resource.dispose();
+  });
+
+  it("does not share an abort reentry with a later source outcome", async () => {
+    const source = createSignal("a");
+    const calls: string[] = [];
+    const resolvers = new Map<string, (value: string) => void>();
+    let nested: Promise<ResourceOutcome<string>> | undefined;
+    let resource!: Resource<string>;
+    resource = createResource(source, (value, { signal }) => {
+      calls.push(value);
+      if (value === "a") {
+        signal.addEventListener(
+          "abort",
+          () => {
+            nested = resource.refetchOutcome();
+            source.set("c");
+          },
+          { once: true },
+        );
+      }
+      return new Promise<string>((resolve) => resolvers.set(value, resolve));
+    });
+
+    const first = resource.refetchOutcome();
+    await Promise.resolve();
+    source.set("b");
+    await Promise.resolve();
+    await Promise.resolve();
+    const current = resource.refetchOutcome();
+
+    expect(nested).toBeDefined();
+    expect(nested).not.toBe(current);
+    expect(calls).toEqual(["a", "c"]);
+    resolvers.get("c")?.("C");
+
+    await expect(first).resolves.toEqual({ status: "cancelled", reason: "superseded" });
+    await expect(nested).resolves.toEqual({ status: "cancelled", reason: "superseded" });
+    await expect(current).resolves.toEqual({ status: "success", data: "C" });
+    expect(resource.data()).toBe("C");
     expect(resource.loading()).toBe(false);
     resource.dispose();
   });
