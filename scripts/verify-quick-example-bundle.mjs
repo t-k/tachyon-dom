@@ -21,7 +21,7 @@ const templateSource = `<main>
 const compiled = compileTemplate(templateSource, { whitespace: "condense" });
 if (!compiled.ok) throw new Error(compiled.error.message);
 
-const generated = generateClientModule(compiled.value, { reactive: true });
+const generated = generateClientModule(compiled.value, { reactive: true, instrumentBindings: false });
 const clientSource = `
 import { createSignal } from "tachyon-dom";
 ${generated}

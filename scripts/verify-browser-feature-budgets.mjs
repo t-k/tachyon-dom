@@ -9,7 +9,10 @@ const productionDefines = { __TACHYON_PRODUCTION__: "true" };
 const generatedClientSource = (source, options = {}) => {
   const compiled = compileTemplate(source);
   if (!compiled.ok) throw new Error(compiled.error.message);
-  return generateClientModule(compiled.value, options).replaceAll('from "tachyon-dom/', 'from "./dist/');
+  return generateClientModule(compiled.value, { instrumentBindings: false, ...options }).replaceAll(
+    'from "tachyon-dom/',
+    'from "./dist/',
+  );
 };
 
 const features = {
