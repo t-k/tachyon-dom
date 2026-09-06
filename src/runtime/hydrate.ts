@@ -1,8 +1,12 @@
 import { err, ok, type Result } from "../result.js";
 import { runCleanups } from "./subtree.js";
 
+export type HydrationBoundaryErrorKind = "missing" | "duplicate" | "malformed";
+
 export type HydrationBoundaryError = {
   message: string;
+  /** Machine readable classification of a boundary adoption failure. */
+  kind?: HydrationBoundaryErrorKind;
 };
 
 export type LocatedHydrationBoundary = {
@@ -127,14 +131,26 @@ export const locateHydrationBoundary = (
   id: string,
   index: HydrationCommentIndex = hydrationCommentIndex(root),
 ): Result<LocatedHydrationBoundary, HydrationBoundaryError> => {
-  const start = index.starts.get(id)?.[0];
-  const end = index.ends.get(id)?.[0];
+  const starts = index.starts.get(id) ?? [];
+  const ends = index.ends.get(id) ?? [];
+  if (starts.length > 1 || ends.length > 1) {
+    return err({ kind: "duplicate", message: `Duplicate hydrate boundary markers for ${id}.` });
+  }
+  const start = starts[0];
+  const end = ends[0];
   if (!start || !end) {
-    return err({ message: `Missing hydrate boundary markers for ${id}.` });
+    return err({ kind: "missing", message: `Missing hydrate boundary markers for ${id}.` });
+  }
+  if (
+    start.parentNode === null ||
+    start.parentNode !== end.parentNode ||
+    !(start.compareDocumentPosition(end) & Node.DOCUMENT_POSITION_FOLLOWING)
+  ) {
+    return err({ kind: "malformed", message: `Malformed hydrate boundary markers for ${id}.` });
   }
   const element = nextElementBetween(start, end);
   if (!element) {
-    return err({ message: `Missing hydrate boundary element for ${id}.` });
+    return err({ kind: "malformed", message: `Missing hydrate boundary element for ${id}.` });
   }
   return ok({ id, start, end, element });
 };
@@ -332,14 +348,17 @@ export const scheduleHydration = (
 ): (() => void) => {
   // `retry` re-arms the interaction trigger when hydration fails, so a failed
   // chunk load does not leave the boundary permanently unresponsive.
-  const trigger = (event?: Event, retry?: () => void): void => {
+  // `replay` is decided once per event: only cancelable interactions are
+  // suppressed and replayed. Non-cancelable events keep propagating untouched
+  // and never produce a clone.
+  const trigger = (event?: Event, retry?: () => void, replay = false): void => {
     const fail = (error: unknown): void => {
       retry?.();
       options.onError?.(hydrationErrorFor(error));
     };
     try {
       const hydration = handle.hydrate();
-      if (options.replayInteraction && event) {
+      if (replay && event) {
         const replay = (): void => {
           if (handle.hydrated()) {
             const target =
@@ -420,13 +439,18 @@ export const scheduleHydration = (
   const listener = (event: Event): void => {
     if (!active) return;
     element.removeEventListener(eventName, listener, true);
-    if (options.replayInteraction) {
+    const shouldReplay = options.replayInteraction === true && event.cancelable;
+    if (shouldReplay) {
       event.stopImmediatePropagation();
-      if (event.cancelable) event.preventDefault();
+      event.preventDefault();
     }
-    trigger(event, () => {
-      if (active) element.addEventListener(eventName, listener, true);
-    });
+    trigger(
+      event,
+      () => {
+        if (active) element.addEventListener(eventName, listener, true);
+      },
+      shouldReplay,
+    );
   };
   element.addEventListener(eventName, listener, true);
   return () => {

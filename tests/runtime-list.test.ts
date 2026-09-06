@@ -1266,6 +1266,100 @@ describe("mountKeyedList", () => {
     expect(root.innerHTML).toBe("");
   });
 
+  it("rejects adopted SSR rows whose hydration markers are duplicated even when row keys are unique", () => {
+    document.body.innerHTML =
+      `<ul id="items"><!--tachyon-hydrate:same:start--><li><button>Server A</button></li><!--tachyon-hydrate:same:end-->` +
+      `<!--tachyon-hydrate:same:start--><li><button>Server B</button></li><!--tachyon-hydrate:same:end--></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const calls: string[] = [];
+    const options = {
+      signature: "row-duplicate-hydration-id",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><button> </button></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "item.label" },
+        {
+          kind: "event" as const,
+          path: [0],
+          eventName: "click",
+          handler: "item.onClick",
+          read: (scope: Record<string, unknown>) => (scope.item as { onClick: () => void }).onClick,
+        },
+      ],
+      hydrationBoundaries: [
+        { path: [], id: "item.hydrationId", idKind: "expression" as const, strategy: "interaction" as const, interaction: "click" },
+      ],
+    };
+    const rows = [
+      { id: "a", hydrationId: "same", label: "A", onClick: () => calls.push("a") },
+      { id: "b", hydrationId: "same", label: "B", onClick: () => calls.push("b") },
+    ];
+
+    expect(() => mountKeyedList(root, [], rows, options)).toThrow(/Duplicate hydrate boundary markers for same/);
+    for (const button of Array.from(root.querySelectorAll("button"))) button.click();
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps SSR-adopted and client-created hydration rows separate through reorder, removal, and re-append", () => {
+    document.body.innerHTML =
+      `<ul id="items"><!--tachyon-hydrate:a:start--><li><button>Server A</button></li><!--tachyon-hydrate:a:end--></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const calls: string[] = [];
+    const options = {
+      signature: "row-mixed-adoption",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><button> </button></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "item.label" },
+        {
+          kind: "event" as const,
+          path: [0],
+          eventName: "click",
+          handler: "item.onClick",
+          read: (scope: Record<string, unknown>) => (scope.item as { onClick: () => void }).onClick,
+        },
+      ],
+      hydrationBoundaries: [
+        { path: [], id: "item.id", idKind: "expression" as const, strategy: "interaction" as const, interaction: "click" },
+      ],
+    };
+    const a = { id: "a", label: "A", onClick: () => calls.push("a") };
+    const b = { id: "b", label: "B", onClick: () => calls.push("b") };
+
+    mountKeyedList(root, [], [a], options);
+    mountKeyedList(root, [], [a, b], options);
+    const buttons = () => Array.from(root.querySelectorAll("button")) as HTMLButtonElement[];
+    expect(buttons().map((button) => button.textContent)).toEqual(["Server A", "B"]);
+
+    buttons()[1]?.click();
+    expect(calls).toEqual(["b"]);
+    buttons()[0]?.click();
+    expect(calls).toEqual(["b", "a"]);
+    expect(buttons()[0]?.textContent).toBe("A");
+
+    mountKeyedList(root, [], [b, a], options);
+    expect(buttons().map((button) => button.textContent)).toEqual(["B", "A"]);
+    buttons()[0]?.click();
+    buttons()[1]?.click();
+    expect(calls).toEqual(["b", "a", "b", "a"]);
+
+    const removed = buttons()[1] as HTMLButtonElement;
+    mountKeyedList(root, [], [b], options);
+    removed.click();
+    expect(calls).toEqual(["b", "a", "b", "a"]);
+
+    const a2 = { id: "a", label: "A2", onClick: () => calls.push("a2") };
+    mountKeyedList(root, [], [b, a2], options);
+    buttons()[1]?.click();
+    expect(calls).toEqual(["b", "a", "b", "a", "a2"]);
+    mountKeyedList(root, [], [], options);
+    expect(root.innerHTML).toBe("");
+  });
+
   it("inserts newly mounted rows before a static trailing sibling", () => {
     document.body.innerHTML = `<ul id="items"><li class="footer">Footer</li></ul>`;
     const root = document.querySelector("#items");

@@ -470,7 +470,13 @@ const setupHydration = (
       bindNodes(anchor, state, options, boundaryEntries, cleanups, true);
       return () => runCleanups(cleanups);
     });
-    if (!handle.ok) continue;
+    if (!handle.ok) {
+      // Missing markers mean the branch was created on the client and binds
+      // eagerly. Duplicate or malformed SSR markers must not bind another
+      // element silently.
+      if (handle.error.kind === "missing") continue;
+      throw new Error(`Conditional hydration boundary could not be adopted: ${handle.error.message}`);
+    }
     state.hydrationBoundaries.push(handle.value);
     state.hydrationCleanups.push(
       scheduleHydration(handle.value, {

@@ -314,6 +314,143 @@ describe("hydrate boundary runtime", () => {
     boundary.value.dispose();
   });
 
+  it("rejects duplicate and malformed boundary markers without calling any loader or binder", async () => {
+    document.body.innerHTML =
+      `<main><!--tachyon-hydrate:dup:start--><section>A</section><!--tachyon-hydrate:dup:end-->` +
+      `<!--tachyon-hydrate:dup:start--><section>B</section><!--tachyon-hydrate:dup:end-->` +
+      `<div><!--tachyon-hydrate:cross:start--></div><section>C</section><!--tachyon-hydrate:cross:end-->` +
+      `<!--tachyon-hydrate:reversed:end--><section>D</section><!--tachyon-hydrate:reversed:start-->` +
+      `<!--tachyon-hydrate:empty:start--><!--tachyon-hydrate:empty:end--></main>`;
+    const main = document.querySelector("main");
+    if (!main) throw new Error("Missing main.");
+    const bind = vi.fn(() => undefined);
+    const load = vi.fn(async () => ({ bind }));
+
+    const duplicate = createHydrationBoundary(main, "dup", bind);
+    const lazyDuplicate = createLazyHydrationBoundary(main, "dup", load);
+    const cross = createHydrationBoundary(main, "cross", bind);
+    const reversed = createLazyHydrationBoundary(main, "reversed", load);
+    const empty = createHydrationBoundary(main, "empty", bind);
+    const missing = createHydrationBoundary(main, "absent", bind);
+
+    expect(duplicate.ok).toBe(false);
+    expect(lazyDuplicate.ok).toBe(false);
+    if (!duplicate.ok && !lazyDuplicate.ok) {
+      expect(duplicate.error.kind).toBe("duplicate");
+      expect(lazyDuplicate.error.kind).toBe("duplicate");
+      expect(lazyDuplicate.error.message).toContain("Duplicate hydrate boundary markers for dup");
+    }
+    expect(cross.ok).toBe(false);
+    expect(reversed.ok).toBe(false);
+    expect(empty.ok).toBe(false);
+    expect(missing.ok).toBe(false);
+    if (!cross.ok && !reversed.ok && !empty.ok && !missing.ok) {
+      expect(cross.error.kind).toBe("malformed");
+      expect(reversed.error.kind).toBe("malformed");
+      expect(empty.error.kind).toBe("malformed");
+      expect(missing.error.kind).toBe("missing");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(load).not.toHaveBeenCalled();
+    expect(bind).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { cancelable: true, replayInteraction: true, async: false },
+    { cancelable: true, replayInteraction: true, async: true },
+    { cancelable: true, replayInteraction: false, async: false },
+    { cancelable: true, replayInteraction: false, async: true },
+    { cancelable: false, replayInteraction: true, async: false },
+    { cancelable: false, replayInteraction: true, async: true },
+    { cancelable: false, replayInteraction: false, async: false },
+    { cancelable: false, replayInteraction: false, async: true },
+  ])(
+    "replays only cancelable interactions (cancelable=$cancelable replay=$replayInteraction async=$async)",
+    async ({ cancelable, replayInteraction, async }) => {
+      document.body.innerHTML = `<main><!--tachyon-hydrate:matrix:start--><section><button>Go</button></section><!--tachyon-hydrate:matrix:end--></main>`;
+      const main = document.querySelector("main");
+      const button = main?.querySelector("button");
+      if (!main || !(button instanceof HTMLButtonElement)) throw new Error("Missing matrix button.");
+      const bound: Event[] = [];
+      const binder = (element: Element): (() => void) => {
+        const listener = (event: Event): void => void bound.push(event);
+        element.addEventListener("click", listener);
+        return () => element.removeEventListener("click", listener);
+      };
+      const boundary = async
+        ? createLazyHydrationBoundary(main, "matrix", async () => ({ bind: binder }))
+        : createHydrationBoundary(main, "matrix", binder);
+      if (!boundary.ok) throw new Error(boundary.error.message);
+      const observed: Array<{ replayed: boolean; defaultPrevented: boolean; sameEvent: boolean }> = [];
+      const original = new MouseEvent("click", { bubbles: true, cancelable });
+      const documentListener = (event: Event): void =>
+        void observed.push({
+          replayed: isReplayedInteraction(event),
+          defaultPrevented: event.defaultPrevented,
+          sameEvent: event === original,
+        });
+      document.addEventListener("click", documentListener);
+      const cleanup = scheduleHydration(boundary.value, { strategy: "interaction", interaction: "click", replayInteraction });
+
+      button.dispatchEvent(original);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const expectReplay = replayInteraction && cancelable;
+      expect(boundary.value.hydrated()).toBe(true);
+      expect(original.defaultPrevented).toBe(expectReplay);
+      if (expectReplay) {
+        // The original is suppressed at the boundary; only the clone bubbles.
+        expect(observed).toEqual([{ replayed: true, defaultPrevented: false, sameEvent: false }]);
+        expect(bound.filter(isReplayedInteraction)).toHaveLength(1);
+      } else {
+        expect(observed).toEqual([{ replayed: false, defaultPrevented: false, sameEvent: true }]);
+        expect(bound.some(isReplayedInteraction)).toBe(false);
+        // A synchronous binder sees the propagating original; an asynchronous
+        // one is not guaranteed to receive it.
+        expect(bound.length).toBe(async ? 0 : 1);
+      }
+      cleanup();
+      button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      expect(observed.filter((entry) => entry.replayed)).toHaveLength(expectReplay ? 1 : 0);
+      document.removeEventListener("click", documentListener);
+      boundary.value.dispose();
+    },
+  );
+
+  it("does not replay a pending interaction after the scheduler is released or the boundary is disposed", async () => {
+    document.body.innerHTML = `<main><!--tachyon-hydrate:pending:start--><section><button>Go</button></section><!--tachyon-hydrate:pending:end--></main>`;
+    const main = document.querySelector("main");
+    const button = main?.querySelector("button");
+    if (!main || !(button instanceof HTMLButtonElement)) throw new Error("Missing pending button.");
+    let resolveChunk!: (chunk: { bind: (element: Element) => void }) => void;
+    const boundary = createLazyHydrationBoundary(
+      main,
+      "pending",
+      () => new Promise<{ bind: (element: Element) => void }>((resolve) => void (resolveChunk = resolve)),
+    );
+    if (!boundary.ok) throw new Error(boundary.error.message);
+    const replays: Event[] = [];
+    const documentListener = (event: Event): void => {
+      if (isReplayedInteraction(event)) replays.push(event);
+    };
+    document.addEventListener("click", documentListener);
+    const cleanup = scheduleHydration(boundary.value, {
+      strategy: "interaction",
+      interaction: "click",
+      replayInteraction: true,
+    });
+
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    cleanup();
+    boundary.value.dispose();
+    resolveChunk({ bind: () => undefined });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(boundary.value.hydrated()).toBe(false);
+    expect(replays).toHaveLength(0);
+    document.removeEventListener("click", documentListener);
+  });
+
   it("loads a lazy boundary once and replays the first interaction", async () => {
     document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--><section><button>Open</button></section><!--tachyon-hydrate:panel:end--></main>`;
     const main = document.querySelector("main");
@@ -341,7 +478,7 @@ describe("hydrate boundary runtime", () => {
       replayInteraction: true,
     });
     const button = main.querySelector("button");
-    button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    button?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
 
     expect(load).toHaveBeenCalledTimes(1);
     expect(bind).not.toHaveBeenCalled();

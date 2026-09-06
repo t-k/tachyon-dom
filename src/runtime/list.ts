@@ -751,8 +751,14 @@ const createRecord = (
     hydrationBoundaries: [],
     hydrationCleanups: [],
   };
+  const adopted = existingElements !== undefined;
   try {
     const deferredBindings = new Set<Binding>();
+    // Phase 1: locate every boundary of this row before starting any
+    // listener or effect. Adopted SSR rows must have well-formed markers;
+    // rows created on the client have none and bind eagerly.
+    const located: Array<{ boundary: HydrationPlan["boundary"]; handle: HydrationBoundaryHandle; plan: BindingPlan }> =
+      [];
     for (const hydrationPlan of state.hydrationPlans) {
       const { boundary, bindings: boundaryPlan } = hydrationPlan;
       const resolvedId = boundary.idKind === "expression" ? readPath(scope, boundary.id) : boundary.id;
@@ -763,19 +769,27 @@ const createRecord = (
         return () => runCleanups(cleanups);
       });
       if (handle.ok) {
-        record.hydrationBoundaries.push(handle.value);
-        record.hydrationCleanups.push(
-          scheduleHydration(handle.value, {
-            strategy: boundary.strategy ?? "load",
-            ...(boundary.media ? { media: boundary.media } : {}),
-            ...(boundary.interaction ? { interaction: boundary.interaction } : {}),
-            ...(boundary.rootMargin ? { rootMargin: boundary.rootMargin } : {}),
-            replayInteraction: true,
-          }),
-        );
-        record.hydrationCleanups.push(() => handle.value.dispose());
-        for (const { binding } of boundaryPlan.all) deferredBindings.add(binding);
+        located.push({ boundary, handle: handle.value, plan: boundaryPlan });
+        continue;
       }
+      if (adopted || handle.error.kind !== "missing") {
+        throw new Error(`Hydration boundary for list row ${String(key)} could not be adopted: ${handle.error.message}`);
+      }
+    }
+    // Phase 2: schedule the located boundaries.
+    for (const { boundary, handle, plan } of located) {
+      record.hydrationBoundaries.push(handle);
+      record.hydrationCleanups.push(
+        scheduleHydration(handle, {
+          strategy: boundary.strategy ?? "load",
+          ...(boundary.media ? { media: boundary.media } : {}),
+          ...(boundary.interaction ? { interaction: boundary.interaction } : {}),
+          ...(boundary.rootMargin ? { rootMargin: boundary.rootMargin } : {}),
+          replayInteraction: true,
+        }),
+      );
+      record.hydrationCleanups.push(() => handle.dispose());
+      for (const { binding } of plan.all) deferredBindings.add(binding);
     }
     // Rows created on the client have no SSR hydration markers, so every
     // binding whose boundary could not be adopted is bound eagerly. Only
