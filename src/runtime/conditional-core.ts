@@ -74,11 +74,24 @@ type AnchorResolution = {
   adoptedNodes: Node[] | undefined;
 };
 
+export type ConditionalCoreLaterDescriptor = {
+  visible: unknown;
+  templateHtml: string;
+};
+
+export type ConditionalCoreAdoptionGuard = (
+  parent: Node,
+  index: number,
+  expected: readonly Node[],
+  laterConditionals: readonly ConditionalCoreLaterDescriptor[] | undefined,
+) => boolean;
+
 export type ConditionalCoreAnchorDescriptor = {
   path: readonly number[];
   visible: unknown;
   templateHtml: string;
   parentTagName?: string;
+  laterConditionals?: readonly ConditionalCoreLaterDescriptor[];
 };
 
 type PreparedConditional = {
@@ -270,7 +283,53 @@ export const prepareConditionalCore = (root: Node, descriptors: readonly Conditi
     // produced the SSR DOM. Inspect the server shape independently so a
     // server-visible branch can be removed when the client starts hidden.
     const adopted = adoptableNodes(parent, index, expected);
-    if (adopted && candidateBelongsToLaterVisibleConditional(parent, index, descriptor, expected, descriptors)) {
+    const anchor = document.createComment("");
+    parent.insertBefore(anchor, candidate ?? null);
+    registerAnchor(root, descriptor.path, anchor);
+    if (adopted) {
+      plan.modes.set(descriptor.key, "expanded");
+      setPreparedConditionalNodes(anchor, adopted);
+    } else {
+      plan.modes.set(descriptor.key, "omitted");
+    }
+  }
+};
+
+export const prepareConditionalCoreWithAdoptionGuard = (
+  root: Node,
+  descriptors: readonly ConditionalCoreAnchorDescriptor[],
+): void => {
+  const initialNodes = initialNodesFor(root);
+  const ordered = orderedPreparedConditionals(descriptors);
+  const byParent = new Map<string, PreparedConditional[]>();
+  for (const descriptor of ordered) {
+    const siblings = byParent.get(descriptor.parentKey) ?? [];
+    siblings.push(descriptor);
+    byParent.set(descriptor.parentKey, siblings);
+  }
+  const plan: PreparedPathPlan = { byParent, modes: new Map(), invalid: new Set() };
+  preparedPathPlans.set(root, plan);
+
+  for (const descriptor of ordered) {
+    const source = descriptors.find((candidate) => pathKey(candidate.path) === descriptor.key);
+    const parentPath = descriptor.path.slice(0, -1);
+    const parent = initialNodeAt(root, parentPath, plan, initialNodes);
+    const expectedParentTag = source?.parentTagName?.toLowerCase();
+    if (!parent || (expectedParentTag && (!(parent instanceof Element) || parent.localName !== expectedParentTag))) {
+      plan.invalid.add(descriptor.key);
+      continue;
+    }
+    const rawIndex = rawIndexFor(plan, descriptor.parentKey, descriptor.index);
+    const index = rawIndex + insertedAnchorCountBefore(plan, descriptor.parentKey, descriptor.index);
+    const candidate = logicalChildren(parent)[index];
+    if (candidate instanceof Comment && !isHydrationMarker(candidate)) {
+      plan.modes.set(descriptor.key, "placeholder");
+      registerAnchor(root, descriptor.path, candidate);
+      continue;
+    }
+    const expected = createNodes(source?.templateHtml ?? "");
+    const adopted = adoptableNodes(parent, index, expected);
+    if (adopted && deferConditionalAdoption(parent, index, expected, source?.laterConditionals)) {
       const anchor = document.createComment("");
       parent.insertBefore(anchor, candidate ?? null);
       registerAnchor(root, descriptor.path, anchor);
@@ -350,28 +409,19 @@ const adoptableNodes = (parent: Node, index: number, expected: readonly Node[]):
     : undefined;
 };
 
-const candidateBelongsToLaterVisibleConditional = (
-  parent: Node,
-  index: number,
-  descriptor: PreparedConditional,
-  expected: readonly Node[],
-  descriptors: readonly ConditionalCoreAnchorDescriptor[],
+export const deferConditionalAdoption: ConditionalCoreAdoptionGuard = (
+  parent,
+  index,
+  expected,
+  laterConditionals,
 ): boolean => {
-  for (const later of descriptors) {
-    const laterIndex = later.path.at(-1);
-    if (
-      pathKey(later.path.slice(0, -1)) !== descriptor.parentKey ||
-      laterIndex === undefined ||
-      laterIndex <= descriptor.index
-    ) {
-      continue;
-    }
-    if (!later.visible) continue;
-    const laterExpected = createNodes(later.templateHtml);
-    if (!adoptableNodes(parent, index, laterExpected)) continue;
-    if (!adoptableNodes(parent, index + expected.length, laterExpected)) return true;
-  }
-  return false;
+  const candidate = laterConditionals?.find(
+    (later) => Boolean(later.visible) && adoptableNodes(parent, index, createNodes(later.templateHtml)) !== undefined,
+  );
+  return (
+    candidate !== undefined &&
+    adoptableNodes(parent, index + expected.length, createNodes(candidate.templateHtml)) === undefined
+  );
 };
 
 const resolveAnchor = (
@@ -427,7 +477,7 @@ const readPath = (scope: Record<string, unknown>, expression: string): unknown =
 const readBinding = (scope: Record<string, unknown>, binding: Exclude<ConditionalCoreBinding, EventBinding>): unknown =>
   read(binding.read ? binding.read(scope) : readPath(scope, binding.expression));
 
-const cleanupState = (state: ConditionalCoreState): void => {
+const cleanupState = (state: Pick<ConditionalCoreState, "nodes" | "cleanups">): void => {
   let firstError: unknown;
   let failed = false;
   try {
@@ -447,22 +497,6 @@ const cleanupState = (state: ConditionalCoreState): void => {
     }
   }
   state.nodes.length = 0;
-  if (failed) throw firstError;
-};
-
-const removeAdoptedNodes = (nodes: readonly Node[]): void => {
-  let firstError: unknown;
-  let failed = false;
-  for (const node of nodes) {
-    try {
-      cleanupOwnedSubtree(node);
-    } catch (error) {
-      if (!failed) firstError = error;
-      failed = true;
-    } finally {
-      node.parentNode?.removeChild(node);
-    }
-  }
   if (failed) throw firstError;
 };
 
@@ -538,7 +572,7 @@ export const mountConditionalCore = (
         detachOwnerCleanup(anchor);
       }
     }
-    if (adoptedNodes) removeAdoptedNodes(adoptedNodes);
+    if (adoptedNodes) cleanupState({ nodes: adoptedNodes, cleanups: [] });
     setPreparedConditionalNodeCount(anchor, 0);
     return;
   }

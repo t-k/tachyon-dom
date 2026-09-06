@@ -562,6 +562,7 @@ const runtimeNames = {
   mountConditional: "__tachyonMountConditional",
   mountConditionalCore: "__tachyonMountConditionalCore",
   prepareConditionalCore: "__tachyonPrepareConditionalCore",
+  prepareConditionalCoreWithAdoptionGuard: "__tachyonPrepareConditionalCoreWithAdoptionGuard",
   preparedNodeAt: "__tachyonPreparedNodeAt",
   mountKeyedList: "__tachyonMountKeyedList",
   mountTextKeyedList: "__tachyonMountTextKeyedList",
@@ -781,6 +782,20 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsConditional = bindings.some((binding) => binding.kind === "if");
   const needsConditionalCore = bindings.some((binding) => binding.kind === "if" && usesConditionalCore(binding));
   const needsGenericConditional = bindings.some((binding) => binding.kind === "if" && !usesConditionalCore(binding));
+  const needsConditionalCoreAdoptionGuard =
+    needsConditionalCore &&
+    bindings.some(
+      (binding) =>
+        binding.kind === "if" &&
+        usesConditionalCore(binding) &&
+        bindings.some(
+          (candidate) =>
+            candidate.kind === "if" &&
+            candidate.path.length === binding.path.length &&
+            candidate.path.slice(0, -1).every((part, index) => part === binding.path[index]) &&
+            (candidate.path.at(-1) ?? -1) > (binding.path.at(-1) ?? -1),
+        ),
+    );
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const needsElementAt = needsClass || needsAttr || needsModel || needsTextList || (reactive && needsList);
   const needsNodeAt = reactive && needsGenericConditional;
@@ -825,9 +840,12 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (needsConditional) {
     if (needsConditionalCore) {
-      lines.push(
-        `import { mountConditionalCore as ${runtimeNames.mountConditionalCore}, prepareConditionalCore as ${runtimeNames.prepareConditionalCore}, preparedNodeAt as ${runtimeNames.preparedNodeAt} } from "tachyon-dom/runtime/conditional-core";`,
-      );
+      const conditionalCoreImports = [
+        `mountConditionalCore as ${runtimeNames.mountConditionalCore}`,
+        `${needsConditionalCoreAdoptionGuard ? "prepareConditionalCoreWithAdoptionGuard" : "prepareConditionalCore"} as ${runtimeNames.prepareConditionalCore}`,
+        `preparedNodeAt as ${runtimeNames.preparedNodeAt}`,
+      ];
+      lines.push(`import { ${conditionalCoreImports.join(", ")} } from "tachyon-dom/runtime/conditional-core";`);
     }
     if (needsGenericConditional) {
       lines.push(
@@ -1000,8 +1018,27 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       const parent = nodeAtElementPath(template.root, binding.path.slice(0, -1));
       const visibilityName = conditionalVisibilityNames.get(binding) as string;
       const visibility = reactive ? `${visibilityName}()` : visibilityName;
+      const bindingIndex = binding.path.at(-1);
+      const laterConditionals =
+        bindingIndex === undefined
+          ? []
+          : bindings
+              .filter(
+                (candidate): candidate is ConditionalBinding =>
+                  candidate.kind === "if" &&
+                  candidate.path.length === binding.path.length &&
+                  candidate.path.slice(0, -1).every((part, index) => part === binding.path[index]) &&
+                  (candidate.path.at(-1) ?? -1) > bindingIndex,
+              )
+              .map((candidate) => {
+                const candidateVisibilityName = conditionalVisibilityNames.get(candidate) as string;
+                const candidateVisibility = reactive ? `${candidateVisibilityName}()` : candidateVisibilityName;
+                return `{ visible: ${candidateVisibility}, templateHtml: ${JSON.stringify(candidate.templateHtml)} }`;
+              });
+      const laterDescriptor =
+        laterConditionals.length > 0 ? ` laterConditionals: [${laterConditionals.join(", ")}],` : "";
       lines.push(
-        `    { path: ${JSON.stringify(binding.path)}, visible: ${visibility},${parent ? ` parentTagName: ${JSON.stringify(parent.tagName)},` : ""} templateHtml: ${JSON.stringify(binding.templateHtml)} },`,
+        `    { path: ${JSON.stringify(binding.path)}, visible: ${visibility},${parent ? ` parentTagName: ${JSON.stringify(parent.tagName)},` : ""}${laterDescriptor} templateHtml: ${JSON.stringify(binding.templateHtml)} },`,
       );
     }
     lines.push(`  ]);`);
