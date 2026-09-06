@@ -177,7 +177,7 @@ const resolveLegacyOptions = (options: TextKeyedListOptions): TextKeyedListRunti
     : options.keyRead
       ? (item: unknown, index: number) =>
           options.keyRead?.(scopedItem(options.itemName, item, options.indexName, index, options.scope))
-      : (item: unknown, index: number) => readItemPath(item, options.key, options.itemName);
+      : (item: unknown) => readItemPath(item, options.key, options.itemName);
   return {
     signature: legacyOptionsSignature(options),
     itemName: options.itemName,
