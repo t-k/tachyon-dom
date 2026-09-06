@@ -18,6 +18,7 @@ export const GENERATED_TEXT_LIST_ADAPTER_SPEED_THRESHOLD = 1.1;
 
 const GENERATED_ADAPTER_IMPORT = "mountGeneratedTextKeyedList as __tachyonMountTextKeyedList";
 const LEGACY_ADAPTER_IMPORT = "mountTextKeyedList as __tachyonMountTextKeyedList";
+const ADAPTER_ROUTE_EXPORT = "__tachyonBenchmarkAdapterRoute";
 
 type AdapterName = "generated" | "legacy";
 type OperationName = "update" | "reorder" | "append" | "remove" | "restore";
@@ -109,6 +110,33 @@ export type GeneratedTextListAdapterMeasurements = {
     decision: "candidate" | "indeterminate";
   };
 };
+
+export type GeneratedTextListAdapterGateInputs = {
+  generatedImport: boolean;
+  generatedBundle: boolean;
+  legacyBundle: boolean;
+  listTextMetafileInput: boolean;
+  minifiedSizeReduced: boolean;
+  brotliSizeReduced: boolean;
+  operationOracle: boolean;
+  negativeOracle: boolean;
+  speedWithinThreshold: boolean;
+};
+
+export const decideGeneratedTextListAdapter = (
+  gates: GeneratedTextListAdapterGateInputs,
+): "candidate" | "indeterminate" =>
+  gates.generatedImport &&
+  gates.generatedBundle &&
+  gates.legacyBundle &&
+  gates.listTextMetafileInput &&
+  gates.minifiedSizeReduced &&
+  gates.brotliSizeReduced &&
+  gates.operationOracle &&
+  gates.negativeOracle &&
+  gates.speedWithinThreshold
+    ? "candidate"
+    : "indeterminate";
 
 export type GeneratedTextListAdapterBenchmark = BenchmarkEnvelope<
   GeneratedTextListAdapterWorkload,
@@ -298,8 +326,8 @@ const hasListTextInput = (metafile: Record<string, unknown>): boolean =>
   inputFilesFor(metafile).some((file) => file.replaceAll("\\", "/").endsWith("src/runtime/list-text.ts"));
 
 const hasGeneratedAdapterImplementation = (loaded: LoadedGeneratedModule, adapter: AdapterName): boolean => {
-  const marker = adapter === "generated" ? "resolveGeneratedOptions" : "resolveLegacyOptions";
-  return loaded.productionBundledCode.includes(marker);
+  const route = (loaded.productionModule as unknown as Record<string, unknown>)[ADAPTER_ROUTE_EXPORT];
+  return route === adapter;
 };
 
 const runSample = (loaded: LoadedGeneratedModule, sampleIndex: number, itemCount: number): AdapterSample => {
@@ -353,17 +381,20 @@ const loadAdapterArtifacts = async (
   if (generated.code.includes('from "tachyon-dom/runtime/list"')) {
     throw new Error("The pure text-list fixture unexpectedly used the generic list runtime.");
   }
-  const legacy = generated.code.replace(GENERATED_ADAPTER_IMPORT, LEGACY_ADAPTER_IMPORT);
+  const generatedSource = `${generated.code}\nexport const ${ADAPTER_ROUTE_EXPORT} = "generated";\n`;
+  const legacy = generatedSource
+    .replace(GENERATED_ADAPTER_IMPORT, LEGACY_ADAPTER_IMPORT)
+    .replace(`export const ${ADAPTER_ROUTE_EXPORT} = "generated";`, `export const ${ADAPTER_ROUTE_EXPORT} = "legacy";`);
   if (legacy === generated.code || legacy.includes(GENERATED_ADAPTER_IMPORT)) {
     throw new Error("Could not create the same-revision legacy adapter artifact.");
   }
   const [generatedLoaded, legacyLoaded] = await Promise.all([
-    loadCandidateModule<GeneratedClientModule>(generated.code, generated.compileMs),
+    loadCandidateModule<GeneratedClientModule>(generatedSource, generated.compileMs),
     loadCandidateModule<GeneratedClientModule>(legacy, generated.compileMs),
   ]);
   return {
     artifacts: { generated: generatedLoaded, legacy: legacyLoaded },
-    generatedSource: generated.code,
+    generatedSource,
     legacySource: legacy,
   };
 };
@@ -452,7 +483,7 @@ export const runGeneratedTextListAdapterBenchmark = async (
       ),
     );
     const negativeOracle = Object.values(negativeOracleCases).every(Boolean);
-    const gates = {
+    const gateInputs: GeneratedTextListAdapterGateInputs = {
       generatedImport: loaded.generatedSource.includes(GENERATED_ADAPTER_IMPORT),
       generatedBundle: artifacts.generated.bundleIncludesAdapterImplementation,
       legacyBundle: artifacts.legacy.bundleIncludesAdapterImplementation,
@@ -463,15 +494,8 @@ export const runGeneratedTextListAdapterBenchmark = async (
       operationOracle,
       negativeOracle,
       speedWithinThreshold,
-      decision:
-        artifacts.generated.minifiedBytes < artifacts.legacy.minifiedBytes &&
-        artifacts.generated.brotliBytes < artifacts.legacy.brotliBytes &&
-        operationOracle &&
-        negativeOracle &&
-        speedWithinThreshold
-          ? ("candidate" as const)
-          : ("indeterminate" as const),
     };
+    const gates = { ...gateInputs, decision: decideGeneratedTextListAdapter(gateInputs) };
     const workload: GeneratedTextListAdapterWorkload = {
       contractVersion: GENERATED_TEXT_LIST_ADAPTER_CONTRACT_VERSION,
       source: GENERATED_TEXT_LIST_ADAPTER_SOURCE,

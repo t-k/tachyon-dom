@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  decideGeneratedTextListAdapter,
   snapshotGeneratedTextListRows,
   verifyGeneratedTextListOperation,
   verifyGeneratedTextListOracleNegativeCases,
@@ -37,5 +38,23 @@ describe("generated text-list benchmark oracle", () => {
     expect(() => verifyGeneratedTextListOperation(root, [{ id: 0, label: "Row 0" }], before)).toThrow(
       /Expected 1 rows after an operation|Unexpected row at index 0/,
     );
+  });
+
+  it("requires the production artifact route and all benchmark gates", () => {
+    const allGates = {
+      generatedImport: true,
+      generatedBundle: true,
+      legacyBundle: true,
+      listTextMetafileInput: true,
+      minifiedSizeReduced: true,
+      brotliSizeReduced: true,
+      operationOracle: true,
+      negativeOracle: true,
+      speedWithinThreshold: true,
+    } as const;
+
+    expect(decideGeneratedTextListAdapter(allGates)).toBe("candidate");
+    expect(decideGeneratedTextListAdapter({ ...allGates, generatedBundle: false })).toBe("indeterminate");
+    expect(decideGeneratedTextListAdapter({ ...allGates, speedWithinThreshold: false })).toBe("indeterminate");
   });
 });
