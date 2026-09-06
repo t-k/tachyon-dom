@@ -150,6 +150,19 @@ describe("client mount entrypoints", () => {
     expect(root.textContent).toBe("A:7");
   });
 
+  it("keeps same-named stores in sibling components independent", () => {
+    const compiled = compileTemplate(
+      `<main><component name="Left"><span><store count={left}/>{count}</span></component><component name="Right"><span><store count={right}/>{count}</span></component></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value));
+    const root = document.createElement("div");
+
+    mount(root, module, { left: 1, right: 2 });
+
+    expect(Array.from(root.querySelectorAll("span")).map((span) => span.textContent)).toEqual(["1", "2"]);
+  });
+
   it("resolves binding paths across SSR hydration markers when a boundary has siblings", () => {
     const compiled = compileTemplate(
       `<main><section hydrate:id={panel}><p class:on={active}>{title}:{note}</p></section><h1>{title}</h1><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul><button on:click={go}>go</button></main>`,
@@ -178,13 +191,18 @@ describe("client mount entrypoints", () => {
     title.set("B");
     expect(root.innerHTML).toContain("<h1>B</h1>");
     expect(root.querySelector("p")?.textContent).toBe("B:n");
-    rows.set([{ id: 1, label: "uno" }, { id: 2, label: "two" }]);
+    rows.set([
+      { id: 1, label: "uno" },
+      { id: 2, label: "two" },
+    ]);
     expect(Array.from(root.querySelectorAll("li")).map((li) => li.textContent)).toEqual(["uno", "two"]);
     result.value.dispose();
   });
 
   it("releases eager bindings when boundary creation fails so a retried hydrate does not double-bind", () => {
-    const compiled = compileTemplate(`<main><button on:click={go}>go</button><section hydrate><p>{title}</p></section></main>`);
+    const compiled = compileTemplate(
+      `<main><button on:click={go}>go</button><section hydrate><p>{title}</p></section></main>`,
+    );
     if (!compiled.ok) throw new Error(compiled.error.message);
     const code = generateClientModule(compiled.value, {
       reactive: true,

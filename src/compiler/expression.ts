@@ -4,6 +4,8 @@ import type { CompilerError } from "./types.js";
 
 export type ExpressionParserBackend = "auto" | "native" | "oxc";
 
+export type ExpressionAliases = ReadonlyMap<string, string>;
+
 export type ExpressionParseOptions = {
   backend?: ExpressionParserBackend;
 };
@@ -878,13 +880,19 @@ export const expressionToJs = (
   locals: ReadonlySet<string> = new Set(),
   scopeName = "scope",
   options: ExpressionParseOptions = {},
+  aliases: ExpressionAliases = new Map(),
 ): string => {
   const parsed = parseExpression(source, options);
-  return parsed.ok ? expressionNodeToJs(parsed.value, locals, scopeName) : "undefined";
+  return parsed.ok ? expressionNodeToJs(parsed.value, locals, scopeName, aliases) : "undefined";
 };
 
-const memberObjectToJs = (node: ExpressionNode, locals: ReadonlySet<string>, scopeName: string): string => {
-  const expression = expressionNodeToJs(node, locals, scopeName);
+const memberObjectToJs = (
+  node: ExpressionNode,
+  locals: ReadonlySet<string>,
+  scopeName: string,
+  aliases: ExpressionAliases,
+): string => {
+  const expression = expressionNodeToJs(node, locals, scopeName, aliases);
   return node.type === "identifier" || node.type === "member" || node.type === "call" ? expression : `(${expression})`;
 };
 
@@ -921,10 +929,17 @@ export const expressionNodeToJs = (
   node: ExpressionNode,
   locals: ReadonlySet<string> = new Set(),
   scopeName = "scope",
+  aliases: ExpressionAliases = new Map(),
 ): string => {
   if (node.type === "identifier") {
     const [head, ...tail] = node.path;
-    const root = head && locals.has(head) ? head : `${scopeName}.${head ?? ""}`;
+    const alias = head ? aliases.get(head) : undefined;
+    const root =
+      head && locals.has(head)
+        ? head
+        : alias && alias !== head
+          ? `${scopeName}[${JSON.stringify(alias)}]`
+          : `${scopeName}.${head ?? ""}`;
     return [root, ...tail].join(".");
   }
   if (node.type === "literal") {
@@ -934,59 +949,63 @@ export const expressionNodeToJs = (
     return `new RegExp(${JSON.stringify(node.pattern)}, ${JSON.stringify(node.flags)})`;
   }
   if (node.type === "array") {
-    return `[${node.items.map((item) => expressionNodeToJs(item, locals, scopeName)).join(", ")}]`;
+    return `[${node.items.map((item) => expressionNodeToJs(item, locals, scopeName, aliases)).join(", ")}]`;
   }
   if (node.type === "object") {
     return `{ ${node.entries
-      .map((entry) => `${JSON.stringify(entry.key)}: ${expressionNodeToJs(entry.value, locals, scopeName)}`)
+      .map((entry) => `${JSON.stringify(entry.key)}: ${expressionNodeToJs(entry.value, locals, scopeName, aliases)}`)
       .join(", ")} }`;
   }
   if (node.type === "unary") {
-    return `(${node.operator}${expressionNodeToJs(node.argument, locals, scopeName)})`;
+    return `(${node.operator}${expressionNodeToJs(node.argument, locals, scopeName, aliases)})`;
   }
   if (node.type === "conditional") {
-    return `(${expressionNodeToJs(node.test, locals, scopeName)} ? ${expressionNodeToJs(
+    return `(${expressionNodeToJs(node.test, locals, scopeName, aliases)} ? ${expressionNodeToJs(
       node.consequent,
       locals,
       scopeName,
-    )} : ${expressionNodeToJs(node.alternate, locals, scopeName)})`;
+      aliases,
+    )} : ${expressionNodeToJs(node.alternate, locals, scopeName, aliases)})`;
   }
   if (node.type === "call") {
-    const args = node.args.map((arg) => expressionNodeToJs(arg, locals, scopeName));
+    const args = node.args.map((arg) => expressionNodeToJs(arg, locals, scopeName, aliases));
     if (node.callee.type === "member") {
-      const object = memberObjectToJs(node.callee.object, locals, scopeName);
+      const object = memberObjectToJs(node.callee.object, locals, scopeName, aliases);
       const propertyName = literalPropertyName(node.callee.property);
       if (!node.callee.computed && propertyName && isIdentifierName(propertyName)) {
         return `${object}${node.callee.optional ? "?." : "."}${propertyName}(${args.join(", ")})`;
       }
-      const property = expressionNodeToJs(node.callee.property, locals, scopeName);
+      const property = expressionNodeToJs(node.callee.property, locals, scopeName, aliases);
       return guardedMemberCallToJs(object, property, args, node.callee.optional);
     }
     if (node.callee.type === "identifier") {
-      return `${expressionNodeToJs(node.callee, locals, scopeName)}(${args.join(", ")})`;
+      return `${expressionNodeToJs(node.callee, locals, scopeName, aliases)}(${args.join(", ")})`;
     }
-    return genericCallToJs(expressionNodeToJs(node.callee, locals, scopeName), args);
+    return genericCallToJs(expressionNodeToJs(node.callee, locals, scopeName, aliases), args);
   }
   if (node.type === "member") {
-    const object = memberObjectToJs(node.object, locals, scopeName);
+    const object = memberObjectToJs(node.object, locals, scopeName, aliases);
     const propertyName = literalPropertyName(node.property);
     if (!node.computed && propertyName && isIdentifierName(propertyName)) {
       return `${object}${node.optional ? "?." : "."}${propertyName}`;
     }
-    const property = expressionNodeToJs(node.property, locals, scopeName);
+    const property = expressionNodeToJs(node.property, locals, scopeName, aliases);
     return guardedMemberAccessToJs(object, property, node.optional);
   }
   if (node.type === "template") {
     return node.parts
       .map((part) =>
-        typeof part === "string" ? JSON.stringify(part) : `String(${expressionNodeToJs(part, locals, scopeName)})`,
+        typeof part === "string"
+          ? JSON.stringify(part)
+          : `String(${expressionNodeToJs(part, locals, scopeName, aliases)})`,
       )
       .join(" + ");
   }
-  return `(${expressionNodeToJs(node.left, locals, scopeName)} ${node.operator} ${expressionNodeToJs(
+  return `(${expressionNodeToJs(node.left, locals, scopeName, aliases)} ${node.operator} ${expressionNodeToJs(
     node.right,
     locals,
     scopeName,
+    aliases,
   )})`;
 };
 

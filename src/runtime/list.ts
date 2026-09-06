@@ -91,12 +91,14 @@ type NestedListBinding = {
 
 type StoreDefinition = {
   name: string;
+  key?: string;
   initial: string;
   read?: ExpressionReader;
 };
 
 type ComponentProp = {
   name: string;
+  key?: string;
   expression: string;
   read?: ExpressionReader;
 };
@@ -293,10 +295,10 @@ const sourceScopeChanged = (previous: ReadonlyMap<string, unknown>, next: Readon
 
 const localScopeKeysFor = (options: KeyedListOptions): ReadonlySet<string> =>
   new Set([
-    ...(options.stores ?? []).map((store) => store.name),
+    ...(options.stores ?? []).flatMap((store) => [store.name, store.key ?? store.name]),
     ...(options.components ?? []).flatMap((component) => [
-      ...component.props.map((prop) => prop.name),
-      ...component.stores.map((store) => store.name),
+      ...component.props.flatMap((prop) => [prop.name, prop.key ?? prop.name]),
+      ...component.stores.flatMap((store) => [store.name, store.key ?? store.name]),
     ]),
   ]);
 
@@ -325,14 +327,14 @@ const localScopeFor = (
       ? createStore(scopedItem(itemName, item, indexName, index, sourceScope))
       : scopedItem(itemName, item, indexName, index, sourceScope);
   for (const store of options.stores ?? []) {
-    scope[store.name] = readExpression(scope, store.initial, store.read);
+    scope[store.key ?? store.name] = readExpression(scope, store.initial, store.read);
   }
   for (const component of options.components ?? []) {
     for (const prop of component.props) {
-      scope[prop.name] = readExpression(scope, prop.expression, prop.read);
+      scope[prop.key ?? prop.name] = readExpression(scope, prop.expression, prop.read);
     }
     for (const store of component.stores) {
-      scope[store.name] = readExpression(scope, store.initial, store.read);
+      scope[store.key ?? store.name] = readExpression(scope, store.initial, store.read);
     }
   }
   return scope;
@@ -341,7 +343,7 @@ const localScopeFor = (
 const updateComponentProps = (scope: Record<string, unknown>, options: KeyedListOptions): void => {
   for (const component of options.components ?? []) {
     for (const prop of component.props) {
-      scope[prop.name] = readExpression(scope, prop.expression, prop.read);
+      scope[prop.key ?? prop.name] = readExpression(scope, prop.expression, prop.read);
     }
   }
 };

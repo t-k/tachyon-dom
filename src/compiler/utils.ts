@@ -1,5 +1,5 @@
 import type { Attribute, ElementNode, HydrationBoundary, TemplateNode } from "./types.js";
-import { evaluateExpression, expressionToJs } from "./expression.js";
+import { evaluateExpression, expressionToJs, type ExpressionAliases } from "./expression.js";
 import { escapeHtml } from "../html-escape.js";
 export { escapeHtml } from "../html-escape.js";
 
@@ -279,8 +279,9 @@ export const expressionToScopeAccess = (
   expression: string,
   locals: ReadonlySet<string> = new Set(),
   scopeName = "scope",
+  aliases: ExpressionAliases = new Map(),
 ): string => {
-  return expressionToJs(expression, locals, scopeName);
+  return expressionToJs(expression, locals, scopeName, {}, aliases);
 };
 
 export const jsString = (value: string): string => JSON.stringify(value);
