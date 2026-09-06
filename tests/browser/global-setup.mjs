@@ -264,12 +264,9 @@ export const runListFooterCase = () => {
 `,
   };
   await Promise.all(
-    [
-      ...sharedParentModules,
-      ...conditionalShapeModules,
-      componentSplitModule,
-      listFooterModule,
-    ].map(({ fileName, source: generatedSource }) => writeFile(resolve(outDir, fileName), generatedSource)),
+    [...sharedParentModules, ...conditionalShapeModules, componentSplitModule, listFooterModule].map(
+      ({ fileName, source: generatedSource }) => writeFile(resolve(outDir, fileName), generatedSource),
+    ),
   );
   const sharedImports = sharedParentModules
     .map(
@@ -278,8 +275,9 @@ export const runListFooterCase = () => {
     )
     .join("\n");
   const followupImports = [
-    ...conditionalShapeModules.map(({ fileName }, index) =>
-      `import { runConditionalShapeCase as runConditionalShape${index} } from "./${fileName}";`,
+    ...conditionalShapeModules.map(
+      ({ fileName }, index) =>
+        `import { runConditionalShapeCase as runConditionalShape${index} } from "./${fileName}";`,
     ),
     `import { runComponentSplitCase } from "./${componentSplitModule.fileName}";`,
     `import { runListFooterCase } from "./${listFooterModule.fileName}";`,
