@@ -6,6 +6,7 @@ export {
   createHydrationBoundary,
   createLazyHydrationBoundary,
   diagnoseHydrationBoundaries,
+  isReplayedInteraction,
   readHydrationState,
   reportHydrationDiagnostics,
   scheduleHydration,

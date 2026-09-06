@@ -4,6 +4,7 @@ const browserServerPort = Number(process.env.PLAYWRIGHT_SERVER_PORT ?? process.e
 
 export default defineConfig({
   testDir: "./tests/browser",
+  globalSetup: "./tests/browser/global-setup.mjs",
   timeout: 30_000,
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),

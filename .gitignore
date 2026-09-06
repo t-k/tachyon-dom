@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 test-results/
+tests/browser/generated/
 release-artifacts/
 reports/mutation/
 .stryker-tmp/

@@ -181,18 +181,29 @@ export const reportHydrationDiagnostics = (
   return diagnostics;
 };
 
+const replayedInteractions = new WeakSet<Event>();
+
+/**
+ * Returns true when the event is the replayed clone of an interaction that
+ * triggered hydration. Capture listeners registered on ancestors such as
+ * `document` observe both the original interaction and the replay, so they
+ * can use this predicate to avoid duplicating side effects.
+ */
+export const isReplayedInteraction = (event: Event): boolean => replayedInteractions.has(event);
+
 const cloneInteractionEvent = (event: Event): Event => {
-  if (typeof MouseEvent !== "undefined" && event instanceof MouseEvent) {
-    return new MouseEvent(event.type, event);
-  }
-  if (typeof KeyboardEvent !== "undefined" && event instanceof KeyboardEvent) {
-    return new KeyboardEvent(event.type, event);
-  }
-  return new Event(event.type, {
-    bubbles: event.bubbles,
-    cancelable: event.cancelable,
-    composed: event.composed,
-  });
+  const clone =
+    typeof MouseEvent !== "undefined" && event instanceof MouseEvent
+      ? new MouseEvent(event.type, event)
+      : typeof KeyboardEvent !== "undefined" && event instanceof KeyboardEvent
+        ? new KeyboardEvent(event.type, event)
+        : new Event(event.type, {
+            bubbles: event.bubbles,
+            cancelable: event.cancelable,
+            composed: event.composed,
+          });
+  replayedInteractions.add(clone);
+  return clone;
 };
 
 export const createHydrationBoundary = (

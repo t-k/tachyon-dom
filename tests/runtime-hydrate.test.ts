@@ -3,6 +3,7 @@ import {
   createHydrationBoundary,
   createLazyHydrationBoundary,
   diagnoseHydrationBoundaries,
+  isReplayedInteraction,
   locateHydrationBoundary,
   readHydrationState,
   reportHydrationDiagnostics,
@@ -248,6 +249,32 @@ describe("hydrate boundary runtime", () => {
     expect(dispatch).toHaveBeenCalledTimes(2);
     cleanup();
     dispatch.mockRestore();
+  });
+
+  it("marks the replayed interaction so ancestor capture listeners can distinguish it from the original", () => {
+    document.body.innerHTML = `<main><!--tachyon-hydrate:td-h-mark:start--><section><button>Send</button></section><!--tachyon-hydrate:td-h-mark:end--></main>`;
+    const main = document.querySelector("main");
+    const button = main?.querySelector("button");
+    if (!main || !(button instanceof HTMLButtonElement)) throw new Error("Missing compiled boundary button.");
+    const observed: Array<{ replayed: boolean; defaultPrevented: boolean }> = [];
+    const documentListener = (event: Event): void => {
+      observed.push({ replayed: isReplayedInteraction(event), defaultPrevented: event.defaultPrevented });
+    };
+    document.addEventListener("click", documentListener, true);
+    const cleanup = scheduleHydrationBoundaries(
+      main,
+      [{ id: "td-h-mark", idKind: "static", strategy: "interaction", interaction: "click" }],
+      vi.fn(),
+    );
+
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+
+    expect(observed).toEqual([
+      { replayed: false, defaultPrevented: false },
+      { replayed: true, defaultPrevented: false },
+    ]);
+    cleanup();
+    document.removeEventListener("click", documentListener, true);
   });
 
   it("loads a lazy boundary once and replays the first interaction", async () => {
