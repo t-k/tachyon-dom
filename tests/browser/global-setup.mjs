@@ -93,10 +93,58 @@ const buildConditionalFixture = async () => {
   if (!compiled.ok) throw new Error(compiled.error.message);
   const generated = generateClientModule(compiled.value, { reactive: true, instrumentBindings: false });
   const entrySource = resolve(outDir, "conditional-source.js");
+  const sharedParentSources = [
+    `<main><for each={rows} key={row.id}><p>{row.label}</p></for><if test={active}><button>{label}</button></if><footer>{tail}</footer></main>`,
+    `<main><if test={active}><button>{label}</button></if><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
+  ];
+  const sharedParentModules = sharedParentSources.map((sharedSource, index) => {
+    const sharedCompiled = compileTemplate(sharedSource);
+    if (!sharedCompiled.ok) throw new Error(sharedCompiled.error.message);
+    const sharedGenerated = generateClientModule(sharedCompiled.value, { reactive: true, instrumentBindings: false });
+    const sharedMarkup = renderServerTemplate(sharedCompiled.value, {
+      rows: [
+        { id: "a", label: "R1" },
+        { id: "b", label: "R2" },
+      ],
+      active: true,
+      label: "A",
+      tail: "F",
+    });
+    return {
+      fileName: `shared-parent-${index === 0 ? "before" : "after"}.js`,
+      source: `import { createSignal } from "tachyon-dom";
+import { hydrate } from "tachyon-dom/runtime/mount";
+${sharedGenerated}
+export const runSharedParentGuard = () => {
+  const root = document.createElement("div");
+  root.innerHTML = ${JSON.stringify(sharedMarkup)};
+  const before = root.innerHTML;
+  const result = hydrate(root, { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind }, {
+    rows: createSignal([{ id: "a", label: "R1" }, { id: "b", label: "R2" }]),
+    active: createSignal(true),
+    label: createSignal("A"),
+    tail: createSignal("F"),
+  });
+  if (result.ok) result.value.dispose();
+  return { ok: result.ok, unchanged: root.innerHTML === before, message: result.ok ? "" : result.error.message };
+};
+`,
+    };
+  });
+  await Promise.all(
+    sharedParentModules.map(({ fileName, source: sharedSource }) => writeFile(resolve(outDir, fileName), sharedSource)),
+  );
+  const sharedImports = sharedParentModules
+    .map(
+      ({ fileName }, index) =>
+        `import { runSharedParentGuard as runSharedParent${index === 0 ? "Before" : "After"} } from "./${fileName}";`,
+    )
+    .join("\n");
   await writeFile(
     entrySource,
     `import { createSignal } from "tachyon-dom";
 import { hydrate, mount } from "tachyon-dom/runtime/mount";
+${sharedImports}
 ${generated}
 const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind };
 window.runConditionalFollowup = () => {
@@ -205,7 +253,11 @@ window.runConditionalFollowup = () => {
     text: ssrRoot.textContent,
   };
   hydrated.value.dispose();
-  return { mount: mountResult, hydrate: hydrateResult };
+  return {
+    mount: mountResult,
+    hydrate: hydrateResult,
+    sharedParent: { before: runSharedParentBefore(), after: runSharedParentAfter() },
+  };
 };
 window.__conditionalReady = true;
 `,

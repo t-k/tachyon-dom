@@ -44,6 +44,10 @@ declare global {
         genericFooterUpdated: boolean;
         text: string;
       };
+      sharedParent: {
+        before: { ok: boolean; unchanged: boolean; message: string };
+        after: { ok: boolean; unchanged: boolean; message: string };
+      };
     };
     __conditionalReady?: boolean;
   }
@@ -151,5 +155,11 @@ test("runs generated adjacent conditional mount and SSR hydration regressions in
   expect(result.hydrate.genericFormRecreated).toBe(true);
   expect(result.hydrate.genericFooterUpdated).toBe(true);
   expect(result.hydrate.text).toBe("secondHydrated footer 2");
+  expect(result.sharedParent.before.ok).toBe(false);
+  expect(result.sharedParent.before.unchanged).toBe(true);
+  expect(result.sharedParent.before.message).toContain("multiple direct dynamic regions");
+  expect(result.sharedParent.after.ok).toBe(false);
+  expect(result.sharedParent.after.unchanged).toBe(true);
+  expect(result.sharedParent.after.message).toContain("multiple direct dynamic regions");
   expect(["chromium", "firefox", "webkit"]).toContain(browserName);
 });

@@ -232,39 +232,67 @@ describe("client mount entrypoints", () => {
     },
   );
 
-  it.each([
-    `<main><for each={rows} key={row.id}><p>{row.label}</p></for><if test={active}><button>{label}</button></if><footer>{tail}</footer></main>`,
-    `<main><if test={active}><button>{label}</button></if><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
-  ])("rejects ambiguous SSR for and if siblings before mutating the DOM", (source) => {
-    const compiled = compileTemplate(source);
-    if (!compiled.ok) throw new Error(compiled.error.message);
-    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
-    const root = document.createElement("div");
-    root.innerHTML = renderServerTemplate(compiled.value, {
-      rows: [
-        { id: "a", label: "R1" },
-        { id: "b", label: "R2" },
-      ],
-      active: true,
-      label: "A",
-      tail: "F",
-    });
-    const before = root.innerHTML;
-    const result = hydrate(root, module, {
-      rows: createSignal([
-        { id: "a", label: "R1" },
-        { id: "b", label: "R2" },
-      ]),
-      active: createSignal(true),
-      label: createSignal("A"),
-      tail: createSignal("F"),
-    });
+  it.each(
+    [
+      {
+        rows: [],
+        serverActive: false,
+        clientActive: false,
+      },
+      {
+        rows: [{ id: "a", label: "R1" }],
+        serverActive: true,
+        clientActive: false,
+      },
+      {
+        rows: [
+          { id: "a", label: "R1" },
+          { id: "b", label: "R2" },
+        ],
+        serverActive: false,
+        clientActive: true,
+      },
+      {
+        rows: [
+          { id: "a", label: "R1" },
+          { id: "b", label: "R2" },
+        ],
+        serverActive: true,
+        clientActive: true,
+      },
+    ].flatMap((values) =>
+      [
+        `<main><for each={rows} key={row.id}><p>{row.label}</p></for><if test={active}><button>{label}</button></if><footer>{tail}</footer></main>`,
+        `<main><if test={active}><button>{label}</button></if><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
+      ].map((source) => ({ source, ...values })),
+    ),
+  )(
+    "rejects ambiguous SSR for and if siblings before mutating the DOM",
+    ({ source, rows, serverActive, clientActive }) => {
+      const compiled = compileTemplate(source);
+      if (!compiled.ok) throw new Error(compiled.error.message);
+      const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+      const root = document.createElement("div");
+      root.innerHTML = renderServerTemplate(compiled.value, {
+        rows,
+        active: serverActive,
+        label: "A",
+        tail: "F",
+      });
+      const before = root.innerHTML;
+      const result = hydrate(root, module, {
+        rows: createSignal(rows),
+        active: createSignal(clientActive),
+        label: createSignal("A"),
+        tail: createSignal("F"),
+      });
 
-    expect(result.ok).toBe(false);
-    if (result.ok) throw new Error("Ambiguous dynamic regions unexpectedly hydrated.");
-    expect(result.error.message).toContain("multiple direct dynamic regions");
-    expect(root.innerHTML).toBe(before);
-  });
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Ambiguous dynamic regions unexpectedly hydrated.");
+      expect(result.error.message).toContain("multiple direct dynamic regions");
+      expect(root.innerHTML).toBe(before);
+    },
+  );
 
   it("keeps bindings after a generated conditional on their original nodes", () => {
     const compiled = compileTemplate(`<main><if test={visible}><p>{left}</p></if><footer>{tail}</footer></main>`);
