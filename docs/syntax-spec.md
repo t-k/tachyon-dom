@@ -54,7 +54,7 @@ Expressions inside `script` and `style` are rejected because ordinary HTML escap
 
 Use `update="reference"` when the list follows immutable update discipline and an unchanged item reference should not re-evaluate that row. The default is `update="always"`, which preserves in-place mutation behavior. Index changes and changes to the outer scope still invalidate rows in either mode.
 
-The client compiler records static element siblings around a direct `<for>` so SSR rows can be adopted without consuming those siblings. This applies to the unambiguous case of one direct list dynamic region; ambiguous combinations of multiple direct `<for>` or `<if>` regions retain the ordinary binding path.
+The client compiler records static element siblings around a direct `<for>` so SSR rows can be adopted without consuming those siblings. A direct `<for>` can be hydrated when it is the sole dynamic region under its parent. If it shares that parent with another direct `<for>` or `<if>`, `hydrate()` reports an ambiguous dynamic-region error before binding and leaves the SSR DOM untouched. Place the dynamic regions under separate parent elements when they must be hydrated together.
 
 Row-local `<component>` boundaries, `<store>` declarations, and explicit hydration boundaries are supported. Row stores and component props belong to the keyed row and survive reorder while being disposed when the key leaves the list. A row hydration boundary must use an explicit row-scoped expression such as `hydrate:id={row.id}`; an automatically generated static id inside a row is rejected because it would be duplicated. The runtime does not silently drop unsupported metadata.
 

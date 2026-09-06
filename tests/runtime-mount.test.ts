@@ -187,6 +187,85 @@ describe("client mount entrypoints", () => {
     }
   });
 
+  it.each([
+    [true, false],
+    [false, true],
+  ] as const)(
+    "reconciles a generated conditional when SSR visibility is %j and client visibility is %j",
+    (serverVisible, clientVisible) => {
+      const compiled = compileTemplate(`<main><if test={visible}><p>{label}</p></if><footer>{tail}</footer></main>`);
+      if (!compiled.ok) throw new Error(compiled.error.message);
+      const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+      const root = document.createElement("div");
+      root.innerHTML = renderServerTemplate(compiled.value, {
+        visible: serverVisible,
+        label: "SSR",
+        tail: "SSR footer",
+      });
+      const serverParagraph = root.querySelector("p");
+      const serverFooter = root.querySelector("footer");
+      const visible = createSignal(clientVisible);
+      const label = createSignal("Client");
+      const tail = createSignal("Client footer");
+      const hydrated = hydrate(root, module, { visible, label, tail });
+      if (!hydrated.ok) throw new Error(hydrated.error.message);
+
+      expect(root.querySelector("footer")).toBe(serverFooter);
+      if (serverVisible && clientVisible) {
+        expect(root.querySelector("p")).toBe(serverParagraph);
+      } else if (clientVisible) {
+        expect(root.querySelector("p")).not.toBeNull();
+      } else {
+        expect(root.querySelector("p")).toBeNull();
+      }
+      expect(root.querySelector("p")?.textContent ?? null).toBe(clientVisible ? "Client" : null);
+      expect(serverParagraph?.isConnected ?? false).toBe(serverVisible && clientVisible);
+      expect(serverFooter?.textContent).toBe("Client footer");
+
+      tail.set("Client footer 2");
+      expect(serverFooter?.textContent).toBe("Client footer 2");
+      visible.set(!clientVisible);
+      expect(root.querySelector("p")?.textContent ?? null).toBe(clientVisible ? null : "Client");
+      visible.set(clientVisible);
+      expect(root.querySelector("p")?.textContent ?? null).toBe(clientVisible ? "Client" : null);
+      hydrated.value.dispose();
+    },
+  );
+
+  it.each([
+    `<main><for each={rows} key={row.id}><p>{row.label}</p></for><if test={active}><button>{label}</button></if><footer>{tail}</footer></main>`,
+    `<main><if test={active}><button>{label}</button></if><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
+  ])("rejects ambiguous SSR for and if siblings before mutating the DOM", (source) => {
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      rows: [
+        { id: "a", label: "R1" },
+        { id: "b", label: "R2" },
+      ],
+      active: true,
+      label: "A",
+      tail: "F",
+    });
+    const before = root.innerHTML;
+    const result = hydrate(root, module, {
+      rows: createSignal([
+        { id: "a", label: "R1" },
+        { id: "b", label: "R2" },
+      ]),
+      active: createSignal(true),
+      label: createSignal("A"),
+      tail: createSignal("F"),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Ambiguous dynamic regions unexpectedly hydrated.");
+    expect(result.error.message).toContain("multiple direct dynamic regions");
+    expect(root.innerHTML).toBe(before);
+  });
+
   it("keeps bindings after a generated conditional on their original nodes", () => {
     const compiled = compileTemplate(`<main><if test={visible}><p>{left}</p></if><footer>{tail}</footer></main>`);
     if (!compiled.ok) throw new Error(compiled.error.message);

@@ -356,6 +356,22 @@ const cleanup = (state: ConditionalState): void => {
   if (failed) throw firstError;
 };
 
+const removeAdoptedNodes = (nodes: readonly Node[]): void => {
+  let firstError: unknown;
+  let failed = false;
+  for (const node of nodes) {
+    try {
+      cleanupOwnedSubtree(node);
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
+    } finally {
+      node.parentNode?.removeChild(node);
+    }
+  }
+  if (failed) throw firstError;
+};
+
 const createNodes = (templateHtml: string): Node[] => {
   const template = document.createElement("template");
   template.innerHTML = templateHtml;
@@ -530,6 +546,7 @@ export const mountConditional = (
   }
   const signature = signatureFor(options);
   const current = states.get(anchor);
+  const adoptedNodes = current ? undefined : takePreparedConditionalNodes(anchor);
   if (!visible) {
     if (current) {
       try {
@@ -538,13 +555,13 @@ export const mountConditional = (
         states.delete(anchor);
       }
     }
+    if (adoptedNodes) removeAdoptedNodes(adoptedNodes);
     setPreparedConditionalNodeCount(anchor, 0);
     return;
   }
   if (current && current.signature !== signature) {
     cleanupOwnedSubtree(anchor);
   }
-  const adoptedNodes = current ? undefined : takePreparedConditionalNodes(anchor);
   const state =
     current && current.signature === signature
       ? current

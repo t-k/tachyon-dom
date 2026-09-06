@@ -1,9 +1,5 @@
 import { err, ok, type Result } from "../result.js";
-import {
-  diagnoseHydrationBoundaries,
-  type CompiledHydrationBoundary,
-  type HydrationBoundaryChunk,
-} from "./hydrate.js";
+import { diagnoseHydrationBoundaries, type CompiledHydrationBoundary, type HydrationBoundaryChunk } from "./hydrate.js";
 import { createRoot, onCleanup } from "./signal.js";
 
 export type ClientHydrationDynamicAttribute = {
@@ -107,6 +103,17 @@ const hydrationAttributeKey = (path: readonly number[], name: string): string =>
   `${path.join(".")}\0${name.toLowerCase()}`;
 
 const hydrationRegionKey = (path: readonly number[]): string => path.join(".");
+
+const ambiguousDynamicRegionError = (
+  dynamicRegions: ReadonlyMap<string, readonly ClientHydrationDynamicRegion[]>,
+): string | undefined => {
+  for (const [key, regions] of dynamicRegions) {
+    if (regions.length < 2 || !regions.some((region) => region.kind === "list")) continue;
+    const path = key === "" ? [] : key.split(".").map(Number);
+    return `Hydration cannot safely adopt multiple direct dynamic regions at ${hydrationPathLabel(path)} when a <for> shares its parent with another dynamic region.`;
+  }
+  return undefined;
+};
 
 const hydrationUnsafeExtraNodeError = (node: Node, path: readonly number[]): string | undefined => {
   if (node.nodeType !== Node.ELEMENT_NODE) {
@@ -220,7 +227,13 @@ const hydrationStructureError = (
         }
         continue;
       }
-      const mismatch = hydrationStructureError(expectedChild, actualChild, childPath, dynamicAttributes, dynamicRegions);
+      const mismatch = hydrationStructureError(
+        expectedChild,
+        actualChild,
+        childPath,
+        dynamicAttributes,
+        dynamicRegions,
+      );
       if (mismatch) return mismatch;
       actualIndex++;
     }
@@ -316,6 +329,10 @@ export const hydrate = <Scope extends Record<string, unknown>>(
     const regions = dynamicRegions.get(key) ?? [];
     regions.push(region);
     dynamicRegions.set(key, regions);
+  }
+  const dynamicRegionError = ambiguousDynamicRegionError(dynamicRegions);
+  if (dynamicRegionError) {
+    return err({ message: dynamicRegionError });
   }
   const structureError = hydrationStructureError(expectedRoot, bindRoot, [], dynamicAttributes, dynamicRegions);
   if (structureError) {

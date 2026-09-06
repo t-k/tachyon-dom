@@ -266,10 +266,15 @@ export const prepareConditionalCore = (root: Node, descriptors: readonly Conditi
       continue;
     }
     const expected = createNodes(source?.templateHtml ?? "");
-    const visible = Boolean(source?.visible);
-    const adopted = visible ? adoptableNodes(parent, index, expected) : undefined;
-    if (visible && !adopted) {
-      plan.invalid.add(descriptor.key);
+    // The client condition describes the requested state, not the state that
+    // produced the SSR DOM. Inspect the server shape independently so a
+    // server-visible branch can be removed when the client starts hidden.
+    const adopted = adoptableNodes(parent, index, expected);
+    if (adopted && candidateBelongsToLaterVisibleConditional(parent, index, descriptor, expected, descriptors)) {
+      const anchor = document.createComment("");
+      parent.insertBefore(anchor, candidate ?? null);
+      registerAnchor(root, descriptor.path, anchor);
+      plan.modes.set(descriptor.key, "omitted");
       continue;
     }
     const anchor = document.createComment("");
@@ -343,6 +348,30 @@ const adoptableNodes = (parent: Node, index: number, expected: readonly Node[]):
     expected.every((node, nodeIndex) => sameNodeShape(node, actual[nodeIndex] as Node))
     ? actual
     : undefined;
+};
+
+const candidateBelongsToLaterVisibleConditional = (
+  parent: Node,
+  index: number,
+  descriptor: PreparedConditional,
+  expected: readonly Node[],
+  descriptors: readonly ConditionalCoreAnchorDescriptor[],
+): boolean => {
+  for (const later of descriptors) {
+    const laterIndex = later.path.at(-1);
+    if (
+      pathKey(later.path.slice(0, -1)) !== descriptor.parentKey ||
+      laterIndex === undefined ||
+      laterIndex <= descriptor.index
+    ) {
+      continue;
+    }
+    if (!later.visible) continue;
+    const laterExpected = createNodes(later.templateHtml);
+    if (!adoptableNodes(parent, index, laterExpected)) continue;
+    if (!adoptableNodes(parent, index + expected.length, laterExpected)) return true;
+  }
+  return false;
 };
 
 const resolveAnchor = (
@@ -421,6 +450,22 @@ const cleanupState = (state: ConditionalCoreState): void => {
   if (failed) throw firstError;
 };
 
+const removeAdoptedNodes = (nodes: readonly Node[]): void => {
+  let firstError: unknown;
+  let failed = false;
+  for (const node of nodes) {
+    try {
+      cleanupOwnedSubtree(node);
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
+    } finally {
+      node.parentNode?.removeChild(node);
+    }
+  }
+  if (failed) throw firstError;
+};
+
 const detachOwnerCleanup = (anchor: Comment): void => {
   ownerCleanupDisposers.get(anchor)?.();
   ownerCleanupDisposers.delete(anchor);
@@ -493,6 +538,7 @@ export const mountConditionalCore = (
         detachOwnerCleanup(anchor);
       }
     }
+    if (adoptedNodes) removeAdoptedNodes(adoptedNodes);
     setPreparedConditionalNodeCount(anchor, 0);
     return;
   }
