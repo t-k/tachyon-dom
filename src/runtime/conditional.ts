@@ -469,6 +469,13 @@ const setupHydration = (
   const deferredBindings = new Set<ConditionalBinding>();
   const root: ParentNode =
     anchor.parentElement ?? state.nodes.find((node): node is Element => node instanceof Element) ?? document;
+  // Phase 1: locate every boundary before any scheduler starts, so a failure
+  // leaves no listener behind.
+  const located: Array<{
+    boundary: NonNullable<ConditionalOptions["hydrationBoundaries"]>[number];
+    handle: HydrationBoundaryHandle;
+    entries: Array<{ binding: ConditionalBinding; index: number }>;
+  }> = [];
   for (const boundary of options.hydrationBoundaries ?? []) {
     const resolvedId = boundary.idKind === "expression" ? readPath(state.scope, boundary.id) : boundary.id;
     if (resolvedId === undefined || resolvedId === null) continue;
@@ -487,9 +494,13 @@ const setupHydration = (
       if (handle.error.kind === "missing") continue;
       throw new Error(`Conditional hydration boundary could not be adopted: ${handle.error.message}`);
     }
-    state.hydrationBoundaries.push(handle.value);
+    located.push({ boundary, handle: handle.value, entries: boundaryEntries });
+  }
+  // Phase 2: schedule.
+  for (const { boundary, handle, entries } of located) {
+    state.hydrationBoundaries.push(handle);
     state.hydrationCleanups.push(
-      scheduleHydration(handle.value, {
+      scheduleHydration(handle, {
         strategy: boundary.strategy ?? "load",
         ...(boundary.media ? { media: boundary.media } : {}),
         ...(boundary.interaction ? { interaction: boundary.interaction } : {}),
@@ -497,8 +508,8 @@ const setupHydration = (
         replayInteraction: true,
       }),
     );
-    state.hydrationCleanups.push(() => handle.value.dispose());
-    for (const { binding } of boundaryEntries) deferredBindings.add(binding);
+    state.hydrationCleanups.push(() => handle.dispose());
+    for (const { binding } of entries) deferredBindings.add(binding);
   }
   return deferredBindings;
 };

@@ -1,6 +1,6 @@
 {
-  "runtime/list": { "maxMinifiedBytes": 33922, "maxBrotliBytes": 10496 },
+  "runtime/list": { "maxMinifiedBytes": 34109, "maxBrotliBytes": 10496 },
   "runtime/form": { "maxMinifiedBytes": 3072, "maxBrotliBytes": 2048 },
-  "runtime/conditional": { "maxMinifiedBytes": 33738, "maxBrotliBytes": 10496 },
+  "runtime/conditional": { "maxMinifiedBytes": 33925, "maxBrotliBytes": 10496 },
   "runtime/router": { "maxMinifiedBytes": 20480, "maxBrotliBytes": 8192 }
 }

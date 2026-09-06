@@ -172,4 +172,13 @@ function local() { const title = "local"; return title; }
       `<ul><for each="{rows}" key='{entry.id}'><li>{entry.name}</li></for></ul>`,
     );
   });
+
+  it("keeps object literal arrow parameters and curried arrows in their own scopes without refusing the file", () => {
+    const source = `<script lang="ts">const title = "outer";\nconst handlers = { format: title => title.length, run: (title: string) => title };\nconst curried = a => b => a + b;\nconst typed = (a: number) => (b: number) => a + b;\n</script><p>{title}</p>`;
+    const rename = templateRenameAt(source, positionAt(source, source.lastIndexOf("{title") + 2), "heading");
+    expect(rename?.edits).toHaveLength(2);
+    expect(applyEdits(source, rename?.edits ?? [])).toBe(
+      `<script lang="ts">const heading = "outer";\nconst handlers = { format: title => title.length, run: (title: string) => title };\nconst curried = a => b => a + b;\nconst typed = (a: number) => (b: number) => a + b;\n</script><p>{heading}</p>`,
+    );
+  });
 });

@@ -390,15 +390,33 @@ const scriptSymbols = (
     return -1;
   };
   const isArrowAt = (index: number): boolean => tokens[index]?.punct === "=" && tokens[index + 1]?.punct === ">";
+  // True when the arrow at `arrowIndex` (index of its `=`) sits inside a return
+  // type annotation: its parameter list is preceded by `): `.
+  const isReturnTypeArrow = (arrowIndex: number): boolean => {
+    const previous = tokens[arrowIndex - 1];
+    let before: number;
+    if (previous?.punct === ")") {
+      const openIndex = openingParenIndex(arrowIndex - 1);
+      if (openIndex < 0) return false;
+      before = openIndex - 1;
+    } else if (previous?.name) {
+      before = arrowIndex - 2;
+    } else {
+      return false;
+    }
+    return tokens[before]?.punct === ":" && tokens[before - 1]?.punct === ")";
+  };
   const parameterListBeforeReturnType = (arrowIndex: number): number | "unsafe" | undefined => {
     let depth = 0;
     for (let index = arrowIndex - 1; index >= 0; index -= 1) {
       const token = tokens[index]!;
       if (token.punct === ")" || token.punct === "]" || token.punct === "}" || token.punct === ">") {
         if (token.punct === ">" && tokens[index - 1]?.punct === "=") {
-          // Another arrow inside the annotation: a function return type. The
-          // parameter boundary cannot be determined reliably.
-          return "unsafe";
+          if (depth > 0) return "unsafe";
+          // A preceding arrow at depth 0 is either a curried arrow (`a => b =>`)
+          // or a function type inside a return annotation
+          // (`(x): (y: T) => R => body`). Only the latter is ambiguous.
+          return isReturnTypeArrow(index - 1) ? "unsafe" : undefined;
         }
         depth += 1;
         continue;
@@ -515,7 +533,7 @@ const scriptSymbols = (
       registerParameters(parameterTokens(openIndex, closeIndex), tokens[openIndex]!.start, index);
       continue;
     }
-    if (previous?.name && !reservedWords.has(previous.name) && tokens[index - 2]?.punct !== ":") {
+    if (previous?.name && !reservedWords.has(previous.name)) {
       registerParameters([previous], previous.start, index);
     }
   }

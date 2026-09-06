@@ -2104,6 +2104,46 @@ export const bindRows = (root, rows, options) => effect(() => {
     }
   });
 
+  it("emits no binding instrumentation for non-development builds or when the Vite root is unknown", async () => {
+    const source = `<script setup>const title = "Dev";</script><main><h1>{title}</h1></main>`;
+    const context = {
+      error(error: string): never {
+        throw new Error(error);
+      },
+    } as never;
+    const noRoot = tachyonDom({ reactive: true, declarationOutput: false });
+    if (typeof noRoot.transform !== "function") throw new Error("Missing transform hook.");
+    const withoutRoot = await noRoot.transform.call(context, source, "/absolute/app/src/page.td");
+    expect(typeof withoutRoot === "object" ? String(withoutRoot?.code ?? "") : "").not.toContain("__tachyonRegisterBindings");
+
+    const staging = tachyonDom({ reactive: true, declarationOutput: false });
+    if (typeof staging.configResolved !== "function" || typeof staging.transform !== "function") {
+      throw new Error("Missing hooks.");
+    }
+    await (staging.configResolved as (config: unknown) => void).call({} as never, {
+      command: "build",
+      mode: "staging",
+      root: "/absolute/app",
+    });
+    const stagingCode = await staging.transform.call(context, source, "/absolute/app/src/page.td");
+    expect(typeof stagingCode === "object" ? String(stagingCode?.code ?? "") : "").not.toContain("__tachyonRegisterBindings");
+    const configHook = staging.config as (config: unknown, env: { command: string; mode: string }) => { define?: Record<string, string> } | undefined;
+    expect(configHook.call({} as never, {}, { command: "build", mode: "staging" })?.define?.__TACHYON_PRODUCTION__).toBe("true");
+    expect(configHook.call({} as never, {}, { command: "build", mode: "development" })).toBeUndefined();
+  });
+
+  it("type checks templates that are only imported through hydrate-only", async () => {
+    const plugin = tachyonDom({ reactive: true, typecheck: true, declarationOutput: false });
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+    const context = {
+      error(error: string): never {
+        throw new Error(error);
+      },
+    } as never;
+    const source = `<script setup lang="ts">const user = { name: "Ada" };</script><main><section hydrate><p>{user.missing}</p></section></main>`;
+    await expect(plugin.transform.call(context, source, "/src/typed.td?client&hydrate-only")).rejects.toThrow(/TS2339/);
+  });
+
   it("generates one lazy chunk request per top-level hydration boundary", async () => {
     const plugin = tachyonDom();
     if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");

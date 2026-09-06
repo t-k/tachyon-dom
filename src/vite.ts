@@ -365,7 +365,9 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
     name: "tachyon-dom",
     enforce: "pre",
     config(config, env) {
-      if (env.command !== "build" || env.mode !== "production") {
+      // Every non-development build (production, staging, ...) is a shipping
+      // build: fold diagnostics away and emit no instrumentation.
+      if (env.command !== "build" || env.mode === "development") {
         return;
       }
       return {
@@ -452,7 +454,9 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       if (!result.ok) {
         this.error(formatDiagnostic(result.error, id));
       }
-      if (options.typecheck === true && isPrimaryRequest(id)) {
+      // Type checks run for every non-chunk request so a template loaded only
+      // through `?client&hydrate-only` is still checked.
+      if (options.typecheck === true && hydrationBoundaryIdFor(id) === undefined) {
         const typeResult = checkTachyonTemplateTypes(source, { fileName: cleanId(id) });
         if (!typeResult.ok) {
           this.error(typeResult.error);
@@ -482,15 +486,15 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
           : undefined;
       const hydrateOnly = resolvedTarget === "client" && hydrationBoundaryId === undefined && isHydrateOnlyRequest(id);
       // Binding location instrumentation is a development aid: it names the
-      // template relative to the Vite root (never an absolute path) and is
-      // omitted entirely from production builds.
-      const isProductionBuild = command === "build" && mode === "production";
+      // template relative to the Vite root (never an absolute path; without a
+      // resolved root nothing is emitted) and is omitted from every build
+      // that is not a development build.
       const instrumentation =
-        resolvedTarget === "client" && !isProductionBuild
+        resolvedTarget === "client" && (command !== "build" || mode === "development") && rootDir
           ? {
-              templateId: `${
-                rootDir ? relative(rootDir, cleanId(id)).split(sep).join("/") : cleanId(id).split(sep).join("/")
-              }${hydrationBoundaryId === undefined ? "" : `?tachyon-hydration=${hydrationBoundaryId}`}`,
+              templateId: `${relative(rootDir, cleanId(id)).split(sep).join("/")}${
+                hydrationBoundaryId === undefined ? "" : `?tachyon-hydration=${hydrationBoundaryId}`
+              }`,
               sourceRevision: createHash("sha256").update(source).digest("hex").slice(0, 8),
               mapSourceOffset: result.value.descriptor.mapTemplateOffset,
             }
