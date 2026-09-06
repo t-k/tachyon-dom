@@ -149,6 +149,33 @@ describe("client mount entrypoints", () => {
     expect(root.textContent).toBe("A:7");
   });
 
+  it("resolves binding paths across SSR hydration markers when a boundary has siblings", () => {
+    const compiled = compileTemplate(
+      `<main><section hydrate:id={panel}><p class:on={active}>{title}:{note}</p></section><h1>{title}</h1><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      panel: "p-1",
+      active: true,
+      title: "A",
+      note: "n",
+      rows: [{ id: 1, label: "one" }],
+    });
+    const title = createSignal("A");
+    const rows = createSignal([{ id: 1, label: "one" }]);
+
+    const result = hydrate(root, module, { panel: "p-1", active: true, title, note: "n", rows });
+    if (!result.ok) throw new Error(result.error.message);
+    title.set("B");
+    expect(root.innerHTML).toContain("<h1>B</h1>");
+    expect(root.querySelector("p")?.textContent).toBe("B:n");
+    rows.set([{ id: 1, label: "uno" }, { id: 2, label: "two" }]);
+    expect(Array.from(root.querySelectorAll("li")).map((li) => li.textContent)).toEqual(["uno", "two"]);
+    result.value.dispose();
+  });
+
   it("rejects mounting a hydrate-only module before touching the DOM and refuses to hydrate a root twice", () => {
     const hydrateOnly = {
       hydrateOnly: true as const,
