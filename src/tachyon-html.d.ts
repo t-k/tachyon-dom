@@ -50,6 +50,28 @@ declare module "*.td?client" {
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
 
+declare module "*.td?client&hydrate-only" {
+  export const hydrateOnly: true;
+  export const templateHtml: string;
+  export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
+  export const hydrationDynamicAttributes: readonly {
+    path: readonly number[];
+    name: string;
+    kind?: "value" | "token";
+  }[];
+  export const hydrationDynamicRegions: readonly {
+    path: readonly number[];
+    index: number;
+    kind: "list" | "conditional";
+  }[];
+  export const componentBoundaries: unknown[];
+  export const hydrate: (
+    bindRoot: Element,
+    hydrationRoot: ParentNode,
+    scope: Record<string, unknown>,
+  ) => void | (() => void);
+}
+
 declare module "*.td?server" {
   export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
   export const renderHydrationState: (id: string, state: unknown) => string;

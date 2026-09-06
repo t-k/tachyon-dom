@@ -242,6 +242,7 @@ const codeForTarget = (
   defaultScopeName?: string,
   hydrationBoundaryId?: string,
   hydrationChunkImports?: Readonly<Record<string, string>>,
+  hydrateOnly = false,
 ): string => {
   if (scriptOnly) {
     return generateScriptOnlyModule(target);
@@ -257,6 +258,7 @@ const codeForTarget = (
     ...(defaultScopeName ? { defaultScopeName } : {}),
     ...(hydrationBoundaryId ? { hydrationBoundaryId } : {}),
     ...(hydrationChunkImports ? { hydrationChunkImports } : {}),
+    ...(hydrateOnly ? { hydrateOnly: true } : {}),
   });
 };
 
@@ -284,6 +286,12 @@ const targetForId = (
 const isEntryRequest = (id: string): boolean => queryForId(id).has("entry");
 
 const hydrationBoundaryIdFor = (id: string): string | undefined => queryForId(id).get("tachyon-hydration") ?? undefined;
+
+/** `./Page.td?client&hydrate-only` requests a module without boundary bindings or `bind`. */
+const isHydrateOnlyRequest = (id: string): boolean => queryForId(id).has("hydrate-only");
+
+/** Declarations and type checks run once per source file, for the primary request only. */
+const isPrimaryRequest = (id: string): boolean => hydrationBoundaryIdFor(id) === undefined && !isHydrateOnlyRequest(id);
 
 const hydrationChunkImportsFor = (
   id: string,
@@ -397,7 +405,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         include.test(cleanId(id)) &&
         !queryForId(id).has("url") &&
         !isEntryRequest(id) &&
-        hydrationBoundaryIdFor(id) === undefined
+        isPrimaryRequest(id)
       ) {
         const declarationOutput =
           options.declarationOutput === false
@@ -441,7 +449,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       if (!result.ok) {
         this.error(formatDiagnostic(result.error, id));
       }
-      if (options.typecheck === true && hydrationBoundaryIdFor(id) === undefined) {
+      if (options.typecheck === true && isPrimaryRequest(id)) {
         const typeResult = checkTachyonTemplateTypes(source, { fileName: cleanId(id) });
         if (!typeResult.ok) {
           this.error(typeResult.error);
@@ -469,6 +477,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         result.value.template.client.hydrationBoundaries.length > 0
           ? hydrationChunkImportsFor(id, result.value.template.client.hydrationBoundaries)
           : undefined;
+      const hydrateOnly = resolvedTarget === "client" && hydrationBoundaryId === undefined && isHydrateOnlyRequest(id);
       // Boundary chunks bind with the scope resolved by the entry module, so the
       // SFC script and its setup factory are only emitted into the entry.
       const code = `${hydrationBoundaryId === undefined ? script.value.code : ""}${codeForTarget(
@@ -481,6 +490,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
           : undefined,
         hydrationBoundaryId,
         hydrationChunkImports,
+        hydrateOnly,
       )}`;
       const emitSourceMap = shouldEmitSourceMap({
         sourcemap: options.sourcemap,

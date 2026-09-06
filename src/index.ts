@@ -14,6 +14,7 @@ export {
   serializeHydrationState,
 } from "./runtime/hydrate.js";
 export { hydrate, hydrateClientTemplate, mount, mountClientTemplate } from "./runtime/mount.js";
+export type { HydratableTemplateModule, HydrateOnlyTemplateModule } from "./runtime/mount.js";
 export { createTemplateComponent } from "./runtime/component.js";
 export type {
   TemplateComponent,

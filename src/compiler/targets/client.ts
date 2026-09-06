@@ -402,7 +402,7 @@ const hasModelBinding = (binding: ClientBinding): boolean => {
 const clientModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
 
 const clientModuleCacheKey = (options: GenerateClientModuleOptions): string =>
-  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}\0${options.hydrationBoundaryId ?? ""}\0${options.hydrationChunk === true ? "chunk" : ""}\0${JSON.stringify(options.hydrationChunkImports ?? {})}`;
+  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}\0${options.hydrationBoundaryId ?? ""}\0${options.hydrationChunk === true ? "chunk" : ""}\0${options.hydrateOnly === true ? "hydrate-only" : ""}\0${JSON.stringify(options.hydrationChunkImports ?? {})}`;
 
 /** Maps each compiled boundary to the template node it was lowered from. */
 const hydrationBoundaryNodes = new WeakMap<HydrationBoundary, ElementNode>();
@@ -473,8 +473,16 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (cached) {
     return cached;
   }
-  const bindings = template.client.bindings;
-  const hydrationDynamicAttributes = bindings.flatMap((binding) => {
+  const allBindings = template.client.bindings;
+  const hydrateOnly = options.hydrateOnly === true;
+  const withinHydrationBoundary = (binding: ClientBinding): boolean =>
+    template.client.hydrationBoundaries.some((boundary) =>
+      boundary.path.every((part, index) => binding.path[index] === part),
+    );
+  // A hydrate-only module removes boundary bindings at generation time, so the
+  // runtime imports below are computed from the eager bindings alone.
+  const bindings = hydrateOnly ? allBindings.filter((binding) => !withinHydrationBoundary(binding)) : allBindings;
+  const hydrationDynamicAttributes = allBindings.flatMap((binding) => {
     if (binding.kind === "attr") {
       return [{ path: binding.path, name: binding.name }];
     }
@@ -490,6 +498,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const hydrationChunkImports = options.hydrationChunkImports ?? {};
   const hasHydrationChunks = Object.keys(hydrationChunkImports).length > 0;
   const isHydrationChunk = options.hydrationChunk === true;
+  const emitsHydrate = hasHydrationChunks || hydrateOnly;
+  const bindName = hydrateOnly ? "__tachyonBindEager" : "bind";
   const needsStore = template.client.stores.length > 0;
   const hasDefaultScope = typeof options.defaultScopeName === "string" && options.defaultScopeName.length > 0;
   const sourceName = scopeName(needsStore);
@@ -564,6 +574,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       `import { createLazyHydrationBoundary as __tachyonCreateLazyHydrationBoundary, diagnoseHydrationBoundaries as __tachyonDiagnoseHydrationBoundaries, scheduleHydration as __tachyonScheduleHydration } from "tachyon-dom/runtime/hydrate";`,
     );
   }
+  if (hydrateOnly) {
+    lines.push(`export const hydrateOnly = true;`);
+  }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
   lines.push(`export const hydrationDynamicAttributes = ${JSON.stringify(hydrationDynamicAttributes)};`);
@@ -589,11 +602,13 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   // the entry's hydrate() resolved once. Eager bindings and boundary chunks
   // bind with the same context instead of re-running setup or re-creating
   // stores.
-  const acceptsContext = hasHydrationChunks || isHydrationChunk;
+  const acceptsContext = hasHydrationChunks || isHydrationChunk || hydrateOnly;
   const bindSignature = acceptsContext
     ? `(root, inputScope = {}, __tachyonSkipHydration = false, __tachyonContext = undefined)`
     : `(root, inputScope = {})`;
-  lines.push(`export const bind = ${bindSignature} => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`);
+  lines.push(
+    `${hydrateOnly ? "const" : "export const"} ${bindName} = ${bindSignature} => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`,
+  );
   const createScope = hasDefaultScope ? `__tachyonCreateScope(inputScope)` : `inputScope`;
   if (acceptsContext) {
     lines.push(
@@ -651,11 +666,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   let conditionalIndex = 0;
   let targetIndex = 0;
   for (const binding of bindings) {
-    const bindingInHydrationBoundary =
-      hasHydrationChunks &&
-      template.client.hydrationBoundaries.some((boundary) =>
-        boundary.path.every((part, index) => binding.path[index] === part),
-      );
+    const bindingInHydrationBoundary = hasHydrationChunks && !hydrateOnly && withinHydrationBoundary(binding);
     const bindingStart = lines.length;
     if (bindingInHydrationBoundary) lines.push(`  if (!__tachyonSkipHydration) {`);
     if (binding.kind === "text") {
@@ -770,7 +781,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   lines.push(`  };`);
   lines.push(`});`);
-  if (hasHydrationChunks) {
+  if (emitsHydrate && hasHydrationChunks) {
     lines.push(
       `const __tachyonLoadHydrationChunk = (loader, context) => Promise.resolve(loader()).then((module) => ({`,
     );
@@ -781,6 +792,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`    return typeof binder === "function" ? binder(element, context.scope, false, context) : undefined;`);
     lines.push(`  },`);
     lines.push(`}));`);
+  }
+  if (emitsHydrate) {
     lines.push(
       `export const hydrate = (bindRoot, hydrationRoot, inputScope = {}) => ${runtimeNames.createRoot}((__tachyonDisposeRoot) => {`,
     );
@@ -802,16 +815,18 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     );
     // Preflight: every boundary in the hydration root must be adoptable
     // before any listener, loader, or effect starts.
-    lines.push(
-      `  const __tachyonBoundaryDiagnostics = __tachyonDiagnoseHydrationBoundaries(hydrationRoot, [${boundaryIdExpressions.join(", ")}]);`,
-    );
-    lines.push(
-      `  if (__tachyonBoundaryDiagnostics.length > 0) throw new Error(__tachyonBoundaryDiagnostics.map((diagnostic) => diagnostic.message).join(" "));`,
-    );
-    lines.push(`  const eagerCleanup = bind(bindRoot, scope, true, __tachyonContext);`);
+    if (hasHydrationChunks) {
+      lines.push(
+        `  const __tachyonBoundaryDiagnostics = __tachyonDiagnoseHydrationBoundaries(hydrationRoot, [${boundaryIdExpressions.join(", ")}]);`,
+      );
+      lines.push(
+        `  if (__tachyonBoundaryDiagnostics.length > 0) throw new Error(__tachyonBoundaryDiagnostics.map((diagnostic) => diagnostic.message).join(" "));`,
+      );
+    }
+    lines.push(`  const eagerCleanup = ${bindName}(bindRoot, scope, true, __tachyonContext);`);
     lines.push(`  cleanups.push(eagerCleanup);`);
     let hydrationIndex = 0;
-    for (const [boundaryIndex, boundary] of template.client.hydrationBoundaries.entries()) {
+    for (const [boundaryIndex, boundary] of hasHydrationChunks ? template.client.hydrationBoundaries.entries() : []) {
       const key = boundary.id;
       const idExpression = boundaryIdExpressions[boundaryIndex] as string;
       const resultName = `__tachyonBoundary${hydrationIndex++}`;

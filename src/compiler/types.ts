@@ -224,4 +224,9 @@ export type GenerateClientModuleOptions = {
   hydrationBoundaryId?: string;
   /** Internal: the module is a boundary chunk that binds with an entry-provided hydration context. */
   hydrationChunk?: boolean;
+  /**
+   * Generate a hydrate-only module: boundary bindings and their runtime
+   * imports are removed from the module and `bind` is not exported.
+   */
+  hydrateOnly?: boolean;
 };

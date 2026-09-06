@@ -1846,6 +1846,190 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(code.indexOf("__tachyonDiagnoseHydrationBoundaries(hydrationRoot")).toBeLessThan(code.indexOf("bind(bindRoot"));
   });
 
+  it("generates a hydrate-only module without boundary bindings, boundary runtime imports, or bind", async () => {
+    const plugin = tachyonDom({ reactive: true });
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+    const context = {
+      error(error: string): never {
+        throw new Error(error);
+      },
+    } as never;
+    const transformHook = plugin.transform;
+    const source = `<script setup>const title = "Users";</script><main><h1>{title}</h1><section hydrate:interaction="click"><form on:submit={save}><input bind:value={name}><ul><for each={rows} key={row.id}><li class:active={row.active}>{row.label}</li></for></ul></form></section></main>`;
+    const transform = async (id: string): Promise<string> => {
+      const result = await transformHook.call(context, source, id);
+      return typeof result === "object" ? String(result?.code ?? "") : "";
+    };
+    const hydrateOnly = await transform("/src/users.td?client&hydrate-only");
+    const regular = await transform("/src/users.td");
+
+    expect(hydrateOnly).toContain("export const hydrateOnly = true;");
+    expect(hydrateOnly).toContain("export const hydrate = (bindRoot, hydrationRoot, inputScope = {})");
+    expect(hydrateOnly).not.toContain("export const bind");
+    expect(hydrateOnly).not.toContain(`from "tachyon-dom/runtime/form"`);
+    expect(hydrateOnly).not.toContain(`from "tachyon-dom/runtime/event"`);
+    expect(hydrateOnly).not.toContain(`from "tachyon-dom/runtime/list"`);
+    expect(hydrateOnly).not.toContain(`from "tachyon-dom/runtime/class"`);
+    expect(hydrateOnly).toContain(`from "tachyon-dom/runtime/text"`);
+    expect(hydrateOnly).toContain(`import("/src/users.td?client&tachyon-hydration=td-h-1")`);
+    expect(hydrateOnly).not.toContain("__tachyonSkipHydration) {");
+    // The ordinary module keeps the synchronous mount contract.
+    expect(regular).toContain("export const bind");
+    expect(regular).toContain(`from "tachyon-dom/runtime/form"`);
+    expect(regular).not.toContain("hydrateOnly");
+
+    await expect(
+      transformHook.call(context, source, "/src/users.td?client&hydrate-only&tachyon-hydration=td-h-9"),
+    ).rejects.toThrow("Cannot generate hydration chunk for boundary td-h-9.");
+    // A source revision that moves the boundary changes the chunk id, so a
+    // stale chunk request from before the edit is rejected.
+    const revised = await transformHook.call(
+      context,
+      `<main><p>Intro</p><h1>{title}</h1><section hydrate:interaction="click"><form on:submit={save}><input bind:value={name}></form></section></main>`,
+      "/src/users.td?client&hydrate-only",
+    );
+    expect(typeof revised === "object" ? String(revised?.code ?? "") : "").toContain("tachyon-hydration=td-h-2");
+    await expect(
+      transformHook.call(
+        context,
+        `<main><p>Intro</p><h1>{title}</h1><section hydrate:interaction="click"><form on:submit={save}><input bind:value={name}></form></section></main>`,
+        "/src/users.td?client&tachyon-hydration=td-h-1",
+      ),
+    ).rejects.toThrow("Cannot generate hydration chunk for boundary td-h-1.");
+  });
+
+  it("keeps boundary-only runtime modules out of the hydrate-only entry's static module graph", async () => {
+    await mkdir(path.join(process.cwd(), "node_modules", ".cache"), { recursive: true });
+    const dir = await mkdtemp(path.join(process.cwd(), "node_modules", ".cache", "tachyon-hydrate-only-"));
+    try {
+      await mkdir(path.join(dir, "src"), { recursive: true });
+      await writeFile(
+        path.join(dir, "src", "users.td"),
+        `<script setup>globalThis.__tachyonHydrateOnlySetups = (globalThis.__tachyonHydrateOnlySetups ?? 0) + 1; const title = "Users"; const save = (event) => { event.preventDefault(); globalThis.__tachyonHydrateOnlySubmits = (globalThis.__tachyonHydrateOnlySubmits ?? 0) + 1; };</script>` +
+          `<main><h1>{title}</h1><section hydrate><form on:submit={save}><input bind:value={name}><ul><for each={rows} key={row.id}><li class:active={row.active}>{row.label}</li></for></ul></form></section></main>`,
+      );
+      await writeFile(path.join(dir, "src", "main.js"), `export { hydrate } from "./users.td?client&hydrate-only";\n`);
+      const sourceRoot = path.resolve(process.cwd(), "src");
+      const output = await viteBuild({
+        configFile: false,
+        logLevel: "silent",
+        root: dir,
+        plugins: [tachyonDom({ reactive: true })],
+        resolve: {
+          alias: [
+            { find: /^tachyon-dom\/(.+)$/, replacement: `${sourceRoot}/$1.ts` },
+            { find: "tachyon-dom", replacement: path.resolve(sourceRoot, "index.ts") },
+          ],
+        },
+        build: {
+          outDir: "dist",
+          minify: false,
+          rollupOptions: {
+            input: path.join(dir, "src", "main.js"),
+            preserveEntrySignatures: "strict",
+            output: { entryFileNames: "entry.js", chunkFileNames: "[name].js", format: "es" },
+          },
+        },
+      });
+      const outputs = Array.isArray(output) ? output : [output];
+      const chunks = outputs.flatMap((result) =>
+        "output" in result ? result.output.filter((item): item is typeof item & { type: "chunk" } => item.type === "chunk") : [],
+      );
+      const byName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]));
+      const closure = (fileName: string, dynamic: boolean): Set<string> => {
+        const modules = new Set<string>();
+        const visited = new Set<string>();
+        const visit = (name: string): void => {
+          if (visited.has(name)) return;
+          visited.add(name);
+          const chunk = byName.get(name);
+          if (!chunk) return;
+          for (const id of Object.keys(chunk.modules)) modules.add(id);
+          for (const imported of chunk.imports) visit(imported);
+          if (dynamic) for (const imported of chunk.dynamicImports) visit(imported);
+        };
+        visit(fileName);
+        return modules;
+      };
+      const entry = byName.get("entry.js");
+      if (!entry) throw new Error("Missing entry chunk.");
+      const boundaryChunkName = entry.dynamicImports[0];
+      if (!boundaryChunkName) throw new Error("Missing boundary chunk import.");
+      const staticClosure = closure("entry.js", false);
+      const boundaryClosure = closure(boundaryChunkName, true);
+      const runtimeIn = (modules: Set<string>, name: string): boolean =>
+        [...modules].some((id) => id.endsWith(`/src/runtime/${name}.ts`));
+      for (const name of ["form", "event", "list", "class"]) {
+        expect(runtimeIn(staticClosure, name), `${name} runtime must stay out of the static closure`).toBe(false);
+        expect(runtimeIn(boundaryClosure, name), `${name} runtime must ship with the boundary chunk`).toBe(true);
+      }
+      expect(runtimeIn(staticClosure, "text")).toBe(true);
+      expect(runtimeIn(staticClosure, "signal")).toBe(true);
+
+      (globalThis as { __tachyonHydrateOnlySetups?: number }).__tachyonHydrateOnlySetups = 0;
+      document.body.innerHTML = `<main><h1>Users</h1><!--tachyon-hydrate:td-h-1:start--><section><form><input><ul></ul></form></section><!--tachyon-hydrate:td-h-1:end--></main>`;
+      const built = (await import(/* @vite-ignore */ pathToFileURL(path.join(dir, "dist", "entry.js")).href)) as {
+        hydrate: (bindRoot: Element, hydrationRoot: Element, scope?: Record<string, unknown>) => () => void;
+        bind?: unknown;
+      };
+      expect(built.bind).toBeUndefined();
+      const root = document.querySelector("main");
+      if (!root) throw new Error("Missing root.");
+      const stop = built.hydrate(root, root, { name: "", rows: [{ id: 1, label: "Ada", active: true }] });
+      try {
+        await new Promise((resolveTimer) => setTimeout(resolveTimer, 50));
+        expect((globalThis as { __tachyonHydrateOnlySetups?: number }).__tachyonHydrateOnlySetups).toBe(1);
+        expect(root.querySelector("li")?.textContent).toBe("Ada");
+        expect(root.querySelector("li")?.classList.contains("active")).toBe(true);
+      } finally {
+        stop();
+        delete (globalThis as { __tachyonHydrateOnlySetups?: number }).__tachyonHydrateOnlySetups;
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("types hydrate-only modules as hydratable but not mountable", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-hydrate-only-types-"));
+    try {
+      const usageFile = path.join(dir, "usage.ts");
+      await writeFile(
+        usageFile,
+        [
+          `import { hydrate, mount } from "tachyon-dom";`,
+          `import * as page from "./page.td?client&hydrate-only";`,
+          `import * as full from "./page.td?client";`,
+          `const root = document.body;`,
+          `hydrate(root, page, {});`,
+          `hydrate(root, full, {});`,
+          `mount(root, full, {});`,
+          `// @ts-expect-error hydrate-only modules have no bind`,
+          `mount(root, page, {});`,
+          ``,
+        ].join("\n"),
+      );
+      const program = ts.createProgram([usageFile, path.resolve("src/tachyon-html.d.ts")], {
+        baseUrl: process.cwd(),
+        lib: ["lib.es2022.d.ts", "lib.dom.d.ts"],
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+        noEmit: true,
+        paths: { "tachyon-dom": ["src/index.ts"] },
+        skipLibCheck: true,
+        strict: true,
+        target: ts.ScriptTarget.ES2022,
+      });
+      const diagnostics = ts
+        .getPreEmitDiagnostics(program)
+        .filter((diagnostic) => diagnostic.file?.fileName === usageFile)
+        .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+      expect(diagnostics).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("generates one lazy chunk request per top-level hydration boundary", async () => {
     const plugin = tachyonDom();
     if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");

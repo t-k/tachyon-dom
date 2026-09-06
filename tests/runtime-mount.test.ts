@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
 import { hydrate, mount, type ClientTemplateModule } from "../src/runtime/mount";
-import { cleanupTextKeyedList, mountTextKeyedList } from "../src/runtime/list-text";
-import { mountKeyedList } from "../src/runtime/list";
 import { createRoot, createSignal, effect } from "../src/runtime/signal";
-import { setText, textAt } from "../src/runtime/text";
 import * as attrRuntime from "../src/runtime/attr";
 import * as classRuntime from "../src/runtime/class";
 import * as conditionalRuntime from "../src/runtime/conditional";
@@ -199,6 +196,30 @@ describe("client mount entrypoints", () => {
     mount(root, module, { rows: [{ id: "a", label: "A", count: 7 }] });
 
     expect(root.textContent).toBe("A:7");
+  });
+
+  it("rejects mounting a hydrate-only module before touching the DOM and refuses to hydrate a root twice", () => {
+    const hydrateOnly = {
+      hydrateOnly: true as const,
+      templateHtml: "<p></p>",
+      hydrate: () => () => undefined,
+    };
+    const root = document.createElement("div");
+    root.innerHTML = "<b>keep</b>";
+
+    expect(() => mount(root, hydrateOnly as never, {})).toThrow(/hydrate-only/);
+    expect(root.innerHTML).toBe("<b>keep</b>");
+
+    root.innerHTML = "<p></p>";
+    const first = hydrate(root, hydrateOnly, {});
+    expect(first.ok).toBe(true);
+    const second = hydrate(root, hydrateOnly, {});
+    expect(second.ok).toBe(false);
+    if (!second.ok) expect(second.error.message).toContain("already hydrated");
+    if (first.ok) first.value.dispose();
+    const third = hydrate(root, hydrateOnly, {});
+    expect(third.ok).toBe(true);
+    if (third.ok) third.value.dispose();
   });
 
   it("runs mount and hydrate cleanups once when the enclosing owner is disposed", () => {

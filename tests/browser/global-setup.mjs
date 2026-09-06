@@ -17,7 +17,7 @@ const buildLazyFixture = async () => {
   const { compileTachyonSfc, renderServerTemplate } = await import(`${distRoot}/compiler.js`);
   await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
-  await build({
+  const output = await build({
     configFile: false,
     logLevel: "silent",
     root: fixtureRoot,
@@ -39,6 +39,26 @@ const buildLazyFixture = async () => {
       },
     },
   });
+  // Static and dynamic module closures from the real production module graph.
+  const chunks = (Array.isArray(output) ? output : [output]).flatMap((result) =>
+    "output" in result ? result.output.filter((item) => item.type === "chunk") : [],
+  );
+  const byName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]));
+  const closure = (fileName, dynamic) => {
+    const modules = new Set();
+    const visited = new Set();
+    const visit = (name) => {
+      if (visited.has(name)) return;
+      visited.add(name);
+      const chunk = byName.get(name);
+      if (!chunk) return;
+      for (const id of Object.keys(chunk.modules)) modules.add(id.replace(distRoot, "dist"));
+      for (const imported of chunk.imports) visit(imported);
+      if (dynamic) for (const imported of chunk.dynamicImports) visit(imported);
+    };
+    visit(fileName);
+    return [...modules].sort();
+  };
   const entry = await readFile(resolve(outDir, "entry.js"), "utf8");
   const chunkImport = /import\((["`'])\.\/([^"`']+\.js)\1\)/.exec(entry);
   if (!chunkImport) throw new Error("The built lazy fixture entry has no dynamic boundary chunk import.");
@@ -52,7 +72,17 @@ const buildLazyFixture = async () => {
   );
   await writeFile(
     resolve(outDir, "manifest.json"),
-    `${JSON.stringify({ entry: "entry.js", boundaryChunk: chunkImport[2], ssrMarkup: markup }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        entry: "entry.js",
+        boundaryChunk: chunkImport[2],
+        ssrMarkup: markup,
+        staticClosure: closure("entry.js", false),
+        boundaryClosure: closure(chunkImport[2], true),
+      },
+      null,
+      2,
+    )}\n`,
   );
 };
 

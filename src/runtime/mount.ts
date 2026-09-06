@@ -28,6 +28,22 @@ export type ClientTemplateModule<Scope extends Record<string, unknown> = Record<
   bind: (root: Element, scope: Scope) => void | (() => void);
 };
 
+/**
+ * A module generated with `?client&hydrate-only`: it hydrates SSR output and
+ * never exposes `bind`, so it cannot be mounted into an empty root.
+ */
+export type HydrateOnlyTemplateModule<Scope extends Record<string, unknown> = Record<string, unknown>> = Omit<
+  ClientTemplateModule<Scope>,
+  "bind" | "hydrate"
+> & {
+  hydrateOnly: true;
+  hydrate: (bindRoot: Element, hydrationRoot: ParentNode, scope: Scope) => void | (() => void);
+};
+
+export type HydratableTemplateModule<Scope extends Record<string, unknown> = Record<string, unknown>> =
+  | ClientTemplateModule<Scope>
+  | HydrateOnlyTemplateModule<Scope>;
+
 export type MountHandle = {
   root: Element;
   disposed: () => boolean;
@@ -238,11 +254,17 @@ const hydrationRootFor = (root: Element, expectedRoot: Element): Element | undef
     : undefined;
 };
 
+/** Roots with a live hydration handle; a second hydrate must not bind twice. */
+const hydratedRoots = new WeakSet<Element>();
+
 export const mount = <Scope extends Record<string, unknown>>(
   root: Element,
   module: ClientTemplateModule<Scope>,
   scope?: Scope,
 ): MountHandle => {
+  if (typeof (module as { bind?: unknown }).bind !== "function") {
+    throw new TypeError("Cannot mount a hydrate-only client module; use hydrate() on server-rendered markup instead.");
+  }
   const previousChildren = Array.from(root.childNodes);
   try {
     root.innerHTML = module.templateHtml;
@@ -259,9 +281,12 @@ export const mount = <Scope extends Record<string, unknown>>(
 
 export const hydrate = <Scope extends Record<string, unknown>>(
   root: Element,
-  module: ClientTemplateModule<Scope>,
+  module: HydratableTemplateModule<Scope>,
   scope?: Scope,
 ): Result<MountHandle, HydrateError> => {
+  if (hydratedRoots.has(root)) {
+    return err({ message: "Hydration root is already hydrated; dispose the previous handle first." });
+  }
   const ids = (module.hydrationBoundaries ?? [])
     .filter((boundary) => boundary.idKind !== "expression")
     .map((boundary) => boundary.id);
@@ -297,11 +322,19 @@ export const hydrate = <Scope extends Record<string, unknown>>(
     return err({ message: structureError });
   }
   try {
-    const owned = module.hydrate
-      ? ownCleanup(() => module.hydrate!(bindRoot, root, scope as Scope))
-      : bindWithOwner(bindRoot, module, scope as Scope);
+    const owned = ownCleanup(() => {
+      hydratedRoots.add(root);
+      const cleanup = module.hydrate
+        ? module.hydrate(bindRoot, root, scope as Scope)
+        : (module as ClientTemplateModule<Scope>).bind(bindRoot, scope as Scope);
+      return () => {
+        hydratedRoots.delete(root);
+        cleanup?.();
+      };
+    });
     return ok(handleFor(root, owned));
   } catch (error) {
+    hydratedRoots.delete(root);
     return err({ message: error instanceof Error ? error.message : String(error) });
   }
 };

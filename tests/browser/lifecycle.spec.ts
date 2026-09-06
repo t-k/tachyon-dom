@@ -61,7 +61,14 @@ test("loads the Vite-built boundary chunk only after the first interaction and r
   const manifest = JSON.parse(await readFile(new URL("./generated/manifest.json", import.meta.url), "utf8")) as {
     boundaryChunk: string;
     ssrMarkup: string;
+    staticClosure: string[];
+    boundaryClosure: string[];
   };
+  // The fixture only uses the event runtime inside its boundary, so the
+  // hydrate-only entry's static module graph must not contain it.
+  expect(manifest.staticClosure.some((id) => id.endsWith("/runtime/event.js"))).toBe(false);
+  expect(manifest.boundaryClosure.some((id) => id.endsWith("/runtime/event.js"))).toBe(true);
+  expect(manifest.staticClosure.some((id) => id.endsWith("/runtime/hydrate.js"))).toBe(true);
   const chunkRequests: string[] = [];
   page.on("request", (request) => {
     if (request.url().endsWith(`/generated/${manifest.boundaryChunk}`)) chunkRequests.push(request.url());
