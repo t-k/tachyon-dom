@@ -24,7 +24,7 @@ Expressions inside `script` and `style` are rejected because ordinary HTML escap
 
 ## Conditional Rendering
 
-`<if test={condition}>...</if>` renders children only when `test` is truthy. The client target lowers it to a comment anchor plus a `runtime/conditional` binding. The server targets omit the children when the condition is falsy.
+`<if test={condition}>...</if>` renders children only when `test` is truthy. The client target lowers it to a comment anchor plus a conditional binding; branches limited to text, class, attr, style, and event bindings use `runtime/conditional-core`, while branches with stores, components, lists, models, refs, or hydration boundaries use the generic `runtime/conditional` path. The server targets omit the children when the condition is falsy.
 
 ```html
 <if test="{active}">

@@ -124,6 +124,10 @@
       "types": "./dist/runtime/conditional.d.ts",
       "import": "./dist/runtime/conditional.js"
     },
+    "./runtime/conditional-core": {
+      "types": "./dist/runtime/conditional-core.d.ts",
+      "import": "./dist/runtime/conditional-core.js"
+    },
     "./runtime/attr": {
       "types": "./dist/runtime/attr.d.ts",
       "import": "./dist/runtime/attr.js"
@@ -528,6 +532,14 @@
     {
       "name": "runtime/conditional",
       "path": "dist/runtime/conditional.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "8 KB"
+    },
+    {
+      "name": "runtime/conditional-core",
+      "path": "dist/runtime/conditional-core.js",
       "disablePlugins": [
         "@size-limit/esbuild"
       ],

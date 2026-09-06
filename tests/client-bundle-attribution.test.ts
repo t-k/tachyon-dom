@@ -136,10 +136,8 @@ describe("client bundle attribution", () => {
       }
       const minimalIf = report.fixtures.find((fixture) => fixture.name === "minimal-if");
       expect(minimalIf).toBeDefined();
-      expect(minimalIf?.minimalFeaturePolicy?.ok).toBe(false);
-      expect(minimalIf?.minimalFeaturePolicy?.unwantedInputs).toEqual(
-        expect.arrayContaining(["dist/runtime/form.js", "dist/runtime/list.js", "dist/runtime/hydrate.js"]),
-      );
+      expect(minimalIf?.minimalFeaturePolicy?.ok).toBe(true);
+      expect(minimalIf?.minimalFeaturePolicy?.unwantedInputs).toEqual([]);
     } finally {
       await rm(artifactRoot, { recursive: true, force: true });
     }

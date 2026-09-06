@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { mountConditional } from "../src/runtime/conditional";
+import { mountConditionalCore } from "../src/runtime/conditional-core";
 import { createRoot, createSignal, effect } from "../src/runtime/signal";
+import { registerOwnedSubtree } from "../src/runtime/subtree";
 
 describe("mountConditional", () => {
   it("clears and replaces refs when conditional content is unmounted", () => {
@@ -398,5 +400,41 @@ describe("mountConditional", () => {
     dispose();
 
     expect(root.innerHTML).toBe(`<!---->`);
+  });
+});
+
+describe("mountConditionalCore", () => {
+  it("shows, hides, and shows a generated text and event branch without duplicate listeners", () => {
+    document.body.innerHTML = `<main><!----></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const calls: string[] = [];
+    const scope = { label: "first", save: () => calls.push("save") };
+    const options = {
+      signature: "core-event-text",
+      templateHtml: `<button> </button>`,
+      bindings: [
+        { kind: "event" as const, path: [], eventName: "click", handler: "save" },
+        { kind: "text" as const, path: [0], expression: "label" },
+      ],
+    };
+
+    mountConditionalCore(root, [0], true, scope, options);
+    const firstButton = root.querySelector("button");
+    firstButton?.click();
+    scope.label = "second";
+    mountConditionalCore(root, [0], true, scope, options);
+    expect(root.querySelector("button")?.textContent).toBe("second");
+    registerOwnedSubtree(firstButton as HTMLButtonElement, () => {
+      throw new Error("core cleanup failed");
+    });
+    expect(() => mountConditionalCore(root, [0], false, scope, options)).toThrow("core cleanup failed");
+    expect(root.querySelector("button")).toBeNull();
+    expect(() => mountConditionalCore(root, [0], false, scope, options)).not.toThrow();
+    root.querySelector("button")?.click();
+    mountConditionalCore(root, [0], true, scope, options);
+    root.querySelector("button")?.click();
+
+    expect(calls).toEqual(["save", "save"]);
   });
 });

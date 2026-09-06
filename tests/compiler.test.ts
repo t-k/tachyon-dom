@@ -1037,9 +1037,28 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`signature: "if:`);
     expect(code).toContain(`read: (scope) => scope.label`);
     expect(code).toContain(
-      `cleanups.push(__tachyonEffect(() => __tachyonMountConditional(__tachyonTarget0, [], __tachyonRead(scope.active), scope, conditionalOptions0)));`,
+      `cleanups.push(__tachyonEffect(() => __tachyonMountConditionalCore(root, [0], __tachyonRead(scope.active), scope, conditionalOptions0)));`,
     );
     expect(code).not.toContain(`__tachyonMountConditional(__tachyonTarget0, [], __tachyonRead(scope.active), scope, {`);
+  });
+
+  it("falls back to the generic conditional runtime for unsupported branch capabilities", () => {
+    const sources = [
+      `<main><if test={active}><form><input bind:value={value}></form></if></main>`,
+      `<main><if test={active}><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></if></main>`,
+      `<main><if test={active}><store count={initial}/><output>{count}</output></if></main>`,
+      `<main><if test={active}><section hydrate:id={boundary}><p>ready</p></section></if></main>`,
+    ];
+
+    for (const source of sources) {
+      const result = compileTemplate(source);
+      if (!result.ok) throw new Error(result.error.message);
+      const code = generateClientModule(result.value, { reactive: true });
+
+      expect(code).toContain(`from "tachyon-dom/runtime/conditional"`);
+      expect(code).not.toContain(`from "tachyon-dom/runtime/conditional-core"`);
+      expect(code).toContain(`__tachyonMountConditional(`);
+    }
   });
 
   it("generates a separate server target without client runtime imports", () => {
@@ -1532,11 +1551,13 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value, { reactive: true });
 
-    expect(code).toContain(`nodeAt as __tachyonNodeAt`);
+    expect(code).not.toContain(`nodeAt as __tachyonNodeAt`);
     expect(code).toContain(`const __tachyonTarget`);
     expect(code).toContain(`__tachyonMountTextKeyedList(__tachyonTarget`);
-    expect(code).toContain(`__tachyonMountConditional(__tachyonTarget`);
-    expect(code).toContain(`, [], __tachyonRead(scope.active), scope, conditionalOptions`);
+    expect(code).toContain(`__tachyonMountConditionalCore(root, [1]`);
+    expect(code).toContain(
+      `__tachyonMountConditionalCore(root, [1], __tachyonRead(scope.active), scope, conditionalOptions`,
+    );
     expect(code).not.toContain(`__tachyonMountTextKeyedList(root, [0]`);
     expect(code).not.toContain(`__tachyonMountConditional(root, [1]`);
   });
@@ -1586,10 +1607,10 @@ describe("HTML-first compiler", () => {
     expect(renderServerTemplate(result.value, { active: false, count: 3 })).toBe(`<main><section></section></main>`);
 
     const code = generateClientModule(result.value, { reactive: true });
-    expect(code).toContain(`from "tachyon-dom/runtime/conditional"`);
+    expect(code).toContain(`from "tachyon-dom/runtime/conditional-core"`);
     expect(code).toContain(`const conditionalOptions0 = {`);
     expect(code).toContain(
-      `__tachyonMountConditional(__tachyonTarget0, [], __tachyonRead(scope.active), scope, conditionalOptions0)`,
+      `__tachyonMountConditionalCore(root, [0,0], __tachyonRead(scope.active), scope, conditionalOptions0)`,
     );
   });
 

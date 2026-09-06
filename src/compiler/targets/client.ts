@@ -558,6 +558,7 @@ const runtimeNames = {
   effect: "__tachyonEffect",
   elementAt: "__tachyonElementAt",
   mountConditional: "__tachyonMountConditional",
+  mountConditionalCore: "__tachyonMountConditionalCore",
   mountKeyedList: "__tachyonMountKeyedList",
   mountTextKeyedList: "__tachyonMountTextKeyedList",
   nodeAt: "__tachyonNodeAt",
@@ -614,6 +615,19 @@ const isTextOnlyList = (binding: ListBinding): boolean =>
   (binding.stores?.length ?? 0) === 0 &&
   (binding.hydrationBoundaries?.length ?? 0) === 0 &&
   (binding.components?.length ?? 0) === 0;
+
+const isConditionalCoreBinding = (binding: ClientBinding): boolean =>
+  binding.kind === "text" ||
+  binding.kind === "class" ||
+  binding.kind === "event" ||
+  binding.kind === "attr" ||
+  binding.kind === "style";
+
+const usesConditionalCore = (binding: ConditionalBinding): boolean =>
+  (binding.stores?.length ?? 0) === 0 &&
+  (binding.hydrationBoundaries?.length ?? 0) === 0 &&
+  (binding.components?.length ?? 0) === 0 &&
+  binding.bindings.every(isConditionalCoreBinding);
 
 const hasModelBinding = (binding: ClientBinding): boolean => {
   if (binding.kind === "model") {
@@ -761,9 +775,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsList = bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding));
   const needsTextList = bindings.some((binding) => binding.kind === "list" && isTextOnlyList(binding));
   const needsConditional = bindings.some((binding) => binding.kind === "if");
+  const needsConditionalCore = bindings.some((binding) => binding.kind === "if" && usesConditionalCore(binding));
+  const needsGenericConditional = bindings.some((binding) => binding.kind === "if" && !usesConditionalCore(binding));
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const needsElementAt = needsClass || needsAttr || needsModel || needsTextList || (reactive && needsList);
-  const needsNodeAt = reactive && needsConditional;
+  const needsNodeAt = reactive && needsGenericConditional;
   const needsManualCleanup = reactive || needsEvent || needsModel || needsRef || needsTextList || hasDefaultScope;
   const lines: string[] = [];
   if (needsText) {
@@ -800,11 +816,18 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     );
   }
   if (needsConditional) {
-    lines.push(
-      needsNodeAt
-        ? `import { mountConditional as ${runtimeNames.mountConditional}, nodeAt as ${runtimeNames.nodeAt} } from "tachyon-dom/runtime/conditional";`
-        : `import { mountConditional as ${runtimeNames.mountConditional} } from "tachyon-dom/runtime/conditional";`,
-    );
+    if (needsConditionalCore) {
+      lines.push(
+        `import { mountConditionalCore as ${runtimeNames.mountConditionalCore} } from "tachyon-dom/runtime/conditional-core";`,
+      );
+    }
+    if (needsGenericConditional) {
+      lines.push(
+        needsNodeAt
+          ? `import { mountConditional as ${runtimeNames.mountConditional}, nodeAt as ${runtimeNames.nodeAt} } from "tachyon-dom/runtime/conditional";`
+          : `import { mountConditional as ${runtimeNames.mountConditional} } from "tachyon-dom/runtime/conditional";`,
+      );
+    }
   }
   {
     const signalImports = [
@@ -1043,7 +1066,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       const targetName = reactive || isTextOnlyList(binding) ? `__tachyonTarget${targetIndex++}` : undefined;
       lines.push(emitListBinding(binding, reactive, sourceName, listIndex++, targetName, bindingAliases));
     } else {
-      const targetName = reactive ? `__tachyonTarget${targetIndex++}` : undefined;
+      const targetName = reactive && !usesConditionalCore(binding) ? `__tachyonTarget${targetIndex++}` : undefined;
       lines.push(emitConditionalBinding(binding, reactive, sourceName, conditionalIndex++, targetName, bindingAliases));
     }
     if (instrumentBindings) {
@@ -1365,10 +1388,13 @@ const emitConditionalBinding = (
     `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
     `  };`,
   ].join("\n");
+  const useCore = usesConditionalCore(binding);
   const target = targetName ?? "root";
   const path = targetName ? [] : binding.path;
-  const statement = `${runtimeNames.mountConditional}(${target}, ${JSON.stringify(path)}, ${runtimeValueExpression(binding.test, reactive, sourceName, aliases)}, ${sourceName}, ${optionsName})`;
-  return reactive
-    ? `  const ${targetName} = ${nodeExpression(binding.path)};\n${conditionalOptions}\n  cleanups.push(${runtimeNames.effect}(() => ${statement}));`
-    : `${conditionalOptions}\n  ${statement};`;
+  const statement = useCore
+    ? `${runtimeNames.mountConditionalCore}(root, ${JSON.stringify(binding.path)}, ${runtimeValueExpression(binding.test, reactive, sourceName, aliases)}, ${sourceName}, ${optionsName})`
+    : `${runtimeNames.mountConditional}(${target}, ${JSON.stringify(path)}, ${runtimeValueExpression(binding.test, reactive, sourceName, aliases)}, ${sourceName}, ${optionsName})`;
+  if (!reactive) return `${conditionalOptions}\n  ${statement};`;
+  const targetDeclaration = useCore ? "" : `  const ${targetName} = ${nodeExpression(binding.path)};\n`;
+  return `${targetDeclaration}${conditionalOptions}\n  cleanups.push(${runtimeNames.effect}(() => ${statement}));`;
 };

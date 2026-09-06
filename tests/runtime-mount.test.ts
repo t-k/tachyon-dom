@@ -17,6 +17,67 @@ describe("client mount entrypoints", () => {
     expect(root.innerHTML).toBe(`<p>Alice</p>`);
   });
 
+  it("uses the lightweight conditional path for generated branches and adopts SSR nodes", () => {
+    const compiled = compileTemplate(`<main><if test={visible}><button on:click={save}>{label}</button></if></main>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const generated = generateClientModule(compiled.value, { reactive: true });
+    expect(generated).toContain(`from "tachyon-dom/runtime/conditional-core"`);
+    expect(generated).not.toContain(`from "tachyon-dom/runtime/conditional"`);
+    expect(generated).not.toContain(`from "tachyon-dom/runtime/form"`);
+    expect(generated).not.toContain(`from "tachyon-dom/runtime/list"`);
+    const module = evaluateGeneratedClientModule(generated);
+    const visible = createSignal(false);
+    const label = createSignal("client");
+    let clicks = 0;
+    const scope = { visible, label, save: () => clicks++ };
+    const root = document.createElement("div");
+
+    mount(root, module, scope);
+    visible.set(true);
+    expect(root.querySelector("button")?.textContent).toBe("client");
+    root.querySelector("button")?.click();
+    visible.set(false);
+    expect(root.querySelector("button")).toBeNull();
+    visible.set(true);
+    root.querySelector("button")?.click();
+    expect(clicks).toBe(2);
+
+    const ssrRoot = document.createElement("div");
+    ssrRoot.innerHTML = renderServerTemplate(compiled.value, { visible: true, label: "server" });
+    const serverButton = ssrRoot.querySelector("button");
+    if (!(serverButton instanceof HTMLButtonElement)) throw new Error("Missing SSR button.");
+    const hydratedVisible = createSignal(true);
+    const hydratedLabel = createSignal("hydrated");
+    const hydrated = hydrate(ssrRoot, module, {
+      visible: hydratedVisible,
+      label: hydratedLabel,
+      save: () => clicks++,
+    });
+
+    expect(hydrated.ok).toBe(true);
+    expect(ssrRoot.querySelector("button")).toBe(serverButton);
+    expect(serverButton.textContent).toBe("hydrated");
+    hydratedLabel.set("updated");
+    expect(serverButton.textContent).toBe("updated");
+    serverButton.click();
+    hydratedVisible.set(false);
+    expect(ssrRoot.querySelector("button")).toBeNull();
+    if (hydrated.ok) hydrated.value.dispose();
+
+    const hiddenSsrRoot = document.createElement("div");
+    hiddenSsrRoot.innerHTML = renderServerTemplate(compiled.value, { visible: false, label: "hidden" });
+    const hiddenVisible = createSignal(false);
+    const hiddenHydrated = hydrate(hiddenSsrRoot, module, {
+      visible: hiddenVisible,
+      label: createSignal("shown later"),
+      save: () => clicks++,
+    });
+    expect(hiddenHydrated.ok).toBe(true);
+    hiddenVisible.set(true);
+    expect(hiddenSsrRoot.querySelector("button")?.textContent).toBe("shown later");
+    if (hiddenHydrated.ok) hiddenHydrated.value.dispose();
+  });
+
   it("rejects hydration when the existing root structure does not match", () => {
     const compiled = compileTemplate(`<p>{name}</p>`);
     if (!compiled.ok) throw new Error(compiled.error.message);

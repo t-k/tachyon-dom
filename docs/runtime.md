@@ -12,6 +12,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/keyed-rows`: dependency-free keyed table-row list where the live DOM is the single source of truth (no shadow item/row arrays). Bulk creation binds and clones a reusable multi-row chunk; remove/swap/select are O(1) DOM operations. Suited to large data tables that do not need per-row reactivity.
 - `runtime/virtual-list`: fixed-height virtualized lists with overscan, imperative updates, index scrolling, and ARIA position metadata.
 - `runtime/conditional`: conditional DOM mounting.
+- `runtime/conditional-core`: lightweight conditional mounting selected for branches whose bindings are limited to text, class, attr, style, and event.
 - `runtime/hydrate`: SSR boundary location, state handoff, hydration scheduling, and dev diagnostics.
 - `runtime/router`: client-side navigation with link interception, History API, abortable loaders, scroll hooks, history-entry scroll restoration, focus restoration, optional view transitions, and route HMR cache invalidation.
 - `runtime/fragment`: wrapper-free fragment mounting.
@@ -36,9 +37,12 @@ Browser feature bundles have independent minified and Brotli budgets for `runtim
 import { createTemplateComponent } from "tachyon-dom";
 
 const card = createTemplateComponent({
-  client: { templateHtml: "<article></article>", bind: (root, scope) => {
-    root.textContent = String(scope.title);
-  } },
+  client: {
+    templateHtml: "<article></article>",
+    bind: (root, scope) => {
+      root.textContent = String(scope.title);
+    },
+  },
   render: (props: { title: string }) => `<article>${props.title}</article>`,
 });
 const instance = card.mount(document.querySelector("#app")!, { title: "Hello" });
