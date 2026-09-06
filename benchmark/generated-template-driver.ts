@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { brotliCompressSync } from "node:zlib";
 import { compileTemplate, generateClientModule } from "../src/compiler/index.js";
 import type { Signal } from "../src/runtime/signal.js";
 
@@ -57,9 +58,18 @@ export type GeneratedModuleLoadTiming = {
   importMs: number;
 };
 
+export type ArtifactSize = {
+  /** Minified bundle bytes of the artifact together with the runtime it imports. */
+  minifiedBytes: number;
+  brotliBytes: number;
+};
+
 export type LoadedGeneratedModule = {
   module: GeneratedClientModule;
   timing: GeneratedModuleLoadTiming;
+  /** The exact bundled code that was imported and executed. */
+  bundledCode: string;
+  size: ArtifactSize;
 };
 
 const nestedTags = `<td><ul><for each={row.tags} key={tag.id}><li>{tag.name}</li></for></ul></td>`;
@@ -74,42 +84,69 @@ const execFileAsync = promisify(execFile);
 const requireFromProject = createRequire(path.join(projectRoot, "package.json"));
 const esbuildCli = requireFromProject.resolve("esbuild/bin/esbuild");
 
-export const loadGeneratedClientModule = async (source: string): Promise<LoadedGeneratedModule> => {
-  const compileStarted = performance.now();
-  const compiled = compileTemplate(source);
-  if (!compiled.ok) throw new Error(compiled.error.message);
-  const code = (
-    `import { createSignal as __tachyonBenchmarkCreateSignal } from "tachyon-dom/runtime/signal";\n` +
-    `export { __tachyonBenchmarkCreateSignal as createSignal };\n` +
-    generateClientModule(compiled.value, { reactive: true })
-  ).replaceAll(/"tachyon-dom\/([^"]+)"/g, (_match, specifier: string) =>
+const resolveRuntimeImports = (code: string): string =>
+  code.replaceAll(/"tachyon-dom\/([^"]+)"/g, (_match, specifier: string) =>
     JSON.stringify(path.resolve(projectRoot, "src", `${specifier}.ts`)),
   );
-  const compileMs = performance.now() - compileStarted;
+
+/**
+ * Bundles one ESM artifact (with `tachyon-dom/runtime/*` imports resolved to
+ * the source runtime), imports the bundled code, and measures the size of the
+ * same bundle in minified form. Everything that is executed is what is sized.
+ */
+export const loadCandidateModule = async <Module>(
+  code: string,
+  compileMs = 0,
+): Promise<{ module: Module; timing: GeneratedModuleLoadTiming; bundledCode: string; size: ArtifactSize }> => {
   const directory = await mkdtemp(path.join(tmpdir(), "tachyon-generated-template-"));
   const input = path.join(directory, "entry.js");
   const output = path.join(directory, "entry.out.js");
+  const minified = path.join(directory, "entry.min.js");
   try {
     const bundleStarted = performance.now();
-    await writeFile(input, code);
-    await execFileAsync(
-      process.execPath,
-      [esbuildCli, input, "--bundle", "--format=esm", "--platform=node", "--target=es2022", `--outfile=${output}`],
-      {
-        cwd: projectRoot,
-        maxBuffer: 16 * 1024 * 1024,
-      },
-    );
+    await writeFile(input, resolveRuntimeImports(code));
+    const commonArguments = ["--bundle", "--format=esm", "--platform=node", "--target=es2022"];
+    await execFileAsync(process.execPath, [esbuildCli, input, ...commonArguments, `--outfile=${output}`], {
+      cwd: projectRoot,
+      maxBuffer: 16 * 1024 * 1024,
+    });
     const bundled = await readFile(output, "utf8");
     const bundleMs = performance.now() - bundleStarted;
+    await execFileAsync(
+      process.execPath,
+      [esbuildCli, input, ...commonArguments, "--minify", `--outfile=${minified}`],
+      { cwd: projectRoot, maxBuffer: 16 * 1024 * 1024 },
+    );
+    const minifiedCode = await readFile(minified);
     const importStarted = performance.now();
     const encoded = Buffer.from(bundled).toString("base64");
-    const module = (await import(`data:text/javascript;base64,${encoded}`)) as GeneratedClientModule;
+    const module = (await import(`data:text/javascript;base64,${encoded}`)) as Module;
     const importMs = performance.now() - importStarted;
-    return { module, timing: { compileMs, bundleMs, importMs } };
+    return {
+      module,
+      timing: { compileMs, bundleMs, importMs },
+      bundledCode: bundled,
+      size: { minifiedBytes: minifiedCode.byteLength, brotliBytes: brotliCompressSync(minifiedCode).byteLength },
+    };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+};
+
+export const generatedClientArtifact = (source: string): { code: string; compileMs: number } => {
+  const compileStarted = performance.now();
+  const compiled = compileTemplate(source);
+  if (!compiled.ok) throw new Error(compiled.error.message);
+  const code =
+    `import { createSignal as __tachyonBenchmarkCreateSignal } from "tachyon-dom/runtime/signal";\n` +
+    `export { __tachyonBenchmarkCreateSignal as createSignal };\n` +
+    generateClientModule(compiled.value, { reactive: true });
+  return { code, compileMs: performance.now() - compileStarted };
+};
+
+export const loadGeneratedClientModule = async (source: string): Promise<LoadedGeneratedModule> => {
+  const artifact = generatedClientArtifact(source);
+  return loadCandidateModule<GeneratedClientModule>(artifact.code, artifact.compileMs);
 };
 
 export type LoadedRepresentativeModules = {
