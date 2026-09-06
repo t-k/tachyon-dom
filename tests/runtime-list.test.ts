@@ -1289,7 +1289,13 @@ describe("mountKeyedList", () => {
         },
       ],
       hydrationBoundaries: [
-        { path: [], id: "item.hydrationId", idKind: "expression" as const, strategy: "interaction" as const, interaction: "click" },
+        {
+          path: [],
+          id: "item.hydrationId",
+          idKind: "expression" as const,
+          strategy: "interaction" as const,
+          interaction: "click",
+        },
       ],
     };
     const rows = [
@@ -1302,9 +1308,52 @@ describe("mountKeyedList", () => {
     expect(calls).toEqual([]);
   });
 
-  it("keeps SSR-adopted and client-created hydration rows separate through reorder, removal, and re-append", () => {
+  it("preflights every adopted SSR row before binding and preserves the existing DOM on failure", () => {
     document.body.innerHTML =
-      `<ul id="items"><!--tachyon-hydrate:a:start--><li><button>Server A</button></li><!--tachyon-hydrate:a:end--></ul>`;
+      `<ul id="items"><!--tachyon-hydrate:a:start--><li><span>Server A</span><button>Server A</button></li><!--tachyon-hydrate:a:end-->` +
+      `<li><span>Server B</span><button>Server B</button></li></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const before = root.innerHTML;
+    let reads = 0;
+    const options = {
+      signature: "row-preflight-before-binding",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span><button> </button></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "item.label",
+          read: () => {
+            reads++;
+            return "bound";
+          },
+        },
+      ],
+      hydrationBoundaries: [
+        { path: [1], id: "item.id", idKind: "expression" as const, strategy: "interaction" as const },
+      ],
+    };
+
+    expect(() =>
+      mountKeyedList(
+        root,
+        [],
+        [
+          { id: "a", label: "A" },
+          { id: "b", label: "B" },
+        ],
+        options,
+      ),
+    ).toThrow(/could not be adopted/);
+    expect(reads).toBe(0);
+    expect(root.innerHTML).toBe(before);
+  });
+
+  it("keeps SSR-adopted and client-created hydration rows separate through reorder, removal, and re-append", () => {
+    document.body.innerHTML = `<ul id="items"><!--tachyon-hydrate:a:start--><li><button>Server A</button></li><!--tachyon-hydrate:a:end--></ul>`;
     const root = document.querySelector("#items");
     if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
     const calls: string[] = [];
@@ -1324,7 +1373,13 @@ describe("mountKeyedList", () => {
         },
       ],
       hydrationBoundaries: [
-        { path: [], id: "item.id", idKind: "expression" as const, strategy: "interaction" as const, interaction: "click" },
+        {
+          path: [],
+          id: "item.id",
+          idKind: "expression" as const,
+          strategy: "interaction" as const,
+          interaction: "click",
+        },
       ],
     };
     const a = { id: "a", label: "A", onClick: () => calls.push("a") };

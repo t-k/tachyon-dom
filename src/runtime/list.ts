@@ -177,6 +177,8 @@ type RowRecord = {
   key: PropertyKey;
   element: Element;
   nodes: Node[];
+  adoptedNodes: ReadonlySet<Node>;
+  ownedNodes: Node[];
   scope: Record<string, unknown>;
   cleanups: Array<() => void>;
   refCleanups?: Map<number, () => void>;
@@ -515,7 +517,7 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
   return next;
 };
 
-const cleanupRecord = (record: RowRecord): void => {
+const cleanupRecord = (record: RowRecord, preserveAdoptedNodes = false): void => {
   let firstError: unknown;
   let failed = false;
   try {
@@ -539,6 +541,7 @@ const cleanupRecord = (record: RowRecord): void => {
     failed = true;
   }
   record.hydrationBoundaries.splice(0);
+  const removableNodes = preserveAdoptedNodes ? new Set(record.ownedNodes) : new Set(record.nodes);
   for (const node of record.nodes) {
     try {
       cleanupOwnedSubtree(node);
@@ -546,7 +549,9 @@ const cleanupRecord = (record: RowRecord): void => {
       if (!failed) firstError = error;
       failed = true;
     } finally {
-      node.parentNode?.removeChild(node);
+      if (removableNodes.has(node)) {
+        node.parentNode?.removeChild(node);
+      }
     }
   }
   if (failed) throw firstError;
@@ -737,10 +742,13 @@ const createRecord = (
     return undefined;
   }
   const scope = localScopeFor(options.itemName, item, options.indexName, index, options.scope, options);
+  const adoptedNodes = new Set<Node>(existingElements ?? []);
   const record: RowRecord = {
     key,
     element,
     nodes,
+    adoptedNodes,
+    ownedNodes: nodes.filter((node) => !adoptedNodes.has(node)),
     scope,
     cleanups: [],
     lastValues: [],
@@ -804,7 +812,7 @@ const createRecord = (
     return record;
   } catch (error) {
     try {
-      cleanupRecord(record);
+      cleanupRecord(record, true);
     } catch (cleanupError) {
       throw new AggregateError([error, cleanupError], "List row creation and cleanup failed.");
     } finally {
@@ -1040,6 +1048,32 @@ export const mountKeyedList = (
     (options.region
       ? serverDynamicElements.length > 0
       : serverElements.length >= entries.length * state.elementIndices.length);
+  if (canAdoptServerRows) {
+    for (const [entryIndex, entry] of entries.entries()) {
+      const adoptable = serverDynamicElements.slice(
+        entryIndex * state.elementIndices.length,
+        (entryIndex + 1) * state.elementIndices.length,
+      );
+      const scope = scopedItem(options.itemName, entry.item, options.indexName, entry.index, options.scope);
+      for (const hydrationPlan of state.hydrationPlans) {
+        const { boundary } = hydrationPlan;
+        const resolvedId = boundary.idKind === "expression" ? readPath(scope, boundary.id) : boundary.id;
+        if (resolvedId === undefined || resolvedId === null) continue;
+        const rowRoot = adoptable[0]?.parentElement ?? adoptable[0];
+        if (!rowRoot) {
+          throw new Error(
+            `Hydration boundary for list row ${String(entry.key)} could not be adopted: missing row root.`,
+          );
+        }
+        const handle = createHydrationBoundary(rowRoot, String(resolvedId), () => undefined);
+        if (!handle.ok) {
+          throw new Error(
+            `Hydration boundary for list row ${String(entry.key)} could not be adopted: ${handle.error.message}`,
+          );
+        }
+      }
+    }
+  }
   try {
     for (const [entryIndex, entry] of entries.entries()) {
       const existing = state.records.get(entry.key);
@@ -1094,7 +1128,7 @@ export const mountKeyedList = (
     let cleanupFailed = false;
     for (const record of createdRecords) {
       try {
-        cleanupRecord(record);
+        cleanupRecord(record, true);
       } catch (cleanupError) {
         if (!cleanupFailed) firstCleanupError = cleanupError;
         cleanupFailed = true;
