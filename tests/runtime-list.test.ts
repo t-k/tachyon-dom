@@ -1211,6 +1211,61 @@ describe("mountKeyedList", () => {
     expect(calls).toEqual(["a", "a"]);
   });
 
+  it("binds hydration-marked rows eagerly when the row is created on the client without SSR markers", () => {
+    document.body.innerHTML = `<ul id="items"></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const calls: string[] = [];
+    const options = {
+      signature: "row-interaction-hydration-client-created",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><button> </button></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "item.label" },
+        {
+          kind: "event" as const,
+          path: [0],
+          eventName: "click",
+          handler: "item.onClick",
+          read: (scope: Record<string, unknown>) => (scope.item as { onClick: () => void }).onClick,
+        },
+      ],
+      hydrationBoundaries: [
+        {
+          path: [],
+          id: "item.id",
+          idKind: "expression" as const,
+          strategy: "interaction" as const,
+          interaction: "click",
+        },
+      ],
+    };
+    const first = { id: "a", label: "A", onClick: () => calls.push("a") };
+
+    mountKeyedList(root, [], [first], options);
+    const button = root.querySelector("button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Missing button.");
+    expect(button.textContent).toBe("A");
+
+    button.click();
+    expect(calls).toEqual(["a"]);
+
+    const second = { id: "b", label: "B", onClick: () => calls.push("b") };
+    mountKeyedList(root, [], [first, second], options);
+    const appended = root.querySelectorAll("button")[1];
+    if (!(appended instanceof HTMLButtonElement)) throw new Error("Missing appended button.");
+    expect(appended.textContent).toBe("B");
+    appended.click();
+    expect(calls).toEqual(["a", "b"]);
+
+    mountKeyedList(root, [], [], options);
+    appended.click();
+    button.click();
+    expect(calls).toEqual(["a", "b"]);
+    expect(root.innerHTML).toBe("");
+  });
+
   it("inserts newly mounted rows before a static trailing sibling", () => {
     document.body.innerHTML = `<ul id="items"><li class="footer">Footer</li></ul>`;
     const root = document.querySelector("#items");

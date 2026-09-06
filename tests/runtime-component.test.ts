@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createTemplateComponent } from "../src/runtime/component";
-import { createSignal, effect, onCleanup } from "../src/runtime/signal";
+import { createRoot, createSignal, effect, onCleanup } from "../src/runtime/signal";
 
 describe("reusable template component interface", () => {
   it("keeps instances independent and applies reactive prop updates", () => {
@@ -156,5 +156,47 @@ describe("reusable template component interface", () => {
     instance.dispose();
 
     expect(childCleanups).toEqual(["nested"]);
+  });
+
+  it("runs bind cleanup when a parent owner disposes the component and keeps explicit dispose idempotent", () => {
+    let cleaned = 0;
+    const component = createTemplateComponent({
+      client: { templateHtml: "<p></p>", bind: () => () => cleaned++ },
+    });
+    let child: ReturnType<typeof component.mount> | undefined;
+    const stopParent = createRoot((stop) => {
+      child = component.mount(document.createElement("div"), {});
+      return stop;
+    });
+    if (!child) throw new Error("Missing child instance.");
+
+    stopParent();
+
+    expect(cleaned).toBe(1);
+    expect(child.disposed()).toBe(true);
+
+    child.dispose();
+    expect(cleaned).toBe(1);
+  });
+
+  it("runs hydrate cleanup when a parent owner disposes the hydrated component", () => {
+    let cleaned = 0;
+    const component = createTemplateComponent({
+      client: { templateHtml: "<p></p>", bind: () => () => cleaned++ },
+    });
+    const root = document.createElement("div");
+    root.innerHTML = "<p></p>";
+    let child: ReturnType<typeof component.mount> | undefined;
+    const stopParent = createRoot((stop) => {
+      const result = component.hydrate(root, {});
+      if (!result.ok) throw new Error(result.error.message);
+      child = result.value;
+      return stop;
+    });
+
+    stopParent();
+
+    expect(cleaned).toBe(1);
+    expect(child?.disposed()).toBe(true);
   });
 });

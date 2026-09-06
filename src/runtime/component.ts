@@ -1,6 +1,6 @@
 import { err, ok, type Result } from "../result.js";
 import { hydrate, mount, type ClientTemplateModule, type HydrateError, type MountHandle } from "./mount.js";
-import { batch, createRoot, createStore } from "./signal.js";
+import { batch, createRoot, createStore, onCleanup } from "./signal.js";
 
 export type TemplateComponentOptions<
   Props extends object,
@@ -62,7 +62,7 @@ const instanceFor = <Props extends object, Scope extends Record<string, unknown>
   let scopeKeys = new Set<PropertyKey>(Reflect.ownKeys(scope));
   let disposed = false;
   const dispose = (): void => {
-    if (disposed || owner.disposed()) return;
+    if (disposed) return;
     disposed = true;
     let firstError: unknown;
     let failed = false;
@@ -121,6 +121,9 @@ export const createTemplateComponent = <
       ownerDisposed = isDisposed;
       const ownedScope = createOwnedScope(options, props);
       const handle = mount(root, options.client, ownedScope.scope);
+      // Parent owner disposal must run the mount cleanup too, not only the
+      // nested reactive root.
+      onCleanup(() => handle.dispose());
       return { scope: ownedScope.scope, handle, scopeDispose: ownedScope.dispose };
     });
     const owner: OwnerState = {
@@ -144,6 +147,7 @@ export const createTemplateComponent = <
         dispose();
         return err(result.error);
       }
+      onCleanup(() => result.value.dispose());
       return ok({ scope: ownedScope.scope, handle: result.value, scopeDispose: ownedScope.dispose });
     });
     if (!prepared.ok) return prepared;

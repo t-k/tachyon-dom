@@ -197,7 +197,6 @@ type ListState = {
   template: HTMLTemplateElement;
   elementIndices: number[];
   bindingPlan: BindingPlan;
-  eagerPlan: BindingPlan;
   hydrationPlans: readonly HydrationPlan[];
   initialized: boolean;
   cleanups: Array<() => void>;
@@ -391,7 +390,7 @@ const bindingPlanFor = (bindings: readonly Binding[]): BindingPlan =>
 
 const listPlansFor = (
   options: KeyedListOptions,
-): { bindingPlan: BindingPlan; eagerPlan: BindingPlan; hydrationPlans: readonly HydrationPlan[] } => {
+): { bindingPlan: BindingPlan; hydrationPlans: readonly HydrationPlan[] } => {
   const bindingPlan = bindingPlanFor(options.bindings);
   const hydrationPlans = (options.hydrationBoundaries ?? []).map((boundary) => ({
     boundary,
@@ -399,12 +398,7 @@ const listPlansFor = (
       bindingPlan.all.filter(({ binding }) => bindingWithin(boundary.path ?? [], binding.path)),
     ),
   }));
-  const deferred = new Set(hydrationPlans.flatMap(({ bindings }) => bindings.all.map(({ binding }) => binding)));
-  return {
-    bindingPlan,
-    eagerPlan: bindingPlanFromEntries(bindingPlan.all.filter(({ binding }) => !deferred.has(binding))),
-    hydrationPlans,
-  };
+  return { bindingPlan, hydrationPlans };
 };
 
 const textAtRecord = (record: RowRecord, path: readonly number[]): Text => {
@@ -443,7 +437,6 @@ const updateListPlans = (state: ListState, options: KeyedListOptions): void => {
   const plans = listPlansFor(options);
   state.options = options;
   state.bindingPlan = plans.bindingPlan;
-  state.eagerPlan = plans.eagerPlan;
   state.hydrationPlans = plans.hydrationPlans;
 };
 
@@ -498,7 +491,6 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
       const plans = listPlansFor(options);
       return {
         bindingPlan: plans.bindingPlan,
-        eagerPlan: plans.eagerPlan,
         hydrationPlans: plans.hydrationPlans,
       };
     })(),
@@ -785,9 +777,12 @@ const createRecord = (
         for (const { binding } of boundaryPlan.all) deferredBindings.add(binding);
       }
     }
+    // Rows created on the client have no SSR hydration markers, so every
+    // binding whose boundary could not be adopted is bound eagerly. Only
+    // bindings owned by an adopted boundary stay deferred.
     const eagerPlan =
       deferredBindings.size === 0
-        ? state.eagerPlan
+        ? state.bindingPlan
         : bindingPlanFromEntries(state.bindingPlan.all.filter(({ binding }) => !deferredBindings.has(binding)));
     bindRow(record, options, eagerPlan, record.cleanups);
     return record;
