@@ -240,6 +240,35 @@ describe("client mount entrypoints", () => {
   });
 
   it.each([
+    `<main><if test={visible}><p class="shared">{left}</p></if><p class="shared" data-static="yes">{tail}</p></main>`,
+    `<main><if test={visible}><section><b>{left}</b></section></if><section><em>{tail}</em></section></main>`,
+  ])("keeps a static sibling when conditional adoption differs below the root", (source) => {
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      visible: false,
+      left: "SSR branch",
+      tail: "SSR tail",
+    });
+    const main = root.querySelector("main");
+    const staticSibling = main?.lastElementChild;
+    const visible = createSignal(false);
+    const left = createSignal("Client branch");
+    const tail = createSignal("Client tail");
+
+    const hydrated = hydrate(root, module, { visible, left, tail });
+
+    expect(hydrated.ok).toBe(true);
+    expect(main?.lastElementChild).toBe(staticSibling);
+    expect(root.querySelector("main")?.textContent).toBe("Client tail");
+    tail.set("Client tail 2");
+    expect(staticSibling?.textContent).toBe("Client tail 2");
+    if (hydrated.ok) hydrated.value.dispose();
+  });
+
+  it.each([
     `<main><p data-kind="same">Before</p><if test={visible}><p data-kind="same">{label}</p></if><p data-kind="same">After</p></main>`,
     `<main><if test={leftVisible}><p data-kind="same">{left}</p></if><if test={rightVisible}><p data-kind="same">{right}</p></if><footer>Static</footer></main>`,
   ])("rejects ambiguous conditional adoption before changing same-shaped SSR siblings", (source) => {
@@ -476,6 +505,62 @@ describe("client mount entrypoints", () => {
       expect(cleanups).toBe(0);
     },
   );
+
+  it("rejects dynamic regions split by a transparent component before touching SSR DOM", () => {
+    const compiled = compileTemplate(
+      `<main><component name="Region"><for each={rows} key={row.id}><p>{row.label}</p></for></component><if test={active}><button>{label}</button></if><footer>{tail}</footer></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    expect(compiled.value.client.hydrationDynamicRegionErrors).toHaveLength(1);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const rows = [
+      { id: "r1", label: "R1" },
+      { id: "r2", label: "R2" },
+    ];
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      rows,
+      active: true,
+      label: "SSR button",
+      tail: "SSR footer",
+    });
+    const before = root.innerHTML;
+    const serverRow = root.querySelector("p");
+    const serverButton = root.querySelector("button");
+    const serverFooter = root.querySelector("footer");
+    let owners = 0;
+    let effects = 0;
+    let subscriptions = 0;
+    let cleanups = 0;
+    const restoreHooks = setRuntimeLifecycleHooks({
+      ownerCreated: () => owners++,
+      effectCreated: () => effects++,
+      subscriptionChanged: (delta) => (subscriptions += delta),
+      cleanupChanged: (delta) => (cleanups += delta),
+    });
+    try {
+      const result = hydrate(root, module, {
+        rows: createSignal(rows),
+        active: createSignal(true),
+        label: createSignal("Client button"),
+        tail: createSignal("Client footer"),
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Component-split dynamic regions unexpectedly hydrated.");
+      expect(result.error.message).toContain("multiple direct dynamic regions");
+    } finally {
+      restoreHooks();
+    }
+    expect(root.innerHTML).toBe(before);
+    expect(root.querySelector("p")).toBe(serverRow);
+    expect(root.querySelector("button")).toBe(serverButton);
+    expect(root.querySelector("footer")).toBe(serverFooter);
+    expect(owners).toBe(0);
+    expect(effects).toBe(0);
+    expect(subscriptions).toBe(0);
+    expect(cleanups).toBe(0);
+  });
 
   it("hydrates dynamic regions under separate parents", () => {
     const compiled = compileTemplate(
@@ -733,6 +818,70 @@ describe("client mount entrypoints", () => {
 
     expect(root.textContent).toBe("BC");
     expect(root.querySelector("li")).toBe(firstRow);
+  });
+
+  it.each([
+    [
+      "text",
+      `<main><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
+      `mountGeneratedTextKeyedList as __tachyonMountTextKeyedList`,
+    ],
+    [
+      "generic",
+      `<main><for each={rows} key={row.id}><p class:active={row.active}>{row.label}</p></for><footer>{tail}</footer></main>`,
+      `mountKeyedList as __tachyonMountKeyedList`,
+    ],
+  ])("keeps the generated %s list footer binding after rows move", (name, source, generatedImport) => {
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const generated = generateClientModule(compiled.value, { reactive: true });
+    expect(generated).toContain(generatedImport);
+    const module = evaluateGeneratedClientModule(generated);
+    const first = { id: "a", label: "A", active: true };
+    const second = { id: "b", label: "B", active: false };
+    const third = { id: "c", label: "C", active: true };
+    const rows = createSignal([first, second]);
+    const tail = createSignal("F");
+    const root = document.createElement("div");
+    const handle = mount(root, module, { rows, tail });
+    const footer = root.querySelector("footer");
+    const firstRow = root.querySelectorAll("p")[0];
+
+    expect(root.querySelector("main")?.textContent).toBe("ABF");
+    expect(footer?.textContent).toBe("F");
+    tail.set("F2");
+    expect(footer?.textContent).toBe("F2");
+    expect(firstRow?.textContent).toBe("A");
+
+    rows.set([second, third, first]);
+    expect(root.querySelector("main")?.textContent).toBe("BCAF2");
+    expect(root.querySelector("footer")).toBe(footer);
+    expect(root.querySelectorAll("p")[2]).toBe(firstRow);
+
+    rows.set([third]);
+    expect(root.querySelector("main")?.textContent).toBe("CF2");
+    expect(root.querySelector("footer")).toBe(footer);
+    handle.dispose();
+
+    const hydratedRoot = document.createElement("div");
+    hydratedRoot.innerHTML = renderServerTemplate(compiled.value, {
+      rows: [first, second],
+      tail: "SSR footer",
+    });
+    const serverFooter = hydratedRoot.querySelector("footer");
+    const hydratedRows = createSignal([first, second]);
+    const hydratedTail = createSignal("Hydrated footer");
+    const hydrated = hydrate(hydratedRoot, module, { rows: hydratedRows, tail: hydratedTail });
+    if (!hydrated.ok) throw new Error(hydrated.error.message);
+
+    expect(hydratedRoot.querySelector("footer")).toBe(serverFooter);
+    expect(hydratedRoot.querySelector("main")?.textContent).toBe("ABHydrated footer");
+    hydratedTail.set("Hydrated footer 2");
+    expect(serverFooter?.textContent).toBe("Hydrated footer 2");
+    hydratedRows.set([second, third, first]);
+    expect(hydratedRoot.querySelector("main")?.textContent).toBe("BCAHydrated footer 2");
+    expect(hydratedRoot.querySelector("footer")).toBe(serverFooter);
+    hydrated.value.dispose();
   });
 
   it("reconciles generated text rows with indexes, outer signals, and nested signals", () => {
