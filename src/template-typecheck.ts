@@ -213,15 +213,22 @@ const appendMappedExpression = (
   locals: ReadonlySet<string>,
   kind: ExpressionKind,
   index: number,
+  eventName?: string,
 ): void => {
   const mapping = mappedLocation(location, descriptor);
   const access = expressionCode(location.expression, locals);
   if (kind === "event") {
-    builder.line(`const __tachyonEventHandler${index}: (event: Event) => unknown = ${access};`, mapping);
+    builder.line(
+      `const __tachyonEventHandler${index}: __TachyonEventHandler<${JSON.stringify(eventName ?? "")}> = ${access};`,
+      mapping,
+    );
     return;
   }
   if (kind === "model") {
-    builder.line(`__tachyonCheckModel(() => ${access}, (value) => { ${access} = value; });`, mapping);
+    // The third argument mirrors the runtime write-back contract: writable
+    // signals are written through `.set`, readonly accessors are rejected, and
+    // plain scope properties are assigned.
+    builder.line(`__tachyonCheckModel(() => ${access}, (value) => { ${access} = value; }, ${access});`, mapping);
     return;
   }
   builder.line(`void ${access};`, mapping);
@@ -243,7 +250,15 @@ const appendAttributeExpressions = (
       : attribute.name.startsWith("bind:") && isAssignableExpression(expression)
         ? "model"
         : "value";
-    appendMappedExpression(builder, descriptor, { ...location, expression }, locals, kind, nextIndex());
+    appendMappedExpression(
+      builder,
+      descriptor,
+      { ...location, expression },
+      locals,
+      kind,
+      nextIndex(),
+      kind === "event" ? attribute.name.slice(3) : undefined,
+    );
   }
 };
 
@@ -533,7 +548,23 @@ export const checkTachyonTemplateTypes = (
     `type __TachyonListItem<T> = NonNullable<__TachyonListValue<T>> extends readonly (infer TValue)[] ? TValue : never;`,
   );
   builder.line(`type __TachyonAwaitValue<T> = T extends PromiseLike<infer TValue> ? TValue : T;`);
-  builder.line(`const __tachyonCheckModel = <T>(_read: () => T, _write: (value: T) => void): void => undefined;`);
+  builder.line(
+    `type __TachyonEventOf<Name extends string> = Name extends keyof HTMLElementEventMap ? HTMLElementEventMap[Name] : Event;`,
+  );
+  // Unknown event names keep a bivariant method contract so CustomEvent
+  // handlers are accepted; known DOM events use the precise event type.
+  builder.line(
+    `type __TachyonEventHandler<Name extends string> = Name extends keyof HTMLElementEventMap ? (event: __TachyonEventOf<Name>) => unknown : { handler(event: Event): unknown }["handler"];`,
+  );
+  builder.line(
+    `type __TachyonReadonlyModelTarget = { readonly __tachyonModelError: "bind: requires a writable signal or a plain scope property; a readonly signal accessor cannot be written" };`,
+  );
+  builder.line(
+    `type __TachyonModelTarget<T> = [T] extends [(...args: any[]) => unknown] ? ([T] extends [{ set: (value: any) => void }] ? T : __TachyonReadonlyModelTarget) : T;`,
+  );
+  builder.line(
+    `const __tachyonCheckModel = <T>(_read: () => T, _write: (value: T) => void, _target: __TachyonModelTarget<T>): void => undefined;`,
+  );
   builder.line(`const __tachyonCheckTemplate = (__tachyonScope: __TachyonScope): void => {`);
   let expressionIndex = 0;
   const nextIndex = (): number => expressionIndex++;
