@@ -25,12 +25,29 @@ export const findForbiddenInputs: (inputs: readonly string[], patterns?: readonl
 export const findUnwantedFeatureInputs: (
   inputs: readonly { path: string; bytesInOutput: number }[],
 ) => Array<{ path: string; bytesInOutput: number }>;
+export type ClientBundleBudget = { maxMinifiedBytes: number; maxBrotliBytes: number };
 export const checkBundleBudget: (input: {
   minifiedBytes: number;
   brotliBytes: number;
-  budget: { maxMinifiedBytes: number; maxBrotliBytes: number };
-}) => { ok: true } | { ok: false; reason: "minified budget" | "Brotli budget" };
+  budget: ClientBundleBudget;
+}) => { ok: true } | { ok: false; reason: "invalid budget" | "minified budget" | "Brotli budget" };
+export type ClientBundleFixture = {
+  name: string;
+  source: string;
+  generatedSource: string;
+  entrySource: string;
+  compileOptions?: Record<string, unknown>;
+  generateOptions?: Record<string, unknown>;
+};
+export const createClientBundleFixtures: () => ClientBundleFixture[];
+export const validateFixtureBudgets: (
+  budgets: Record<string, unknown>,
+  fixtures: readonly Pick<ClientBundleFixture, "name">[],
+) =>
+  | { ok: true }
+  | { ok: false; reason: "missing fixture budget" | "invalid fixture budget"; fixtures: string[] };
 export const runClientBundleAttribution: (options?: {
   cwd?: string;
   artifactRoot?: string;
+  fixtures?: readonly ClientBundleFixture[];
 }) => Promise<{ runId: string; artifactPath: string; report: any }>;
