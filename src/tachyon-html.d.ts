@@ -24,6 +24,7 @@ declare module "*.td" {
     index: number;
     kind: "list" | "conditional";
   }[];
+  export const hydrationDynamicRegionErrors: readonly string[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
@@ -46,6 +47,7 @@ declare module "*.td?client" {
     index: number;
     kind: "list" | "conditional";
   }[];
+  export const hydrationDynamicRegionErrors: readonly string[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
@@ -64,6 +66,7 @@ declare module "*.td?client&hydrate-only" {
     index: number;
     kind: "list" | "conditional";
   }[];
+  export const hydrationDynamicRegionErrors: readonly string[];
   export const componentBoundaries: unknown[];
   export const hydrate: (
     bindRoot: Element,
@@ -103,6 +106,7 @@ declare module "*.tachyon" {
     index: number;
     kind: "list" | "conditional";
   }[];
+  export const hydrationDynamicRegionErrors: readonly string[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
@@ -125,6 +129,7 @@ declare module "*.tachyon?client" {
     index: number;
     kind: "list" | "conditional";
   }[];
+  export const hydrationDynamicRegionErrors: readonly string[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
@@ -160,6 +165,7 @@ declare module "*.tachyon.html" {
     index: number;
     kind: "list" | "conditional";
   }[];
+  export const hydrationDynamicRegionErrors: readonly string[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
@@ -182,6 +188,7 @@ declare module "*.tachyon.html?client" {
     index: number;
     kind: "list" | "conditional";
   }[];
+  export const hydrationDynamicRegionErrors: readonly string[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }

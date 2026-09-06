@@ -455,6 +455,7 @@ export const generateTachyonModuleTypes = (
     `export declare const hydrationBoundaries: readonly __TachyonHydrationBoundary[];`,
     `export declare const hydrationDynamicAttributes: readonly __TachyonHydrationDynamicAttribute[];`,
     `export declare const hydrationDynamicRegions: readonly __TachyonHydrationDynamicRegion[];`,
+    `export declare const hydrationDynamicRegionErrors: readonly string[];`,
     `export declare const componentBoundaries: unknown[];`,
     `export declare const bind: (root: Element, scope: ${typeName}) => void | (() => void);`,
   ].join("\n");

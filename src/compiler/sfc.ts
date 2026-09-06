@@ -137,6 +137,7 @@ const emptyTemplate = (source: string): CompiledTemplate => ({
     components: [],
     hydrationBoundaries: [],
     hydrationDynamicRegions: [],
+    hydrationDynamicRegionErrors: [],
     stores: [],
     templateHtml: "",
   },
@@ -599,6 +600,7 @@ export const generateScriptOnlyModule = (target: "client" | "server" | "stream")
     `export const hydrationBoundaries = [];`,
     `export const hydrationDynamicAttributes = [];`,
     `export const hydrationDynamicRegions = [];`,
+    `export const hydrationDynamicRegionErrors = [];`,
     `export const componentBoundaries = [];`,
     `export const bind = () => undefined;`,
   ].join("\n");

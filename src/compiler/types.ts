@@ -205,6 +205,7 @@ export type CompiledTemplate = {
     stores: StoreDefinition[];
     hydrationBoundaries: HydrationBoundary[];
     hydrationDynamicRegions: HydrationDynamicRegion[];
+    hydrationDynamicRegionErrors: string[];
     components: ComponentBoundary[];
   };
 };
@@ -214,6 +215,7 @@ export type LoweringContext = {
   stores: StoreDefinition[];
   hydrationBoundaries: HydrationBoundary[];
   hydrationDynamicRegions: HydrationDynamicRegion[];
+  hydrationDynamicRegionErrors: string[];
   components: ComponentBoundary[];
 };
 

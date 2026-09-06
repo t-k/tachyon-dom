@@ -187,6 +187,86 @@ describe("client mount entrypoints", () => {
     }
   });
 
+  it("preserves a static sibling when a hidden SSR conditional has a different root shape", () => {
+    const compiled = compileTemplate(
+      `<main><if test={visible}><p data-branch="branch">{label}</p></if><p data-static="yes">{tail}</p></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      visible: false,
+      label: "SSR branch",
+      tail: "SSR tail",
+    });
+    const serverStatic = root.querySelector('[data-static="yes"]');
+    const visible = createSignal(false);
+    const label = createSignal("Client branch");
+    const tail = createSignal("Client tail");
+
+    const hydrated = hydrate(root, module, { visible, label, tail });
+
+    expect(hydrated.ok).toBe(true);
+    expect(root.querySelector('[data-static="yes"]')).toBe(serverStatic);
+    expect(root.textContent).toBe("Client tail");
+    tail.set("Client tail 2");
+    expect(serverStatic?.textContent).toBe("Client tail 2");
+    if (hydrated.ok) hydrated.value.dispose();
+  });
+
+  it.each([
+    `<main><p data-kind="same">Before</p><if test={visible}><p data-kind="same">{label}</p></if><p data-kind="same">After</p></main>`,
+    `<main><if test={leftVisible}><p data-kind="same">{left}</p></if><if test={rightVisible}><p data-kind="same">{right}</p></if><footer>Static</footer></main>`,
+  ])("rejects ambiguous conditional adoption before changing same-shaped SSR siblings", (source) => {
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = source.includes("Before")
+      ? renderServerTemplate(compiled.value, { visible: false, label: "Client", tail: "ignored" })
+      : renderServerTemplate(compiled.value, {
+          leftVisible: true,
+          rightVisible: false,
+          left: "Left",
+          right: "Right",
+        });
+    const before = root.innerHTML;
+    const serverNodes = Array.from(root.querySelectorAll('[data-kind="same"]'));
+    let owners = 0;
+    let effects = 0;
+    let subscriptions = 0;
+    let cleanups = 0;
+    const restoreHooks = setRuntimeLifecycleHooks({
+      ownerCreated: () => owners++,
+      effectCreated: () => effects++,
+      subscriptionChanged: (delta) => (subscriptions += delta),
+      cleanupChanged: (delta) => (cleanups += delta),
+    });
+    try {
+      const scope = source.includes("Before")
+        ? { visible: createSignal(false), label: createSignal("Client") }
+        : {
+            leftVisible: createSignal(true),
+            rightVisible: createSignal(true),
+            left: createSignal("Client left"),
+            right: createSignal("Client right"),
+          };
+      const result = hydrate(root, module, scope);
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Ambiguous conditional adoption unexpectedly hydrated.");
+      expect(result.error.message).toContain("ambiguous conditional");
+    } finally {
+      restoreHooks();
+    }
+    expect(root.innerHTML).toBe(before);
+    expect(Array.from(root.querySelectorAll('[data-kind="same"]'))).toEqual(serverNodes);
+    expect(owners).toBe(0);
+    expect(effects).toBe(0);
+    expect(subscriptions).toBe(0);
+    expect(cleanups).toBe(0);
+  });
+
   it.each([
     [true, false],
     [false, true],
@@ -293,6 +373,111 @@ describe("client mount entrypoints", () => {
       expect(root.innerHTML).toBe(before);
     },
   );
+
+  it.each([
+    { order: "for-if", groups: [], active: false },
+    { order: "for-if", groups: [{ id: "g1", rows: [] }], active: true },
+    {
+      order: "for-if",
+      groups: [
+        { id: "g1", rows: [{ id: "r1", label: "R1" }] },
+        { id: "g2", rows: [{ id: "r2", label: "R2" }] },
+      ],
+      active: false,
+    },
+    { order: "if-for", groups: [], active: true },
+    { order: "if-for", groups: [{ id: "g1", rows: [] }], active: false },
+    {
+      order: "if-for",
+      groups: [
+        { id: "g1", rows: [{ id: "r1", label: "R1" }] },
+        { id: "g2", rows: [{ id: "r2", label: "R2" }] },
+      ],
+      active: true,
+    },
+  ] as const)(
+    "rejects dynamic regions shared inside every generated list row before creating row owners",
+    ({ order, groups, active }) => {
+      const dynamicSource =
+        order === "for-if"
+          ? `<for each={group.rows} key={row.id}><p>{row.label}</p></for><if test={active}><button on:click={save}>{label}</button></if>`
+          : `<if test={active}><button on:click={save}>{label}</button></if><for each={group.rows} key={row.id}><p>{row.label}</p></for>`;
+      const source = `<main><for each={groups} key={group.id}><section>${dynamicSource}<footer>{tail}</footer></section></for></main>`;
+      const compiled = compileTemplate(source);
+      if (!compiled.ok) throw new Error(compiled.error.message);
+      const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+      const root = document.createElement("div");
+      root.innerHTML = renderServerTemplate(compiled.value, {
+        groups,
+        active,
+        label: "SSR button",
+        tail: "SSR footer",
+        save: () => undefined,
+      });
+      const before = root.innerHTML;
+      const serverButton = root.querySelector("button");
+      const serverFooter = root.querySelector("footer");
+      let owners = 0;
+      let effects = 0;
+      let subscriptions = 0;
+      let cleanups = 0;
+      const restoreHooks = setRuntimeLifecycleHooks({
+        ownerCreated: () => owners++,
+        effectCreated: () => effects++,
+        subscriptionChanged: (delta) => (subscriptions += delta),
+        cleanupChanged: (delta) => (cleanups += delta),
+      });
+      try {
+        const result = hydrate(root, module, {
+          groups: createSignal(groups),
+          active: createSignal(active),
+          label: createSignal("Client button"),
+          tail: createSignal("Client footer"),
+          save: () => undefined,
+        });
+
+        expect(result.ok).toBe(false);
+        if (result.ok) throw new Error("Nested shared dynamic regions unexpectedly hydrated.");
+        expect(result.error.message).toContain("dynamic regions");
+      } finally {
+        restoreHooks();
+      }
+      expect(root.innerHTML).toBe(before);
+      expect(root.querySelector("button")).toBe(serverButton);
+      expect(root.querySelector("footer")).toBe(serverFooter);
+      expect(owners).toBe(0);
+      expect(effects).toBe(0);
+      expect(subscriptions).toBe(0);
+      expect(cleanups).toBe(0);
+    },
+  );
+
+  it("hydrates dynamic regions under separate parents", () => {
+    const compiled = compileTemplate(
+      `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for></section><aside><if test={active}><button>{label}</button></if></aside></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      rows: [{ id: "r1", label: "R1" }],
+      active: true,
+      label: "SSR",
+    });
+    const serverRow = root.querySelector("p");
+    const serverButton = root.querySelector("button");
+    const result = hydrate(root, module, {
+      rows: createSignal([{ id: "r1", label: "Client row" }]),
+      active: createSignal(true),
+      label: createSignal("Client button"),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(root.querySelector("p")).toBe(serverRow);
+    expect(root.querySelector("button")).toBe(serverButton);
+    expect(root.textContent).toBe("Client rowClient button");
+    if (result.ok) result.value.dispose();
+  });
 
   it("keeps bindings after a generated conditional on their original nodes", () => {
     const compiled = compileTemplate(`<main><if test={visible}><p>{left}</p></if><footer>{tail}</footer></main>`);

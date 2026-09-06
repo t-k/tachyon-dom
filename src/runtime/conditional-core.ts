@@ -395,7 +395,10 @@ const createNodes = (templateHtml: string): Node[] => {
 const sameNodeShape = (expected: Node, actual: Node): boolean => {
   if (expected.nodeType !== actual.nodeType) return false;
   if (expected instanceof Element && actual instanceof Element) {
-    return expected.localName === actual.localName;
+    if (expected.localName !== actual.localName) return false;
+    return Array.from(expected.attributes).every(
+      (attribute) => actual.getAttribute(attribute.name) === attribute.value,
+    );
   }
   return expected.nodeType === Node.TEXT_NODE || expected.nodeType === Node.COMMENT_NODE;
 };

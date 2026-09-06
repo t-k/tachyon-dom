@@ -41,6 +41,91 @@ type LoweredNode = {
   nodeCount: number;
 };
 
+const hydrationShapesForChildren = (children: readonly TemplateNode[]): string[] =>
+  children
+    .filter((child) => {
+      if (child.type === "text") return child.value.length > 0;
+      return child.tagName !== "store" && child.tagName !== "for";
+    })
+    .map(hydrationShapeForNode)
+    .filter((shape) => shape.length > 0);
+
+const hydrationShapeForChildren = (children: readonly TemplateNode[]): string =>
+  JSON.stringify(hydrationShapesForChildren(children));
+
+const hydrationShapeForRegion = (children: readonly TemplateNode[]): string => {
+  const shapes = hydrationShapesForChildren(children);
+  return shapes.length === 1 ? (shapes[0] as string) : JSON.stringify(shapes);
+};
+
+const hydrationShapeForStaticAttributes = (node: ElementNode): string[] =>
+  node.attrs
+    .flatMap((attr) => {
+      if (
+        isHydrationAttribute(attr.name) ||
+        attr.name.startsWith("on:") ||
+        attr.name.startsWith("bind:") ||
+        attr.name.startsWith("style:") ||
+        attr.name.startsWith("class:") ||
+        attr.name === "ref" ||
+        readExpressionAttribute(attr.value)
+      ) {
+        return [];
+      }
+      return [[attr.name.toLowerCase(), attr.value === true ? "" : attr.value] as const];
+    })
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, value]) => `${name}=${value}`);
+
+const hydrationShapeForNode = (node: TemplateNode): string => {
+  if (node.type === "text") return node.value.length > 0 ? "text" : "";
+  if (node.tagName === "store" || node.tagName === "for") return "";
+  if (node.tagName === "if" || node.tagName === "outlet" || node.tagName === "slot") return "comment";
+  if (node.tagName === "component") return hydrationShapeForChildren(node.children);
+  return `element:${node.tagName.toLowerCase()}:${JSON.stringify(hydrationShapeForStaticAttributes(node))}:${hydrationShapeForChildren(node.children)}`;
+};
+
+type HydrationDirectChild = {
+  kind: "static" | "list" | "conditional";
+  shape: string;
+};
+
+const recordHydrationDynamicRegionErrors = (
+  node: ElementNode,
+  path: readonly number[],
+  context: ClientLoweringContext,
+): void => {
+  const children: HydrationDirectChild[] = node.children.map((child) => {
+    if (child.type === "element" && child.tagName === "if") {
+      return { kind: "conditional", shape: hydrationShapeForRegion(child.children) };
+    }
+    if (child.type === "element" && child.tagName === "for") {
+      return { kind: "list", shape: hydrationShapeForRegion(child.children) };
+    }
+    return { kind: "static", shape: hydrationShapeForNode(child) };
+  });
+  const dynamicChildren = children.filter(({ kind }) => kind !== "static");
+  if (dynamicChildren.length >= 2 && dynamicChildren.some(({ kind }) => kind === "list")) {
+    const label = path.length === 0 ? "root" : `root.${path.join(".")}`;
+    context.hydrationDynamicRegionErrors.push(
+      `Hydration cannot safely adopt multiple direct dynamic regions at ${label} when a <for> shares its parent with another dynamic region.`,
+    );
+    return;
+  }
+  for (const [index, child] of children.entries()) {
+    if (child.kind !== "conditional" || child.shape.length === 0) continue;
+    const hasAmbiguousSibling = children.some(
+      (sibling, siblingIndex) => siblingIndex !== index && sibling.shape === child.shape && sibling.shape.length > 0,
+    );
+    if (!hasAmbiguousSibling) continue;
+    const label = path.length === 0 ? "root" : `root.${path.join(".")}`;
+    context.hydrationDynamicRegionErrors.push(
+      `Hydration cannot safely adopt an ambiguous conditional hydration region at ${label}: its client shape is shared by another sibling.`,
+    );
+    return;
+  }
+};
+
 type LexicalScope = {
   parent?: LexicalScope;
   bindings: Map<string, string>;
@@ -286,6 +371,7 @@ const lowerIf = (node: ElementNode, path: number[], context: ClientLoweringConte
     stores: [],
     hydrationBoundaries: [],
     hydrationDynamicRegions: [],
+    hydrationDynamicRegionErrors: context.hydrationDynamicRegionErrors,
     components: [],
     lexicalScope: createChildScope(context.lexicalScope),
     declarations: context.declarations,
@@ -339,6 +425,7 @@ const lowerList = (
     stores: [],
     hydrationBoundaries: [],
     hydrationDynamicRegions: [],
+    hydrationDynamicRegionErrors: context.hydrationDynamicRegionErrors,
     components: [],
     lexicalScope: childScope,
     declarations: context.declarations,
@@ -393,6 +480,8 @@ const lowerElement = (node: ElementNode, path: number[], context: ClientLowering
   if (node.tagName === "component") {
     return lowerComponent(node, path, context);
   }
+
+  recordHydrationDynamicRegionErrors(node, path, context);
 
   const attrs: string[] = [];
   const staticClassNames: string[] = [];
@@ -532,6 +621,7 @@ export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client
     stores: [],
     hydrationBoundaries: [],
     hydrationDynamicRegions: [],
+    hydrationDynamicRegionErrors: [],
     components: [],
     lexicalScope: { bindings: new Map() },
     declarations: { next: 0, stores: new WeakMap(), props: new WeakMap() },
@@ -543,6 +633,7 @@ export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client
     stores: context.stores,
     hydrationBoundaries: context.hydrationBoundaries,
     hydrationDynamicRegions: context.hydrationDynamicRegions,
+    hydrationDynamicRegionErrors: context.hydrationDynamicRegionErrors,
     components: context.components,
   };
 };
@@ -897,6 +988,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
   lines.push(`export const hydrationDynamicAttributes = ${JSON.stringify(hydrationDynamicAttributes)};`);
   lines.push(`export const hydrationDynamicRegions = ${JSON.stringify(template.client.hydrationDynamicRegions)};`);
+  lines.push(
+    `export const hydrationDynamicRegionErrors = ${JSON.stringify(template.client.hydrationDynamicRegionErrors)};`,
+  );
   lines.push(`export const componentBoundaries = ${JSON.stringify(template.client.components)};`);
   if (hasHydrationChunks) {
     const loaders = Object.entries(hydrationChunkImports)

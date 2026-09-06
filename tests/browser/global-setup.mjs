@@ -119,7 +119,7 @@ export const runSharedParentGuard = () => {
   const root = document.createElement("div");
   root.innerHTML = ${JSON.stringify(sharedMarkup)};
   const before = root.innerHTML;
-  const result = hydrate(root, { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind }, {
+  const result = hydrate(root, { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind }, {
     rows: createSignal([{ id: "a", label: "R1" }, { id: "b", label: "R2" }]),
     active: createSignal(true),
     label: createSignal("A"),
@@ -146,7 +146,7 @@ export const runSharedParentGuard = () => {
 import { hydrate, mount } from "tachyon-dom/runtime/mount";
 ${sharedImports}
 ${generated}
-const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind };
+const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
 window.runConditionalFollowup = () => {
   const mountRoot = document.querySelector("#conditional-mount");
   if (!mountRoot) throw new Error("Missing conditional mount root.");

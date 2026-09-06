@@ -20,6 +20,7 @@ export type ClientTemplateModule<Scope extends Record<string, unknown> = Record<
   hydrationChunks?: Readonly<Record<string, () => Promise<HydrationBoundaryChunk> | HydrationBoundaryChunk>>;
   hydrationDynamicAttributes?: readonly ClientHydrationDynamicAttribute[];
   hydrationDynamicRegions?: readonly ClientHydrationDynamicRegion[];
+  hydrationDynamicRegionErrors?: readonly string[];
   hydrate?: (bindRoot: Element, hydrationRoot: ParentNode, scope: Scope) => void | (() => void);
   bind: (root: Element, scope: Scope) => void | (() => void);
 };
@@ -333,6 +334,10 @@ export const hydrate = <Scope extends Record<string, unknown>>(
   const dynamicRegionError = ambiguousDynamicRegionError(dynamicRegions);
   if (dynamicRegionError) {
     return err({ message: dynamicRegionError });
+  }
+  const dynamicRegionDiagnostic = module.hydrationDynamicRegionErrors?.[0];
+  if (dynamicRegionDiagnostic) {
+    return err({ message: dynamicRegionDiagnostic });
   }
   const structureError = hydrationStructureError(expectedRoot, bindRoot, [], dynamicAttributes, dynamicRegions);
   if (structureError) {
