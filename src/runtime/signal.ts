@@ -554,6 +554,10 @@ const reportAsyncEffectError = (runner: EffectRunner, runOwner: Owner, error: un
 };
 
 const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
+  const registrationOwner = currentEffectOwner ?? currentOwner;
+  if (registrationOwner?.disposed || currentOwner?.disposed) {
+    return () => undefined;
+  }
   const parent = activeEffect && !activeEffect.disposed ? activeEffect : undefined;
   const errorOwner = currentErrorOwner;
   const bindingLocation = lifecycleDiagnosticsEnabled ? currentBindingLocation : undefined;
@@ -598,7 +602,15 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
       try {
         const returned = fn();
         if (typeof returned === "function") {
-          registerCleanup(runOwner, returned as () => void);
+          const registration = registerCleanup(runOwner, returned as () => void);
+          if (!registration && runOwner.disposed) {
+            try {
+              (returned as () => void)();
+            } catch (error) {
+              callbackError = error;
+              callbackFailed = true;
+            }
+          }
         } else if (isPromiseLike(returned)) {
           void Promise.resolve(returned).catch((error) => reportAsyncEffectError(runner, runOwner, error));
         }
@@ -622,10 +634,12 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
       if (callbackFailed) throw callbackError;
     },
   };
+  const dispose = (): void => disposeRunner(runner);
   if (lifecycleDiagnosticsEnabled && runner.id !== undefined)
     runtimeLifecycleHooks?.effectCreated?.(runner.id, runner.runOwner.id, bindingLocation);
   parent?.children.add(runner);
   errorOwner?.runners.add(runner);
+  runner.registration = registerCleanup(registrationOwner, dispose);
   try {
     runner.run();
   } catch (error) {
@@ -635,8 +649,6 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
       throw delivered.error;
     }
   }
-  const dispose = (): void => disposeRunner(runner);
-  runner.registration = registerCleanup(currentEffectOwner ?? currentOwner, dispose);
   return dispose;
 };
 
@@ -673,12 +685,13 @@ export const createResource = <Source, T>(
   source: Source | Accessor<Source>,
   fetcher: (source: Source, context: ResourceFetcherContext) => Promise<T> | T,
 ): Resource<T> => {
+  const resourceOwner = currentEffectOwner ?? currentOwner;
+  let disposed = resourceOwner?.disposed ?? false;
   const data = createSignal<T | undefined>(undefined);
   const error = createSignal<unknown | undefined>(undefined);
-  const loading = createSignal(true);
+  const loading = createSignal(!disposed);
   let currentOutcome: Promise<ResourceOutcome<T>> | undefined;
   let version = 0;
-  let disposed = false;
   let controller: AbortController | undefined;
   let cancelCurrent: ((reason: unknown) => void) | undefined;
   let disposeTracking: (() => void) | undefined;
@@ -713,6 +726,7 @@ export const createResource = <Source, T>(
     });
     cancelCurrent = cancel;
     currentOutcome = outcome;
+    const skipped = Symbol("skipped resource run");
     const runStateUpdate = (update: () => void): void => {
       try {
         batch(update);
@@ -726,16 +740,16 @@ export const createResource = <Source, T>(
     });
     void Promise.resolve()
       .then(() => {
-        if (settled) return undefined;
+        if (settled) return skipped;
         if (disposed || runVersion !== version) {
           settle({ status: "cancelled", reason: "superseded" });
-          return undefined;
+          return skipped;
         }
         return fetcher(value, { signal: nextController.signal });
       })
       .then(
         (result) => {
-          if (settled) return;
+          if (result === skipped || settled) return;
           if (!disposed && runVersion === version) {
             let notificationFailed = false;
             let notificationError: unknown;
@@ -782,15 +796,17 @@ export const createResource = <Source, T>(
     const outcome = runOutcome(value);
     return outcome.then((result) => (result.status === "success" ? result.data : undefined));
   };
-  if (isSignal(source)) {
-    disposeTracking = effect(() => {
-      const value = source();
-      if (!hasSource || !Object.is(lastSource, value)) {
-        void untrack(() => run(value));
-      }
-    });
-  } else {
-    void run();
+  if (!disposed) {
+    if (isSignal(source)) {
+      disposeTracking = effect(() => {
+        const value = source();
+        if (!hasSource || !Object.is(lastSource, value)) {
+          void untrack(() => run(value));
+        }
+      });
+    } else {
+      void run();
+    }
   }
   const resource: Resource<T> = {
     data,
@@ -828,6 +844,6 @@ export const createResource = <Source, T>(
       if (failed) throw firstError;
     },
   };
-  resourceRegistration = registerCleanup(currentEffectOwner ?? currentOwner, resource.dispose);
+  resourceRegistration = registerCleanup(resourceOwner, resource.dispose);
   return resource;
 };

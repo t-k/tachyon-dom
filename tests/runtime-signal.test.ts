@@ -11,6 +11,7 @@ import {
   onCleanup,
   read,
   untrack,
+  type Resource,
 } from "../src/runtime/signal";
 
 const arrayFrom = Array.from;
@@ -262,6 +263,76 @@ describe("signal runtime", () => {
 
     expect(() => value.set(1)).not.toThrow();
     expect(runs).toBe(1);
+  });
+
+  it("does not rerun an effect after its root is disposed during the initial run", () => {
+    const source = createSignal(0);
+    let runs = 0;
+    const disposeRoot = createRoot((dispose) => {
+      effect(() => {
+        source();
+        runs++;
+        dispose();
+      });
+      return dispose;
+    });
+
+    source.set(1);
+
+    expect(runs).toBe(1);
+    disposeRoot();
+  });
+
+  it("runs a returned cleanup immediately when the initial owner is disposed", () => {
+    let cleanupRuns = 0;
+    const disposeRoot = createRoot((dispose) => {
+      effect(() => {
+        dispose();
+        return () => {
+          cleanupRuns++;
+        };
+      });
+      return dispose;
+    });
+
+    expect(cleanupRuns).toBe(1);
+    disposeRoot();
+    expect(cleanupRuns).toBe(1);
+  });
+
+  it("does not retain work created after an initial owner disposal", async () => {
+    const source = createSignal(0);
+    let registered: boolean | undefined;
+    let childRuns = 0;
+    let fetchCalls = 0;
+    let resource!: Resource<string>;
+    const disposeRoot = createRoot((dispose) => {
+      effect(() => {
+        dispose();
+        source();
+        registered = onCleanup(() => undefined);
+        effect(() => {
+          childRuns++;
+          source();
+        });
+        resource = createResource("source", () => {
+          fetchCalls++;
+          return "payload";
+        });
+      });
+      return dispose;
+    });
+
+    source.set(1);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(registered).toBe(false);
+    expect(childRuns).toBe(0);
+    expect(fetchCalls).toBe(0);
+    expect(resource.loading()).toBe(false);
+    await expect(resource.refetchOutcome()).resolves.toMatchObject({ status: "cancelled" });
+    disposeRoot();
   });
 
   it("disposes nested effects before rerunning their owner", () => {

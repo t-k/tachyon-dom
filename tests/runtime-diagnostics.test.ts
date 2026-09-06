@@ -27,6 +27,28 @@ describe("development runtime diagnostics", () => {
     diagnostics.dispose();
   });
 
+  it("returns to the diagnostics baseline after initial effect self-disposal", () => {
+    const diagnostics = createRuntimeDiagnostics();
+    const before = diagnostics.snapshot();
+    const source = createSignal(0);
+    let runs = 0;
+    const disposeRoot = createRoot((dispose) => {
+      effect(() => {
+        source();
+        runs++;
+        dispose();
+      });
+      return dispose;
+    });
+
+    source.set(1);
+
+    expect(runs).toBe(1);
+    expect(diagnostics.snapshot()).toEqual(before);
+    disposeRoot();
+    diagnostics.dispose();
+  });
+
   it("observes resource counts without retaining disposed owners", () => {
     const diagnostics = createRuntimeDiagnostics({
       bindings: [{ templateId: "page.td", path: [0, 1], sourceOffset: 24 }],
