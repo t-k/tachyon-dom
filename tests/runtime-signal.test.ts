@@ -821,6 +821,40 @@ describe("signal runtime", () => {
     resource.dispose();
   });
 
+  it("shares the current source outcome when an abort listener refetches", async () => {
+    const source = createSignal("a");
+    const calls: string[] = [];
+    const resolvers = new Map<string, (value: string) => void>();
+    let nested: Promise<import("../src/runtime/signal").ResourceOutcome<string>> | undefined;
+    let resource!: Resource<string>;
+    resource = createResource(source, (value, { signal }) => {
+      calls.push(value);
+      if (value === "a") {
+        signal.addEventListener("abort", () => {
+          nested = resource.refetchOutcome();
+        }, { once: true });
+      }
+      return new Promise<string>((resolve) => resolvers.set(value, resolve));
+    });
+
+    const first = resource.refetchOutcome();
+    await Promise.resolve();
+    source.set("b");
+    const current = resource.refetchOutcome();
+
+    expect(nested).toBe(current);
+    expect(nested).not.toBe(first);
+    await Promise.resolve();
+    expect(calls).toEqual(["a", "b"]);
+    resolvers.get("b")?.("B");
+
+    await expect(first).resolves.toEqual({ status: "cancelled", reason: "superseded" });
+    await expect(nested).resolves.toEqual({ status: "success", data: "B" });
+    expect(resource.data()).toBe("B");
+    expect(resource.loading()).toBe(false);
+    resource.dispose();
+  });
+
   it("detaches a resource before a throwing dispose notification", () => {
     const notificationError = new Error("dispose notification failed");
     let resource!: ReturnType<typeof createResource<string, string>>;

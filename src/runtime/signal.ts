@@ -713,15 +713,9 @@ export const createResource = <Source, T>(
     hasSource = true;
     lastSource = value;
     const previousController = controller;
+    const previousCancel = cancelCurrent;
     const runVersion = ++version;
-    cancelCurrent?.("superseded");
-    if (controller === previousController) controller = undefined;
-    previousController?.abort();
-    if (disposed || runVersion !== version) {
-      return Promise.resolve({ status: "cancelled", reason: "superseded" });
-    }
     const nextController = new AbortController();
-    controller = nextController;
     let settled = false;
     let settle!: (result: ResourceOutcome<T>) => void;
     const cancel = (reason: unknown): void => settle({ status: "cancelled", reason });
@@ -733,6 +727,7 @@ export const createResource = <Source, T>(
         resolve(result);
       };
     });
+    controller = nextController;
     cancelCurrent = cancel;
     currentOutcome = outcome;
     const skipped = Symbol("skipped resource run");
@@ -747,6 +742,11 @@ export const createResource = <Source, T>(
       loading.set(true);
       error.set(undefined);
     });
+    previousCancel?.("superseded");
+    previousController?.abort();
+    if (disposed || runVersion !== version) {
+      return Promise.resolve({ status: "cancelled", reason: "superseded" });
+    }
     void Promise.resolve()
       .then(() => {
         if (settled) return skipped;
