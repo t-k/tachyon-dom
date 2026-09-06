@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { delegate } from "../src/runtime/event";
+import { delegate, delegateTarget } from "../src/runtime/event";
 
 describe("runtime event delegation", () => {
   it("attaches listeners to the target path so non-bubbling events fire", () => {
@@ -50,5 +50,22 @@ describe("runtime event delegation", () => {
     expect(calls).toEqual(["child"]);
     cleanupChild();
     cleanupParent();
+  });
+
+  it("binds and cleans up a directly resolved element", () => {
+    document.body.innerHTML = `<section><button>Save</button></section>`;
+    const root = document.querySelector("section");
+    const button = document.querySelector("button");
+    if (!(root instanceof HTMLElement) || !(button instanceof HTMLButtonElement)) {
+      throw new Error("Missing direct target test nodes.");
+    }
+    const calls: string[] = [];
+    const cleanup = delegateTarget(root, "click", button, () => calls.push("clicked"));
+
+    button.click();
+    cleanup();
+    button.click();
+
+    expect(calls).toEqual(["clicked"]);
   });
 });

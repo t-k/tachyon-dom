@@ -556,6 +556,7 @@ const runtimeNames = {
   createMemo: "__tachyonCreateMemo",
   createRoot: "__tachyonCreateRoot",
   delegate: "__tachyonDelegate",
+  delegateTarget: "__tachyonDelegateTarget",
   effect: "__tachyonEffect",
   elementAt: "__tachyonElementAt",
   mountConditional: "__tachyonMountConditional",
@@ -808,7 +809,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     );
   }
   if (needsEvent) {
-    lines.push(`import { delegate as ${runtimeNames.delegate} } from "tachyon-dom/runtime/event";`);
+    lines.push(
+      needsConditionalCore
+        ? `import { delegateTarget as ${runtimeNames.delegateTarget} } from "tachyon-dom/runtime/event";`
+        : `import { delegate as ${runtimeNames.delegate} } from "tachyon-dom/runtime/event";`,
+    );
   }
   if (needsList) {
     lines.push(`import { mountKeyedList as ${runtimeNames.mountKeyedList} } from "tachyon-dom/runtime/list";`);
@@ -1055,7 +1060,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       }
     } else if (binding.kind === "event") {
       const eventTarget = needsConditionalCore ? bindingNodeExpression(binding.path) : JSON.stringify(binding.path);
-      const statement = `${runtimeNames.delegate}(root, ${JSON.stringify(binding.eventName)}, ${eventTarget}, ${expressionToScopeAccess(binding.handler, new Set(), scopeName(needsStore), bindingAliases)})`;
+      const delegateName = needsConditionalCore ? runtimeNames.delegateTarget : runtimeNames.delegate;
+      const statement = `${delegateName}(root, ${JSON.stringify(binding.eventName)}, ${eventTarget}, ${expressionToScopeAccess(binding.handler, new Set(), scopeName(needsStore), bindingAliases)})`;
       lines.push(`  cleanups.push(${statement});`);
     } else if (binding.kind === "attr") {
       const target = bindingElementExpression(binding.path);

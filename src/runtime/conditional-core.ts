@@ -1,6 +1,6 @@
 import { setAttributeValue, setStyleValue } from "./attr.js";
 import { setClassPresence } from "./class.js";
-import { delegate } from "./event.js";
+import { delegateTarget } from "./event.js";
 import { onOwnerCleanup, read } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { setText, textAt } from "./text.js";
@@ -465,7 +465,7 @@ const bindNodes = (state: ConditionalCoreState, options: ConditionalCoreOptions,
         const handler = binding.read ? binding.read(state.scope) : readPath(state.scope, binding.handler);
         if (typeof handler === "function") (handler as EventListener)(event);
       };
-      state.cleanups.push(delegate(element, binding.eventName, [], listener));
+      state.cleanups.push(delegateTarget(element, binding.eventName, element, listener));
     }
   }
 };
