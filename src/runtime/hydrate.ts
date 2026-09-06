@@ -355,6 +355,7 @@ export const scheduleHydration = (
   handle: HydrationBoundaryHandle,
   options: HydrationScheduleOptions = { strategy: "load" },
 ): (() => void) => {
+  const scheduler = { active: true };
   // `retry` re-arms the interaction trigger when hydration fails, so a failed
   // chunk load does not leave the boundary permanently unresponsive.
   // `replay` is decided once per event: only cancelable interactions are
@@ -369,7 +370,7 @@ export const scheduleHydration = (
       const hydration = handle.hydrate();
       if (replay && event) {
         const replay = (): void => {
-          if (handle.hydrated()) {
+          if (scheduler.active && handle.hydrated()) {
             const target =
               event.target instanceof Node && handle.element().contains(event.target) ? event.target : handle.element();
             target.dispatchEvent(cloneInteractionEvent(event));
@@ -444,9 +445,8 @@ export const scheduleHydration = (
   }
   const eventName = options.interaction ?? "click";
   const element = handle.element();
-  let active = true;
   const listener = (event: Event): void => {
-    if (!active) return;
+    if (!scheduler.active) return;
     element.removeEventListener(eventName, listener, true);
     const shouldReplay = options.replayInteraction === true && event.cancelable;
     if (shouldReplay) {
@@ -456,14 +456,14 @@ export const scheduleHydration = (
     trigger(
       event,
       () => {
-        if (active) element.addEventListener(eventName, listener, true);
+        if (scheduler.active) element.addEventListener(eventName, listener, true);
       },
       shouldReplay,
     );
   };
   element.addEventListener(eventName, listener, true);
   return () => {
-    active = false;
+    scheduler.active = false;
     element.removeEventListener(eventName, listener, true);
   };
 };

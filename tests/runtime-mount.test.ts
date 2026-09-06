@@ -517,6 +517,37 @@ describe("client mount entrypoints", () => {
     expect(runs).toBe(1);
   });
 
+  it("rolls back generated eager listeners when a later binding throws", () => {
+    const compiled = compileTemplate(`<main><button on:click={go}>go</button><p>{message}</p></main>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value));
+    const root = document.createElement("div");
+    root.innerHTML = module.templateHtml;
+    const bindRoot = root.firstElementChild;
+    const button = root.querySelector("button");
+    if (!(bindRoot instanceof HTMLElement) || !(button instanceof HTMLButtonElement)) {
+      throw new Error("Missing generated binding root.");
+    }
+    let calls = 0;
+    const failingScope: Record<string, unknown> = {
+      go: () => calls++,
+    };
+    Object.defineProperty(failingScope, "message", {
+      get: () => {
+        throw new Error("binding read failed");
+      },
+    });
+
+    expect(() => module.bind(bindRoot, failingScope)).toThrow("binding read failed");
+    button.click();
+    expect(calls).toBe(0);
+
+    const cleanup = module.bind(bindRoot, { go: () => calls++, message: "ready" });
+    button.click();
+    expect(calls).toBe(1);
+    cleanup?.();
+  });
+
   it("cleans resources created before a hydrate bind failure", () => {
     const root = document.createElement("main");
     root.innerHTML = `<p>SSR</p>`;

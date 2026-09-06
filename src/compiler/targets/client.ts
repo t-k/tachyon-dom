@@ -911,6 +911,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (needsManualCleanup) {
     lines.push(`  const cleanups = [];`);
+    lines.push(`  try {`);
   }
   if (template.client.components.length > 0 && needsStore) {
     const componentLines = emitComponentScope("    ", reactive && needsManualCleanup);
@@ -1051,6 +1052,14 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`    }`);
   }
   lines.push(`  };`);
+  if (needsManualCleanup) {
+    lines.push(`  } catch (error) {`);
+    lines.push(`    for (const cleanup of cleanups.splice(0).reverse()) {`);
+    lines.push(`      try { cleanup(); } catch {}`);
+    lines.push(`    }`);
+    lines.push(`    throw error;`);
+    lines.push(`  }`);
+  }
   lines.push(`});`);
   if (emitsHydrate && hasHydrationChunks) {
     lines.push(

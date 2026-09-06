@@ -390,7 +390,11 @@ describe("hydrate boundary runtime", () => {
           sameEvent: event === original,
         });
       document.addEventListener("click", documentListener);
-      const cleanup = scheduleHydration(boundary.value, { strategy: "interaction", interaction: "click", replayInteraction });
+      const cleanup = scheduleHydration(boundary.value, {
+        strategy: "interaction",
+        interaction: "click",
+        replayInteraction,
+      });
 
       button.dispatchEvent(original);
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -451,6 +455,40 @@ describe("hydrate boundary runtime", () => {
     document.removeEventListener("click", documentListener);
   });
 
+  it("does not replay a pending interaction after only the scheduler is released", async () => {
+    document.body.innerHTML = `<main><!--tachyon-hydrate:released:start--><section><button>Go</button></section><!--tachyon-hydrate:released:end--></main>`;
+    const main = document.querySelector("main");
+    const button = main?.querySelector("button");
+    if (!main || !(button instanceof HTMLButtonElement)) throw new Error("Missing released button.");
+    let resolveChunk!: (chunk: { bind: (element: Element) => void }) => void;
+    const boundary = createLazyHydrationBoundary(
+      main,
+      "released",
+      () => new Promise<{ bind: (element: Element) => void }>((resolve) => void (resolveChunk = resolve)),
+    );
+    if (!boundary.ok) throw new Error(boundary.error.message);
+    const replays: Event[] = [];
+    const documentListener = (event: Event): void => {
+      if (isReplayedInteraction(event)) replays.push(event);
+    };
+    document.addEventListener("click", documentListener);
+    const cleanup = scheduleHydration(boundary.value, {
+      strategy: "interaction",
+      interaction: "click",
+      replayInteraction: true,
+    });
+
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    cleanup();
+    resolveChunk({ bind: () => undefined });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(boundary.value.hydrated()).toBe(true);
+    expect(replays).toHaveLength(0);
+    document.removeEventListener("click", documentListener);
+    boundary.value.dispose();
+  });
+
   it("loads a lazy boundary once and replays the first interaction", async () => {
     document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--><section><button>Open</button></section><!--tachyon-hydrate:panel:end--></main>`;
     const main = document.querySelector("main");
@@ -507,9 +545,10 @@ describe("hydrate boundary runtime", () => {
     const result = createLazyHydrationBoundary(
       form,
       "panel",
-      () => new Promise<{ bind: (element: Element) => void }>((resolve) => {
-        resolveChunk = resolve;
-      }),
+      () =>
+        new Promise<{ bind: (element: Element) => void }>((resolve) => {
+          resolveChunk = resolve;
+        }),
     );
     if (!result.ok) throw new Error(result.error.message);
     const stop = scheduleHydration(result.value, {
