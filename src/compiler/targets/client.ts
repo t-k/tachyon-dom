@@ -90,20 +90,29 @@ type HydrationDirectChild = {
   shape: string;
 };
 
+const hydrationDirectChildren = (children: readonly TemplateNode[]): HydrationDirectChild[] =>
+  children.flatMap((child) => {
+    if (child.type === "element" && child.tagName === "component") {
+      const renderable = renderableChildren(child);
+      return renderable.length === 1
+        ? hydrationDirectChildren(renderable)
+        : [{ kind: "static", shape: hydrationShapeForNode(child) }];
+    }
+    if (child.type === "element" && child.tagName === "if") {
+      return [{ kind: "conditional", shape: hydrationShapeForRegion(child.children) }];
+    }
+    if (child.type === "element" && child.tagName === "for") {
+      return [{ kind: "list", shape: hydrationShapeForRegion(child.children) }];
+    }
+    return [{ kind: "static", shape: hydrationShapeForNode(child) }];
+  });
+
 const recordHydrationDynamicRegionErrors = (
   node: ElementNode,
   path: readonly number[],
   context: ClientLoweringContext,
 ): void => {
-  const children: HydrationDirectChild[] = node.children.map((child) => {
-    if (child.type === "element" && child.tagName === "if") {
-      return { kind: "conditional", shape: hydrationShapeForRegion(child.children) };
-    }
-    if (child.type === "element" && child.tagName === "for") {
-      return { kind: "list", shape: hydrationShapeForRegion(child.children) };
-    }
-    return { kind: "static", shape: hydrationShapeForNode(child) };
-  });
+  const children = hydrationDirectChildren(node.children);
   const dynamicChildren = children.filter(({ kind }) => kind !== "static");
   if (dynamicChildren.length >= 2 && dynamicChildren.some(({ kind }) => kind === "list")) {
     const label = path.length === 0 ? "root" : `root.${path.join(".")}`;
@@ -661,6 +670,7 @@ const runtimeNames = {
   mountKeyedList: "__tachyonMountKeyedList",
   mountTextKeyedList: "__tachyonMountTextKeyedList",
   nodeAt: "__tachyonNodeAt",
+  nodeAtWithDynamicLists: "__tachyonNodeAtWithDynamicLists",
   read: "__tachyonRead",
   setAttributeValue: "__tachyonSetAttributeValue",
   setClassPresence: "__tachyonSetClassPresence",
@@ -730,6 +740,51 @@ const usesConditionalCore = (binding: ConditionalBinding): boolean =>
 
 const hasStaticConditionalRootAttribute = (templateHtml: string): boolean =>
   /<[A-Za-z][^\s/>]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)/.test(templateHtml);
+
+const hydrationRootTagName = (shape: string): string | undefined => {
+  if (shape.startsWith("element:")) return shape.slice("element:".length).split(":", 1)[0];
+  try {
+    const parsed: unknown = JSON.parse(shape);
+    if (Array.isArray(parsed) && typeof parsed[0] === "string" && parsed[0].startsWith("element:")) {
+      return parsed[0].slice("element:".length).split(":", 1)[0];
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+};
+
+const conditionalRootTagName = (templateHtml: string): string | undefined =>
+  templateHtml.match(/^\s*<([A-Za-z][\w:.-]*)/)?.[1]?.toLowerCase();
+
+const hasConditionalSiblingRootShape = (root: ElementNode, binding: ConditionalBinding): boolean => {
+  const parent = nodeAtElementPath(root, binding.path.slice(0, -1));
+  const index = binding.path.at(-1);
+  const expectedTag = conditionalRootTagName(binding.templateHtml);
+  if (!parent || index === undefined || !expectedTag) return false;
+  return domChildren(parent).some((child, childIndex) => {
+    if (childIndex === index || child.type !== "element") return false;
+    const siblingTag =
+      child.tagName === "if" || child.tagName === "for"
+        ? hydrationRootTagName(hydrationShapeForRegion(child.children))
+        : child.tagName.toLowerCase();
+    return siblingTag === expectedTag;
+  });
+};
+
+const conditionalDynamicAttributes = (
+  binding: ConditionalBinding,
+): Array<{
+  path: number[];
+  name: string;
+  kind?: "value" | "token";
+}> =>
+  binding.bindings.flatMap((child) => {
+    if (child.kind === "attr") return [{ path: child.path, name: child.name }];
+    if (child.kind === "class") return [{ path: child.path, name: "class", kind: "token" as const }];
+    if (child.kind === "style") return [{ path: child.path, name: "style" }];
+    return [];
+  });
 
 const hasStaticConditionalSiblingAttribute = (root: ElementNode, binding: ConditionalBinding): boolean => {
   const parent = nodeAtElementPath(root, binding.path.slice(0, -1));
@@ -896,6 +951,25 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsConditional = bindings.some((binding) => binding.kind === "if");
   const needsConditionalCore = bindings.some((binding) => binding.kind === "if" && usesConditionalCore(binding));
   const needsGenericConditional = bindings.some((binding) => binding.kind === "if" && !usesConditionalCore(binding));
+  const listPathsForBinding = (
+    path: readonly number[],
+  ): Array<{
+    path: number[];
+    region?: ListBinding["region"];
+  }> =>
+    bindings.flatMap((candidate) => {
+      if (
+        candidate.kind !== "list" ||
+        candidate.path.length >= path.length ||
+        !candidate.path.every((part, index) => part === path[index])
+      ) {
+        return [];
+      }
+      return [{ path: candidate.path, ...(candidate.region ? { region: candidate.region } : {}) }];
+    });
+  const needsListPathResolver = bindings.some(
+    (binding) => binding.kind !== "list" && listPathsForBinding(binding.path).length > 0,
+  );
   const needsConditionalCoreAdoptionGuard =
     needsConditionalCore &&
     bindings.some(
@@ -917,7 +991,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         binding.kind === "if" &&
         usesConditionalCore(binding) &&
         (hasStaticConditionalRootAttribute(binding.templateHtml) ||
-          hasStaticConditionalSiblingAttribute(template.root, binding)),
+          hasStaticConditionalSiblingAttribute(template.root, binding) ||
+          hasConditionalSiblingRootShape(template.root, binding)),
     );
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const needsElementAt = needsClass || needsAttr || needsModel || needsTextList || (reactive && needsList);
@@ -929,12 +1004,13 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       `import { setText as ${runtimeNames.setText}, textAt as ${runtimeNames.textAt} } from "tachyon-dom/runtime/text";`,
     );
   }
-  if (needsElementAt) {
-    lines.push(
-      needsClass
-        ? `import { elementAt as ${runtimeNames.elementAt}, setClassPresence as ${runtimeNames.setClassPresence} } from "tachyon-dom/runtime/class";`
-        : `import { elementAt as ${runtimeNames.elementAt} } from "tachyon-dom/runtime/class";`,
-    );
+  if (needsElementAt || needsListPathResolver) {
+    const classImports = [
+      ...(needsElementAt ? [`elementAt as ${runtimeNames.elementAt}`] : []),
+      ...(needsClass ? [`setClassPresence as ${runtimeNames.setClassPresence}`] : []),
+      ...(needsListPathResolver ? [`nodeAtWithDynamicLists as ${runtimeNames.nodeAtWithDynamicLists}`] : []),
+    ];
+    lines.push(`import { ${classImports.join(", ")} } from "tachyon-dom/runtime/class";`);
   }
   if (needsAttr) {
     lines.push(
@@ -1167,28 +1243,53 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
               .map((candidate) => {
                 const candidateVisibilityName = conditionalVisibilityNames.get(candidate) as string;
                 const candidateVisibility = reactive ? `${candidateVisibilityName}()` : candidateVisibilityName;
-                return `{ visible: ${candidateVisibility}, templateHtml: ${JSON.stringify(candidate.templateHtml)} }`;
+                const dynamicAttributes = conditionalDynamicAttributes(candidate);
+                const dynamicAttributeField =
+                  needsConditionalCoreShapeMatcher && dynamicAttributes.length > 0
+                    ? `, dynamicAttributes: ${JSON.stringify(dynamicAttributes)}`
+                    : "";
+                return `{ visible: ${candidateVisibility}, templateHtml: ${JSON.stringify(candidate.templateHtml)}${dynamicAttributeField} }`;
               });
       const laterDescriptor =
         laterConditionals.length > 0 ? ` laterConditionals: [${laterConditionals.join(", ")}],` : "";
+      const dynamicAttributes = conditionalDynamicAttributes(binding);
+      const dynamicAttributeField =
+        needsConditionalCoreShapeMatcher && dynamicAttributes.length > 0
+          ? ` dynamicAttributes: ${JSON.stringify(dynamicAttributes)},`
+          : "";
       lines.push(
-        `    { path: ${JSON.stringify(binding.path)}, visible: ${visibility},${parent ? ` parentTagName: ${JSON.stringify(parent.tagName)},` : ""}${laterDescriptor} templateHtml: ${JSON.stringify(binding.templateHtml)} },`,
+        `    { path: ${JSON.stringify(binding.path)}, visible: ${visibility},${parent ? ` parentTagName: ${JSON.stringify(parent.tagName)},` : ""}${laterDescriptor}${dynamicAttributeField} templateHtml: ${JSON.stringify(binding.templateHtml)} },`,
       );
     }
     lines.push(`  ]);`);
   }
-  const bindingNodeExpression = (path: readonly number[]): string =>
-    needsConditionalCore && path.length > 0
+  const listPathExpression = (path: readonly number[]): string | undefined => {
+    const lists = listPathsForBinding(path);
+    return lists.length > 0
+      ? `${runtimeNames.nodeAtWithDynamicLists}(root, ${JSON.stringify(path)}, ${JSON.stringify(lists)})`
+      : undefined;
+  };
+  const bindingNodeExpression = (path: readonly number[]): string => {
+    const listPath = listPathExpression(path);
+    if (listPath && !needsConditionalCore) return listPath;
+    return needsConditionalCore && path.length > 0
       ? `${runtimeNames.preparedNodeAt}(root, ${JSON.stringify(path)})`
       : nodeExpression(path);
-  const bindingElementExpression = (path: readonly number[]): string =>
-    needsConditionalCore && path.length > 0
+  };
+  const bindingElementExpression = (path: readonly number[]): string => {
+    const listPath = listPathExpression(path);
+    if (listPath && !needsConditionalCore) return listPath;
+    return needsConditionalCore && path.length > 0
       ? `${runtimeNames.preparedNodeAt}(root, ${JSON.stringify(path)})`
       : elementExpression(path);
-  const bindingTextExpression = (path: readonly number[]): string =>
-    needsConditionalCore
+  };
+  const bindingTextExpression = (path: readonly number[]): string => {
+    const listPath = listPathExpression(path);
+    if (listPath && !needsConditionalCore) return `${runtimeNames.textAt}(${listPath}, [])`;
+    return needsConditionalCore
       ? `${runtimeNames.textAt}(${bindingNodeExpression(path)}, [])`
       : `${runtimeNames.textAt}(root, ${JSON.stringify(path)})`;
+  };
   let listIndex = 0;
   let conditionalIndex = 0;
   let targetIndex = 0;

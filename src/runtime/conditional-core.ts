@@ -63,6 +63,12 @@ export type ConditionalCoreOptions = {
 
 type ConditionalCoreNodeMatcher = (expected: Node, actual: Node) => boolean;
 
+type ConditionalCoreDynamicAttribute = {
+  path: readonly number[];
+  name: string;
+  kind?: "value" | "token";
+};
+
 type ConditionalCoreState = {
   signature: string;
   anchor: Comment;
@@ -79,6 +85,7 @@ type AnchorResolution = {
 export type ConditionalCoreLaterDescriptor = {
   visible: unknown;
   templateHtml: string;
+  dynamicAttributes?: readonly ConditionalCoreDynamicAttribute[];
 };
 
 export type ConditionalCoreAdoptionGuard = (
@@ -94,6 +101,7 @@ export type ConditionalCoreAnchorDescriptor = {
   templateHtml: string;
   parentTagName?: string;
   laterConditionals?: readonly ConditionalCoreLaterDescriptor[];
+  dynamicAttributes?: readonly ConditionalCoreDynamicAttribute[];
 };
 
 type PreparedConditional = {
@@ -297,22 +305,77 @@ export const prepareConditionalCore = (root: Node, descriptors: readonly Conditi
   }
 };
 
-const sameNodeShapeWithStaticAttributes: ConditionalCoreNodeMatcher = (expected, actual) => {
+const pathEquals = (left: readonly number[], right: readonly number[]): boolean =>
+  left.length === right.length && left.every((part, index) => part === right[index]);
+
+const dynamicAttributeFor = (
+  dynamicAttributes: readonly ConditionalCoreDynamicAttribute[],
+  path: readonly number[],
+  name: string,
+): ConditionalCoreDynamicAttribute | undefined =>
+  dynamicAttributes.find(
+    (attribute) => pathEquals(attribute.path, path) && attribute.name.toLowerCase() === name.toLowerCase(),
+  );
+
+const sameNodeShapeWithStaticAttributes = (
+  expected: Node,
+  actual: Node,
+  dynamicAttributes: readonly ConditionalCoreDynamicAttribute[],
+  path: readonly number[] = [],
+): boolean => {
+  if (
+    expected.nodeType === Node.TEXT_NODE &&
+    expected.nodeValue === " " &&
+    actual.nodeType === Node.COMMENT_NODE &&
+    actual.nodeValue === "td:text"
+  ) {
+    return true;
+  }
   if (!sameNodeShape(expected, actual)) return false;
   if (!(expected instanceof Element) || !(actual instanceof Element)) return true;
-  if (expected.attributes.length === 0) return actual.attributes.length === 0;
-  return [...expected.attributes].every((attribute) => actual.getAttribute(attribute.name) === attribute.value);
+
+  for (const attribute of Array.from(expected.attributes)) {
+    const dynamicAttribute = dynamicAttributeFor(dynamicAttributes, path, attribute.name);
+    if (dynamicAttribute?.kind === "token" && attribute.name.toLowerCase() === "class") {
+      const actualTokens = new Set((actual.getAttribute(attribute.name) ?? "").split(/\s+/).filter(Boolean));
+      const expectedTokens = attribute.value.split(/\s+/).filter(Boolean);
+      if (expectedTokens.some((token) => !actualTokens.has(token))) return false;
+    } else if (!dynamicAttribute && actual.getAttribute(attribute.name) !== attribute.value) {
+      return false;
+    }
+  }
+  for (const attribute of Array.from(actual.attributes)) {
+    if (expected.hasAttribute(attribute.name)) continue;
+    if (!dynamicAttributeFor(dynamicAttributes, path, attribute.name)) return false;
+  }
+
+  const expectedChildren = logicalChildren(expected);
+  const actualChildren = logicalChildren(actual);
+  return (
+    expectedChildren.length === actualChildren.length &&
+    expectedChildren.every((child, index) =>
+      sameNodeShapeWithStaticAttributes(child, actualChildren[index] as Node, dynamicAttributes, [...path, index]),
+    )
+  );
 };
 
 const adoptableNodesWithStaticAttributes = (
   parent: Node,
   index: number,
   expected: readonly Node[],
+  dynamicAttributes: readonly ConditionalCoreDynamicAttribute[],
 ): Node[] | undefined => {
   if (expected.length === 0) return undefined;
   const actual = logicalChildren(parent).slice(index, index + expected.length);
   return actual.length === expected.length &&
-    expected.every((node, nodeIndex) => sameNodeShapeWithStaticAttributes(node, actual[nodeIndex] as Node))
+    expected.every((node, nodeIndex) =>
+      sameNodeShapeWithStaticAttributes(
+        node,
+        actual[nodeIndex] as Node,
+        dynamicAttributes,
+        expected.length === 1 ? [] : [nodeIndex],
+      ),
+    )
     ? actual
     : undefined;
 };
@@ -350,7 +413,7 @@ export const prepareConditionalCoreWithStaticAttributes = (
       continue;
     }
     const expected = createNodes(source?.templateHtml ?? "");
-    const adopted = adoptableNodesWithStaticAttributes(parent, index, expected);
+    const adopted = adoptableNodesWithStaticAttributes(parent, index, expected, source?.dynamicAttributes ?? []);
     const anchor = document.createComment("");
     parent.insertBefore(anchor, candidate ?? null);
     registerAnchor(root, descriptor.path, anchor);
@@ -425,12 +488,21 @@ const deferConditionalAdoptionWithStaticAttributes = (
   const candidate = laterConditionals?.find(
     (later) =>
       Boolean(later.visible) &&
-      adoptableNodesWithStaticAttributes(parent, index, createNodes(later.templateHtml)) !== undefined,
+      adoptableNodesWithStaticAttributes(
+        parent,
+        index,
+        createNodes(later.templateHtml),
+        later.dynamicAttributes ?? [],
+      ) !== undefined,
   );
   return (
     candidate !== undefined &&
-    adoptableNodesWithStaticAttributes(parent, index + expected.length, createNodes(candidate.templateHtml)) ===
-      undefined
+    adoptableNodesWithStaticAttributes(
+      parent,
+      index + expected.length,
+      createNodes(candidate.templateHtml),
+      candidate.dynamicAttributes ?? [],
+    ) === undefined
   );
 };
 
@@ -467,7 +539,7 @@ export const prepareConditionalCoreWithAdoptionGuardAndStaticAttributes = (
       continue;
     }
     const expected = createNodes(source?.templateHtml ?? "");
-    const adopted = adoptableNodesWithStaticAttributes(parent, index, expected);
+    const adopted = adoptableNodesWithStaticAttributes(parent, index, expected, source?.dynamicAttributes ?? []);
     if (adopted && deferConditionalAdoptionWithStaticAttributes(parent, index, expected, source?.laterConditionals)) {
       const anchor = document.createComment("");
       parent.insertBefore(anchor, candidate ?? null);
