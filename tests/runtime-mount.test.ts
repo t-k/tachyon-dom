@@ -214,6 +214,31 @@ describe("client mount entrypoints", () => {
     if (hydrated.ok) hydrated.value.dispose();
   });
 
+  it("preserves an attributed static sibling when the conditional root has no attributes", () => {
+    const compiled = compileTemplate(
+      `<main><if test={visible}><p>{label}</p></if><p data-static="yes">{tail}</p></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      visible: false,
+      label: "SSR branch",
+      tail: "SSR tail",
+    });
+    const serverStatic = root.querySelector('[data-static="yes"]');
+    const hydrated = hydrate(root, module, {
+      visible: createSignal(false),
+      label: createSignal("Client branch"),
+      tail: createSignal("Client tail"),
+    });
+
+    expect(hydrated.ok).toBe(true);
+    expect(root.querySelector('[data-static="yes"]')).toBe(serverStatic);
+    expect(root.textContent).toBe("Client tail");
+    if (hydrated.ok) hydrated.value.dispose();
+  });
+
   it.each([
     `<main><p data-kind="same">Before</p><if test={visible}><p data-kind="same">{label}</p></if><p data-kind="same">After</p></main>`,
     `<main><if test={leftVisible}><p data-kind="same">{left}</p></if><if test={rightVisible}><p data-kind="same">{right}</p></if><footer>Static</footer></main>`,

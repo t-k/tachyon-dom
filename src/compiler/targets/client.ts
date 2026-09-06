@@ -731,6 +731,23 @@ const usesConditionalCore = (binding: ConditionalBinding): boolean =>
 const hasStaticConditionalRootAttribute = (templateHtml: string): boolean =>
   /<[A-Za-z][^\s/>]*(?:\s+[A-Za-z_:][\w:.-]*(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)/.test(templateHtml);
 
+const hasStaticConditionalSiblingAttribute = (root: ElementNode, binding: ConditionalBinding): boolean => {
+  const parent = nodeAtElementPath(root, binding.path.slice(0, -1));
+  const index = binding.path.at(-1);
+  return (
+    parent !== undefined &&
+    index !== undefined &&
+    domChildren(parent).some(
+      (child, childIndex) =>
+        childIndex !== index &&
+        child.type === "element" &&
+        child.tagName !== "if" &&
+        child.tagName !== "for" &&
+        hydrationShapeForStaticAttributes(child).length > 0,
+    )
+  );
+};
+
 const hasModelBinding = (binding: ClientBinding): boolean => {
   if (binding.kind === "model") {
     return true;
@@ -899,7 +916,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       (binding) =>
         binding.kind === "if" &&
         usesConditionalCore(binding) &&
-        hasStaticConditionalRootAttribute(binding.templateHtml),
+        (hasStaticConditionalRootAttribute(binding.templateHtml) ||
+          hasStaticConditionalSiblingAttribute(template.root, binding)),
     );
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const needsElementAt = needsClass || needsAttr || needsModel || needsTextList || (reactive && needsList);

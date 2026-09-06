@@ -300,6 +300,7 @@ export const prepareConditionalCore = (root: Node, descriptors: readonly Conditi
 const sameNodeShapeWithStaticAttributes: ConditionalCoreNodeMatcher = (expected, actual) => {
   if (!sameNodeShape(expected, actual)) return false;
   if (!(expected instanceof Element) || !(actual instanceof Element)) return true;
+  if (expected.attributes.length === 0) return actual.attributes.length === 0;
   return [...expected.attributes].every((attribute) => actual.getAttribute(attribute.name) === attribute.value);
 };
 
