@@ -299,7 +299,7 @@ const hasListTextInput = (metafile: Record<string, unknown>): boolean =>
 
 const hasGeneratedAdapterImplementation = (loaded: LoadedGeneratedModule, adapter: AdapterName): boolean => {
   const marker = adapter === "generated" ? "resolveGeneratedOptions" : "resolveLegacyOptions";
-  return loaded.bundledCode.includes(marker);
+  return loaded.productionBundledCode.includes(marker);
 };
 
 const runSample = (loaded: LoadedGeneratedModule, sampleIndex: number, itemCount: number): AdapterSample => {
