@@ -21,7 +21,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/stream-client`: browser stream chunk reading.
 - `runtime/error-boundary`: DOM-mounted client fallback boundaries.
 
-Browser feature bundles have independent minified and Brotli budgets for `runtime/list`, `runtime/form`, `runtime/conditional`, and `runtime/router`. The current generated-list baselines are 34914 minified/10495 Brotli bytes and 34728 minified/10468 Brotli bytes for conditional bindings; the checks leave a small Brotli variance margin while rejecting compiler, server, TypeScript, parse5, and language-server inputs from the browser graph. Run `pnpm check:browser-feature-budgets` after changing one of these modules.
+Browser feature bundles have independent minified and Brotli budgets for `runtime/list`, `runtime/form`, `runtime/conditional`, and `runtime/router`. The current generated-list baselines are 35016 minified/10504 Brotli bytes and 10892 minified/3721 Brotli bytes for conditional bindings; the checks leave a small Brotli variance margin while rejecting compiler, server, TypeScript, parse5, and language-server inputs from the browser graph. Run `pnpm check:browser-feature-budgets` after changing one of these modules.
 
 ## Mount and Hydrate Entrypoints
 

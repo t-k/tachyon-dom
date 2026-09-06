@@ -1640,7 +1640,7 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(code).toContain(`import { mountKeyedList } from "tachyon-dom/runtime/list";`);
     expect(code).toContain(`import { effect } from "tachyon-dom/runtime/signal";`);
     expect(code).toContain(
-      `import { cleanupTextKeyedList as __tachyonCleanupTextKeyedList, mountTextKeyedList as __tachyonMountTextKeyedList } from "tachyon-dom/runtime/list-text";`,
+      `import { cleanupTextKeyedList as __tachyonCleanupTextKeyedList, mountGeneratedTextKeyedList as __tachyonMountTextKeyedList } from "tachyon-dom/runtime/list-text";`,
     );
     expect(code).toContain(
       `import { createRoot as __tachyonCreateRoot, effect as __tachyonEffect, read as __tachyonRead } from "tachyon-dom/runtime/signal";`,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanupTextKeyedList, mountTextKeyedList } from "../src/runtime/list-text";
+import { cleanupTextKeyedList, mountGeneratedTextKeyedList, mountTextKeyedList } from "../src/runtime/list-text";
 import { createSignal, effect, onCleanup } from "../src/runtime/signal";
 
 const warn = console.warn;
@@ -9,6 +9,41 @@ afterEach(() => {
 });
 
 describe("mountTextKeyedList", () => {
+  it("reconciles compiler-generated rows through the mandatory reader contract", () => {
+    const root = document.createElement("ul");
+    const options = {
+      signature: "generated-reader-contract",
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "row",
+      scope: {},
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "row.label",
+          read: (scope: Record<string, unknown>) => (scope.row as { label: string }).label,
+        },
+      ],
+    };
+
+    mountGeneratedTextKeyedList(root, [], [{ id: "a", label: "A" }], options);
+    const row = root.firstElementChild;
+    mountGeneratedTextKeyedList(
+      root,
+      [],
+      [
+        { id: "a", label: "B" },
+        { id: "b", label: "C" },
+      ],
+      options,
+    );
+
+    expect(root.textContent).toBe("BC");
+    expect(root.firstElementChild).toBe(row);
+  });
+
   it("exposes an explicit row index while reusing keyed records", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

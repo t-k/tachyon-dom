@@ -78,6 +78,26 @@ describe("client mount entrypoints", () => {
     if (hiddenHydrated.ok) hiddenHydrated.value.dispose();
   });
 
+  it("emits the generated text-list entry while preserving its runtime behavior", () => {
+    const compiled = compileTemplate(`<ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const generated = generateClientModule(compiled.value, { reactive: true });
+    expect(generated).toContain(`mountGeneratedTextKeyedList as __tachyonMountTextKeyedList`);
+    const module = evaluateGeneratedClientModule(generated);
+    const root = document.createElement("div");
+    const rows = createSignal([{ id: "a", label: "A" }]);
+
+    mount(root, module, { rows });
+    const firstRow = root.querySelector("li");
+    rows.set([
+      { id: "a", label: "B" },
+      { id: "b", label: "C" },
+    ]);
+
+    expect(root.textContent).toBe("BC");
+    expect(root.querySelector("li")).toBe(firstRow);
+  });
+
   it("rejects hydration when the existing root structure does not match", () => {
     const compiled = compileTemplate(`<p>{name}</p>`);
     if (!compiled.ok) throw new Error(compiled.error.message);

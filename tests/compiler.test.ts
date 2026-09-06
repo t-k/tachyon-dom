@@ -1448,7 +1448,7 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value);
 
-    expect(code).toContain(`mountTextKeyedList as __tachyonMountTextKeyedList`);
+    expect(code).toContain(`mountGeneratedTextKeyedList as __tachyonMountTextKeyedList`);
     expect(code).toContain(`cleanupTextKeyedList as __tachyonCleanupTextKeyedList`);
     expect(code).toContain(`from "tachyon-dom/runtime/list-text"`);
     expect(code).not.toContain(`from "tachyon-dom/runtime/list"`);

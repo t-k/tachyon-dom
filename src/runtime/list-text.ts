@@ -26,6 +26,36 @@ type TextKeyedListOptions = {
   bindings: TextBinding[];
 };
 
+type GeneratedTextBinding = Omit<TextBinding, "read"> & { read: ExpressionReader };
+
+type GeneratedTextKeyedListOptionsBase = {
+  signature: string;
+  key: string;
+  itemName: string;
+  indexName?: string;
+  updatePolicy?: "always" | "reference";
+  region?: TextKeyedListRegion;
+  scope?: Record<string, unknown>;
+  templateHtml: string;
+  bindings: GeneratedTextBinding[];
+};
+
+type GeneratedTextKeyedListOptions = GeneratedTextKeyedListOptionsBase &
+  ({ keyReadItem: (item: unknown) => unknown; keyRead?: never } | { keyRead: ExpressionReader; keyReadItem?: never });
+
+type TextKeyedListRuntimeOptions = {
+  signature: string;
+  itemName: string;
+  indexName?: string;
+  updatePolicy?: "always" | "reference";
+  region?: TextKeyedListRegion;
+  scope?: Record<string, unknown>;
+  templateHtml: string;
+  bindings: TextBinding[];
+  readKey: (item: unknown, index: number) => unknown;
+  readBinding: (scope: Record<string, unknown>, binding: TextBinding) => unknown;
+};
+
 type TextKeyedListRegion = {
   before: number;
   after: number;
@@ -47,7 +77,7 @@ type RowRecord = {
 
 type ListState = {
   signature: string;
-  options: TextKeyedListOptions;
+  options: TextKeyedListRuntimeOptions;
   records: Map<PropertyKey, RowRecord>;
   template: HTMLTemplateElement;
   elementIndices: number[];
@@ -110,7 +140,7 @@ const textAtRecord = (record: RowRecord, path: readonly number[]): Text => {
   return textAt(record.nodes[firstIndex ?? 0] ?? record.element, rest);
 };
 
-const optionsSignature = (options: TextKeyedListOptions): string =>
+const legacyOptionsSignature = (options: TextKeyedListOptions): string =>
   options.signature ??
   JSON.stringify({
     key: options.key,
@@ -121,6 +151,46 @@ const optionsSignature = (options: TextKeyedListOptions): string =>
     templateHtml: options.templateHtml,
     bindings: options.bindings,
   });
+
+const resolveGeneratedOptions = (options: GeneratedTextKeyedListOptions): TextKeyedListRuntimeOptions => {
+  const readKey = options.keyReadItem
+    ? (item: unknown) => options.keyReadItem(item)
+    : (item: unknown, index: number) =>
+        options.keyRead(scopedItem(options.itemName, item, options.indexName, index, options.scope));
+  return {
+    signature: options.signature,
+    itemName: options.itemName,
+    ...(options.indexName ? { indexName: options.indexName } : {}),
+    ...(options.updatePolicy ? { updatePolicy: options.updatePolicy } : {}),
+    ...(options.region ? { region: options.region } : {}),
+    ...(options.scope ? { scope: options.scope } : {}),
+    templateHtml: options.templateHtml,
+    bindings: options.bindings,
+    readKey,
+    readBinding: (scope, binding) => read((binding as GeneratedTextBinding).read(scope)),
+  };
+};
+
+const resolveLegacyOptions = (options: TextKeyedListOptions): TextKeyedListRuntimeOptions => {
+  const readKey = options.keyReadItem
+    ? (item: unknown) => options.keyReadItem?.(item)
+    : options.keyRead
+      ? (item: unknown, index: number) =>
+          options.keyRead?.(scopedItem(options.itemName, item, options.indexName, index, options.scope))
+      : (item: unknown, index: number) => readItemPath(item, options.key, options.itemName);
+  return {
+    signature: legacyOptionsSignature(options),
+    itemName: options.itemName,
+    ...(options.indexName ? { indexName: options.indexName } : {}),
+    ...(options.updatePolicy ? { updatePolicy: options.updatePolicy } : {}),
+    ...(options.region ? { region: options.region } : {}),
+    ...(options.scope ? { scope: options.scope } : {}),
+    templateHtml: options.templateHtml,
+    bindings: options.bindings,
+    readKey,
+    readBinding: (scope, binding) => read(binding.read ? binding.read(scope) : readPath(scope, binding.expression)),
+  };
+};
 
 const cleanupRecord = (record: RowRecord): void => {
   let firstError: unknown;
@@ -161,10 +231,10 @@ const cleanupListState = (state: ListState): void => {
   if (failed) throw firstError;
 };
 
-const getListState = (container: Element, options: TextKeyedListOptions): ListState => {
+const getListState = (container: Element, options: TextKeyedListRuntimeOptions): ListState => {
   const current = listStates.get(container);
   if (current && current.options === options) return current;
-  const signature = optionsSignature(options);
+  const signature = options.signature;
   if (current && current.signature === signature) {
     current.options = options;
     return current;
@@ -198,10 +268,7 @@ const getListState = (container: Element, options: TextKeyedListOptions): ListSt
   return next;
 };
 
-const readBinding = (scope: Record<string, unknown>, binding: TextBinding): unknown =>
-  read(binding.read ? binding.read(scope) : readPath(scope, binding.expression));
-
-const bindRow = (record: RowRecord, options: TextKeyedListOptions): void => {
+const bindRow = (record: RowRecord, options: TextKeyedListRuntimeOptions): void => {
   if (options.bindings.length === 0) return;
   record.cleanups.push(
     untrack(() =>
@@ -209,7 +276,7 @@ const bindRow = (record: RowRecord, options: TextKeyedListOptions): void => {
         record.revision();
         for (let index = 0; index < options.bindings.length; index++) {
           const binding = options.bindings[index] as TextBinding;
-          const value = readBinding(record.scope, binding);
+          const value = options.readBinding(record.scope, binding);
           if (Object.is(record.lastValues[index], value)) continue;
           record.lastValues[index] = value;
           setText(textAtRecord(record, binding.path), value);
@@ -219,16 +286,11 @@ const bindRow = (record: RowRecord, options: TextKeyedListOptions): void => {
   );
 };
 
-const keyFor = (item: unknown, index: number, options: TextKeyedListOptions): PropertyKey => {
-  const key = options.keyReadItem
-    ? options.keyReadItem(item)
-    : options.keyRead
-      ? options.keyRead(scopedItem(options.itemName, item, options.indexName, index, options.scope))
-      : readItemPath(item, options.key, options.itemName);
-  return normalizeListKey(read(key));
+const keyFor = (item: unknown, index: number, options: TextKeyedListRuntimeOptions): PropertyKey => {
+  return normalizeListKey(read(options.readKey(item, index)));
 };
 
-const warnDuplicateKey = (key: PropertyKey, options: TextKeyedListOptions): void => {
+const warnDuplicateKey = (key: PropertyKey, options: TextKeyedListRuntimeOptions): void => {
   if ((typeof process !== "undefined" && process.env.NODE_ENV === "production") || typeof console.warn !== "function") {
     return;
   }
@@ -242,7 +304,7 @@ const createRecord = (
   state: ListState,
   key: PropertyKey,
   item: unknown,
-  options: TextKeyedListOptions,
+  options: TextKeyedListRuntimeOptions,
   existingElements?: readonly Element[],
   index = 0,
 ): RowRecord | undefined => {
@@ -272,7 +334,7 @@ const createRecord = (
   return record;
 };
 
-const updateRecord = (record: RowRecord, item: unknown, index: number, options: TextKeyedListOptions): void => {
+const updateRecord = (record: RowRecord, item: unknown, index: number, options: TextKeyedListRuntimeOptions): void => {
   const nextSourceScopeSnapshot = sourceScopeSnapshotFor(options.scope);
   const scopeChanged =
     record.sourceScope !== options.scope || sourceScopeChanged(record.sourceScopeSnapshot, nextSourceScopeSnapshot);
@@ -427,14 +489,11 @@ export const cleanupTextKeyedList = (root: Element, path: readonly number[]): vo
   if (container instanceof Element) cleanupOwnedSubtree(container);
 };
 
-/**
- * Mounts compiler-generated text-only rows. `templateHtml` must be trusted compiler output, never untrusted input.
- */
-export const mountTextKeyedList = (
+const mountTextKeyedListResolved = (
   root: Element,
   path: readonly number[],
   items: readonly unknown[] | undefined,
-  options: TextKeyedListOptions,
+  options: TextKeyedListRuntimeOptions,
 ): void => {
   const container = nodeAt(root, path);
   if (!(container instanceof Element)) return;
@@ -542,4 +601,26 @@ export const mountTextKeyedList = (
     if (cleanupFailed) throw new AggregateError([error, firstCleanupError], "Text list update and rollback failed.");
     throw error;
   }
+};
+
+/** Mounts compiler-generated text-only rows using mandatory compiler readers. */
+export const mountGeneratedTextKeyedList = (
+  root: Element,
+  path: readonly number[],
+  items: readonly unknown[] | undefined,
+  options: GeneratedTextKeyedListOptions,
+): void => {
+  mountTextKeyedListResolved(root, path, items, resolveGeneratedOptions(options));
+};
+
+/**
+ * Mounts text-only rows from the compatibility descriptor. `templateHtml` must be trusted compiler output, never untrusted input.
+ */
+export const mountTextKeyedList = (
+  root: Element,
+  path: readonly number[],
+  items: readonly unknown[] | undefined,
+  options: TextKeyedListOptions,
+): void => {
+  mountTextKeyedListResolved(root, path, items, resolveLegacyOptions(options));
 };

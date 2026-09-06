@@ -812,7 +812,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (needsTextList) {
     lines.push(
-      `import { cleanupTextKeyedList as ${runtimeNames.cleanupTextKeyedList}, mountTextKeyedList as ${runtimeNames.mountTextKeyedList} } from "tachyon-dom/runtime/list-text";`,
+      `import { cleanupTextKeyedList as ${runtimeNames.cleanupTextKeyedList}, mountGeneratedTextKeyedList as ${runtimeNames.mountTextKeyedList} } from "tachyon-dom/runtime/list-text";`,
     );
   }
   if (needsConditional) {
