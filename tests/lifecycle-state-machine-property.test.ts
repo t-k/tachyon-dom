@@ -379,4 +379,42 @@ describe("lifecycle state machine", () => {
     key.set("third");
     expect(resource.loading()).toBe(false);
   });
+
+  it("does not retain a rerun after cleanup disposes its owner", () => {
+    fc.assert(
+      fc.property(fc.boolean(), (throwsFromCleanup) => {
+        const source = createSignal(0);
+        let runs = 0;
+        let cleanupRuns = 0;
+        let siblingRuns = 0;
+        const disposeRoot = createRoot((dispose) => {
+          effect(() => {
+            source();
+            runs++;
+            return () => {
+              cleanupRuns++;
+              dispose();
+              if (throwsFromCleanup) throw new Error("property cleanup failed");
+            };
+          });
+          effect(() => {
+            source();
+            siblingRuns++;
+          });
+          return dispose;
+        });
+
+        if (throwsFromCleanup) {
+          expect(() => source.set(1)).toThrow("property cleanup failed");
+        } else {
+          expect(() => source.set(1)).not.toThrow();
+        }
+        expect(runs).toBe(1);
+        expect(cleanupRuns).toBe(1);
+        expect(siblingRuns).toBe(1);
+        expect(() => disposeRoot()).not.toThrow();
+      }),
+      propertyParameters({ seed: 0x25_09_06, numRuns: 2 }),
+    );
+  });
 });

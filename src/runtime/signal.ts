@@ -317,7 +317,7 @@ const cleanup = (runner: EffectRunner, createNextRunOwner: boolean): void => {
     if (!failed) firstError = error;
     failed = true;
   }
-  if (createNextRunOwner) {
+  if (createNextRunOwner && !runner.disposed) {
     runner.runOwner = createOwner();
   }
   if (failed) throw firstError;
@@ -584,6 +584,10 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
         cleanupError = error;
         cleanupFailed = true;
       }
+      if (runner.disposed) {
+        if (cleanupFailed) throw cleanupError;
+        return;
+      }
       const previous = activeEffect;
       const previousOwner = currentOwner;
       const previousEffectOwner = currentEffectOwner;
@@ -708,11 +712,16 @@ export const createResource = <Source, T>(
     }
     hasSource = true;
     lastSource = value;
+    const previousController = controller;
+    const runVersion = ++version;
     cancelCurrent?.("superseded");
-    controller?.abort();
+    if (controller === previousController) controller = undefined;
+    previousController?.abort();
+    if (disposed || runVersion !== version) {
+      return Promise.resolve({ status: "cancelled", reason: "superseded" });
+    }
     const nextController = new AbortController();
     controller = nextController;
-    const runVersion = ++version;
     let settled = false;
     let settle!: (result: ResourceOutcome<T>) => void;
     const cancel = (reason: unknown): void => settle({ status: "cancelled", reason });

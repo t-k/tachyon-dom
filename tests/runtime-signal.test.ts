@@ -283,6 +283,68 @@ describe("signal runtime", () => {
     disposeRoot();
   });
 
+  it("does not rerun an effect after its root is disposed by rerun cleanup", async () => {
+    const source = createSignal(0);
+    let runs = 0;
+    let cleanupRuns = 0;
+    let fetchCalls = 0;
+    let resource: Resource<number> | undefined;
+    const disposeRoot = createRoot((dispose) => {
+      effect(() => {
+        source();
+        runs++;
+        if (runs === 2) {
+          resource = createResource("key", () => {
+            fetchCalls++;
+            return 1;
+          });
+        }
+        return () => {
+          cleanupRuns++;
+          dispose();
+        };
+      });
+      return dispose;
+    });
+
+    source.set(1);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(runs).toBe(1);
+    expect(cleanupRuns).toBe(1);
+    expect(fetchCalls).toBe(0);
+    expect(resource).toBeUndefined();
+    disposeRoot();
+  });
+
+  it("preserves a rerun cleanup error when that cleanup disposes its root", () => {
+    const source = createSignal(0);
+    const cleanupError = new Error("cleanup disposed the root");
+    let runs = 0;
+    let cleanupRuns = 0;
+    let disposeRoot: (() => void) | undefined;
+
+    createRoot((dispose) => {
+      disposeRoot = dispose;
+      effect(() => {
+        source();
+        runs++;
+        return () => {
+          cleanupRuns++;
+          dispose();
+          throw cleanupError;
+        };
+      });
+      return dispose;
+    });
+
+    expect(() => source.set(1)).toThrow(cleanupError);
+    expect(runs).toBe(1);
+    expect(cleanupRuns).toBe(1);
+    expect(() => disposeRoot?.()).not.toThrow();
+  });
+
   it("runs a returned cleanup immediately when the initial owner is disposed", () => {
     let cleanupRuns = 0;
     const disposeRoot = createRoot((dispose) => {
@@ -738,6 +800,23 @@ describe("signal runtime", () => {
 
     await expect(outcome).resolves.toEqual({ status: "cancelled", reason: "disposed" });
     expect(resource.data()).toBe("payload");
+    expect(resource.loading()).toBe(false);
+    resource.dispose();
+  });
+
+  it("does not revive loading when an abort listener disposes a completed resource", async () => {
+    let resource!: Resource<string>;
+    let fetchCalls = 0;
+    resource = createResource("source", (_value, { signal }) => {
+      fetchCalls++;
+      signal.addEventListener("abort", () => resource.dispose(), { once: true });
+      return "payload";
+    });
+
+    await expect(resource.refetchOutcome()).resolves.toEqual({ status: "success", data: "payload" });
+    await expect(resource.refetchOutcome()).resolves.toEqual({ status: "cancelled", reason: "superseded" });
+
+    expect(fetchCalls).toBe(1);
     expect(resource.loading()).toBe(false);
     resource.dispose();
   });
