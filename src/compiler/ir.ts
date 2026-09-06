@@ -65,7 +65,12 @@ const componentProps = (node: ElementNode): ComponentProp[] =>
 const componentStores = (node: ElementNode): StoreDefinition[] => {
   const stores: StoreDefinition[] = [];
   const visit = (child: TemplateNode): void => {
-    if (child.type !== "element" || child.tagName === "component") {
+    if (
+      child.type !== "element" ||
+      child.tagName === "component" ||
+      child.tagName === "if" ||
+      child.tagName === "for"
+    ) {
       return;
     }
     if (child.tagName === "store") {

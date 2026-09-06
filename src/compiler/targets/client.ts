@@ -198,7 +198,12 @@ const componentStores = (
 ): StoreDefinition[] => {
   const stores: StoreDefinition[] = [];
   const visit = (child: TemplateNode): void => {
-    if (child.type !== "element" || child.tagName === "component") {
+    if (
+      child.type !== "element" ||
+      child.tagName === "component" ||
+      child.tagName === "if" ||
+      child.tagName === "for"
+    ) {
       return;
     }
     if (child.tagName === "store") {
@@ -286,10 +291,13 @@ const lowerIf = (node: ElementNode, path: number[], context: ClientLoweringConte
     declarations: context.declarations,
   };
   const children = renderableChildren(node);
+  const renderedChildren = children.filter(
+    (child) => child.type !== "element" || (child.tagName !== "store" && child.tagName !== "for"),
+  );
   let templateHtml = "";
   let domIndex = 0;
   for (const child of children) {
-    const lowered = lowerNode(child, children.length === 1 ? [] : [domIndex], childContext);
+    const lowered = lowerNode(child, renderedChildren.length === 1 ? [] : [domIndex], childContext);
     templateHtml += lowered.html;
     domIndex += lowered.nodeCount;
   }
@@ -512,7 +520,10 @@ const lowerNode = (node: TemplateNode, path: number[], context: ClientLoweringCo
   if (node.type === "text") {
     return lowerTextNode(node, path, context);
   }
-  return { html: lowerElement(node, path, context), nodeCount: 1 };
+  return {
+    html: lowerElement(node, path, context),
+    nodeCount: node.tagName === "store" || node.tagName === "for" ? 0 : 1,
+  };
 };
 
 export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client"] => {
@@ -673,11 +684,16 @@ export const generateClientHydrationChunkModule = (
   // resolved, so it must never run the SFC setup factory again.
   // The chunk registers its own template id so bindings created after the
   // asynchronous load are attributed explicitly instead of via a global.
+  const sourceRevision = options.sourceRevision ?? sourceRevisionFor(template.source);
+  const templateId =
+    typeof options.templateId === "string" && options.templateId.length > 0
+      ? options.templateId
+      : `anonymous:${sourceRevision}:chunk:${hexDigest(sha256(utf8ToBytes(boundaryId)))}`;
   return generateClientModule(boundaryTemplate, {
     hydrationChunk: true,
     ...(options.reactive === undefined ? {} : { reactive: options.reactive }),
-    ...(options.templateId ? { templateId: options.templateId } : {}),
-    ...(options.sourceRevision ? { sourceRevision: options.sourceRevision } : {}),
+    templateId,
+    sourceRevision,
     ...(options.mapSourceOffset ? { mapSourceOffset: options.mapSourceOffset } : {}),
     ...(options.instrumentBindings === undefined ? {} : { instrumentBindings: options.instrumentBindings }),
   });

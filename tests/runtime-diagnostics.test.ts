@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createRuntimeDiagnostics } from "../src/runtime/diagnostics";
 import { createRoot, createSignal, effect } from "../src/runtime/signal";
-import { compileTemplate, generateClientModule } from "../src/compiler";
+import { compileTemplate, generateClientHydrationChunkModule, generateClientModule } from "../src/compiler";
 import { mount } from "../src/runtime/mount";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
 
@@ -147,6 +147,41 @@ describe("development runtime diagnostics", () => {
       expect(locations.every((location) => location.sourceOffset !== undefined)).toBe(true);
     } finally {
       handle.dispose();
+      diagnostics.dispose();
+    }
+  });
+
+  it("assigns independent anonymous diagnostics identities to hydration chunks", () => {
+    const source = `<main><p hydrate:idle>{first}</p><p hydrate:idle>{second}</p></main>`;
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const diagnostics = createRuntimeDiagnostics();
+    const disposers: Array<() => void> = [];
+    const sourceSlices = (): string[] =>
+      diagnostics
+        .liveBindings()
+        .filter((location) => location.kind === "text" && location.effectId !== undefined)
+        .flatMap((location) =>
+          location.sourceOffset === undefined || location.sourceEnd === undefined
+            ? []
+            : [source.slice(location.sourceOffset, location.sourceEnd)],
+        );
+    try {
+      for (const boundary of compiled.value.client.hydrationBoundaries) {
+        const module = evaluateGeneratedClientModule(
+          generateClientHydrationChunkModule(compiled.value, boundary.id, { reactive: true }),
+        );
+        const host = document.createElement("div");
+        host.innerHTML = module.templateHtml;
+        const root = host.firstElementChild;
+        if (!(root instanceof HTMLElement)) throw new Error("Missing hydration chunk root.");
+        const dispose = module.bind?.(root, { first: "ONE", second: "TWO" });
+        if (dispose) disposers.push(dispose);
+      }
+
+      expect(sourceSlices()).toEqual(["first", "second"]);
+    } finally {
+      for (const dispose of disposers.reverse()) dispose();
       diagnostics.dispose();
     }
   });

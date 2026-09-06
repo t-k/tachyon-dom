@@ -163,6 +163,35 @@ describe("client mount entrypoints", () => {
     expect(Array.from(root.querySelectorAll("span")).map((span) => span.textContent)).toEqual(["1", "2"]);
   });
 
+  it("creates component branch stores when shown and recreates them after hiding", () => {
+    const compiled = compileTemplate(
+      `<main><component name="Panel"><section><if test={visible}><store count={init()}/><output>{count}</output></if></section></component></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const visible = createSignal(false);
+    let initializations = 0;
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    const handle = mount(root, module, {
+      visible,
+      init: () => {
+        initializations += 1;
+        return initializations;
+      },
+    });
+
+    expect(initializations).toBe(0);
+    visible.set(true);
+    expect(initializations).toBe(1);
+    expect(root.querySelector("output")?.textContent).toBe("1");
+    visible.set(false);
+    expect(root.querySelector("output")).toBeNull();
+    visible.set(true);
+    expect(initializations).toBe(2);
+    expect(root.querySelector("output")?.textContent).toBe("2");
+    handle.dispose();
+  });
+
   it("resolves binding paths across SSR hydration markers when a boundary has siblings", () => {
     const compiled = compileTemplate(
       `<main><section hydrate:id={panel}><p class:on={active}>{title}:{note}</p></section><h1>{title}</h1><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul><button on:click={go}>go</button></main>`,
