@@ -86,6 +86,144 @@ const buildLazyFixture = async () => {
   );
 };
 
+const buildConditionalFixture = async () => {
+  const { compileTemplate, generateClientModule, renderServerTemplate } = await import(`${distRoot}/compiler.js`);
+  const source = `<main><if test={leftVisible}><button data-branch="left" on:click={saveLeft}>{left}</button></if><if test={rightVisible}><button data-branch="right" on:click={saveRight}>{right}</button></if><if test={ssrVisible}><p>{ssrLabel}<span>{ssrOther}</span></p></if><footer>Static</footer></main>`;
+  const compiled = compileTemplate(source);
+  if (!compiled.ok) throw new Error(compiled.error.message);
+  const generated = generateClientModule(compiled.value, { reactive: true, instrumentBindings: false });
+  const entrySource = resolve(outDir, "conditional-source.js");
+  await writeFile(
+    entrySource,
+    `import { createSignal } from "tachyon-dom";
+import { hydrate, mount } from "tachyon-dom/runtime/mount";
+${generated}
+const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind };
+window.runConditionalFollowup = () => {
+  const mountRoot = document.querySelector("#conditional-mount");
+  if (!mountRoot) throw new Error("Missing conditional mount root.");
+  const leftVisible = createSignal(true);
+  const rightVisible = createSignal(true);
+  const left = createSignal("A");
+  const right = createSignal("B");
+  let leftClicks = 0;
+  let rightClicks = 0;
+  const mounted = mount(mountRoot, clientModule, {
+    leftVisible,
+    rightVisible,
+    left,
+    right,
+    ssrVisible: createSignal(false),
+    ssrLabel: createSignal("unused"),
+    ssrOther: createSignal("unused"),
+    saveLeft: () => leftClicks++,
+    saveRight: () => rightClicks++,
+  });
+  const firstRight = mountRoot.querySelector('[data-branch="right"]');
+  leftVisible.set(false);
+  firstRight?.click();
+  leftVisible.set(true);
+  left.set("A2");
+  right.set("B2");
+  const rightPreserved = mountRoot.querySelector('[data-branch="right"]') === firstRight;
+  const mountedText = mountRoot.textContent;
+  const beforeDisposeRightClicks = rightClicks;
+  mounted.dispose();
+  firstRight?.click();
+  const mountResult = {
+    text: mountedText,
+    rightPreserved,
+    leftClicks,
+    rightClicks,
+    disposedRightListener: rightClicks === beforeDisposeRightClicks,
+  };
+
+  const ssrRoot = document.querySelector("#conditional-ssr");
+  if (!ssrRoot) throw new Error("Missing conditional SSR root.");
+  const ssrVisible = createSignal(true);
+  const ssrLabel = createSignal("");
+  const ssrOther = createSignal(null);
+  const hydrated = hydrate(ssrRoot, clientModule, {
+    leftVisible: createSignal(false),
+    rightVisible: createSignal(false),
+    left: createSignal("unused"),
+    right: createSignal("unused"),
+    ssrVisible,
+    ssrLabel,
+    ssrOther,
+    saveLeft: () => undefined,
+    saveRight: () => undefined,
+  });
+  if (!hydrated.ok) throw new Error(hydrated.error.message);
+  const paragraph = ssrRoot.querySelector("p");
+  if (!paragraph) throw new Error("Missing hydrated paragraph.");
+  const serverParagraph = paragraph;
+  ssrLabel.set("ready");
+  const materialized = paragraph.firstChild?.nodeType === Node.TEXT_NODE && paragraph.textContent === "ready";
+  ssrLabel.set("");
+  ssrOther.set("second");
+  const multipleTextBindings = paragraph.textContent === "second";
+  ssrVisible.set(false);
+  ssrVisible.set(true);
+  const recreatedParagraph = ssrRoot.querySelector("p");
+  const hydrateResult = {
+    materialized,
+    multipleTextBindings,
+    serverIdentity: serverParagraph === ssrRoot.querySelector("p"),
+    recreated: recreatedParagraph !== serverParagraph,
+    text: ssrRoot.textContent,
+  };
+  hydrated.value.dispose();
+  return { mount: mountResult, hydrate: hydrateResult };
+};
+window.__conditionalReady = true;
+`,
+  );
+  await build({
+    configFile: false,
+    logLevel: "silent",
+    root: outDir,
+    mode: "production",
+    resolve: {
+      alias: [
+        { find: /^tachyon-dom\/(.+)$/, replacement: `${distRoot}/$1.js` },
+        { find: "tachyon-dom", replacement: `${distRoot}/index.js` },
+      ],
+    },
+    build: {
+      outDir,
+      emptyOutDir: false,
+      minify: true,
+      rollupOptions: {
+        input: entrySource,
+        output: { entryFileNames: "conditional-entry.js", format: "es" },
+      },
+    },
+  });
+  const markup = renderServerTemplate(compiled.value, {
+    leftVisible: false,
+    rightVisible: false,
+    left: "unused",
+    right: "unused",
+    ssrVisible: true,
+    ssrLabel: "",
+    ssrOther: null,
+  });
+  await writeFile(
+    resolve(outDir, "conditional-fixture.html"),
+    `<!doctype html>
+<html>
+  <body>
+    <div id="conditional-mount"></div>
+    <div id="conditional-ssr">${markup}</div>
+    <script type="module" src="./conditional-entry.js"></script>
+  </body>
+</html>
+`,
+  );
+};
+
 export default async function globalSetup() {
   await buildLazyFixture();
+  await buildConditionalFixture();
 }

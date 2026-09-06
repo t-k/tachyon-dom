@@ -1,9 +1,9 @@
 {
   "static": { "maxMinifiedBytes": 1385, "maxBrotliBytes": 596 },
   "signal-only": { "maxMinifiedBytes": 988, "maxBrotliBytes": 526 },
-  "reactive-text": { "maxMinifiedBytes": 4589, "maxBrotliBytes": 1740 },
-  "event-only": { "maxMinifiedBytes": 1859, "maxBrotliBytes": 817 },
-  "text-only-list": { "maxMinifiedBytes": 12463, "maxBrotliBytes": 4538 },
-  "minimal-if": { "maxMinifiedBytes": 34881, "maxBrotliBytes": 10489 },
-  "composite-quick-example": { "maxMinifiedBytes": 13241, "maxBrotliBytes": 4738 }
+  "reactive-text": { "maxMinifiedBytes": 4637, "maxBrotliBytes": 1754 },
+  "event-only": { "maxMinifiedBytes": 1859, "maxBrotliBytes": 815 },
+  "text-only-list": { "maxMinifiedBytes": 12511, "maxBrotliBytes": 4538 },
+  "minimal-if": { "maxMinifiedBytes": 15428, "maxBrotliBytes": 5126 },
+  "composite-quick-example": { "maxMinifiedBytes": 13289, "maxBrotliBytes": 4747 }
 }

@@ -23,6 +23,23 @@ declare global {
     __lazySetupRuns?: number;
     __lazySubmits?: number;
     __lazyStop?: () => void;
+    runConditionalFollowup: () => {
+      mount: {
+        text: string;
+        rightPreserved: boolean;
+        leftClicks: number;
+        rightClicks: number;
+        disposedRightListener: boolean;
+      };
+      hydrate: {
+        materialized: boolean;
+        multipleTextBindings: boolean;
+        serverIdentity: boolean;
+        recreated: boolean;
+        text: string;
+      };
+    };
+    __conditionalReady?: boolean;
   }
 }
 
@@ -101,5 +118,26 @@ test("loads the Vite-built boundary chunk only after the first interaction and r
   expect(afterInteraction.submits).toBe(1);
   expect(afterInteraction.html).toBe(manifest.ssrMarkup);
   expect(afterInteraction.url).not.toContain("?");
+  expect(["chromium", "firefox", "webkit"]).toContain(browserName);
+});
+
+test("runs generated adjacent conditional mount and SSR hydration regressions in a real browser", async ({
+  page,
+  browserName,
+}) => {
+  await page.goto("/tests/browser/generated/conditional-fixture.html");
+  await page.waitForFunction(() => window.__conditionalReady === true);
+  const result = await page.evaluate(() => window.runConditionalFollowup());
+
+  expect(result.mount.text).toBe("A2B2Static");
+  expect(result.mount.rightPreserved).toBe(true);
+  expect(result.mount.leftClicks).toBe(0);
+  expect(result.mount.rightClicks).toBe(1);
+  expect(result.mount.disposedRightListener).toBe(true);
+  expect(result.hydrate.materialized).toBe(true);
+  expect(result.hydrate.multipleTextBindings).toBe(true);
+  expect(result.hydrate.serverIdentity).toBe(false);
+  expect(result.hydrate.recreated).toBe(true);
+  expect(result.hydrate.text).toBe("secondStatic");
   expect(["chromium", "firefox", "webkit"]).toContain(browserName);
 });
