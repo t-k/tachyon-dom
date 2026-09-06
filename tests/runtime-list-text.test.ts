@@ -44,6 +44,64 @@ describe("mountTextKeyedList", () => {
     expect(root.firstElementChild).toBe(row);
   });
 
+  it("cleans the previous generated descriptor when its signature changes", () => {
+    const root = document.createElement("ul");
+    const oldLabel = createSignal("Old");
+    let oldReads = 0;
+    const oldOptions = {
+      signature: "generated-descriptor-old",
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "row",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "row.label()",
+          read: (scope: Record<string, unknown>) => {
+            oldReads++;
+            return (scope.row as { label: () => string }).label();
+          },
+        },
+      ],
+    };
+
+    mountGeneratedTextKeyedList(root, [], [{ id: "old", label: oldLabel }], oldOptions);
+    const oldRow = root.firstElementChild;
+    const readsBeforeSignatureChange = oldReads;
+
+    const newLabel = createSignal("New");
+    const newOptions = {
+      signature: "generated-descriptor-new",
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "row",
+      templateHtml: `<li><span>static</span><strong> </strong></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [1, 0],
+          expression: "row.label()",
+          read: (scope: Record<string, unknown>) => (scope.row as { label: () => string }).label(),
+        },
+      ],
+    };
+
+    expect(oldOptions.signature).not.toBe(newOptions.signature);
+    expect(oldOptions.templateHtml).not.toBe(newOptions.templateHtml);
+    expect(oldOptions.bindings[0]?.path).not.toEqual(newOptions.bindings[0]?.path);
+    mountGeneratedTextKeyedList(root, [], [{ id: "new", label: newLabel }], newOptions);
+
+    expect(oldRow?.isConnected).toBe(false);
+    expect(root.innerHTML).toBe(`<li><span>static</span><strong>New</strong></li>`);
+    oldLabel.set("Ignored");
+    expect(oldReads).toBe(readsBeforeSignatureChange);
+    newLabel.set("Updated");
+    expect(root.textContent).toBe("staticUpdated");
+    cleanupTextKeyedList(root, []);
+  });
+
   it("exposes an explicit row index while reusing keyed records", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

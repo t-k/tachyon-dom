@@ -69,6 +69,8 @@ export type LoadedGeneratedModule = {
   timing: GeneratedModuleLoadTiming;
   /** The exact bundled code that was imported and executed. */
   bundledCode: string;
+  /** The esbuild dependency graph for the same generated artifact. */
+  metafile: Record<string, unknown>;
   size: ArtifactSize;
 };
 
@@ -78,6 +80,9 @@ export const REPRESENTATIVE_TEMPLATE_SOURCES = {
   "text-template": `<table><tbody><for each={rows} key={row.id}><tr class="row"><td>{row.id}</td><td><input value=""><span>{row.label}</span></td><td>{row.selected ? "selected" : ""}</td>${nestedTags}</tr></for></tbody></table>`,
   "mixed-template": `<table><tbody><for each={rows} key={row.id}><tr class="row" class:selected={row.selected} on:click={row.onClick}><td>{row.id}</td><td><input value="" bind:value={row.label}><span>{row.label}</span></td><td>{row.selected ? "selected" : ""}</td>${nestedTags}</tr></for></tbody></table>`,
 } as const;
+
+/** A top-level text-only list used to measure the generated reader adapter. */
+export const GENERATED_TEXT_LIST_ADAPTER_SOURCE = `<ul><for each={rows} key={row.id}><li><span>{row.label}</span></li></for></ul>`;
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = promisify(execFile);
@@ -97,20 +102,32 @@ const resolveRuntimeImports = (code: string): string =>
 export const loadCandidateModule = async <Module>(
   code: string,
   compileMs = 0,
-): Promise<{ module: Module; timing: GeneratedModuleLoadTiming; bundledCode: string; size: ArtifactSize }> => {
+): Promise<{
+  module: Module;
+  timing: GeneratedModuleLoadTiming;
+  bundledCode: string;
+  metafile: Record<string, unknown>;
+  size: ArtifactSize;
+}> => {
   const directory = await mkdtemp(path.join(tmpdir(), "tachyon-generated-template-"));
   const input = path.join(directory, "entry.js");
   const output = path.join(directory, "entry.out.js");
   const minified = path.join(directory, "entry.min.js");
+  const metafilePath = path.join(directory, "entry.meta.json");
   try {
     const bundleStarted = performance.now();
     await writeFile(input, resolveRuntimeImports(code));
     const commonArguments = ["--bundle", "--format=esm", "--platform=node", "--target=es2022"];
-    await execFileAsync(process.execPath, [esbuildCli, input, ...commonArguments, `--outfile=${output}`], {
-      cwd: projectRoot,
-      maxBuffer: 16 * 1024 * 1024,
-    });
+    await execFileAsync(
+      process.execPath,
+      [esbuildCli, input, ...commonArguments, `--metafile=${metafilePath}`, `--outfile=${output}`],
+      {
+        cwd: projectRoot,
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
     const bundled = await readFile(output, "utf8");
+    const metafile = JSON.parse(await readFile(metafilePath, "utf8")) as Record<string, unknown>;
     const bundleMs = performance.now() - bundleStarted;
     await execFileAsync(
       process.execPath,
@@ -126,6 +143,7 @@ export const loadCandidateModule = async <Module>(
       module,
       timing: { compileMs, bundleMs, importMs },
       bundledCode: bundled,
+      metafile,
       size: { minifiedBytes: minifiedCode.byteLength, brotliBytes: brotliCompressSync(minifiedCode).byteLength },
     };
   } finally {
