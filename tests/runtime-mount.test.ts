@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
 import { hydrate, mount, type ClientTemplateModule } from "../src/runtime/mount";
-import { createRoot, createSignal, effect } from "../src/runtime/signal";
+import { createRoot, createSignal, effect, onCleanup, setRuntimeLifecycleHooks } from "../src/runtime/signal";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
 import * as hydrateRuntime from "../src/runtime/hydrate";
 
@@ -78,6 +78,151 @@ describe("client mount entrypoints", () => {
     if (hiddenHydrated.ok) hiddenHydrated.value.dispose();
   });
 
+  it("keeps adjacent generated conditional branches independent across toggles", () => {
+    const compiled = compileTemplate(
+      `<main><if test={leftVisible}><button data-branch="left" on:click={saveLeft}>{left}</button></if><if test={rightVisible}><button data-branch="right" on:click={saveRight}>{right}</button></if><footer>Static</footer></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+
+    for (const [leftInitiallyVisible, rightInitiallyVisible] of [
+      [true, true],
+      [true, false],
+      [false, true],
+      [false, false],
+    ] as const) {
+      const root = document.createElement("div");
+      const leftVisible = createSignal(leftInitiallyVisible);
+      const rightVisible = createSignal(rightInitiallyVisible);
+      const left = createSignal("A");
+      const right = createSignal("B");
+      let leftClicks = 0;
+      let rightClicks = 0;
+      const handle = mount(root, module, {
+        leftVisible,
+        rightVisible,
+        left,
+        right,
+        saveLeft: () => leftClicks++,
+        saveRight: () => rightClicks++,
+      });
+      const main = root.querySelector("main");
+      const footer = main?.querySelector("footer");
+      if (!(main instanceof HTMLElement) || !(footer instanceof HTMLElement)) {
+        throw new Error("Missing generated conditional root.");
+      }
+
+      expect(main.textContent).toBe(`${leftInitiallyVisible ? "A" : ""}${rightInitiallyVisible ? "B" : ""}Static`);
+      rightVisible.set(true);
+      leftVisible.set(true);
+      const firstLeft = main.querySelector(`[data-branch="left"]`);
+      const firstRight = main.querySelector(`[data-branch="right"]`);
+      expect(main.textContent).toBe("ABStatic");
+      expect(main.querySelector("footer")).toBe(footer);
+
+      left.set("A2");
+      right.set("B2");
+      expect(main.textContent).toBe("A2B2Static");
+      leftVisible.set(false);
+      expect(main.textContent).toBe("B2Static");
+      main.querySelector(`[data-branch="right"]`)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(rightClicks).toBe(1);
+      leftVisible.set(true);
+      expect(main.textContent).toBe("A2B2Static");
+      expect(main.querySelector(`[data-branch="right"]`)).toBe(firstRight);
+      expect(main.querySelector(`[data-branch="left"]`)).not.toBe(firstLeft);
+      main.querySelector(`[data-branch="left"]`)?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(leftClicks).toBe(1);
+
+      rightVisible.set(false);
+      leftVisible.set(false);
+      expect(main.textContent).toBe("Static");
+      rightVisible.set(true);
+      expect(main.textContent).toBe("B2Static");
+      const finalRight = main.querySelector(`[data-branch="right"]`);
+      expect(finalRight).not.toBe(firstRight);
+      handle.dispose();
+      finalRight?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      expect(rightClicks).toBe(1);
+    }
+  });
+
+  it("hydrates every adjacent conditional visibility combination without stealing SSR nodes", () => {
+    const compiled = compileTemplate(
+      `<main><if test={leftVisible}><button data-branch="left">{left}</button></if><if test={rightVisible}><button data-branch="right">{right}</button></if><footer>Static</footer></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+
+    for (const [leftInitiallyVisible, rightInitiallyVisible] of [
+      [true, true],
+      [true, false],
+      [false, true],
+      [false, false],
+    ] as const) {
+      const root = document.createElement("div");
+      const leftVisible = createSignal(leftInitiallyVisible);
+      const rightVisible = createSignal(rightInitiallyVisible);
+      const left = createSignal("A");
+      const right = createSignal("B");
+      root.innerHTML = renderServerTemplate(compiled.value, {
+        leftVisible: leftInitiallyVisible,
+        rightVisible: rightInitiallyVisible,
+        left: "A",
+        right: "B",
+      });
+      const serverLeft = root.querySelector(`[data-branch="left"]`);
+      const serverRight = root.querySelector(`[data-branch="right"]`);
+      const hydrated = hydrate(root, module, { leftVisible, rightVisible, left, right });
+      if (!hydrated.ok) throw new Error(hydrated.error.message);
+
+      expect(root.textContent).toBe(`${leftInitiallyVisible ? "A" : ""}${rightInitiallyVisible ? "B" : ""}Static`);
+      expect(root.querySelector(`[data-branch="left"]`)).toBe(leftInitiallyVisible ? serverLeft : null);
+      expect(root.querySelector(`[data-branch="right"]`)).toBe(rightInitiallyVisible ? serverRight : null);
+
+      leftVisible.set(!leftInitiallyVisible);
+      rightVisible.set(!rightInitiallyVisible);
+      expect(root.textContent).toBe(`${leftInitiallyVisible ? "" : "A"}${rightInitiallyVisible ? "" : "B"}Static`);
+      hydrated.value.dispose();
+    }
+  });
+
+  it.each(["", null, undefined])("materializes generated conditional SSR text markers for %j", (initialValue) => {
+    const compiled = compileTemplate(
+      `<main><if test={visible}><p>{label}<span>{other}</span></p></if></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      visible: true,
+      label: initialValue,
+      other: initialValue,
+    });
+    const firstParagraph = root.querySelector("p");
+    if (!(firstParagraph instanceof HTMLParagraphElement)) throw new Error("Missing SSR paragraph.");
+    const visible = createSignal(true);
+    const label = createSignal<string | null | undefined>(initialValue);
+    const other = createSignal<string | null | undefined>(initialValue);
+    const hydrated = hydrate(root, module, { visible, label, other });
+    if (!hydrated.ok) throw new Error(hydrated.error.message);
+
+    expect(root.querySelector("p")).toBe(firstParagraph);
+    expect(firstParagraph.textContent).toBe("");
+    label.set("ready");
+    expect(firstParagraph.textContent).toBe("ready");
+    expect(firstParagraph.firstChild?.nodeType).toBe(Node.TEXT_NODE);
+    label.set("");
+    other.set("second");
+    expect(firstParagraph.textContent).toBe("second");
+    visible.set(false);
+    expect(root.querySelector("p")).toBeNull();
+    visible.set(true);
+    expect(root.querySelector("p")?.textContent).toBe("second");
+
+    hydrated.value.dispose();
+  });
+
   it("emits the generated text-list entry while preserving its runtime behavior", () => {
     const compiled = compileTemplate(`<ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul>`);
     if (!compiled.ok) throw new Error(compiled.error.message);
@@ -135,6 +280,155 @@ describe("client mount entrypoints", () => {
     expect(root.querySelectorAll("li")[2]).toBe(firstRow);
     expect(root.querySelectorAll("li")[1]?.textContent).toBe("Q:1:D");
     expect(root.querySelectorAll("li").length).toBe(3);
+  });
+
+  it("hydrates generated multi-root text rows, preserves static siblings, and disposes updates", () => {
+    const compiled = compileTemplate(
+      `<main><ul><for each={rows} key={row.id}><li>{row.label}</li><hr></for><footer>Footer</footer></ul></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const first = { id: "a", label: "A" };
+    const second = { id: "b", label: "B" };
+    const rows = createSignal([first, second]);
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, { rows: [first, second] });
+    const serverRows = Array.from(root.querySelectorAll("li"));
+    const footer = root.querySelector("footer");
+
+    const hydrated = hydrate(root, module, { rows });
+    if (!hydrated.ok) throw new Error(hydrated.error.message);
+    expect(root.textContent).toBe("ABFooter");
+    expect(Array.from(root.querySelectorAll("li"))).toEqual(serverRows);
+    expect(root.querySelector("footer")).toBe(footer);
+
+    const third = { id: "c", label: "C" };
+    rows.set([second, third, first]);
+    const reorderedRows = Array.from(root.querySelectorAll("li"));
+    expect(root.textContent).toBe("BCAFooter");
+    expect(reorderedRows[0]).toBe(serverRows[1]);
+    expect(reorderedRows[2]).toBe(serverRows[0]);
+    expect(root.querySelector("footer")).toBe(footer);
+
+    rows.set([first]);
+    expect(root.textContent).toBe("AFooter");
+    const remainingRow = root.querySelector("li");
+    hydrated.value.dispose();
+    expect(root.querySelector("li")).toBeNull();
+    rows.set([second]);
+    expect(root.querySelector("li")).toBeNull();
+    expect(remainingRow?.isConnected).toBe(false);
+  });
+
+  it("isolates generated text-list roots and releases generated reader cleanups", () => {
+    let cleanupCount = 0;
+    let subscriptionCount = 0;
+    const restoreHooks = setRuntimeLifecycleHooks({
+      cleanupChanged: (delta) => {
+        cleanupCount += delta;
+      },
+      subscriptionChanged: (delta) => {
+        subscriptionCount += delta;
+      },
+    });
+    const handles: Array<ReturnType<typeof mount>> = [];
+    try {
+      const compiled = compileTemplate(`<ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul>`);
+      if (!compiled.ok) throw new Error(compiled.error.message);
+      const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+      const firstRows = createSignal([{ id: "a", label: "A" }]);
+      const secondRows = createSignal([{ id: "b", label: "B" }]);
+      const firstRoot = document.createElement("div");
+      const secondRoot = document.createElement("div");
+      handles.push(mount(firstRoot, module, { rows: firstRows }));
+      handles.push(mount(secondRoot, module, { rows: secondRows }));
+      const secondRow = secondRoot.querySelector("li");
+
+      firstRows.set([{ id: "a", label: "A1" }]);
+      expect(firstRoot.textContent).toBe("A1");
+      expect(secondRoot.textContent).toBe("B");
+      handles[0]?.dispose();
+      firstRows.set([{ id: "a", label: "ignored" }]);
+      expect(firstRoot.textContent).toBe("");
+      secondRows.set([{ id: "b", label: "B1" }]);
+      expect(secondRoot.textContent).toBe("B1");
+      expect(secondRoot.querySelector("li")).toBe(secondRow);
+
+      const throwingCompiled = compileTemplate(`<ul><for each={rows} key={row.id}><li>{register(row.id)}</li></for></ul>`);
+      if (!throwingCompiled.ok) throw new Error(throwingCompiled.error.message);
+      const throwingModule = evaluateGeneratedClientModule(
+        generateClientModule(throwingCompiled.value, { reactive: true }),
+      );
+      const cleaned: number[] = [];
+      const throwingRows = createSignal([{ id: 1 }, { id: 2 }]);
+      const throwingRoot = document.createElement("div");
+      const throwingHandle = mount(throwingRoot, throwingModule, {
+        rows: throwingRows,
+        register: (id: number) => {
+          onCleanup(() => {
+            cleaned.push(id);
+            if (id === 1) throw new Error("generated reader cleanup failed");
+          });
+          return String(id);
+        },
+      });
+      expect(() => throwingRows.set([])).toThrow("generated reader cleanup failed");
+      expect(cleaned.sort()).toEqual([1, 2]);
+      expect(throwingRoot.textContent).toBe("");
+      expect(() => throwingRows.set([])).not.toThrow();
+
+      const rootDisposeRows = createSignal([{ id: 1 }]);
+      const rootDisposeRoot = document.createElement("div");
+      const rootDisposeHandle = mount(rootDisposeRoot, throwingModule, {
+        rows: rootDisposeRows,
+        register: (id: number) => {
+          onCleanup(() => {
+            if (id === 1) throw new Error("generated root cleanup failed");
+          });
+          return String(id);
+        },
+      });
+      expect(() => rootDisposeHandle.dispose()).toThrow("generated root cleanup failed");
+      expect(rootDisposeRoot.textContent).toBe("");
+      expect(() => rootDisposeHandle.dispose()).not.toThrow();
+      throwingHandle.dispose();
+      handles[1]?.dispose();
+    } finally {
+      for (const handle of handles) handle.dispose();
+      restoreHooks();
+    }
+    expect(cleanupCount).toBe(0);
+    expect(subscriptionCount).toBe(0);
+  });
+
+  it("uses the generated keyRead adapter for composite keys and changes signatures safely", () => {
+    const compiled = compileTemplate(
+      `<ul><for each={rows} key={row.id + suffix}><li>{row.label}</li></for></ul>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const generated = generateClientModule(compiled.value, { reactive: true });
+    expect(generated).toContain(`keyRead: (scope) =>`);
+    expect(generated).not.toContain(`keyReadItem:`);
+    const module = evaluateGeneratedClientModule(generated);
+    const root = document.createElement("div");
+    const first = { id: "a", label: "A" };
+    const second = { id: "b", label: "B" };
+    const rows = createSignal([first, second]);
+    const scope = { rows, suffix: "-one" };
+    const handle = mount(root, module, scope);
+    const firstRow = root.querySelectorAll("li")[0];
+    const secondRow = root.querySelectorAll("li")[1];
+
+    rows.set([second, first]);
+    expect(root.textContent).toBe("BA");
+    expect(root.querySelectorAll("li")[0]).toBe(secondRow);
+    expect(root.querySelectorAll("li")[1]).toBe(firstRow);
+    scope.suffix = "-two";
+    rows.set([first, second]);
+    expect(root.textContent).toBe("AB");
+    expect(root.querySelectorAll("li")[0]).not.toBe(firstRow);
+    expect(root.querySelectorAll("li")[1]).not.toBe(secondRow);
+    handle.dispose();
   });
 
   it("rejects hydration when the existing root structure does not match", () => {

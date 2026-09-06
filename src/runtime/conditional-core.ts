@@ -3,7 +3,7 @@ import { setClassPresence } from "./class.js";
 import { delegate } from "./event.js";
 import { onOwnerCleanup, read } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
-import { setText } from "./text.js";
+import { setText, textAt } from "./text.js";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 
@@ -67,14 +67,114 @@ type AnchorResolution = {
   adoptedNodes: Node[] | undefined;
 };
 
+export type ConditionalCoreAnchorDescriptor = {
+  path: readonly number[];
+  visible: unknown;
+  templateHtml: string;
+};
+
 const states = new WeakMap<Comment, ConditionalCoreState>();
 const ownerCleanupDisposers = new WeakMap<Comment, () => void>();
+const anchorsByRoot = new WeakMap<Node, Map<string, Comment>>();
+const initialSnapshots = new WeakMap<Node, { topLevel: Node[]; nodes: Map<string, Node> }>();
+const preparedAdoptions = new WeakMap<Comment, Node[]>();
+
+const pathKey = (path: readonly number[]): string => path.join(".");
 
 const isHydrationMarker = (node: Node): boolean =>
   node.nodeType === Node.COMMENT_NODE && (node.nodeValue ?? "").startsWith("tachyon-hydrate:");
 
 const logicalChildren = (node: Node): Node[] =>
   Array.from(node.childNodes).filter((child) => !isHydrationMarker(child));
+
+const snapshotNodes = (root: Node): Map<string, Node> => {
+  const nodes = new Map<string, Node>();
+  const visit = (node: Node, path: readonly number[]): void => {
+    nodes.set(pathKey(path), node);
+    for (const [index, child] of logicalChildren(node).entries()) visit(child, [...path, index]);
+  };
+  visit(root, []);
+  return nodes;
+};
+
+const initialNodesFor = (root: Node): Map<string, Node> => {
+  const currentTopLevel = logicalChildren(root);
+  const anchors = anchorsByRoot.get(root);
+  const hasAttachedAnchor = Array.from(anchors?.values() ?? []).some((anchor) => anchor.parentNode !== null);
+  const previous = initialSnapshots.get(root);
+  if (
+    previous &&
+    (hasAttachedAnchor ||
+      (previous.topLevel.length === currentTopLevel.length &&
+        previous.topLevel.every((node, index) => node === currentTopLevel[index])))
+  ) {
+    return previous.nodes;
+  }
+  const next = { topLevel: currentTopLevel, nodes: snapshotNodes(root) };
+  initialSnapshots.set(root, next);
+  return next.nodes;
+};
+
+const registeredAnchorFor = (root: Node, path: readonly number[]): Comment | undefined => {
+  const anchors = anchorsByRoot.get(root);
+  const key = pathKey(path);
+  const anchor = anchors?.get(key);
+  if (anchor?.parentNode) return anchor;
+  anchors?.delete(key);
+  return undefined;
+};
+
+const registerAnchor = (root: Node, path: readonly number[], anchor: Comment): void => {
+  const anchors = anchorsByRoot.get(root) ?? new Map<string, Comment>();
+  anchors.set(pathKey(path), anchor);
+  anchorsByRoot.set(root, anchors);
+};
+
+const expectedNodeCount = (templateHtml: string): number => createNodes(templateHtml).length;
+
+/**
+ * Reserves every lightweight conditional anchor before any branch is mounted.
+ * SSR omits false branches, so the client path alone cannot identify a later
+ * sibling until the active server branches have been accounted for.
+ */
+export const prepareConditionalCore = (
+  root: Node,
+  descriptors: readonly ConditionalCoreAnchorDescriptor[],
+): void => {
+  const initialNodes = initialNodesFor(root);
+  const byParent = new Map<string, ConditionalCoreAnchorDescriptor[]>();
+  for (const descriptor of descriptors) {
+    const key = pathKey(descriptor.path.slice(0, -1));
+    const siblings = byParent.get(key) ?? [];
+    siblings.push(descriptor);
+    byParent.set(key, siblings);
+  }
+  for (const descriptorsForParent of byParent.values()) {
+    descriptorsForParent.sort((left, right) => (left.path.at(-1) ?? 0) - (right.path.at(-1) ?? 0));
+    const parentPath = descriptorsForParent[0]?.path.slice(0, -1) ?? [];
+    const parent = initialNodes.get(pathKey(parentPath)) ?? nodeAt(root, parentPath);
+    if (!parent) continue;
+    let adoptedBefore = 0;
+    for (const descriptor of descriptorsForParent) {
+      const index = (descriptor.path.at(-1) ?? 0) + adoptedBefore;
+      const children = logicalChildren(parent);
+      const candidate = children[index];
+      if (candidate instanceof Comment && !isHydrationMarker(candidate)) {
+        registerAnchor(root, descriptor.path, candidate);
+        continue;
+      }
+      const expected = createNodes(descriptor.templateHtml);
+      const adopted = descriptor.visible ? adoptableNodes(parent, index, expected) : undefined;
+      const anchor = document.createComment("");
+      parent.insertBefore(anchor, candidate ?? null);
+      registerAnchor(root, descriptor.path, anchor);
+      if (adopted) {
+        preparedAdoptions.set(anchor, adopted);
+        adoptedBefore += expectedNodeCount(descriptor.templateHtml);
+      }
+    }
+  }
+};
 
 const childAt = (node: Node, index: number): Node | undefined => logicalChildren(node)[index];
 
@@ -127,11 +227,22 @@ const resolveAnchor = (
   visible: unknown,
   templateHtml: string,
 ): AnchorResolution | undefined => {
-  const existing = nodeAt(root, path);
+  const registered = registeredAnchorFor(root, path);
+  if (registered) {
+    const adoptedNodes = preparedAdoptions.get(registered);
+    preparedAdoptions.delete(registered);
+    return { anchor: registered, adoptedNodes };
+  }
+  const initialNodes = initialNodesFor(root);
+  const existing = initialNodes.get(pathKey(path)) ?? nodeAt(root, path);
   if (existing instanceof Comment && !isHydrationMarker(existing)) {
+    registerAnchor(root, path, existing);
     return { anchor: existing, adoptedNodes: undefined };
   }
-  const location = parentAndIndexAt(root, path);
+  const existingLocation = existing?.parentNode
+    ? { parent: existing.parentNode, index: logicalChildren(existing.parentNode).indexOf(existing) }
+    : undefined;
+  const location = existingLocation && existingLocation.index >= 0 ? existingLocation : parentAndIndexAt(root, path);
   if (!location) return undefined;
   const expected = createNodes(templateHtml);
   const adoptedNodes = adoptableNodes(location.parent, location.index, expected);
@@ -139,6 +250,7 @@ const resolveAnchor = (
   const actualChildren = logicalChildren(location.parent);
   const before = adoptedNodes?.[0] ?? actualChildren[location.index] ?? null;
   location.parent.insertBefore(anchor, before);
+  registerAnchor(root, path, anchor);
   if (!visible && adoptedNodes) {
     for (const node of adoptedNodes) {
       cleanupOwnedSubtree(node);
@@ -202,12 +314,18 @@ const nodeAtState = (state: ConditionalCoreState, path: readonly number[]): Node
   return nodeAt(state.nodes[firstIndex ?? 0] as Node, rest);
 };
 
+const textAtState = (state: ConditionalCoreState, path: readonly number[]): Text => {
+  if (state.nodes.length <= 1) return textAt(state.nodes[0] as Node, path);
+  const [firstIndex, ...rest] = path;
+  return textAt(state.nodes[firstIndex ?? 0] as Node, rest);
+};
+
 const bindNodes = (state: ConditionalCoreState, options: ConditionalCoreOptions, bindEvents: boolean): void => {
   for (const binding of options.bindings) {
     const node = nodeAtState(state, binding.path);
     if (!node) continue;
     if (binding.kind === "text") {
-      setText(node as Text, readBinding(state.scope, binding));
+      setText(textAtState(state, binding.path), readBinding(state.scope, binding));
     } else if (binding.kind === "class") {
       setClassPresence(node as Element, binding.className, readBinding(state.scope, binding));
     } else if (binding.kind === "attr") {

@@ -559,6 +559,7 @@ const runtimeNames = {
   elementAt: "__tachyonElementAt",
   mountConditional: "__tachyonMountConditional",
   mountConditionalCore: "__tachyonMountConditionalCore",
+  prepareConditionalCore: "__tachyonPrepareConditionalCore",
   mountKeyedList: "__tachyonMountKeyedList",
   mountTextKeyedList: "__tachyonMountTextKeyedList",
   nodeAt: "__tachyonNodeAt",
@@ -818,7 +819,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (needsConditional) {
     if (needsConditionalCore) {
       lines.push(
-        `import { mountConditionalCore as ${runtimeNames.mountConditionalCore} } from "tachyon-dom/runtime/conditional-core";`,
+        `import { mountConditionalCore as ${runtimeNames.mountConditionalCore}, prepareConditionalCore as ${runtimeNames.prepareConditionalCore} } from "tachyon-dom/runtime/conditional-core";`,
       );
     }
     if (needsGenericConditional) {
@@ -972,6 +973,16 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     }
   }
   if (instrumentBindings) lines.push(`  __tachyonRegisterTemplate();`);
+  if (needsConditionalCore) {
+    lines.push(`  ${runtimeNames.prepareConditionalCore}(root, [`);
+    for (const binding of bindings) {
+      if (binding.kind !== "if" || !usesConditionalCore(binding)) continue;
+      lines.push(
+        `    { path: ${JSON.stringify(binding.path)}, visible: ${runtimeValueExpression(binding.test, reactive, sourceName, aliasesForBinding(binding))}, templateHtml: ${JSON.stringify(binding.templateHtml)} },`,
+      );
+    }
+    lines.push(`  ]);`);
+  }
   let listIndex = 0;
   let conditionalIndex = 0;
   let targetIndex = 0;
