@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-09-06
+
+### Fixed
+
+- Isolated same-named stores across sibling components, component instances, conditional branches, and list rows while preserving owner cleanup and re-entry state.
+- Preflighted SSR rows before binding and preserved adopted DOM when a later row is invalid.
+- Rolled back eager binders and released interaction schedulers without retaining listeners or replaying events after disposal.
+- Assigned generated binding diagnostics to stable source spans, removed diagnostics instrumentation from production output, and isolated anonymous hydration chunk identities.
+- Measured representation candidates using real bundled decode and hydrate work, including no-op-safe benchmark metrics.
+
 ## [0.1.6] - 2026-08-27
 
 ### Added
