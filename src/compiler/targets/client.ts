@@ -1,16 +1,21 @@
 import type {
+  AttributeBinding,
+  ClassBinding,
   ClientBinding,
   ComponentBoundary,
   ComponentProp,
   CompiledTemplate,
   ConditionalBinding,
   ElementNode,
+  EventBinding,
   GenerateClientModuleOptions,
   HydrationBoundary,
   ListBinding,
   LoweringContext,
   StoreDefinition,
+  StyleBinding,
   TemplateNode,
+  TextBinding,
   TextNode,
 } from "../types.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -2162,84 +2167,71 @@ const parentScopeKeysField = (binding: ListBinding): string[] => {
   return names ? [`    parentScopeKeys: ${JSON.stringify([...names].sort())},`] : [];
 };
 
+type GeneratedValueBinding = TextBinding | ClassBinding | AttributeBinding | StyleBinding;
+
+const isGeneratedValueBinding = (binding: ClientBinding): binding is GeneratedValueBinding =>
+  binding.kind === "text" || binding.kind === "class" || binding.kind === "attr" || binding.kind === "style";
+
+const isGeneratedEventBinding = (binding: ClientBinding): binding is EventBinding => binding.kind === "event";
+
 /**
- * Value bindings and row listeners for the generated list adapter. Each binding carries the setter it needs, so
- * the adapter module never imports the class, attribute, or event runtimes itself.
+ * One generated value binding: its reader, and unless it targets a text node, the setter that applies it. Rows
+ * and branches share this shape, so neither runtime classifies a binding or imports a setter of its own.
  */
-const generatedRowBindingFields = (binding: ListBinding): string[] => {
-  const values = binding.bindings.filter((child) => child.kind !== "event");
-  const events = binding.bindings.filter((child) => child.kind === "event");
-  const serializeValue = (child: (typeof values)[number]): string => {
-    const read = `read: (scope) => ${bindingReadExpression(
-      child.kind === "text" || child.kind === "class" || child.kind === "attr" ? child.expression : "",
-      aliasesForBinding(child),
-    )}`;
-    const path = `path: ${JSON.stringify(child.path)}`;
-    if (child.kind === "class") {
-      return `{ ${path}, ${read}, apply: (node, value) => ${runtimeNames.setClassPresence}(node, ${JSON.stringify(child.className)}, value) }`;
-    }
-    if (child.kind === "attr") {
-      const setter =
-        child.name.toLowerCase() === "class"
-          ? `${runtimeNames.setClassValue}(node, value)`
-          : `${runtimeNames.setAttributeValue}(node, ${JSON.stringify(child.name)}, value)`;
-      return `{ ${path}, ${read}, apply: (node, value) => ${setter} }`;
-    }
-    return `{ ${path}, ${read} }`;
-  };
-  // The handler is read when the event fires, not when the listener is registered, so replacing an item's
-  // handler under the same key takes effect the way the generic runtime's rows already do.
-  const serializeEvent = (child: (typeof events)[number]): string =>
-    child.kind === "event"
-      ? `{ path: ${JSON.stringify(child.path)}, bind: (element, scope) => ${runtimeNames.delegate}(element, ${JSON.stringify(child.eventName)}, [], (event) => { const handler = ${bindingReadExpression(child.handler, aliasesForBinding(child))}; if (typeof handler === "function") handler(event); }) }`
-      : "";
+const generatedValueBindingField = (binding: GeneratedValueBinding): string => {
+  const path = `path: ${JSON.stringify(binding.path)}`;
+  const read = `read: (scope) => ${bindingReadExpression(binding.expression, aliasesForBinding(binding))}`;
+  if (binding.kind === "class") {
+    return `{ ${path}, ${read}, apply: (node, value) => ${runtimeNames.setClassPresence}(node, ${JSON.stringify(binding.className)}, value) }`;
+  }
+  if (binding.kind === "style") {
+    return `{ ${path}, ${read}, apply: (node, value) => ${runtimeNames.setStyleValue}(node, ${JSON.stringify(binding.name)}, value) }`;
+  }
+  if (binding.kind === "attr") {
+    // A statically named class attribute is exactly what setClassValue does, so it skips the generic setter's
+    // name validation and URL sanitization, neither of which ever applied to class.
+    const setter =
+      binding.name.toLowerCase() === "class"
+        ? `${runtimeNames.setClassValue}(node, value)`
+        : `${runtimeNames.setAttributeValue}(node, ${JSON.stringify(binding.name)}, value)`;
+    return `{ ${path}, ${read}, apply: (node, value) => ${setter} }`;
+  }
+  return `{ ${path}, ${read} }`;
+};
+
+const generatedBindingFields = (bindings: readonly ClientBinding[], serializeEvent: (binding: EventBinding) => string): string[] => {
+  const events = bindings.filter(isGeneratedEventBinding);
   return [
-    `    bindings: [${values.map(serializeValue).join(", ")}],`,
+    `    bindings: [${bindings.filter(isGeneratedValueBinding).map(generatedValueBindingField).join(", ")}],`,
     ...(events.length > 0 ? [`    events: [${events.map(serializeEvent).join(", ")}],`] : []),
   ];
 };
 
 /**
+ * Value bindings and row listeners for the generated list adapter. Each binding carries the setter it needs, so
+ * the adapter module never imports the class, attribute, or event runtimes itself.
+ */
+const generatedRowBindingFields = (binding: ListBinding): string[] =>
+  // The handler is read when the event fires, not when the listener is registered, so replacing an item's
+  // handler under the same key takes effect the way the generic runtime's rows already do.
+  generatedBindingFields(
+    binding.bindings,
+    (child) =>
+      `{ path: ${JSON.stringify(child.path)}, bind: (element, scope) => ${runtimeNames.delegate}(element, ${JSON.stringify(child.eventName)}, [], (event) => { const handler = ${bindingReadExpression(child.handler, aliasesForBinding(child))}; if (typeof handler === "function") handler(event); }) }`,
+  );
+
+/**
  * Value bindings and listeners for a generated conditional branch. The shape mirrors the generated rows: each
  * value carries its setter, so the branch runtime keeps only the text path.
  */
-const generatedBranchBindingFields = (binding: ConditionalBinding): string[] => {
-  const values = binding.bindings.filter((child) => child.kind !== "event");
-  const events = binding.bindings.filter((child) => child.kind === "event");
-  const serializeValue = (child: (typeof values)[number]): string => {
-    const read = `read: (scope) => ${bindingReadExpression(
-      child.kind === "text" || child.kind === "class" || child.kind === "attr" || child.kind === "style"
-        ? child.expression
-        : "",
-      aliasesForBinding(child),
-    )}`;
-    const path = `path: ${JSON.stringify(child.path)}`;
-    if (child.kind === "class") {
-      return `{ ${path}, ${read}, apply: (node, value) => ${runtimeNames.setClassPresence}(node, ${JSON.stringify(child.className)}, value) }`;
-    }
-    if (child.kind === "style") {
-      return `{ ${path}, ${read}, apply: (node, value) => ${runtimeNames.setStyleValue}(node, ${JSON.stringify(child.name)}, value) }`;
-    }
-    if (child.kind === "attr") {
-      const setter =
-        child.name.toLowerCase() === "class"
-          ? `${runtimeNames.setClassValue}(node, value)`
-          : `${runtimeNames.setAttributeValue}(node, ${JSON.stringify(child.name)}, value)`;
-      return `{ ${path}, ${read}, apply: (node, value) => ${setter} }`;
-    }
-    return `{ ${path}, ${read} }`;
-  };
+const generatedBranchBindingFields = (binding: ConditionalBinding): string[] =>
   // A branch kept across runs is rebound to the newest scope without rebinding its listeners, so the handler is
   // read from the scope the branch currently holds when the event fires.
-  const serializeEvent = (child: (typeof events)[number]): string =>
-    child.kind === "event"
-      ? `{ path: ${JSON.stringify(child.path)}, bind: (element, readScope) => ${runtimeNames.delegate}(element, ${JSON.stringify(child.eventName)}, [], (event) => { const scope = readScope(); const handler = ${bindingReadExpression(child.handler, aliasesForBinding(child))}; if (typeof handler === "function") handler(event); }) }`
-      : "";
-  return [
-    `    bindings: [${values.map(serializeValue).join(", ")}],`,
-    ...(events.length > 0 ? [`    events: [${events.map(serializeEvent).join(", ")}],`] : []),
-  ];
-};
+  generatedBindingFields(
+    binding.bindings,
+    (child) =>
+      `{ path: ${JSON.stringify(child.path)}, bind: (element, readScope) => ${runtimeNames.delegate}(element, ${JSON.stringify(child.eventName)}, [], (event) => { const scope = readScope(); const handler = ${bindingReadExpression(child.handler, aliasesForBinding(child))}; if (typeof handler === "function") handler(event); }) }`,
+  );
 
 const emitListBinding = (
   binding: ListBinding,

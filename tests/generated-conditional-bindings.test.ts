@@ -18,9 +18,14 @@ const generated = (source: string, options: Parameters<typeof generateClientModu
 describe("generated conditional bindings", () => {
   it("compiles branch values into injected setters instead of tagged descriptors", () => {
     const code = generated(
-      `<main><if test={open}><b class:on={flag} title={tip} style:color={hue} on:click={save}>{label}</b></if></main>`,
+      `<main><if test={open}><b class={theme} class:on={flag} title={tip} style:color={hue} on:click={save}>{label}</b></if></main>`,
     );
 
+    // Each value carries the exact setter it needs, including the class attribute's dedicated one.
+    expect(code).toContain(`apply: (node, value) => __tachyonSetClassValue(node, value)`);
+    expect(code).toContain(`apply: (node, value) => __tachyonSetClassPresence(node, "on", value)`);
+    expect(code).toContain(`apply: (node, value) => __tachyonSetAttributeValue(node, "title", value)`);
+    expect(code).toContain(`apply: (node, value) => __tachyonSetStyleValue(node, "color", value)`);
     expect(code).toContain(`mountGeneratedConditional as`);
     expect(code).not.toContain(`mountConditionalCore as`);
     expect(code).toContain(`apply: (node, value) =>`);
@@ -32,6 +37,30 @@ describe("generated conditional bindings", () => {
     // A branch listener is the only reason to reach for the event runtime, and it comes from the same
     // delegate the generated rows use, so the target-only variant is no longer generated at all.
     expect(code).not.toContain(`delegateTarget`);
+  });
+
+  it("emits an events field only for a branch that has listeners, and keeps every listener it has", () => {
+    const withoutEvents = generated(`<main><if test={open}><b title={tip}>{label}</b></if></main>`);
+    expect(withoutEvents).not.toContain(`events:`);
+
+    const module = evaluateGeneratedClientModule(
+      generated(`<main><if test={open}><input on:input={typed} on:focus={focused}></if></main>`),
+    );
+    const root = document.createElement("div");
+    const calls: string[] = [];
+    const handle = mount(root, module, {
+      open: createSignal(true),
+      typed: () => void calls.push("input"),
+      focused: () => void calls.push("focus"),
+    });
+    const input = root.querySelector("input");
+
+    input?.dispatchEvent(new Event("input"));
+    input?.dispatchEvent(new Event("focus"));
+    handle.dispose();
+    input?.dispatchEvent(new Event("input"));
+
+    expect(calls).toEqual(["input", "focus"]);
   });
 
   it("mounts, updates, and disposes a branch through the injected setters", () => {
@@ -144,6 +173,57 @@ describe("generated conditional bindings", () => {
 
     expect(branch.textContent).toBe("M");
     expect(branch.querySelector("p")?.getAttribute("class")).toBe("on");
+  });
+
+  // A branch whose markup no longer matches the descriptor still has to come up: the binding whose node is
+  // missing is skipped rather than read and written through a path that resolves to nothing.
+  it("skips a generated branch binding whose node is missing", () => {
+    const branch = document.createElement("section");
+    branch.innerHTML = `<!---->`;
+    let reads = 0;
+
+    expect(() =>
+      mountGeneratedConditional(branch, [0], true, {}, {
+        signature: "missing-node",
+        templateHtml: `<p> </p>`,
+        bindings: [
+          { path: [0], read: () => "kept" },
+          {
+            path: [5],
+            read: () => {
+              reads += 1;
+              return "unreachable";
+            },
+          },
+        ],
+      }),
+    ).not.toThrow();
+
+    expect(branch.textContent).toBe("kept");
+    expect(reads).toBe(0);
+  });
+
+  it("registers a branch listener only on a node that can carry one", () => {
+    const branch = document.createElement("section");
+    branch.innerHTML = `<!---->`;
+    const bound: Node[] = [];
+    const bind = (element: Element): (() => void) => {
+      bound.push(element);
+      return () => undefined;
+    };
+
+    mountGeneratedConditional(branch, [0], true, {}, {
+      signature: "text-target",
+      templateHtml: `<p> </p>`,
+      bindings: [{ path: [0], read: () => "T" }],
+      // Path [0] is the template's text node, and path [] is the element that holds it.
+      events: [
+        { path: [0], bind },
+        { path: [], bind },
+      ],
+    });
+
+    expect(bound).toEqual([branch.querySelector("p")]);
   });
 
   // The generated entry has no expression strings to fall back to, so a descriptor without a reader cannot be
