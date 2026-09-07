@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compileTemplate, generateClientModule } from "../src/compiler";
-import { mountConditional } from "../src/runtime/conditional";
-import { mountKeyedList } from "../src/runtime/list";
+import { mountConditional, mountGeneratedConditional } from "../src/runtime/conditional";
+import { mountGeneratedKeyedList, mountKeyedList } from "../src/runtime/list";
 import { cleanupTextKeyedList, mountGeneratedTextKeyedList } from "../src/runtime/list-text";
 import { mount } from "../src/runtime/mount";
 import { createSignal } from "../src/runtime/signal";
@@ -27,11 +27,40 @@ describe("generated binding readers", () => {
     expect(code).toContain(`keyReadItem:`);
   });
 
-  it("keeps the path string only where the runtime writes back through it", () => {
-    const code = generated(`<ul><for each={rows} key={row.id}><li ref={refs.item}></li></for></ul>`);
+  // A ref used to ship its path as a string for the runtime to walk. It now ships the same reader every other
+  // binding does, plus the writer that puts the element there, so no generated module carries a path parser.
+  it("writes a ref through a generated setter instead of a path string", () => {
+    const row = generated(`<ul><for each={rows} key={row.id}><li ref={refs.item}></li></for></ul>`);
 
-    expect(code).toContain(`expression: "refs.item"`);
-    expect(code.match(/expression:/g)).toHaveLength(1);
+    expect(row).not.toContain(`expression:`);
+    expect(row).toContain(`read: (scope) => scope.refs?.item`);
+    expect(row).toContain(
+      `write: (scope, value) => { const target = scope.refs; if (target != null && typeof target === "object") target["item"] = value; }`,
+    );
+
+    const topLevel = generated(`<div ref={panel}></div>`);
+    expect(topLevel).toContain(`bindRef as`);
+    expect(topLevel).not.toContain(`setRef`);
+    // A bare name is written straight onto the scope.
+    expect(topLevel).toContain(
+      `(scope, value) => { const target = scope; if (target != null && typeof target === "object") target["panel"] = value; }`,
+    );
+  });
+
+  it("leaves a ref alone when the object that would hold it is missing", () => {
+    const module = evaluateGeneratedClientModule(generated(`<div ref={refs.panel}></div>`));
+    const root = document.createElement("div");
+    const scope: { refs?: { panel?: Element } } = {};
+
+    const handle = mount(root, module, scope);
+    expect(scope.refs).toBeUndefined();
+    handle.dispose();
+
+    scope.refs = {};
+    const second = mount(root, module, scope);
+    expect(scope.refs.panel).toBe(root.querySelector("div"));
+    second.dispose();
+    expect(scope.refs.panel).toBeUndefined();
   });
 
   it("drops the declaration strings from generated stores and component props", () => {
@@ -83,6 +112,62 @@ describe("generated binding readers", () => {
     });
 
     expect(branch.textContent).toBe("M");
+  });
+
+  // C01: the entries a generated module calls take descriptors whose readers are required and whose expression
+  // strings are gone, so a codegen regression in either direction stops compiling instead of silently
+  // resolving a different value.
+  it("requires a reader on every generated list and branch descriptor", () => {
+    type ListBinding = Parameters<typeof mountGeneratedKeyedList>[3]["bindings"][number];
+    type BranchBinding = Parameters<typeof mountGeneratedConditional>[4]["bindings"][number];
+
+    const root = document.createElement("ul");
+    mountGeneratedKeyedList(root, [], [{ id: "a", label: "A" }], {
+      key: "item.id",
+      keyReadItem: (item) => (item as { id: string }).id,
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [{ kind: "text", path: [0], read: (scope) => (scope.item as { label: string }).label }],
+    });
+    expect(root.textContent).toBe("A");
+
+    const branch = document.createElement("section");
+    branch.innerHTML = `<!---->`;
+    mountGeneratedConditional(branch, [0], true, { message: "M" }, {
+      templateHtml: `<p> </p>`,
+      bindings: [{ kind: "text", path: [0], read: (scope) => scope.message }],
+    });
+    expect(branch.textContent).toBe("M");
+
+    // @ts-expect-error a generated descriptor without its reader is a compile error
+    const listWithoutReader: ListBinding = { kind: "text", path: [0] };
+    // @ts-expect-error a generated descriptor cannot carry an expression string to be resolved at runtime
+    const listWithExpression: ListBinding = { kind: "text", path: [0], expression: "item.label" };
+    // @ts-expect-error a generated ref has to carry the writer that puts the element there
+    const listRefWithoutWriter: ListBinding = { kind: "ref", path: [], read: (scope) => scope.refs };
+    // @ts-expect-error the same contract holds for a branch the generic runtime drives
+    const branchWithoutReader: BranchBinding = { kind: "class", path: [], className: "on" };
+
+    expect([listWithoutReader, listWithExpression, listRefWithoutWriter, branchWithoutReader]).toHaveLength(4);
+  });
+
+  it("clears a generated row ref only while it still holds the element it set", () => {
+    const module = evaluateGeneratedClientModule(
+      generated(`<ul><for each={rows} key={row.id}><li ref={refs.item}></li></for></ul>`, { reactive: true }),
+    );
+    const root = document.createElement("div");
+    const refs: { item?: Element } = {};
+    const rows = createSignal([{ id: "a" }]);
+    const handle = mount(root, module, { rows, refs });
+
+    expect(refs.item).toBe(root.querySelector("li"));
+
+    const other = document.createElement("div");
+    refs.item = other;
+    rows.set([]);
+
+    expect(refs.item).toBe(other);
+    handle.dispose();
   });
 
   it("clears a row ref only while it still holds the element it set", () => {

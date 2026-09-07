@@ -772,7 +772,7 @@ export const mountConditionalCore = (
  * Mounts a generated conditional. Every value carries its reader and, unless it targets the template's text
  * node, the setter that applies it, so this entry never classifies a binding or imports a setter of its own.
  */
-export const mountGeneratedConditional = (
+export const mountGeneratedConditionalCore = (
   root: Node,
   path: readonly number[],
   visible: unknown,

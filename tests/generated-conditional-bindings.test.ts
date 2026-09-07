@@ -4,7 +4,7 @@
 // template that never uses those bindings never pays for them.
 import { describe, expect, it } from "vitest";
 import { compileTemplate, generateClientModule } from "../src/compiler";
-import { mountConditionalCore, mountGeneratedConditional } from "../src/runtime/conditional-core";
+import { mountConditionalCore, mountGeneratedConditionalCore } from "../src/runtime/conditional-core";
 import { hydrate, mount } from "../src/runtime/mount";
 import { createSignal } from "../src/runtime/signal";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
@@ -26,7 +26,7 @@ describe("generated conditional bindings", () => {
     expect(code).toContain(`apply: (node, value) => __tachyonSetClassPresence(node, "on", value)`);
     expect(code).toContain(`apply: (node, value) => __tachyonSetAttributeValue(node, "title", value)`);
     expect(code).toContain(`apply: (node, value) => __tachyonSetStyleValue(node, "color", value)`);
-    expect(code).toContain(`mountGeneratedConditional as`);
+    expect(code).toContain(`mountGeneratedConditionalCore as`);
     expect(code).not.toContain(`mountConditionalCore as`);
     expect(code).toContain(`apply: (node, value) =>`);
     expect(code).toContain(`bind: (element, readScope) =>`);
@@ -183,7 +183,7 @@ describe("generated conditional bindings", () => {
     let reads = 0;
 
     expect(() =>
-      mountGeneratedConditional(branch, [0], true, {}, {
+      mountGeneratedConditionalCore(branch, [0], true, {}, {
         signature: "missing-node",
         templateHtml: `<p> </p>`,
         bindings: [
@@ -212,7 +212,7 @@ describe("generated conditional bindings", () => {
       return () => undefined;
     };
 
-    mountGeneratedConditional(branch, [0], true, {}, {
+    mountGeneratedConditionalCore(branch, [0], true, {}, {
       signature: "text-target",
       templateHtml: `<p> </p>`,
       bindings: [{ path: [0], read: () => "T" }],
@@ -232,7 +232,7 @@ describe("generated conditional bindings", () => {
     const branch = document.createElement("section");
     branch.innerHTML = `<!---->`;
 
-    mountGeneratedConditional(branch, [0], true, { message: "M" }, {
+    mountGeneratedConditionalCore(branch, [0], true, { message: "M" }, {
       signature: "generated",
       templateHtml: `<p> </p>`,
       bindings: [{ path: [0], read: (scope) => scope.message }],
@@ -240,7 +240,7 @@ describe("generated conditional bindings", () => {
 
     expect(branch.textContent).toBe("M");
     // @ts-expect-error a generated binding without a reader is a compile error
-    const missing: Parameters<typeof mountGeneratedConditional>[4]["bindings"][number] = { path: [0] };
+    const missing: Parameters<typeof mountGeneratedConditionalCore>[4]["bindings"][number] = { path: [0] };
     expect(missing.read).toBeUndefined();
   });
 });

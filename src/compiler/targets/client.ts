@@ -26,6 +26,7 @@ import {
   attrExpression,
   emitsElementRoot,
   expressionToScopeAccess,
+  jsOptionalPropertyAccess,
   hydrationBoundaryFor,
   isHydrationAttribute,
   isVoidElement,
@@ -751,8 +752,8 @@ const runtimeNames = {
   delegate: "__tachyonDelegate",
   effect: "__tachyonEffect",
   elementAt: "__tachyonElementAt",
-  mountConditional: "__tachyonMountConditional",
   mountGeneratedConditional: "__tachyonMountGeneratedConditional",
+  mountGeneratedConditionalCore: "__tachyonMountGeneratedConditionalCore",
   prepareConditionalCore: "__tachyonPrepareConditionalCore",
   prepareConditionalCoreForMount: "__tachyonPrepareConditionalCoreForMount",
   prepareConditionalCoreWithAdoptionGuard: "__tachyonPrepareConditionalCoreWithAdoptionGuard",
@@ -760,7 +761,7 @@ const runtimeNames = {
   prepareConditionalCoreWithAdoptionGuardAndStaticAttributes:
     "__tachyonPrepareConditionalCoreWithAdoptionGuardAndStaticAttributes",
   preparedNodeAt: "__tachyonPreparedNodeAt",
-  mountKeyedList: "__tachyonMountKeyedList",
+  mountGeneratedKeyedList: "__tachyonMountGeneratedKeyedList",
   mountTextKeyedList: "__tachyonMountTextKeyedList",
   mountTextKeyedListWithBoundary: "__tachyonMountTextKeyedListWithBoundary",
   nodeAt: "__tachyonNodeAt",
@@ -772,7 +773,7 @@ const runtimeNames = {
   setClassValue: "__tachyonSetClassValue",
   setControlValue: "__tachyonSetControlValue",
   writeModelValue: "__tachyonWriteModelValue",
-  setRef: "__tachyonSetRef",
+  bindRef: "__tachyonBindRef",
   setStyleValue: "__tachyonSetStyleValue",
   setText: "__tachyonSetText",
   textAt: "__tachyonTextAt",
@@ -1387,7 +1388,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     ...(bindingsNeedingRuntime.some((binding) => binding.kind === "attr" && !isKnownClassAttribute(binding))
       ? [`setAttributeValue as ${runtimeNames.setAttributeValue}`]
       : []),
-    ...(needsRef ? [`setRef as ${runtimeNames.setRef}`] : []),
+    ...(needsRef ? [`bindRef as ${runtimeNames.bindRef}`] : []),
     ...(bindingsNeedingRuntime.some((binding) => binding.kind === "style")
       ? [`setStyleValue as ${runtimeNames.setStyleValue}`]
       : []),
@@ -1406,7 +1407,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`import { delegate as ${runtimeNames.delegate} } from "tachyon-dom/runtime/event";`);
   }
   if (needsList) {
-    lines.push(`import { mountKeyedList as ${runtimeNames.mountKeyedList} } from "tachyon-dom/runtime/list";`);
+    lines.push(`import { mountGeneratedKeyedList as ${runtimeNames.mountGeneratedKeyedList} } from "tachyon-dom/runtime/list";`);
   }
   if (needsTextList) {
     const textListImports = [
@@ -1421,7 +1422,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (needsConditional) {
     if (needsConditionalCore) {
       const conditionalCoreImports = [
-        `mountGeneratedConditional as ${runtimeNames.mountGeneratedConditional}`,
+        `mountGeneratedConditionalCore as ${runtimeNames.mountGeneratedConditionalCore}`,
         `${
           mountOnly
             ? "prepareConditionalCoreForMount"
@@ -1440,8 +1441,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     if (needsGenericConditional) {
       lines.push(
         needsNodeAt
-          ? `import { mountConditional as ${runtimeNames.mountConditional}, nodeAt as ${runtimeNames.nodeAt} } from "tachyon-dom/runtime/conditional";`
-          : `import { mountConditional as ${runtimeNames.mountConditional} } from "tachyon-dom/runtime/conditional";`,
+          ? `import { mountGeneratedConditional as ${runtimeNames.mountGeneratedConditional}, nodeAt as ${runtimeNames.nodeAt} } from "tachyon-dom/runtime/conditional";`
+          : `import { mountGeneratedConditional as ${runtimeNames.mountGeneratedConditional} } from "tachyon-dom/runtime/conditional";`,
       );
     }
   }
@@ -1768,8 +1769,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         );
       }
     } else if (binding.kind === "ref") {
+      const ref = refAccessExpressions(binding.expression, bindingAliases);
       lines.push(
-        `  cleanups.push(${runtimeNames.setRef}(${sourceName}, ${JSON.stringify(binding.expression)}, ${bindingElementExpression(binding.path)}));`,
+        `  cleanups.push(${runtimeNames.bindRef}(${sourceName}, ${ref.read}, ${ref.write}, ${bindingElementExpression(binding.path)}));`,
       );
     } else if (binding.kind === "model") {
       const target = bindingElementExpression(binding.path);
@@ -1992,6 +1994,31 @@ const conditionalSignature = (binding: ConditionalBinding): string =>
 const bindingReadExpression = (expression: string, aliases: ReadonlyMap<string, string> = new Map()): string =>
   expressionToScopeAccess(expression, new Set(), "scope", aliases);
 
+/**
+ * The reader and writer for a ref. The runtime used to receive the path as a string and walk it, which meant
+ * the generated module shipped a path parser for one assignment. The writer keeps that parser's contract: a
+ * container that is missing or is not an object is left alone rather than thrown at.
+ */
+const refAccessExpressions = (
+  expression: string,
+  aliases: ReadonlyMap<string, string>,
+): { read: string; write: string } => {
+  const parts = expression.split(".");
+  const key = parts.length === 1 ? (aliases.get(expression) ?? expression) : (parts.at(-1) as string);
+  // Every step to the object that holds the ref is optional, the way the path walker this replaces was: a ref
+  // whose container is missing is left alone rather than thrown at, on both the write and the clear.
+  const owner = parts
+    .slice(1, -1)
+    .reduce(
+      (access, part) => jsOptionalPropertyAccess(access, part),
+      parts.length === 1 ? "scope" : bindingReadExpression(parts[0] as string, aliases),
+    );
+  return {
+    read: `(scope) => ${jsOptionalPropertyAccess(owner, key)}`,
+    write: `(scope, value) => { const target = ${owner}; if (target != null && typeof target === "object") target[${JSON.stringify(key)}] = value; }`,
+  };
+};
+
 const serializeStoreDefinition = (store: StoreDefinition): string => {
   const key = declarationKeyFor(store, store.name);
   const keyField = key === store.name ? "" : `, key: ${JSON.stringify(key)}`;
@@ -2035,7 +2062,9 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     fields.push(`name: ${JSON.stringify(binding.name)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
   } else if (binding.kind === "ref") {
-    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
+    const ref = refAccessExpressions(binding.expression, aliases);
+    fields.push(`read: ${ref.read}`);
+    fields.push(`write: ${ref.write}`);
   } else if (binding.kind === "model") {
     fields.push(`property: ${JSON.stringify(binding.property)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
@@ -2272,7 +2301,7 @@ const emitListBinding = (
     ? binding.region?.logicalAfter !== undefined
       ? runtimeNames.mountTextKeyedListWithBoundary
       : runtimeNames.mountTextKeyedList
-    : runtimeNames.mountKeyedList;
+    : runtimeNames.mountGeneratedKeyedList;
   const statement = `${mount}(${target}, ${JSON.stringify(path)}, ${runtimeValueExpression(binding.each, reactive, sourceName, aliases)}, ${optionsName})`;
   const targetDeclaration = targetName ? `  const ${targetName} = ${targetExpression(binding.path)};\n` : "";
   const invocation = reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`;
@@ -2312,8 +2341,8 @@ const emitConditionalBinding = (
   const path = targetName ? [] : binding.path;
   const visible = visibilityExpression ?? runtimeValueExpression(binding.test, reactive, sourceName, aliases);
   const statement = useCore
-    ? `${runtimeNames.mountGeneratedConditional}(root, ${JSON.stringify(binding.path)}, ${visible}, ${sourceName}, ${optionsName})`
-    : `${runtimeNames.mountConditional}(${target}, ${JSON.stringify(path)}, ${visible}, ${sourceName}, ${optionsName})`;
+    ? `${runtimeNames.mountGeneratedConditionalCore}(root, ${JSON.stringify(binding.path)}, ${visible}, ${sourceName}, ${optionsName})`
+    : `${runtimeNames.mountGeneratedConditional}(${target}, ${JSON.stringify(path)}, ${visible}, ${sourceName}, ${optionsName})`;
   const targetDeclaration =
     useCore || !targetName ? "" : `  const ${targetName} = ${targetExpression(binding.path)};\n`;
   if (!reactive) return `${targetDeclaration}${conditionalOptions}\n  ${statement};`;

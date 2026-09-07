@@ -67,6 +67,22 @@ export const setStyleValue = (element: Element, name: string, value: unknown): v
   element.style.setProperty(name, value == null || value === false ? "" : String(value));
 };
 
+/**
+ * Writes an element into the ref the compiler resolved, and clears it on dispose only while it still holds that
+ * element. The reader and writer come from the generated module, so nothing here parses a path.
+ */
+export const bindRef = (
+  scope: Record<string, unknown>,
+  read: (scope: Record<string, unknown>) => unknown,
+  write: (scope: Record<string, unknown>, value: unknown) => void,
+  element: Element,
+): (() => void) => {
+  write(scope, element);
+  return () => {
+    if (read(scope) === element) write(scope, undefined);
+  };
+};
+
 export const setRef = (scope: Record<string, unknown>, expression: string, element: Element): (() => void) => {
   const parts = expression.split(".");
   let current: Record<string, unknown> = scope;

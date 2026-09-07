@@ -1120,7 +1120,7 @@ describe("client mount entrypoints", () => {
     [
       "generic",
       `<main><for each={rows} key={row.id}><p style:opacity={row.opacity}>{row.label}</p></for><footer>{tail}</footer></main>`,
-      `mountKeyedList as __tachyonMountKeyedList`,
+      `mountGeneratedKeyedList as __tachyonMountGeneratedKeyedList`,
     ],
   ])("keeps the generated %s list footer binding after rows move", (name, source, generatedImport) => {
     const compiled = compileTemplate(source);
@@ -1830,7 +1830,7 @@ describe("client mount entrypoints", () => {
     );
     if (!compiled.ok) throw new Error(compiled.error.message);
     const generated = generateClientModule(compiled.value);
-    expect(generated).toContain("mountKeyedList");
+    expect(generated).toContain("mountGeneratedKeyedList");
     const module = evaluateGeneratedClientModule(generated);
     const root = document.createElement("div");
 

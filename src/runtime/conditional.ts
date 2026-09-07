@@ -1,5 +1,5 @@
 import { setClassPresence } from "./class.js";
-import { setAttributeValue, setRef, setStyleValue } from "./attr.js";
+import { bindRef, setAttributeValue, setRef, setStyleValue } from "./attr.js";
 import { delegate } from "./event.js";
 import { bindControl, setControlValue, writeModelValue } from "./form.js";
 import { mountKeyedList } from "./list.js";
@@ -56,7 +56,9 @@ type StyleBinding = {
 type RefBinding = {
   kind: "ref";
   path: number[];
-  expression: string;
+  expression?: string;
+  read?: (scope: Record<string, unknown>) => unknown;
+  write?: (scope: Record<string, unknown>, value: unknown) => void;
 };
 
 type ModelBinding = {
@@ -440,7 +442,12 @@ const bindNodes = (
       setStyleValue(nodeAtState(state, binding.path) as Element, binding.name, readBinding(state.scope, binding));
     } else if (binding.kind === "ref") {
       state.refCleanups.get(bindingIndex)?.();
-      const refCleanup = setRef(state.scope, binding.expression, nodeAtState(state, binding.path) as Element);
+      const refElement = nodeAtState(state, binding.path) as Element;
+      // A generated ref carries its reader and writer; a hand-written one still carries the path string.
+      const refCleanup =
+        binding.read && binding.write
+          ? bindRef(state.scope, binding.read, binding.write, refElement)
+          : setRef(state.scope, binding.expression ?? "", refElement);
       state.refCleanups.set(bindingIndex, refCleanup);
       if (cleanups !== state.cleanups) {
         cleanups.push(() => {
@@ -614,3 +621,53 @@ export const mountConditional = (
     bindNodes(anchor, state, options, entries, state.cleanups, false);
   }
 };
+
+/**
+ * The descriptor shapes the compiler emits for a branch the generic runtime drives. Every value carries its
+ * reader, and a writable target carries its writer, so a generated descriptor that lost one cannot be written
+ * against these types, and one that fell back to an expression string is rejected outright.
+ */
+type WithReader<T> = Omit<T, "read" | "expression" | "handler" | "initial"> & {
+  read: (scope: Record<string, unknown>) => unknown;
+};
+
+type GeneratedTarget<T> = WithReader<T> & { write: (scope: Record<string, unknown>, value: unknown) => void };
+
+type GeneratedStore = WithReader<StoreDefinition>;
+
+type GeneratedComponent = Omit<ComponentBoundary, "props" | "stores"> & {
+  props: Array<WithReader<ComponentProp>>;
+  stores: GeneratedStore[];
+};
+
+type GeneratedChildren = {
+  bindings: GeneratedConditionalBinding[];
+  stores?: GeneratedStore[];
+  components?: GeneratedComponent[];
+};
+
+type GeneratedConditionalBinding =
+  | WithReader<TextBinding>
+  | WithReader<ClassBinding>
+  | WithReader<EventBinding>
+  | WithReader<AttributeBinding>
+  | WithReader<StyleBinding>
+  | GeneratedTarget<RefBinding>
+  | GeneratedTarget<ModelBinding>
+  | (Omit<WithReader<NestedListBinding>, keyof GeneratedChildren> & GeneratedChildren)
+  | (Omit<WithReader<NestedConditionalBinding>, keyof GeneratedChildren> & GeneratedChildren);
+
+export type GeneratedConditionalOptions = Omit<ConditionalOptions, keyof GeneratedChildren> & GeneratedChildren;
+
+/**
+ * The entry a generated module uses. It is the same runtime as `mountConditional`, which keeps resolving the
+ * expression strings a hand-written descriptor carries; what this entry adds is the contract that generated
+ * descriptors never rely on that.
+ */
+export const mountGeneratedConditional: (
+  root: Node,
+  path: readonly number[],
+  visible: unknown,
+  scope: Record<string, unknown>,
+  options: GeneratedConditionalOptions,
+) => void = mountConditional;
