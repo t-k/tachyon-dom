@@ -480,6 +480,130 @@ describe("signal runtime", () => {
     expect(seen).toEqual([11, 22]);
   });
 
+  // Leaf effects own no children, so the only non-empty set a notification could copy is the subscriber set
+  // itself. Rerun cleanup still copies each runner's (empty) child set because those do mutate while iterating.
+  it("queues every subscriber without copying the subscriber set", () => {
+    const source = createSignal(0);
+    const seen: number[] = [];
+    const copiedSetSizes: number[] = [];
+    for (let index = 0; index < 8; index++) {
+      effect(() => {
+        seen[index] = source();
+      });
+    }
+    seen.length = 0;
+    Array.from = vi.fn((value: Iterable<unknown> | ArrayLike<unknown>) => {
+      if (value instanceof Set && value.size > 0) copiedSetSizes.push(value.size);
+      return arrayFrom(value);
+    }) as typeof Array.from;
+
+    source.set(1);
+
+    Array.from = arrayFrom;
+    expect(seen).toEqual(Array.from({ length: 8 }, () => 1));
+    expect(copiedSetSizes).toEqual([]);
+  });
+
+  it("keeps computed subscribers ahead of plain effects and skips equal-value writes", () => {
+    const count = createSignal(1);
+    const order: string[] = [];
+    const doubled = createMemo(() => {
+      order.push("memo");
+      return count() * 2;
+    });
+    effect(() => {
+      order.push(`effect:${count()}:${doubled()}`);
+    });
+    order.length = 0;
+
+    count.set(1);
+    expect(order).toEqual([]);
+
+    count.set(2);
+    expect(order).toEqual(["memo", "effect:2:4"]);
+
+    order.length = 0;
+    batch(() => {
+      count.set(3);
+      count.set(4);
+    });
+    expect(order).toEqual(["memo", "effect:4:8"]);
+  });
+
+  it("skips subscribers disposed by an earlier subscriber of the same notification", () => {
+    const source = createSignal(0);
+    const calls: string[] = [];
+    let disposeSecond: (() => void) | undefined;
+    effect(() => {
+      calls.push(`first:${source()}`);
+      disposeSecond?.();
+    });
+    disposeSecond = effect(() => {
+      calls.push(`second:${source()}`);
+    });
+    const third = effect(() => {
+      calls.push(`third:${source()}`);
+    });
+    calls.length = 0;
+
+    source.set(1);
+
+    expect(calls).toEqual(["first:1", "third:1"]);
+    third();
+  });
+
+  it("delivers notifications to subscriptions added and removed while flushing", () => {
+    const source = createSignal(0);
+    const other = createSignal("a");
+    const calls: string[] = [];
+    let readOther = false;
+    const dispose = effect(() => {
+      calls.push(readOther ? `both:${source()}:${other()}` : `source:${source()}`);
+      onCleanup(() => calls.push("cleanup"));
+    });
+    calls.length = 0;
+
+    readOther = true;
+    source.set(1);
+    expect(calls).toEqual(["cleanup", "both:1:a"]);
+
+    calls.length = 0;
+    other.set("b");
+    expect(calls).toEqual(["cleanup", "both:1:b"]);
+
+    calls.length = 0;
+    readOther = false;
+    source.set(2);
+    expect(calls).toEqual(["cleanup", "source:2"]);
+
+    calls.length = 0;
+    other.set("c");
+    expect(calls).toEqual([]);
+    dispose();
+  });
+
+  it("stops notifying subscribers of a root disposed during the same flush", () => {
+    const source = createSignal(0);
+    const calls: string[] = [];
+    createRoot((dispose) => {
+      effect(() => {
+        calls.push(`disposer:${source()}`);
+        if (source() === 1) dispose();
+      });
+      effect(() => {
+        calls.push(`sibling:${source()}`);
+      });
+    });
+    calls.length = 0;
+
+    source.set(1);
+    expect(calls).toEqual(["disposer:1"]);
+
+    calls.length = 0;
+    source.set(2);
+    expect(calls).toEqual([]);
+  });
+
   it("drains sibling effects before reporting an unhandled failure", () => {
     const source = createSignal(0);
     const calls: string[] = [];

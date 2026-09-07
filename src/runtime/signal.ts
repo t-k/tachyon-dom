@@ -416,9 +416,12 @@ const scheduleFlush = (): void => {
   }
 };
 
+// The subscriber set is walked directly rather than copied. That holds only because this loop enqueues into
+// separate pending sets and runs no user code, no cleanup, and no diagnostic hook, so nothing can subscribe or
+// unsubscribe before the walk finishes; scheduleFlush runs the queued effects afterwards. Adding any synchronous
+// callback to this loop would reintroduce the need for a snapshot.
 const notify = (subscribers: SubscriberSet): void => {
-  const snapshot = Array.from(subscribers);
-  for (const subscriber of snapshot) {
+  for (const subscriber of subscribers) {
     if (!subscriber.disposed) {
       if (subscriber.computed) {
         pendingComputedEffects.add(subscriber);
