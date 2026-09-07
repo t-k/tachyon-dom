@@ -162,6 +162,53 @@ describe("static template optimization", () => {
     ).toEqual([]);
   });
 
+  it("drops the bound when any list expression cannot be parsed", () => {
+    const listBinding = (expression: string) => ({
+      kind: "list" as const,
+      path: [0],
+      each: "rows",
+      itemName: "row",
+      key: "row.id",
+      templateHtml: `<li></li>`,
+      bindings: [{ kind: "text" as const, path: [0], expression }],
+    });
+
+    expect([...(listParentScopeNames(listBinding("prefix")) ?? [])]).toEqual(["prefix"]);
+    expect(listParentScopeNames(listBinding("(("))).toBeUndefined();
+    expect(listParentScopeNames({ ...listBinding("prefix"), key: "((" })).toBeUndefined();
+    expect(
+      listParentScopeNames({
+        ...listBinding("prefix"),
+        stores: [{ name: "draft", initial: "((" }],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("excludes a nested list's own index name from the parent bound", () => {
+    const names = listParentScopeNames({
+      kind: "list",
+      path: [0],
+      each: "rows",
+      itemName: "row",
+      key: "row.id",
+      templateHtml: `<li></li>`,
+      bindings: [
+        {
+          kind: "list",
+          path: [0],
+          each: "row.groups",
+          itemName: "group",
+          indexName: "position",
+          key: "group.id",
+          templateHtml: `<span></span>`,
+          bindings: [{ kind: "text", path: [0], expression: "position" }],
+        },
+      ],
+    });
+
+    expect([...(names ?? [])]).toEqual([]);
+  });
+
   it("emits the bounded parent scope keys in the generated list options", () => {
     const code = generateClientModule(
       compiled(`<ul><for each={rows} key={row.id}><li>{prefix}{row.label}</li></for></ul>`),
