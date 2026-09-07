@@ -39,7 +39,7 @@ import {
   expressionLocationForText,
 } from "../utils.js";
 import { isAssignableExpression } from "../expression.js";
-import { listParentScopeNames } from "../optimize.js";
+import { expressionAlwaysPlainValue, listParentScopeNames } from "../optimize.js";
 
 type LoweredNode = {
   html: string;
@@ -793,7 +793,8 @@ const runtimeValueExpression = (
   aliases: ReadonlyMap<string, string> = new Map(),
 ): string => {
   const value = expressionToScopeAccess(expression, new Set(), sourceName, aliases);
-  return reactive ? `${runtimeNames.read}(${value})` : value;
+  // Only a binding whose whole value could be an accessor needs unwrapping; a computed result never is.
+  return reactive && !expressionAlwaysPlainValue(expression) ? `${runtimeNames.read}(${value})` : value;
 };
 
 const aliasesForBinding = (binding: ClientBinding): ReadonlyMap<string, string> => {

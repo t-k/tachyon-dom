@@ -210,3 +210,31 @@ export const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> 
   for (const name of local) names.delete(name);
   return names;
 };
+
+/**
+ * Whether an expression's result can never be a signal accessor, so the runtime's `read` unwrapping is
+ * unnecessary.
+ *
+ * Compound expressions are evaluated in JavaScript before the result reaches the binding, so an operator that
+ * always produces a primitive, array, or object literal cannot yield an accessor. Anything that can return one
+ * of its operands unchanged - `&&`, `||`, `??`, and the conditional operator - is excluded, as are identifiers,
+ * member access, and calls, whose value the compiler cannot see.
+ */
+export const expressionAlwaysPlainValue = (expression: string): boolean => {
+  const parsed = parseExpression(expression);
+  if (!parsed.ok) return false;
+  const node = parsed.value;
+  switch (node.type) {
+    case "literal":
+    case "regex":
+    case "template":
+    case "array":
+    case "object":
+    case "unary":
+      return true;
+    case "binary":
+      return !["&&", "||", "??"].includes(node.operator);
+    default:
+      return false;
+  }
+};

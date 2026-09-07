@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
 import {
   analyzeConditionalTest,
+  expressionAlwaysPlainValue,
   expressionScopeNames,
   listParentScopeNames,
   removeConstantFalseConditionals,
 } from "../src/compiler/optimize";
 import { mount } from "../src/runtime/mount";
+import { createMemo, createSignal } from "../src/runtime/signal";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
 
 const compiled = (source: string, options: Parameters<typeof compileTemplate>[1] = {}) => {
@@ -167,6 +169,83 @@ describe("static template optimization", () => {
     );
 
     expect(code).toContain(`parentScopeKeys: ["prefix"],`);
+  });
+
+  it("recognises expressions whose result can never be an accessor", () => {
+    for (const expression of [
+      "42",
+      `"text"`,
+      "true",
+      "null",
+      "`x${name}`",
+      "!flag",
+      "-count",
+      "count + 1",
+      "a > b",
+      "a === b",
+      "a * b",
+      "[a, b]",
+      "{ x: a }",
+    ]) {
+      expect(expressionAlwaysPlainValue(expression)).toBe(true);
+    }
+
+    // These can hand back one of their operands unchanged, and that operand may be an accessor.
+    for (const expression of ["value", "user.value", "read()", "a && b", "a || b", "a ?? b", "flag ? a : b", "(("]) {
+      expect(expressionAlwaysPlainValue(expression)).toBe(false);
+    }
+  });
+
+  it("omits the accessor unwrapping only where the result cannot be one", () => {
+    const textBinding = (source: string) => {
+      const code = generateClientModule(compiled(source), { reactive: true, instrumentBindings: false });
+      return /__tachyonSetText\(__tachyonTarget0, (.*)\)\)\);/.exec(code)?.[1];
+    };
+
+    expect(textBinding(`<p>{count + 1}</p>`)).toBe(`(scope.count + 1)`);
+    expect(textBinding(`<p>{!flag}</p>`)).toBe(`(!scope.flag)`);
+    expect(textBinding(`<p>{42}</p>`)).toBe(`42`);
+    expect(textBinding(`<p>{value}</p>`)).toBe(`__tachyonRead(scope.value)`);
+    expect(textBinding(`<p>{a ?? b}</p>`)).toBe(`__tachyonRead((scope.a ?? scope.b))`);
+    expect(textBinding(`<p>{flag ? a : b}</p>`)).toBe(`__tachyonRead((scope.flag ? scope.a : scope.b))`);
+  });
+
+  it("keeps unwrapping a binding whose declared value the input scope can replace", () => {
+    // The generated scope is `{ ...localScope, ...inputScope }`, so a setup declaration never proves the final
+    // value. A bare name therefore keeps its unwrapping even when a setup declares it as a signal.
+    const code = generateClientModule(compiled(`<p>{count}</p>`), { reactive: true, defaultScopeName: "setup" });
+
+    expect(code).toContain(`{ ...localScope, ...inputScope }`);
+    expect(code).toContain(`__tachyonRead(scope.count)`);
+  });
+
+  it("still resolves a bare binding for signals, memos, and plain values from the input scope", () => {
+    const module = evaluateGeneratedClientModule(
+      generateClientModule(compiled(`<p>{count}</p>`), { reactive: true, instrumentBindings: false }),
+    );
+    const render = (count: unknown) => {
+      const root = document.createElement("div");
+      const handle = mount(root, module, { count });
+      const text = root.textContent;
+      handle.dispose();
+      return text;
+    };
+
+    expect(render(createSignal(5))).toBe("5");
+    expect(render(createMemo(() => 6))).toBe("6");
+    expect(render(7)).toBe("7");
+    expect(render("text")).toBe("text");
+  });
+
+  it("computes a plain-valued expression from the values the input scope supplies", () => {
+    const module = evaluateGeneratedClientModule(
+      generateClientModule(compiled(`<p>{a > b}</p>`), { reactive: true, instrumentBindings: false }),
+    );
+    const root = document.createElement("div");
+    const handle = mount(root, module, { a: 2, b: 1 });
+
+    expect(root.textContent).toBe("true");
+    handle.dispose();
   });
 
   it("returns the same tree object when nothing is removed", () => {
