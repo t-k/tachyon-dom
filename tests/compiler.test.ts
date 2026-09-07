@@ -1936,6 +1936,19 @@ describe("HTML-first compiler", () => {
     expect(chunks.join("")).toBe(`<main><h1>Before</h1><p>Ready</p></main>`);
   });
 
+  it("keeps the generated synchronous await fallback when its child is empty", async () => {
+    const result = compileTemplate(`<main><await value={messagePromise} then="message"></await></main>`);
+    if (!result.ok) throw new Error(result.error.message);
+
+    const code = generateServerModule(result.value);
+    expect(code).toContain(`((message) => "")(scope.messagePromise)`);
+
+    const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
+      render: (scope: { messagePromise: unknown }) => string;
+    };
+    expect(module.render({ messagePromise: "Ready" })).toBe(`<main></main>`);
+  });
+
   it("generates hydration state helpers for server modules", async () => {
     const result = compileTemplate(`<main><section hydrate:id={islandId}>{label}</section></main>`);
     if (!result.ok) {
