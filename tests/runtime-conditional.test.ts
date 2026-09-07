@@ -1,6 +1,7 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 import { mountConditional } from "../src/runtime/conditional";
-import { mountConditionalCore } from "../src/runtime/conditional-core";
+import { mountConditionalCore, prepareConditionalCore, preparedNodeAt } from "../src/runtime/conditional-core";
 import { createRoot, createSignal, effect } from "../src/runtime/signal";
 import { registerOwnedSubtree } from "../src/runtime/subtree";
 
@@ -436,5 +437,284 @@ describe("mountConditionalCore", () => {
     root.querySelector("button")?.click();
 
     expect(calls).toEqual(["save", "save"]);
+  });
+
+  // Direct callers skip prepareConditionalCore, so every later logical path has to be corrected by the regions
+  // that earlier conditionals already occupy in the live DOM.
+  it("resolves later logical paths after an earlier branch adopts several server nodes", () => {
+    document.body.innerHTML = `<main><span>a</span><b>c</b><i>d</i><p>x</p></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const serverSpan = root.querySelector("span");
+    const serverBold = root.querySelector("b");
+    const serverItalic = root.querySelector("i");
+    const serverParagraph = root.querySelector("p");
+    const first = { signature: "first", templateHtml: `<span>a</span>`, bindings: [] };
+    const second = { signature: "second", templateHtml: `<b>c</b><i>d</i>`, bindings: [] };
+
+    mountConditionalCore(root, [0], true, {}, first);
+    mountConditionalCore(root, [1], true, {}, second);
+
+    expect(root.querySelector("span")).toBe(serverSpan);
+    expect(root.querySelector("b")).toBe(serverBold);
+    expect(root.querySelector("i")).toBe(serverItalic);
+    expect(root.querySelector("p")).toBe(serverParagraph);
+    expect(root.textContent).toBe("acdx");
+
+    mountConditionalCore(root, [1], false, {}, second);
+    expect(root.querySelector("b")).toBeNull();
+    expect(root.querySelector("i")).toBeNull();
+    expect(root.querySelector("span")).toBe(serverSpan);
+    expect(root.querySelector("p")).toBe(serverParagraph);
+
+    mountConditionalCore(root, [1], true, {}, second);
+    expect(root.textContent).toBe("acdx");
+    expect(root.querySelector("b")).not.toBe(serverBold);
+  });
+
+  it("resolves a later logical path once an earlier branch is hidden", () => {
+    document.body.innerHTML = `<main><span>a</span><b>c</b><p>x</p></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const serverBold = root.querySelector("b");
+    const first = { signature: "first", templateHtml: `<span>a</span>`, bindings: [] };
+    const second = { signature: "second", templateHtml: `<b>c</b>`, bindings: [] };
+
+    mountConditionalCore(root, [0], false, {}, first);
+    expect(root.querySelector("span")).toBeNull();
+
+    mountConditionalCore(root, [1], true, {}, second);
+
+    expect(root.querySelector("b")).toBe(serverBold);
+    expect(root.textContent).toBe("cx");
+  });
+
+  it("resolves a nested logical path inside an adopted server branch", () => {
+    document.body.innerHTML = `<main><section><em>k</em><u>n</u></section></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const serverEmphasis = root.querySelector("em");
+    const serverUnderline = root.querySelector("u");
+    const outer = { signature: "outer", templateHtml: `<section><em>k</em><u>n</u></section>`, bindings: [] };
+    const inner = { signature: "inner", templateHtml: `<em>k</em>`, bindings: [] };
+
+    mountConditionalCore(root, [0], true, {}, outer);
+    mountConditionalCore(root, [0, 0], true, {}, inner);
+
+    expect(root.querySelector("em")).toBe(serverEmphasis);
+    expect(root.querySelector("u")).toBe(serverUnderline);
+    expect(root.textContent).toBe("kn");
+
+    mountConditionalCore(root, [0, 0], false, {}, inner);
+    expect(root.querySelector("em")).toBeNull();
+    expect(root.querySelector("u")).toBe(serverUnderline);
+  });
+
+  it("keeps a later client placeholder for its own conditional", () => {
+    document.body.innerHTML = `<main><!----><!----><p>tail</p></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const tail = root.querySelector("p");
+    const first = { signature: "first", templateHtml: `<span>a</span>`, bindings: [] };
+    const second = { signature: "second", templateHtml: `<b>c</b>`, bindings: [] };
+
+    mountConditionalCore(root, [0], true, {}, first);
+    mountConditionalCore(root, [1], true, {}, second);
+
+    expect(root.textContent).toBe("actail");
+    expect(root.querySelector("p")).toBe(tail);
+    expect(root.querySelector("span")?.nextSibling?.nodeType).toBe(Node.COMMENT_NODE);
+
+    mountConditionalCore(root, [0], false, {}, first);
+    mountConditionalCore(root, [1], false, {}, second);
+    expect(root.textContent).toBe("tail");
+    mountConditionalCore(root, [1], true, {}, second);
+    expect(root.textContent).toBe("ctail");
+  });
+});
+
+describe("prepareConditionalCore", () => {
+  const branch = `<span>a</span>`;
+  const options = { signature: "prepared", templateHtml: branch, bindings: [] };
+  const descriptors = [{ path: [0], visible: true, templateHtml: branch }];
+
+  it("resolves later binding paths past an adopted server branch", () => {
+    document.body.innerHTML = `<main><span>a</span><p>tail</p></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const tail = root.querySelector("p");
+
+    prepareConditionalCore(root, descriptors);
+    expect(preparedNodeAt(root, [1])).toBe(tail);
+
+    mountConditionalCore(root, [0], true, {}, options);
+    expect(preparedNodeAt(root, [1])).toBe(tail);
+
+    mountConditionalCore(root, [0], false, {}, options);
+    expect(preparedNodeAt(root, [1])).toBe(tail);
+  });
+
+  it("reuses the same anchor and DOM when a root is prepared twice", () => {
+    document.body.innerHTML = `<main><span>a</span><p>tail</p></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const tail = root.querySelector("p");
+    const serverSpan = root.querySelector("span");
+
+    prepareConditionalCore(root, descriptors);
+    const markupAfterFirstPrepare = root.innerHTML;
+    prepareConditionalCore(root, descriptors);
+
+    expect(root.innerHTML).toBe(markupAfterFirstPrepare);
+    mountConditionalCore(root, [0], true, {}, options);
+    expect(root.querySelector("span")).toBe(serverSpan);
+    expect(preparedNodeAt(root, [1])).toBe(tail);
+  });
+
+  it("restores a hidden branch when the same root is prepared and mounted again", () => {
+    document.body.innerHTML = `<main><span>a</span><p>tail</p></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const tail = root.querySelector("p");
+
+    prepareConditionalCore(root, descriptors);
+    mountConditionalCore(root, [0], true, {}, options);
+    mountConditionalCore(root, [0], false, {}, options);
+    expect(root.querySelector("span")).toBeNull();
+
+    prepareConditionalCore(root, descriptors);
+    mountConditionalCore(root, [0], true, {}, options);
+
+    expect(root.querySelector("span")?.textContent).toBe("a");
+    expect(root.querySelector("p")).toBe(tail);
+    expect(root.textContent).toBe("atail");
+    expect(preparedNodeAt(root, [1])).toBe(tail);
+  });
+
+  it("marks a descriptor invalid when its declared parent tag does not match", () => {
+    document.body.innerHTML = `<main><span>a</span><p>tail</p></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const markup = root.innerHTML;
+
+    prepareConditionalCore(root, [{ ...descriptors[0]!, parentTagName: "section" }]);
+
+    expect(root.innerHTML).toBe(markup);
+    expect(() => preparedNodeAt(root, [0])).toThrow(/Cannot resolve generated binding path/);
+    mountConditionalCore(root, [0], true, {}, options);
+    expect(root.innerHTML).toBe(markup);
+  });
+
+  it("resolves binding paths that pass through a mounted branch and skips hidden ones", () => {
+    document.body.innerHTML = `<main><section><em>k</em><u>n</u></section><p>tail</p></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const serverSection = root.querySelector("section");
+    const serverUnderline = root.querySelector("u");
+    const tail = root.querySelector("p");
+    const outer = { signature: "outer", templateHtml: `<section><em>k</em><u>n</u></section>`, bindings: [] };
+
+    prepareConditionalCore(root, [{ path: [0], visible: true, templateHtml: outer.templateHtml }]);
+    mountConditionalCore(root, [0], true, {}, outer);
+
+    // A path that ends on a conditional slot resolves to the region's anchor; deeper paths step into the branch.
+    expect(preparedNodeAt(root, [0]).nodeType).toBe(Node.COMMENT_NODE);
+    expect(preparedNodeAt(root, [0, 0]).parentNode).toBe(serverSection);
+    expect(preparedNodeAt(root, [0, 1])).toBe(serverUnderline);
+    expect(preparedNodeAt(root, [1])).toBe(tail);
+
+    mountConditionalCore(root, [0], false, {}, outer);
+
+    expect(() => preparedNodeAt(root, [0, 1])).toThrow(/Missing generated binding node/);
+    expect(preparedNodeAt(root, [1])).toBe(tail);
+    // A conditional inside a hidden region has nowhere to mount, so it must be a no-op rather than a crash.
+    expect(() =>
+      mountConditionalCore(root, [0, 0], true, {}, { signature: "inner", templateHtml: `<em>k</em>`, bindings: [] }),
+    ).not.toThrow();
+    expect(root.textContent).toBe("tail");
+  });
+
+  it("orders nested descriptors by depth regardless of the order they are declared", () => {
+    document.body.innerHTML = `<main><section><em>k</em></section><p>tail</p></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const serverSection = root.querySelector("section");
+    const serverEmphasis = root.querySelector("em");
+    const tail = root.querySelector("p");
+    const outer = { signature: "outer", templateHtml: `<section><em>k</em></section>`, bindings: [] };
+    const inner = { signature: "inner", templateHtml: `<em>k</em>`, bindings: [] };
+
+    prepareConditionalCore(root, [
+      { path: [0, 0], visible: true, templateHtml: inner.templateHtml },
+      { path: [0], visible: true, templateHtml: outer.templateHtml },
+    ]);
+    mountConditionalCore(root, [0], true, {}, outer);
+    mountConditionalCore(root, [0, 0], true, {}, inner);
+
+    expect(root.querySelector("section")).toBe(serverSection);
+    expect(root.querySelector("em")).toBe(serverEmphasis);
+    expect(preparedNodeAt(root, [1])).toBe(tail);
+
+    mountConditionalCore(root, [0, 0], false, {}, inner);
+    expect(root.querySelector("em")).toBeNull();
+    expect(root.querySelector("section")).toBe(serverSection);
+    expect(preparedNodeAt(root, [1])).toBe(tail);
+  });
+
+  it("treats an empty path as the root's own slot in its parent", () => {
+    document.body.innerHTML = `<div><section>content</section><p>tail</p></div>`;
+    const host = document.querySelector("div");
+    const root = document.querySelector("section");
+    if (!(host instanceof HTMLElement) || !(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const tail = host.querySelector("p");
+    const options = { signature: "root-slot", templateHtml: `<section>content</section>`, bindings: [] };
+
+    mountConditionalCore(root, [], true, {}, options);
+    expect(host.querySelector("section")).toBe(root);
+
+    mountConditionalCore(root, [], false, {}, options);
+    expect(host.querySelector("section")).toBeNull();
+    expect(host.querySelector("p")).toBe(tail);
+
+    mountConditionalCore(root, [], true, {}, options);
+    expect(host.querySelector("section")?.textContent).toBe("content");
+    expect(host.querySelector("p")).toBe(tail);
+    expect(host.textContent).toBe("contenttail");
+  });
+
+  it("resolves a third-level conditional that follows a sibling conditional", () => {
+    document.body.innerHTML = `<main><section><div><b>x</b><i>y</i></div></section></main>`;
+    const root = document.querySelector("main");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const serverBold = root.querySelector("b");
+    const serverItalic = root.querySelector("i");
+    const first = { signature: "first", templateHtml: `<b>x</b>`, bindings: [] };
+    const second = { signature: "second", templateHtml: `<i>y</i>`, bindings: [] };
+
+    mountConditionalCore(root, [0, 0, 0], true, {}, first);
+    mountConditionalCore(root, [0, 0, 1], true, {}, second);
+
+    expect(root.querySelector("b")).toBe(serverBold);
+    expect(root.querySelector("i")).toBe(serverItalic);
+    expect(root.textContent).toBe("xy");
+
+    mountConditionalCore(root, [0, 0, 0], false, {}, first);
+    expect(root.querySelector("b")).toBeNull();
+    expect(root.querySelector("i")).toBe(serverItalic);
+
+    mountConditionalCore(root, [0, 0, 1], false, {}, second);
+    expect(root.textContent).toBe("");
+  });
+
+  // The retention fix removes the root-keyed map of every initial node. Reintroducing one would make a hidden
+  // branch reachable from a live root again, which jsdom cannot observe; see docs.local 067-evaluation.
+  it("keeps no root-scoped snapshot of the initial nodes", async () => {
+    const source = await readFile("src/runtime/conditional-core.ts", "utf8");
+
+    expect([...source.matchAll(/const (\w+) = new WeakMap<Node,/g)].map((match) => match[1])).toEqual([
+      "anchorsByRoot",
+      "preparedPathPlans",
+    ]);
+    expect(source).not.toMatch(/initialSnapshots|snapshotNodes/);
   });
 });

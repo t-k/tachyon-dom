@@ -546,6 +546,92 @@ export const runListSeparateParentCase = () => {
 };
 `,
   };
+  // A conditional whose branch owns many nodes, so hiding it has to release the whole region while the static
+  // sibling keeps its identity and its updates.
+  const largeBranchRows = 200;
+  const largeBranchSource = `<main><if test={visible}><ul>${Array.from(
+    { length: largeBranchRows },
+    (_, index) => `<li>row ${index}</li>`,
+  ).join("")}<li>{last}</li></ul></if><footer>{tail}</footer></main>`;
+  const largeBranchCompiled = compileTemplate(largeBranchSource);
+  if (!largeBranchCompiled.ok) throw new Error(largeBranchCompiled.error.message);
+  const largeBranchGenerated = generateClientModule(largeBranchCompiled.value, {
+    reactive: true,
+    instrumentBindings: false,
+  });
+  const largeBranchMarkup = renderServerTemplate(largeBranchCompiled.value, {
+    visible: true,
+    last: "Server last",
+    tail: "Server tail",
+  });
+  const largeBranchModule = {
+    fileName: "conditional-large-branch.js",
+    source: `import { createSignal } from "tachyon-dom";
+import { hydrate } from "tachyon-dom/runtime/mount";
+${largeBranchGenerated}
+const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
+const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
+export const runLargeBranchCase = () => {
+  const root = document.createElement("div");
+  document.body.append(root);
+  root.innerHTML = ${JSON.stringify(largeBranchMarkup)};
+  const serverList = root.querySelector("ul");
+  const serverFooter = root.querySelector("footer");
+  const visible = createSignal(true);
+  const last = createSignal("Client last");
+  const tail = createSignal("Client tail");
+  const started = performance.now();
+  const result = hydrate(root, clientModule, { visible, last, tail });
+  const hydrateMs = performance.now() - started;
+  if (!result.ok) {
+    root.remove();
+    return { ok: false, message: result.error.message };
+  }
+  const adoptedServerList = root.querySelector("ul") === serverList;
+  const adoptedRows = root.querySelectorAll("li").length;
+  const lastUpdated = root.querySelector("ul").lastElementChild.textContent === "Client last";
+  const hideStarted = performance.now();
+  visible.set(false);
+  const hideMs = performance.now() - hideStarted;
+  const hiddenRows = root.querySelectorAll("li").length;
+  tail.set("Tail while hidden");
+  const footerStable = root.querySelector("footer") === serverFooter;
+  const footerUpdated = serverFooter.textContent === "Tail while hidden";
+  const showStarted = performance.now();
+  visible.set(true);
+  const showMs = performance.now() - showStarted;
+  const shownRows = root.querySelectorAll("li").length;
+  const recreatedList = root.querySelector("ul") !== serverList;
+  last.set("Second last");
+  const secondLastUpdated = root.querySelector("ul").lastElementChild.textContent === "Second last";
+  const footerAfterShow = root.querySelector("footer") === serverFooter;
+  visible.set(false);
+  const finalRows = root.querySelectorAll("li").length;
+  result.value.dispose();
+  root.remove();
+  return {
+    ok: true,
+    message: "",
+    rows: ${largeBranchRows} + 1,
+    adoptedServerList,
+    adoptedRows,
+    lastUpdated,
+    hiddenRows,
+    footerStable,
+    footerUpdated,
+    shownRows,
+    recreatedList,
+    secondLastUpdated,
+    footerAfterShow,
+    finalRows,
+    hydrateMs,
+    hideMs,
+    showMs,
+  };
+};
+`,
+  };
+
   await Promise.all(
     [
       ...sharedParentModules,
@@ -557,6 +643,7 @@ export const runListSeparateParentCase = () => {
       listHeaderModule,
       listTextOnlyModule,
       listConditionalModule,
+      largeBranchModule,
     ].map(({ fileName, source: generatedSource }) => writeFile(resolve(outDir, fileName), generatedSource)),
   );
   const sharedImports = sharedParentModules
@@ -579,6 +666,7 @@ export const runListSeparateParentCase = () => {
     `import { runListHeaderCase } from "./${listHeaderModule.fileName}";`,
     `import { runListTextOnlyCase } from "./${listTextOnlyModule.fileName}";`,
     `import { runListSeparateParentCase } from "./${listConditionalModule.fileName}";`,
+    `import { runLargeBranchCase } from "./${largeBranchModule.fileName}";`,
   ].join("\n");
   await writeFile(
     entrySource,
@@ -707,6 +795,7 @@ window.runConditionalFollowup = () => {
     listHeader: runListHeaderCase(),
     listTextOnly: runListTextOnlyCase(),
     listSeparateParent: runListSeparateParentCase(),
+    largeBranch: runLargeBranchCase(),
   };
 };
 window.__conditionalReady = true;

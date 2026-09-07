@@ -116,6 +116,103 @@ describe("compiler expression OXC backend", () => {
     }
   });
 
+  it("returns present values through optional computed access and calls", () => {
+    for (const [source, expected] of [
+      ["object()?.[key()]", "found"],
+      ["object()?.[key()]()", "found"],
+    ] as const) {
+      for (const run of [
+        (scope: Record<string, unknown>) => evaluateExpression(source, scope),
+        Function("scope", `return ${expressionToJs(source, new Set(), "scope", { backend: "oxc" })}`),
+        Function("scope", `with (scope) { return ${source}; }`),
+      ]) {
+        const calls: string[] = [];
+        expect(
+          run({
+            object: () => {
+              calls.push("object");
+              return { label: source.endsWith("()") ? () => "found" : "found" };
+            },
+            key: () => {
+              calls.push("key");
+              return "label";
+            },
+          }),
+        ).toBe(expected);
+        expect(calls).toEqual(["object", "key"]);
+      }
+    }
+  });
+
+  // The interpreter reports the nullish object itself before touching it, so the message never depends on the
+  // property that was about to be read. Generated code and plain JavaScript raise the engine's own TypeError.
+  it("rejects non-optional computed access and calls on nullish objects", () => {
+    for (const source of ["object()[key()]", "object()[key()]()"]) {
+      for (const value of [null, undefined]) {
+        const scope = { object: () => value, key: () => "label" };
+        expect(() => evaluateExpression(source, scope)).toThrow(
+          new TypeError(`Cannot read properties of ${value}.`),
+        );
+        for (const run of [
+          Function("scope", `return ${expressionToJs(source, new Set(), "scope", { backend: "oxc" })}`),
+          Function("scope", `with (scope) { return ${source}; }`),
+        ]) {
+          expect(() => run(scope)).toThrow(TypeError);
+        }
+      }
+    }
+  });
+
+  // Template expressions deliberately diverge from JavaScript here: calling a non-function member yields
+  // undefined instead of throwing, so plain JavaScript is not the oracle for this case.
+  it("returns undefined when a computed member call target is not a function", () => {
+    for (const source of ["object()?.[key()]()", "object()[key()]()"]) {
+      for (const run of [
+        (scope: Record<string, unknown>) => evaluateExpression(source, scope),
+        Function("scope", `return ${expressionToJs(source, new Set(), "scope", { backend: "oxc" })}`),
+      ]) {
+        expect(run({ object: () => ({ label: "not callable" }), key: () => "label" })).toBeUndefined();
+      }
+      expect(() =>
+        Function("scope", `with (scope) { return ${source}; }`)({
+          object: () => ({ label: "not callable" }),
+          key: () => "label",
+        }),
+      ).toThrow(TypeError);
+    }
+  });
+
+  it("passes every computed member call argument in source order", () => {
+    for (const source of ["object()?.[key()](first(), second(), third())", "object()[key()](first(), second(), third())"]) {
+      for (const run of [
+        (scope: Record<string, unknown>) => evaluateExpression(source, scope),
+        Function("scope", `return ${expressionToJs(source, new Set(), "scope", { backend: "oxc" })}`),
+        Function("scope", `with (scope) { return ${source}; }`),
+      ]) {
+        const calls: string[] = [];
+        expect(
+          run({
+            object: () => ({ join: (...args: unknown[]) => args.join("|") }),
+            key: () => "join",
+            first: () => {
+              calls.push("first");
+              return "a";
+            },
+            second: () => {
+              calls.push("second");
+              return "b";
+            },
+            third: () => {
+              calls.push("third");
+              return "c";
+            },
+          }),
+        ).toBe("a|b|c");
+        expect(calls).toEqual(["first", "second", "third"]);
+      }
+    }
+  });
+
   it("short-circuits optional computed keys in compiled SSR", () => {
     const compiled = compileTemplate("<p>{user?.[key()]}</p>");
     expect(compiled.ok).toBe(true);

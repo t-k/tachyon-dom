@@ -804,10 +804,8 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
       if (isDeniedPropertyKey(property)) {
         return undefined;
       }
+      // Optional callees already returned above, so a nullish object here is always a non-optional call.
       if (object == null) {
-        if (node.callee.optional) {
-          return undefined;
-        }
         throw new TypeError(`Cannot read properties of ${object}.`);
       }
       const callee = (object as Record<PropertyKey, unknown>)[property as PropertyKey];
@@ -832,10 +830,8 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
     if (isDeniedPropertyKey(property)) {
       return undefined;
     }
+    // Optional access already returned above, so a nullish object here is always a non-optional member.
     if (object == null) {
-      if (node.optional) {
-        return undefined;
-      }
       throw new TypeError(`Cannot read properties of ${object}.`);
     }
     return (object as Record<PropertyKey, unknown>)[property as PropertyKey];
@@ -910,7 +906,7 @@ const deniedPropertyCheckToJs = (propertyName: string): string =>
 const guardedMemberAccessToJs = (object: string, property: string, optional: boolean): string =>
   optional
     ? `((__tachyonObject, __tachyonKey) => __tachyonObject == null ? undefined : ((__tachyonProperty) => ${deniedPropertyCheckToJs("__tachyonProperty")} ? undefined : __tachyonObject[__tachyonProperty])(__tachyonKey()))(${object}, () => (${property}))`
-    : `((__tachyonObject, __tachyonProperty) => ${optional ? "__tachyonObject == null ? undefined : " : ""}${deniedPropertyCheckToJs(
+    : `((__tachyonObject, __tachyonProperty) => ${deniedPropertyCheckToJs(
         "__tachyonProperty",
       )} ? undefined : __tachyonObject[__tachyonProperty])(${object}, ${property})`;
 
@@ -924,9 +920,7 @@ const guardedMemberCallToJs = (
     return `((__tachyonObject, __tachyonKey, __tachyonArgs) => { if (__tachyonObject == null) return undefined; const __tachyonProperty = __tachyonKey(); if (${deniedPropertyCheckToJs("__tachyonProperty")}) return undefined; const __tachyonCallee = __tachyonObject[__tachyonProperty]; return typeof __tachyonCallee === "function" ? __tachyonCallee.apply(__tachyonObject, __tachyonArgs()) : undefined; })(${object}, () => (${property}), () => [${args.join(", ")}])`;
   }
   const argsArray = `[${args.join(", ")}]`;
-  return `((__tachyonObject, __tachyonProperty) => { if (${
-    optional ? "__tachyonObject == null || " : ""
-  }${deniedPropertyCheckToJs(
+  return `((__tachyonObject, __tachyonProperty) => { if (${deniedPropertyCheckToJs(
     "__tachyonProperty",
   )}) return undefined; const __tachyonCallee = __tachyonObject[__tachyonProperty]; return typeof __tachyonCallee === "function" ? __tachyonCallee.apply(__tachyonObject, ${argsArray}) : undefined; })(${object}, ${property})`;
 };

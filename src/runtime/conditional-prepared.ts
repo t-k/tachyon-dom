@@ -15,6 +15,9 @@ export const setPreparedConditionalNodes = (anchor: Comment, nodes: Node[]): voi
   preparedAdoptions.set(anchor, nodes);
 };
 
+export const preparedConditionalAdoptionCount = (anchor: Comment): number | undefined =>
+  preparedAdoptions.get(anchor)?.length;
+
 export const takePreparedConditionalNodes = (anchor: Comment): Node[] | undefined => {
   const nodes = preparedAdoptions.get(anchor);
   preparedAdoptions.delete(anchor);

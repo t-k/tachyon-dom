@@ -56,6 +56,25 @@ declare global {
       listHeader: { mountCorrect: boolean; hydrateCorrect: boolean };
       listTextOnly: { mountCorrect: boolean; hydrateCorrect: boolean };
       listSeparateParent: { mountCorrect: boolean; hydrateCorrect: boolean };
+      largeBranch: {
+        ok: boolean;
+        message: string;
+        rows: number;
+        adoptedServerList: boolean;
+        adoptedRows: number;
+        lastUpdated: boolean;
+        hiddenRows: number;
+        footerStable: boolean;
+        footerUpdated: boolean;
+        shownRows: number;
+        recreatedList: boolean;
+        secondLastUpdated: boolean;
+        footerAfterShow: boolean;
+        finalRows: number;
+        hydrateMs: number;
+        hideMs: number;
+        showMs: number;
+      };
     };
     __conditionalReady?: boolean;
   }
@@ -214,5 +233,22 @@ test("runs generated adjacent conditional mount and SSR hydration regressions in
   expect(result.listHeader).toEqual({ mountCorrect: true, hydrateCorrect: true });
   expect(result.listTextOnly).toEqual({ mountCorrect: true, hydrateCorrect: true });
   expect(result.listSeparateParent).toEqual({ mountCorrect: true, hydrateCorrect: true });
+  const { largeBranch } = result;
+  expect(largeBranch.message).toBe("");
+  expect(largeBranch.ok).toBe(true);
+  expect(largeBranch.adoptedServerList).toBe(true);
+  expect(largeBranch.adoptedRows).toBe(largeBranch.rows);
+  expect(largeBranch.lastUpdated).toBe(true);
+  expect(largeBranch.hiddenRows).toBe(0);
+  expect(largeBranch.footerStable).toBe(true);
+  expect(largeBranch.footerUpdated).toBe(true);
+  expect(largeBranch.shownRows).toBe(largeBranch.rows);
+  expect(largeBranch.recreatedList).toBe(true);
+  expect(largeBranch.secondLastUpdated).toBe(true);
+  expect(largeBranch.footerAfterShow).toBe(true);
+  expect(largeBranch.finalRows).toBe(0);
+  console.log(
+    `[${browserName}] large conditional branch: ${largeBranch.rows} rows, hydrate ${largeBranch.hydrateMs.toFixed(3)}ms, hide ${largeBranch.hideMs.toFixed(3)}ms, show ${largeBranch.showMs.toFixed(3)}ms`,
+  );
   expect(["chromium", "firefox", "webkit"]).toContain(browserName);
 });

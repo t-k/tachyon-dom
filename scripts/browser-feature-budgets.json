@@ -8,8 +8,8 @@
     "maxBrotliBytes": 2048
   },
   "runtime/conditional": {
-    "maxMinifiedBytes": 14600,
-    "maxBrotliBytes": 4910
+    "maxMinifiedBytes": 14040,
+    "maxBrotliBytes": 4763
   },
   "runtime/router": {
     "maxMinifiedBytes": 20480,
