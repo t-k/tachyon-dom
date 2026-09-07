@@ -29,12 +29,16 @@ describe("generated cleanup specialization", () => {
     expect(registersCleanup(generated(`<main><if test={visible}><span>x</span></if></main>`, { reactive: true }))).toBe(
       true,
     );
+    // A class row is driven by the generated adapter, which always registers its region cleanup.
     expect(
       registersCleanup(generated(`<ul><for each={rows} key={row.id}><li class:on={row.on}></li></for></ul>`)),
+    ).toBe(true);
+    expect(
+      registersCleanup(generated(`<ul><for each={rows} key={row.id}><li style:opacity={row.o}></li></for></ul>`)),
     ).toBe(false);
     expect(
       registersCleanup(
-        generated(`<ul><for each={rows} key={row.id}><li class:on={row.on}></li></for></ul>`, { reactive: true }),
+        generated(`<ul><for each={rows} key={row.id}><li style:opacity={row.o}></li></for></ul>`, { reactive: true }),
       ),
     ).toBe(true);
   });

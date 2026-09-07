@@ -39,7 +39,7 @@ describe("full app example", () => {
       },
       { path: "/lists/", prefix: "..", title: "Lists", marker: "Compiler bindings" },
       { path: "/forms/", prefix: "..", title: "Forms", marker: "guest@example.com" },
-      { path: "/compiler/", prefix: "..", title: "Compiler", marker: "mountKeyedList" },
+      { path: "/compiler/", prefix: "..", title: "Compiler", marker: "mountGeneratedTextKeyedList" },
       { path: "/settings/", prefix: "..", title: "Settings", marker: "Comfortable" },
     ];
 
@@ -188,7 +188,7 @@ describe("full app example", () => {
 
     expect(app.querySelector("[data-testid='compiled-template']")?.textContent).toContain("<for each={rows}");
     expect(app.querySelector("[data-testid='stream-output']")?.textContent).toContain("<section");
-    expect(app.querySelector("[data-testid='generated-client']")?.textContent).toContain("mountKeyedList");
+    expect(app.querySelector("[data-testid='generated-client']")?.textContent).toContain("mountGeneratedTextKeyedList");
 
     instance.dispose();
   });

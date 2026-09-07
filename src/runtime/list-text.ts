@@ -28,10 +28,24 @@ type TextKeyedListOptions = {
   bindings: TextBinding[];
 };
 
-type GeneratedTextBinding = Omit<TextBinding, "read"> & { read: ExpressionReader };
+type GeneratedTextBinding = Omit<TextBinding, "read"> & {
+  read: ExpressionReader;
+  /**
+   * Applies the value to the row node the compiler resolved. Omitted for a text binding, whose node is the
+   * template's text node. Supplying it here keeps class, attribute, and style setters out of this module.
+   */
+  apply?: (node: Node, value: unknown) => void;
+};
+
+/** Registers a row listener and returns its disposer; the generated module owns the event runtime. */
+type GeneratedRowEvent = {
+  path: number[];
+  bind: (element: Element, scope: Record<string, unknown>) => () => void;
+};
 
 type GeneratedTextKeyedListOptionsBase = {
   signature: string;
+  events?: readonly GeneratedRowEvent[];
   key: string;
   /** Parent scope names the compiler proved these rows can read. */
   parentScopeKeys?: readonly string[];
@@ -49,6 +63,7 @@ type GeneratedTextKeyedListOptions = GeneratedTextKeyedListOptionsBase &
 
 type TextKeyedListRuntimeOptions = {
   signature: string;
+  events?: readonly GeneratedRowEvent[];
   parentScopeKeys?: readonly string[];
   itemName: string;
   indexName?: string;
@@ -183,7 +198,19 @@ const scopedItem = (
 
 const nodeAt = (root: Node, path: readonly number[]): Node => {
   let current = root;
-  for (const index of path) current = current.childNodes[index] as Node;
+  for (const index of path) {
+    // Skip SSR hydration marker comments so template paths stay valid on adopted rows.
+    let cursor = 0;
+    let next: Node | undefined;
+    for (const child of Array.from(current.childNodes)) {
+      if (child.nodeType === 8 && (child.nodeValue ?? "").startsWith("tachyon-hydrate:")) continue;
+      if (cursor++ === index) {
+        next = child;
+        break;
+      }
+    }
+    current = next as Node;
+  }
   return current;
 };
 
@@ -218,6 +245,7 @@ const resolveGeneratedOptions = (options: GeneratedTextKeyedListOptions): TextKe
     ...(options.region ? { region: options.region } : {}),
     ...(options.scope ? { scope: options.scope } : {}),
     ...(options.parentScopeKeys ? { parentScopeKeys: options.parentScopeKeys } : {}),
+    ...(options.events ? { events: options.events } : {}),
     templateHtml: options.templateHtml,
     bindings: options.bindings,
     readKey,
@@ -326,18 +354,30 @@ const getListState = (container: Element, options: TextKeyedListRuntimeOptions):
   return next;
 };
 
+const nodeAtRecord = (record: RowRecord, path: readonly number[]): Node => {
+  if (record.nodes.length <= 1) return nodeAt(record.element, path);
+  const [firstIndex, ...rest] = path;
+  return nodeAt(record.nodes[firstIndex ?? 0] ?? record.element, rest);
+};
+
 const bindRow = (record: RowRecord, options: TextKeyedListRuntimeOptions): void => {
+  // The row scope object is mutated in place by updates, so a listener bound once always sees the current item.
+  for (const event of options.events ?? []) {
+    const element = nodeAtRecord(record, event.path);
+    if (element instanceof Element) record.cleanups.push(event.bind(element, record.scope));
+  }
   if (options.bindings.length === 0) return;
   record.cleanups.push(
     untrack(() =>
       effect(() => {
         record.revision();
         for (let index = 0; index < options.bindings.length; index++) {
-          const binding = options.bindings[index] as TextBinding;
+          const binding = options.bindings[index] as GeneratedTextBinding;
           const value = options.readBinding(record.scope, binding);
           if (Object.is(record.lastValues[index], value)) continue;
           record.lastValues[index] = value;
-          setText(textAtRecord(record, binding.path), value);
+          if (binding.apply) binding.apply(nodeAtRecord(record, binding.path), value);
+          else setText(textAtRecord(record, binding.path), value);
         }
       }),
     ),

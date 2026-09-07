@@ -1,7 +1,7 @@
 {
   "runtime/list": {
-    "maxMinifiedBytes": 36143,
-    "maxBrotliBytes": 11015
+    "maxMinifiedBytes": 13995,
+    "maxBrotliBytes": 5080
   },
   "runtime/form": {
     "maxMinifiedBytes": 3072,

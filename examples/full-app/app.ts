@@ -83,7 +83,7 @@ const messages: Record<"en", Record<MessageKey, string>> = {
     activity: "Activity",
     activityCounter: "Counters use createSignal, createMemo, and batch.",
     activityRouteState: "Route state is handled by runtime/router.",
-    activityRows: "Rows use mountKeyedList with compiled readers.",
+    activityRows: "Rows use the generated keyed list adapter with compiled readers.",
     addRow: "Add row",
     allRows: "All rows",
     appName: "Tachyon Full App",

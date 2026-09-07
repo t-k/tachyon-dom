@@ -1994,10 +1994,13 @@ export const bindRows = (root, rows, options) => effect(() => {
       const boundaryClosure = closure(boundaryChunkName, true);
       const runtimeIn = (modules: Set<string>, name: string): boolean =>
         [...modules].some((id) => id.endsWith(`/src/runtime/${name}.ts`));
-      for (const name of ["form", "event", "list", "class"]) {
+      for (const name of ["form", "event", "list-text", "class"]) {
         expect(runtimeIn(staticClosure, name), `${name} runtime must stay out of the static closure`).toBe(false);
         expect(runtimeIn(boundaryClosure, name), `${name} runtime must ship with the boundary chunk`).toBe(true);
       }
+      // The boundary's rows only bind text and class, so the generic list runtime is in neither closure.
+      expect(runtimeIn(staticClosure, "list")).toBe(false);
+      expect(runtimeIn(boundaryClosure, "list")).toBe(false);
       expect(runtimeIn(staticClosure, "text")).toBe(true);
       expect(runtimeIn(staticClosure, "signal")).toBe(true);
 

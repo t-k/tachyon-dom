@@ -1717,9 +1717,9 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`itemName: "row"`);
   });
 
-  it("keeps mixed row bindings on the generic list runtime", () => {
+  it("drives text, class, attribute, and event rows with the generated list adapter", () => {
     const result = compileTemplate(
-      `<ul><for each={rows} key={row.id}><li title={row.label}>{row.label}</li></for></ul>`,
+      `<ul><for each={rows} key={row.id}><li title={row.label} class:on={row.on} on:click={select}>{row.label}</li></for></ul>`,
     );
     if (!result.ok) {
       throw new Error(result.error.message);
@@ -1727,19 +1727,51 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value);
 
-    expect(code).toContain(`mountKeyedList as __tachyonMountKeyedList`);
-    expect(code).toContain(`from "tachyon-dom/runtime/list"`);
-    expect(code).not.toContain(`from "tachyon-dom/runtime/list-text"`);
-    expect(code).toContain(`__tachyonMountKeyedList(root, [], scope.rows`);
+    expect(code).toContain(`mountGeneratedTextKeyedList as __tachyonMountTextKeyedList`);
+    expect(code).not.toContain(`from "tachyon-dom/runtime/list"`);
+    expect(code).toContain(`from "tachyon-dom/runtime/list-text"`);
+    // The setters come from this module, so the adapter itself imports none of them.
+    expect(code).toContain(`apply: (node, value) => __tachyonSetAttributeValue(node, "title", value)`);
+    expect(code).toContain(`apply: (node, value) => __tachyonSetClassPresence(node, "on", value)`);
+    expect(code).toContain(`bind: (element, scope) => __tachyonDelegate(element, "click", [], scope.select)`);
   });
 
+  it("keeps rows the adapter cannot drive on the generic list runtime", () => {
+    for (const source of [
+      `<ul><for each={rows} key={row.id}><li style:opacity={row.opacity}>{row.label}</li></for></ul>`,
+      `<ul><for each={rows} key={row.id}><li ref={refs.row}>{row.label}</li></for></ul>`,
+      `<ul><for each={rows} key={row.id}><li><input bind:value={row.draft}></li></for></ul>`,
+      `<ul><for each={rows} key={row.id}><li on:click={select}></li></for></ul>`,
+    ]) {
+      const result = compileTemplate(source);
+      if (!result.ok) throw new Error(result.error.message);
+      const code = generateClientModule(result.value);
+
+      expect([source, code.includes(`from "tachyon-dom/runtime/list"`)]).toEqual([source, true]);
+      expect([source, code.includes(`from "tachyon-dom/runtime/list-text"`)]).toEqual([source, false]);
+    }
+  });
+
+  // Whichever runtime drives the row, a dynamic URL attribute is written through the sanitizing setter.
   it.each([
-    ["dynamic href", `<ul><for each={rows} key={row.id}><li><a href={row.url}>{row.label}</a></li></for></ul>`],
-    ["dynamic srcset", `<ul><for each={rows} key={row.id}><li><img srcset={row.sources}></li></for></ul>`],
+    ["dynamic href", `<ul><for each={rows} key={row.id}><li><a href={row.url}>{row.label}</a></li></for></ul>`, "href"],
+    ["dynamic srcset", `<ul><for each={rows} key={row.id}><li><img srcset={row.sources}></li></for></ul>`, "srcset"],
     [
       "dynamic formaction",
       `<ul><for each={rows} key={row.id}><li><button formaction={row.action}>{row.label}</button></li></for></ul>`,
+      "formaction",
     ],
+  ])("writes %s row bindings through the security-aware attribute setter", (_name, source, attribute) => {
+    const result = compileTemplate(source);
+    if (!result.ok) throw new Error(result.error.message);
+
+    const code = generateClientModule(result.value);
+
+    expect(code).toContain(`__tachyonSetAttributeValue(node, ${JSON.stringify(attribute)}, value)`);
+    expect(code).toContain(`from "tachyon-dom/runtime/attr"`);
+  });
+
+  it.each([
     [
       "nested list",
       `<ul><for each={groups} key={group.id}><li>{group.label}<ul><for each={group.rows} key={row.id}><li>{row.label}</li></for></ul></li></for></ul>`,
@@ -1748,7 +1780,7 @@ describe("HTML-first compiler", () => {
       "nested conditional",
       `<ul><for each={rows} key={row.id}><li>{row.label}<if test={row.visible}><span>{row.note}</span></if></li></for></ul>`,
     ],
-  ])("keeps %s row bindings on the security-aware generic runtime", (_name, source) => {
+  ])("keeps %s row bindings on the generic runtime", (_name, source) => {
     const result = compileTemplate(source);
     if (!result.ok) throw new Error(result.error.message);
 

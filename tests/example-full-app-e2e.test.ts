@@ -54,7 +54,7 @@ describe("full app browser example", () => {
       { path: "/counter/", title: "Counter", marker: "Projected value is count plus two steps." },
       { path: "/lists/", title: "Lists", marker: "Compiler bindings" },
       { path: "/forms/", title: "Forms", marker: "guest@example.com" },
-      { path: "/compiler/", title: "Compiler", marker: "mountKeyedList" },
+      { path: "/compiler/", title: "Compiler", marker: "mountGeneratedTextKeyedList" },
       { path: "/settings/", title: "Settings", marker: "Comfortable" },
     ];
 
@@ -112,7 +112,7 @@ describe("full app browser example", () => {
 
     await page.getByRole("link", { name: "Compiler" }).click();
     expect(await page.getByTestId("stream-output").textContent()).toContain("<section");
-    expect(await page.getByTestId("generated-client").textContent()).toContain("mountKeyedList");
+    expect(await page.getByTestId("generated-client").textContent()).toContain("mountGeneratedTextKeyedList");
   }, 30000);
 
   it("hydrates each directly served SSR page without losing the route", async () => {
@@ -124,7 +124,7 @@ describe("full app browser example", () => {
       { path: "/counter/", title: "Counter", marker: "Projected value" },
       { path: "/lists/", title: "Lists", marker: "Compiler bindings" },
       { path: "/forms/", title: "Forms", marker: "guest@example.com" },
-      { path: "/compiler/", title: "Compiler", marker: "mountKeyedList" },
+      { path: "/compiler/", title: "Compiler", marker: "mountGeneratedTextKeyedList" },
       { path: "/settings/", title: "Settings", marker: "Comfortable" },
     ];
 

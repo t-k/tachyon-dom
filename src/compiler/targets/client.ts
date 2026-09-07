@@ -811,9 +811,15 @@ const aliasesForDeclaration = (declaration: object): ReadonlyMap<string, string>
 const declarationKeyFor = (declaration: object, fallback: string): string =>
   declarationKeys.get(declaration) ?? fallback;
 
+// Rows the generated adapter can drive on its own: their setters are injected by the generated module, so the
+// adapter never reaches for the generic binding runtime. Refs, models, styles, nested regions, stores,
+// component boundaries, and hydration boundaries all fall back to the general keyed list.
+const generatedRowBindingKinds = new Set(["text", "class", "attr", "event"]);
+
 const isTextOnlyList = (binding: ListBinding): boolean =>
   binding.bindings.length > 0 &&
-  binding.bindings.every((child) => child.kind === "text") &&
+  binding.bindings.every((child) => generatedRowBindingKinds.has(child.kind)) &&
+  binding.bindings.some((child) => child.kind !== "event") &&
   (binding.stores?.length ?? 0) === 0 &&
   (binding.hydrationBoundaries?.length ?? 0) === 0 &&
   (binding.components?.length ?? 0) === 0;
@@ -1248,17 +1254,23 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   // setter and its name validation and URL sanitization, which never applied to class in the first place.
   const isKnownClassAttribute = (binding: ClientBinding): boolean =>
     binding.kind === "attr" && binding.name.toLowerCase() === "class";
-  const needsClassPresence = bindings.some((binding) => binding.kind === "class");
-  const needsClassValue = bindings.some(isKnownClassAttribute);
+  // A generated list's rows are driven by setters this module injects, so their kinds decide its imports too.
+  const generatedRowBindings = bindings.flatMap((binding) =>
+    binding.kind === "list" && isTextOnlyList(binding) ? binding.bindings : [],
+  );
+  const bindingsNeedingRuntime = [...bindings, ...generatedRowBindings];
+  const needsClassPresence = bindingsNeedingRuntime.some((binding) => binding.kind === "class");
+  const needsClassValue = bindingsNeedingRuntime.some(isKnownClassAttribute);
+  const needsRowDelegate = generatedRowBindings.some((binding) => binding.kind === "event");
   const needsClass = needsClassPresence || needsClassValue;
-  const needsAttr = bindings.some(
+  const needsAttr = bindingsNeedingRuntime.some(
     (binding) =>
       (binding.kind === "attr" && !isKnownClassAttribute(binding)) ||
       binding.kind === "style" ||
       binding.kind === "ref",
   );
   const needsModel = bindings.some(hasModelBinding);
-  const needsEvent = bindings.some((binding) => binding.kind === "event");
+  const needsEvent = bindings.some((binding) => binding.kind === "event") || needsRowDelegate;
   const needsRef = bindings.some((binding) => binding.kind === "ref");
   const needsList = bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding));
   const needsTextList = bindings.some((binding) => binding.kind === "list" && isTextOnlyList(binding));
@@ -1364,11 +1376,14 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     );
   }
   if (needsEvent) {
-    lines.push(
-      needsConditionalCore
-        ? `import { delegateTarget as ${runtimeNames.delegateTarget} } from "tachyon-dom/runtime/event";`
-        : `import { delegate as ${runtimeNames.delegate} } from "tachyon-dom/runtime/event";`,
-    );
+    const topLevelEvent = bindings.some((binding) => binding.kind === "event");
+    const eventImports = [
+      ...(topLevelEvent && needsConditionalCore ? [`delegateTarget as ${runtimeNames.delegateTarget}`] : []),
+      ...((topLevelEvent && !needsConditionalCore) || needsRowDelegate
+        ? [`delegate as ${runtimeNames.delegate}`]
+        : []),
+    ];
+    lines.push(`import { ${eventImports.join(", ")} } from "tachyon-dom/runtime/event";`);
   }
   if (needsList) {
     lines.push(`import { mountKeyedList as ${runtimeNames.mountKeyedList} } from "tachyon-dom/runtime/list";`);
@@ -2046,6 +2061,41 @@ const parentScopeKeysField = (binding: ListBinding): string[] => {
   return names ? [`    parentScopeKeys: ${JSON.stringify([...names].sort())},`] : [];
 };
 
+/**
+ * Value bindings and row listeners for the generated list adapter. Each binding carries the setter it needs, so
+ * the adapter module never imports the class, attribute, or event runtimes itself.
+ */
+const generatedRowBindingFields = (binding: ListBinding, aliases: ReadonlyMap<string, string>): string[] => {
+  const values = binding.bindings.filter((child) => child.kind !== "event");
+  const events = binding.bindings.filter((child) => child.kind === "event");
+  const serializeValue = (child: (typeof values)[number]): string => {
+    const read = `read: (scope) => ${bindingReadExpression(
+      child.kind === "text" || child.kind === "class" || child.kind === "attr" ? child.expression : "",
+      aliasesForBinding(child),
+    )}`;
+    const path = `path: ${JSON.stringify(child.path)}`;
+    if (child.kind === "class") {
+      return `{ ${path}, ${read}, apply: (node, value) => ${runtimeNames.setClassPresence}(node, ${JSON.stringify(child.className)}, value) }`;
+    }
+    if (child.kind === "attr") {
+      const setter =
+        child.name.toLowerCase() === "class"
+          ? `${runtimeNames.setClassValue}(node, value)`
+          : `${runtimeNames.setAttributeValue}(node, ${JSON.stringify(child.name)}, value)`;
+      return `{ ${path}, ${read}, apply: (node, value) => ${setter} }`;
+    }
+    return `{ ${path}, ${read} }`;
+  };
+  const serializeEvent = (child: (typeof events)[number]): string =>
+    child.kind === "event"
+      ? `{ path: ${JSON.stringify(child.path)}, bind: (element, scope) => ${runtimeNames.delegate}(element, ${JSON.stringify(child.eventName)}, [], ${bindingReadExpression(child.handler, aliasesForBinding(child))}) }`
+      : "";
+  return [
+    `    bindings: [${values.map(serializeValue).join(", ")}],`,
+    ...(events.length > 0 ? [`    events: [${events.map(serializeEvent).join(", ")}],`] : []),
+  ];
+};
+
 const emitListBinding = (
   binding: ListBinding,
   reactive: boolean,
@@ -2074,7 +2124,9 @@ const emitListBinding = (
     `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
     `    scope: ${sourceName},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
-    `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
+    ...(isTextOnlyList(binding)
+      ? generatedRowBindingFields(binding, aliases)
+      : [`    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`]),
     `  };`,
   ].join("\n");
   const target = targetName ?? "root";

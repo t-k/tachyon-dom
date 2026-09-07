@@ -1113,8 +1113,13 @@ describe("client mount entrypoints", () => {
       `mountGeneratedTextKeyedList as __tachyonMountTextKeyedList`,
     ],
     [
-      "generic",
+      "mixed",
       `<main><for each={rows} key={row.id}><p class:active={row.active}>{row.label}</p></for><footer>{tail}</footer></main>`,
+      `mountGeneratedTextKeyedList as __tachyonMountTextKeyedList`,
+    ],
+    [
+      "generic",
+      `<main><for each={rows} key={row.id}><p style:opacity={row.opacity}>{row.label}</p></for><footer>{tail}</footer></main>`,
       `mountKeyedList as __tachyonMountKeyedList`,
     ],
   ])("keeps the generated %s list footer binding after rows move", (name, source, generatedImport) => {
