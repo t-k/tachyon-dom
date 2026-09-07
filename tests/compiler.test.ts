@@ -809,9 +809,7 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`from "tachyon-dom/runtime/form"`);
     expect(code).toContain(`__tachyonSetAttributeValue(root, "data-count", (scope.count + 1));`);
     expect(code).toContain(`__tachyonSetStyleValue(root, "width", (scope.size + "px"));`);
-    expect(code).toContain(
-      `cleanups.push(__tachyonBindRef(scope, (scope) => scope.refs?.panel, (scope, value) => { const target = scope.refs; if (target != null && typeof target === "object") target["panel"] = value; }, root));`,
-    );
+    expect(code).toContain(`cleanups.push(__tachyonBindRef(scope, (scope) => scope.refs, "panel", root));`);
     expect(code).toContain(`__tachyonBindControl(__tachyonElementAt(root, [0]), "value"`);
     expect(code).toContain(`__tachyonBindControl(__tachyonElementAt(root, [1,0]), "checked"`);
   });

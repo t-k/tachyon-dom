@@ -5,6 +5,7 @@ import { mountGeneratedKeyedList, mountKeyedList } from "../src/runtime/list";
 import { cleanupTextKeyedList, mountGeneratedTextKeyedList } from "../src/runtime/list-text";
 import { mount } from "../src/runtime/mount";
 import { createSignal } from "../src/runtime/signal";
+import { createStore } from "../src/runtime/store";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
 
 const generated = (source: string, options: Parameters<typeof generateClientModule>[1] = {}) => {
@@ -27,30 +28,24 @@ describe("generated binding readers", () => {
     expect(code).toContain(`keyReadItem:`);
   });
 
-  // A ref used to ship its path as a string for the runtime to walk. It now ships the same reader every other
-  // binding does, plus the writer that puts the element there, so no generated module carries a path parser.
-  it("writes a ref through a generated setter instead of a path string", () => {
+  // A ref used to ship its path as a string for the runtime to walk. It now ships a reader for the object that
+  // holds it and the property name on that object, so no generated module carries a path parser and the runtime
+  // can capture the container it wrote into.
+  it("names a ref's container and property instead of shipping a path string", () => {
     const row = generated(`<ul><for each={rows} key={row.id}><li ref={refs.item}></li></for></ul>`);
 
     expect(row).not.toContain(`expression:`);
-    expect(row).toContain(`read: (scope) => scope.refs?.item`);
-    expect(row).toContain(
-      `write: (scope, value) => { const target = scope.refs; if (target != null && typeof target === "object") target["item"] = value; }`,
-    );
+    expect(row).toContain(`owner: (scope) => scope.refs, property: "item"`);
 
     // Every step to the container is optional, so a deeper path still leaves a missing container alone.
     const deep = generated(`<ul><for each={rows} key={row.id}><li ref={refs.deep.item}></li></for></ul>`);
-    expect(deep).toContain(`read: (scope) => scope.refs?.deep?.item`);
-    expect(deep).toContain(`const target = scope.refs?.deep;`);
-    expect(deep).toContain(`target["item"] = value`);
+    expect(deep).toContain(`owner: (scope) => scope.refs?.deep, property: "item"`);
 
     const topLevel = generated(`<div ref={panel}></div>`);
     expect(topLevel).toContain(`bindRef as`);
     expect(topLevel).not.toContain(`setRef`);
     // A bare name is written straight onto the scope.
-    expect(topLevel).toContain(
-      `(scope, value) => { const target = scope; if (target != null && typeof target === "object") target["panel"] = value; }`,
-    );
+    expect(topLevel).toContain(`(scope) => scope, "panel"`);
   });
 
   // The generated writer assigns straight into the object the path names, so the property it writes has to be
@@ -81,6 +76,73 @@ describe("generated binding readers", () => {
     expect(scope.refs.panel).toBe(root.querySelector("div"));
     second.dispose();
     expect(scope.refs.panel).toBeUndefined();
+  });
+
+  // A ref's cleanup has to clear the object it was written into, not whatever the path resolves to later. A row
+  // whose item is replaced under the same key rebinds against a scope that already holds the new item, so a
+  // cleanup that re-resolved the path would leave the element on the item it was taken off.
+  it("clears a ref from the object it was written into after the row item is replaced", () => {
+    const module = evaluateGeneratedClientModule(
+      generated(`<ul><for each={rows} key={row.id}><li ref={row.node}></li></for></ul>`, { reactive: true }),
+    );
+    const root = document.createElement("div");
+    const first: { id: number; node?: unknown } = { id: 1 };
+    const second: { id: number; node?: unknown } = { id: 1 };
+    const rows = createSignal<Array<{ id: number; node?: unknown }>>([first]);
+
+    const handle = mount(root, module, { rows });
+    const item = root.querySelector("li");
+    expect(first.node).toBe(item);
+
+    rows.set([second]);
+    expect(second.node).toBe(item);
+    expect(first.node).toBeUndefined();
+
+    handle.dispose();
+    expect(second.node).toBeUndefined();
+  });
+
+  // The same rule for the container itself: a row that reads `refs` from the parent scope has to clear the
+  // `refs` object it wrote into, not the one the parent scope holds by the time the row is torn down.
+  it("clears a ref from the container it was written into after the container is replaced", () => {
+    const module = evaluateGeneratedClientModule(
+      generated(`<ul><for each={rows} key={row.id}><li ref={refs.item}>{row.label}</li></for></ul>`, {
+        reactive: true,
+      }),
+    );
+    const root = document.createElement("div");
+    const first: { item?: unknown } = {};
+    const second: { item?: unknown } = {};
+    const scope = createStore<{ rows: Array<{ id: number; label: string }>; refs: { item?: unknown } }>({
+      rows: [{ id: 1, label: "A" }],
+      refs: first,
+    });
+
+    const handle = mount(root, module, scope);
+    const item = root.querySelector("li");
+    expect(first.item).toBe(item);
+
+    scope.refs = second;
+    expect(second.item).toBe(item);
+    expect(first.item).toBeUndefined();
+
+    handle.dispose();
+    expect(second.item).toBeUndefined();
+  });
+
+  // Clearing is still conditional: a ref another writer has already replaced belongs to that writer.
+  it("leaves a ref alone on cleanup when something else has replaced it", () => {
+    const module = evaluateGeneratedClientModule(generated(`<div ref={refs.panel}></div>`));
+    const root = document.createElement("div");
+    const refs: { panel?: unknown } = {};
+
+    const handle = mount(root, module, { refs });
+    expect(refs.panel).toBe(root.querySelector("div"));
+
+    const other = document.createElement("span");
+    refs.panel = other;
+    handle.dispose();
+    expect(refs.panel).toBe(other);
   });
 
   it("drops the declaration strings from generated stores and component props", () => {

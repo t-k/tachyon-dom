@@ -1769,9 +1769,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         );
       }
     } else if (binding.kind === "ref") {
-      const ref = refAccessExpressions(binding.expression, bindingAliases);
+      const ref = refTargetExpressions(binding.expression, bindingAliases);
       lines.push(
-        `  cleanups.push(${runtimeNames.bindRef}(${sourceName}, ${ref.read}, ${ref.write}, ${bindingElementExpression(binding.path)}));`,
+        `  cleanups.push(${runtimeNames.bindRef}(${sourceName}, ${ref.owner}, ${JSON.stringify(ref.property)}, ${bindingElementExpression(binding.path)}));`,
       );
     } else if (binding.kind === "model") {
       const target = bindingElementExpression(binding.path);
@@ -1995,28 +1995,26 @@ const bindingReadExpression = (expression: string, aliases: ReadonlyMap<string, 
   expressionToScopeAccess(expression, new Set(), "scope", aliases);
 
 /**
- * The reader and writer for a ref. The runtime used to receive the path as a string and walk it, which meant
- * the generated module shipped a path parser for one assignment. The writer keeps that parser's contract: a
- * container that is missing or is not an object is left alone rather than thrown at.
+ * The container reader and property name for a ref. The runtime used to receive the path as a string and walk
+ * it, which meant the generated module shipped a path parser for one assignment. Handing it the container
+ * rather than a reader/writer pair keeps that parser out and lets the runtime capture the object it wrote into,
+ * so the clear on dispose cannot land on whatever the path names by then.
  */
-const refAccessExpressions = (
+const refTargetExpressions = (
   expression: string,
   aliases: ReadonlyMap<string, string>,
-): { read: string; write: string } => {
+): { owner: string; property: string } => {
   const parts = expression.split(".");
-  const key = parts.length === 1 ? (aliases.get(expression) ?? expression) : (parts.at(-1) as string);
+  const property = parts.length === 1 ? (aliases.get(expression) ?? expression) : (parts.at(-1) as string);
   // Every step to the object that holds the ref is optional, the way the path walker this replaces was: a ref
-  // whose container is missing is left alone rather than thrown at, on both the write and the clear.
+  // whose container is missing is left alone rather than thrown at.
   const owner = parts
     .slice(1, -1)
     .reduce(
       (access, part) => jsOptionalPropertyAccess(access, part),
       parts.length === 1 ? "scope" : bindingReadExpression(parts[0] as string, aliases),
     );
-  return {
-    read: `(scope) => ${jsOptionalPropertyAccess(owner, key)}`,
-    write: `(scope, value) => { const target = ${owner}; if (target != null && typeof target === "object") target[${JSON.stringify(key)}] = value; }`,
-  };
+  return { owner: `(scope) => ${owner}`, property };
 };
 
 const serializeStoreDefinition = (store: StoreDefinition): string => {
@@ -2062,9 +2060,9 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     fields.push(`name: ${JSON.stringify(binding.name)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
   } else if (binding.kind === "ref") {
-    const ref = refAccessExpressions(binding.expression, aliases);
-    fields.push(`read: ${ref.read}`);
-    fields.push(`write: ${ref.write}`);
+    const ref = refTargetExpressions(binding.expression, aliases);
+    fields.push(`owner: ${ref.owner}`);
+    fields.push(`property: ${JSON.stringify(ref.property)}`);
   } else if (binding.kind === "model") {
     fields.push(`property: ${JSON.stringify(binding.property)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
@@ -2115,6 +2113,7 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
  *
  * Any call gives up the bound: a scope member invoked as a method receives the row scope as `this`, and any
  * function can close over names the expression never mentions.
+
  */
 const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> | undefined => {
   const names = new Set<string>();

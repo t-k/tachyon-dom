@@ -71,8 +71,9 @@ type RefBinding = {
   kind: "ref";
   path: number[];
   expression?: string;
-  read?: ExpressionReader;
-  write?: ExpressionWriter;
+  /** Reads the object that holds the ref. A generated ref carries this and `property` instead of a path. */
+  owner?: ExpressionReader;
+  property?: string;
 };
 
 type ModelBinding = {
@@ -579,11 +580,11 @@ const applyRowBinding = (
     record.refCleanups?.get(index)?.();
     const refCleanups = record.refCleanups ?? (record.refCleanups = new Map());
     const element = nodeAtRecord(record, binding.path) as Element;
-    // A generated ref carries its reader and writer; a hand-written one still carries the path string.
+    // A generated ref carries the reader for its container; a hand-written one still carries the path string.
     refCleanups.set(
       index,
-      binding.read && binding.write
-        ? bindRef(scope, binding.read, binding.write, element)
+      binding.owner && binding.property !== undefined
+        ? bindRef(scope, binding.owner, binding.property, element)
         : setRef(scope, binding.expression ?? "", element),
     );
   } else if (binding.kind === "model") {
@@ -1026,6 +1027,12 @@ type WithReader<T> = Omit<T, "read" | "expression" | "handler" | "initial"> & { 
 
 type GeneratedTarget<T> = WithReader<T> & { write: ExpressionWriter };
 
+/** A generated ref names the object it writes into and the property on it, never a path to re-walk. */
+type GeneratedRef = Omit<RefBinding, "expression" | "owner" | "property"> & {
+  owner: ExpressionReader;
+  property: string;
+};
+
 type GeneratedStore = WithReader<StoreDefinition>;
 
 type GeneratedComponent = Omit<ComponentBoundary, "props" | "stores"> & {
@@ -1045,7 +1052,7 @@ type GeneratedBinding =
   | WithReader<EventBinding>
   | WithReader<AttributeBinding>
   | WithReader<StyleBinding>
-  | GeneratedTarget<RefBinding>
+  | GeneratedRef
   | GeneratedTarget<ModelBinding>
   | (Omit<WithReader<NestedListBinding>, keyof GeneratedChildren> & GeneratedChildren)
   | (Omit<WithReader<NestedConditionalBinding>, keyof GeneratedChildren> & GeneratedChildren);

@@ -57,8 +57,9 @@ type RefBinding = {
   kind: "ref";
   path: number[];
   expression?: string;
-  read?: (scope: Record<string, unknown>) => unknown;
-  write?: (scope: Record<string, unknown>, value: unknown) => void;
+  /** Reads the object that holds the ref. A generated ref carries this and `property` instead of a path. */
+  owner?: (scope: Record<string, unknown>) => unknown;
+  property?: string;
 };
 
 type ModelBinding = {
@@ -443,10 +444,10 @@ const bindNodes = (
     } else if (binding.kind === "ref") {
       state.refCleanups.get(bindingIndex)?.();
       const refElement = nodeAtState(state, binding.path) as Element;
-      // A generated ref carries its reader and writer; a hand-written one still carries the path string.
+      // A generated ref carries the reader for its container; a hand-written one still carries the path string.
       const refCleanup =
-        binding.read && binding.write
-          ? bindRef(state.scope, binding.read, binding.write, refElement)
+        binding.owner && binding.property !== undefined
+          ? bindRef(state.scope, binding.owner, binding.property, refElement)
           : setRef(state.scope, binding.expression ?? "", refElement);
       state.refCleanups.set(bindingIndex, refCleanup);
       if (cleanups !== state.cleanups) {
@@ -633,6 +634,12 @@ type WithReader<T> = Omit<T, "read" | "expression" | "handler" | "initial"> & {
 
 type GeneratedTarget<T> = WithReader<T> & { write: (scope: Record<string, unknown>, value: unknown) => void };
 
+/** A generated ref names the object it writes into and the property on it, never a path to re-walk. */
+type GeneratedRef = Omit<RefBinding, "expression" | "owner" | "property"> & {
+  owner: (scope: Record<string, unknown>) => unknown;
+  property: string;
+};
+
 type GeneratedStore = WithReader<StoreDefinition>;
 
 type GeneratedComponent = Omit<ComponentBoundary, "props" | "stores"> & {
@@ -652,7 +659,7 @@ type GeneratedConditionalBinding =
   | WithReader<EventBinding>
   | WithReader<AttributeBinding>
   | WithReader<StyleBinding>
-  | GeneratedTarget<RefBinding>
+  | GeneratedRef
   | GeneratedTarget<ModelBinding>
   | (Omit<WithReader<NestedListBinding>, keyof GeneratedChildren> & GeneratedChildren)
   | (Omit<WithReader<NestedConditionalBinding>, keyof GeneratedChildren> & GeneratedChildren);

@@ -69,17 +69,25 @@ export const setStyleValue = (element: Element, name: string, value: unknown): v
 
 /**
  * Writes an element into the ref the compiler resolved, and clears it on dispose only while it still holds that
- * element. The reader and writer come from the generated module, so nothing here parses a path.
+ * element.
+ *
+ * The container is resolved once, here, and captured. A row rebinds against a scope that already points at its
+ * new item, so re-resolving the container on the way out would clear the ref from whichever object the scope
+ * happens to name then and leave the element on the one it was written into. The container reader and the
+ * property name come from the generated module, so nothing here parses a path.
  */
 export const bindRef = (
   scope: Record<string, unknown>,
-  read: (scope: Record<string, unknown>) => unknown,
-  write: (scope: Record<string, unknown>, value: unknown) => void,
+  owner: (scope: Record<string, unknown>) => unknown,
+  key: string,
   element: Element,
 ): (() => void) => {
-  write(scope, element);
+  const target = owner(scope);
+  if (target == null || typeof target !== "object") return () => undefined;
+  const container = target as Record<string, unknown>;
+  container[key] = element;
   return () => {
-    if (read(scope) === element) write(scope, undefined);
+    if (container[key] === element) container[key] = undefined;
   };
 };
 
