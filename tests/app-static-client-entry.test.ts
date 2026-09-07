@@ -157,29 +157,70 @@ describe("tachyonApp client entry emission", () => {
     expect(warnings).toEqual([]);
   });
 
-  // Nothing loads a chunk every page left out, so the build stops shipping it at all.
-  it("drops an entry chunk and its private chunks when no page loads them", () => {
+  const entryBundle = (code: string | undefined) => ({
+    "assets/entry.js": { type: "chunk", isEntry: true, fileName: "assets/entry.js", code, imports: [], dynamicImports: [] },
+  });
+
+  // A source map link and a strict mode directive are not work a page could need.
+  it.each([
+    ["nothing", ""],
+    ["only a source map link", `//# sourceMappingURL=entry.js.map\n`],
+    ["only a strict mode directive", `"use strict";\n`],
+    ["a directive and a source map link", `"use strict";\n//# sourceMappingURL=entry.js.map\n`],
+    ["no code at all", undefined],
+  ])("leaves the entry out of a static page when it contains %s", (_case, code) => {
+    expect(runBundle({ clientEntry: "when-required" }, entryBundle(code)).pages.get("index.html")).not.toContain(
+      "assets/entry.js",
+    );
+  });
+
+  it.each([
+    ["code after a source map link", `//# sourceMappingURL=entry.js.map\nboot();\n`],
+    ["code before a source map link", `boot();\n//# sourceMappingURL=entry.js.map\n`],
+    ["a directive and code", `"use strict";\nboot();\n`],
+    ["a comment an unminified build kept", `// set up analytics\n`],
+  ])("keeps the entry on a static page when it contains %s", (_case, code) => {
+    expect(runBundle({ clientEntry: "when-required" }, entryBundle(code)).pages.get("index.html")).toContain(
+      "assets/entry.js",
+    );
+  });
+
+  // Nothing loads a chunk every page left out, so the build stops shipping it at all: the entry, the chunks it
+  // statically imports, and the ones it only imports lazily. Anything another entry still reaches has to stay.
+  it("drops the chunks only the unused entry reaches", () => {
     const staticOnly = defineApp({
       pages: [{ path: "/", fileName: "index.html", template: `<main><h1>Static</h1></main>` }],
     });
     const plugin = tachyonApp(staticOnly, { clientEntry: "when-required" });
     if (typeof plugin.generateBundle !== "function") throw new Error("Missing generateBundle hook.");
+    const chunk = (fileName: string, isEntry: boolean, imports: string[], dynamicImports: string[] = []) => ({
+      type: "chunk",
+      isEntry,
+      fileName,
+      code: "",
+      imports,
+      dynamicImports,
+    });
     const bundle: Record<string, unknown> = {
-      "assets/entry.js": {
-        type: "chunk",
-        isEntry: true,
-        fileName: "assets/entry.js",
-        code: "",
-        imports: ["assets/shared.js"],
-        dynamicImports: [],
-      },
+      // The tachyon entry, a chunk it shares with a cycle back to it, and one it only reaches lazily.
+      "assets/entry.js": chunk("assets/entry.js", true, ["assets/private.js", "assets/common.js", "external.js"], [
+        "assets/lazy.js",
+      ]),
       "assets/entry.js.map": { type: "asset", fileName: "assets/entry.js.map" },
-      "assets/shared.js": { type: "chunk", isEntry: false, fileName: "assets/shared.js", code: "", imports: [], dynamicImports: [] },
+      "assets/private.js": chunk("assets/private.js", false, ["assets/entry.js"]),
+      "assets/lazy.js": chunk("assets/lazy.js", false, []),
+      // Reached from a second entry as well, so it is not the tachyon entry's to remove.
+      "assets/common.js": chunk("assets/common.js", false, []),
+      "assets/worker.js": chunk("assets/worker.js", true, ["assets/common.js"]),
       "assets/site.css": { type: "asset", fileName: "assets/site.css" },
     };
     plugin.generateBundle.call({ emitFile() {}, warn() {} } as never, {} as never, bundle as never, false as never);
 
-    expect(Object.keys(bundle)).toEqual(["assets/site.css"]);
+    expect(Object.keys(bundle).sort()).toEqual([
+      "assets/common.js",
+      "assets/site.css",
+      "assets/worker.js",
+    ]);
   });
 
   it("keeps the entry chunk when at least one page loads it", () => {
