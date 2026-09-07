@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compileTemplate, renderServerTemplate } from "../src/compiler";
 import {
   evaluateExpression,
+  evaluateExpressionNode,
   expressionToJs,
   isAssignableExpression,
   parseExpression,
@@ -39,6 +40,110 @@ describe("compiler expression OXC backend", () => {
       }),
     ).toBe("second");
     expect(isAssignableExpression("user[addressKey]", { backend: "oxc" })).toBe(true);
+  });
+
+  it.each([null, undefined])("skips computed keys and arguments on optional nullish access: %s", (user) => {
+    for (const source of ["object()?.[key()]", "object()?.[key()](arg())"]) {
+      const parsed = parseExpression(source, { backend: "oxc" });
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) throw new Error("Expected expression IR");
+      for (const run of [
+        (scope: Record<string, unknown>) => evaluateExpressionNode(parsed.value, scope),
+        Function("scope", `return ${expressionToJs(source, new Set(), "scope", { backend: "oxc" })}`),
+        Function("scope", `with (scope) { return ${source}; }`),
+      ]) {
+        const calls: string[] = [];
+        expect(
+          run({
+            object: () => {
+              calls.push("object");
+              return user;
+            },
+            key: () => {
+              throw new Error("key must not run");
+            },
+            arg: () => {
+              throw new Error("arg must not run");
+            },
+          }),
+        ).toBeUndefined();
+        expect(calls).toEqual(["object"]);
+      }
+    }
+  });
+
+  it.each(["__tachyonObject", "__tachyonProperty"])("preserves computed key locals named %s", (local) => {
+    for (const suffix of ["", "()"]) {
+      const source = `user?.[${local}]${suffix}`;
+      const user = { value: () => 7 };
+      const js = expressionToJs(source, new Set([local]));
+      expect(Function("scope", local, `return ${js}`)({ user }, "value")).toBe(suffix ? 7 : user.value);
+    }
+  });
+
+  it("preserves optional computed method evaluation order and receiver", () => {
+    const source = "object()?.[key()](arg())";
+    for (const run of [
+      (scope: Record<string, unknown>) => evaluateExpression(source, scope),
+      Function("scope", `return ${expressionToJs(source)}`),
+      Function("scope", `with (scope) { return ${source}; }`),
+    ]) {
+      const calls: string[] = [];
+      const receiver = {
+        value: 7,
+        method(this: { value: number }, value: number) {
+          calls.push("method");
+          return this.value + value;
+        },
+      };
+      expect(
+        run({
+          object: () => {
+            calls.push("object");
+            return receiver;
+          },
+          key: () => {
+            calls.push("key");
+            return "method";
+          },
+          arg: () => {
+            calls.push("arg");
+            return 2;
+          },
+        }),
+      ).toBe(9);
+      expect(calls).toEqual(["object", "key", "arg", "method"]);
+    }
+  });
+
+  it("short-circuits optional computed keys in compiled SSR", () => {
+    const compiled = compileTemplate("<p>{user?.[key()]}</p>");
+    expect(compiled.ok).toBe(true);
+    if (!compiled.ok) throw new Error("Expected template");
+    expect(
+      renderServerTemplate(compiled.value, {
+        user: null,
+        key: () => {
+          throw new Error("key must not run");
+        },
+      }),
+    ).toBe("<p><!--td:text--></p>");
+  });
+
+  it("retains denied-key guards on optional computed access and calls", () => {
+    for (const key of ["__proto__", "constructor", "prototype"]) {
+      for (const source of ["user?.[key]", "user?.[key](arg())"]) {
+        const scope = {
+          user: {},
+          key,
+          arg: () => {
+            throw new Error("denied call argument");
+          },
+        };
+        expect(evaluateExpression(source, scope)).toBeUndefined();
+        expect(Function("scope", `return ${expressionToJs(source)}`)(scope)).toBeUndefined();
+      }
+    }
   });
 
   it("uses the OXC fallback from template validation through SSR rendering", () => {

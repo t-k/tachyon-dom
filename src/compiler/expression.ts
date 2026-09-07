@@ -799,6 +799,7 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
     }
     if (node.callee.type === "member") {
       const object = evaluateExpressionNode(node.callee.object, scope);
+      if (node.callee.optional && object == null) return undefined;
       const property = evaluateExpressionNode(node.callee.property, scope);
       if (isDeniedPropertyKey(property)) {
         return undefined;
@@ -826,6 +827,7 @@ export const evaluateExpressionNode = (node: ExpressionNode, scope: Record<strin
   }
   if (node.type === "member") {
     const object = evaluateExpressionNode(node.object, scope);
+    if (node.optional && object == null) return undefined;
     const property = evaluateExpressionNode(node.property, scope);
     if (isDeniedPropertyKey(property)) {
       return undefined;
@@ -906,9 +908,11 @@ const deniedPropertyCheckToJs = (propertyName: string): string =>
   deniedPropertyNameList.map((name) => `String(${propertyName}) === ${JSON.stringify(name)}`).join(" || ");
 
 const guardedMemberAccessToJs = (object: string, property: string, optional: boolean): string =>
-  `((__tachyonObject, __tachyonProperty) => ${optional ? "__tachyonObject == null ? undefined : " : ""}${deniedPropertyCheckToJs(
-    "__tachyonProperty",
-  )} ? undefined : __tachyonObject[__tachyonProperty])(${object}, ${property})`;
+  optional
+    ? `((__tachyonObject, __tachyonKey) => __tachyonObject == null ? undefined : ((__tachyonProperty) => ${deniedPropertyCheckToJs("__tachyonProperty")} ? undefined : __tachyonObject[__tachyonProperty])(__tachyonKey()))(${object}, () => (${property}))`
+    : `((__tachyonObject, __tachyonProperty) => ${optional ? "__tachyonObject == null ? undefined : " : ""}${deniedPropertyCheckToJs(
+        "__tachyonProperty",
+      )} ? undefined : __tachyonObject[__tachyonProperty])(${object}, ${property})`;
 
 const guardedMemberCallToJs = (
   object: string,
@@ -916,6 +920,9 @@ const guardedMemberCallToJs = (
   args: readonly string[],
   optional: boolean,
 ): string => {
+  if (optional) {
+    return `((__tachyonObject, __tachyonKey, __tachyonArgs) => { if (__tachyonObject == null) return undefined; const __tachyonProperty = __tachyonKey(); if (${deniedPropertyCheckToJs("__tachyonProperty")}) return undefined; const __tachyonCallee = __tachyonObject[__tachyonProperty]; return typeof __tachyonCallee === "function" ? __tachyonCallee.apply(__tachyonObject, __tachyonArgs()) : undefined; })(${object}, () => (${property}), () => [${args.join(", ")}])`;
+  }
   const argsArray = `[${args.join(", ")}]`;
   return `((__tachyonObject, __tachyonProperty) => { if (${
     optional ? "__tachyonObject == null || " : ""
