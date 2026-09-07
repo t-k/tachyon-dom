@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-09-07
+
+### Fixed
+
+- Prevented SSR hydration from adopting an ambiguous static sibling when conditional branches use dynamic class/style bases or derived bindings.
+- Preserved DOM identity, ownership, subscriptions, and cleanup when ambiguous hydration regions are rejected before binding.
+- Preserved generated and text-only list boundaries across synchronous and asynchronous SSR paths.
+- Stabilized conditional hydration diagnostics for direct, nested, and deep dynamic regions.
+
+### Changed
+
+- Kept lightweight conditional bundle boundaries while extending compiler-side shape checks for dynamic DOM attributes.
+
 ## [0.1.7] - 2026-09-06
 
 ### Fixed
