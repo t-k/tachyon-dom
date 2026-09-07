@@ -883,6 +883,31 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`cleanups.push(__tachyonDelegate(root, "click", [], scope.select));`);
   });
 
+  it("writes a statically known class attribute through the class setter", () => {
+    const result = compileTemplate(`<div class={theme}><span class={inner} title={label}></span></div>`);
+    if (!result.ok) throw new Error(result.error.message);
+
+    const code = generateClientModule(result.value);
+
+    expect(code).toContain(`__tachyonSetClassValue(root, scope.theme);`);
+    expect(code).toContain(`__tachyonSetClassValue(__tachyonElementAt(root, [0]), scope.inner);`);
+    expect(code).toContain(`__tachyonSetAttributeValue(__tachyonElementAt(root, [0]), "title", scope.label);`);
+    expect(code).toContain(`setClassValue as __tachyonSetClassValue`);
+  });
+
+  it("keeps a class-only template free of the generic attribute runtime", () => {
+    const result = compileTemplate(`<div class={theme} class:active={selected}></div>`);
+    if (!result.ok) throw new Error(result.error.message);
+
+    const code = generateClientModule(result.value, { reactive: true });
+
+    expect(code).not.toContain(`tachyon-dom/runtime/attr`);
+    expect(code).toContain(`from "tachyon-dom/runtime/class"`);
+    expect(code).toContain(`__tachyonSetClassValue(__tachyonTarget0, __tachyonRead(scope.theme))`);
+    expect(code).toContain(`__tachyonSetClassPresence(__tachyonTarget1, "active", __tachyonRead(scope.selected))`);
+    expect(code).toContain(`{"path":[],"name":"class"}`);
+  });
+
   it("wraps every generated bind in an ownership root", () => {
     const result = compileTemplate(`<button>{label}</button>`);
     if (!result.ok) throw new Error(result.error.message);

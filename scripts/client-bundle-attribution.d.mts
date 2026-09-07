@@ -51,3 +51,19 @@ export const runClientBundleAttribution: (options?: {
   artifactRoot?: string;
   fixtures?: readonly ClientBundleFixture[];
 }) => Promise<{ runId: string; artifactPath: string; report: any }>;
+
+export type ClientBundleBuildResult = {
+  metafile: BundleMetafile;
+  outputFiles?: Array<{ contents: Uint8Array; text: string }>;
+};
+export const buildClientBundle: (
+  contents: string,
+  options?: { cwd?: string },
+) => Promise<ClientBundleBuildResult>;
+export const summarizeClientBundle: (result: ClientBundleBuildResult) => {
+  minifiedBytes: number;
+  brotliBytes: number;
+  outputs: Array<{ path: string; bytes: number; brotliBytes: number; sha256: string; metafileBytes?: number }>;
+  inputs: Array<{ path: string; bytesInOutput: number; sourceBytes?: number }>;
+  metafileAttribution: BundleAttribution;
+};

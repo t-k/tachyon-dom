@@ -763,6 +763,7 @@ const runtimeNames = {
   read: "__tachyonRead",
   setAttributeValue: "__tachyonSetAttributeValue",
   setClassPresence: "__tachyonSetClassPresence",
+  setClassValue: "__tachyonSetClassValue",
   setControlValue: "__tachyonSetControlValue",
   writeModelValue: "__tachyonWriteModelValue",
   setRef: "__tachyonSetRef",
@@ -1233,9 +1234,18 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const hasDefaultScope = typeof options.defaultScopeName === "string" && options.defaultScopeName.length > 0;
   const sourceName = scopeName(needsStore);
   const needsText = bindings.some((binding) => binding.kind === "text");
-  const needsClass = bindings.some((binding) => binding.kind === "class");
+  // A statically named class attribute is exactly what setClassValue does, so it skips the generic attribute
+  // setter and its name validation and URL sanitization, which never applied to class in the first place.
+  const isKnownClassAttribute = (binding: ClientBinding): boolean =>
+    binding.kind === "attr" && binding.name.toLowerCase() === "class";
+  const needsClassPresence = bindings.some((binding) => binding.kind === "class");
+  const needsClassValue = bindings.some(isKnownClassAttribute);
+  const needsClass = needsClassPresence || needsClassValue;
   const needsAttr = bindings.some(
-    (binding) => binding.kind === "attr" || binding.kind === "style" || binding.kind === "ref",
+    (binding) =>
+      (binding.kind === "attr" && !isKnownClassAttribute(binding)) ||
+      binding.kind === "style" ||
+      binding.kind === "ref",
   );
   const needsModel = bindings.some(hasModelBinding);
   const needsEvent = bindings.some((binding) => binding.kind === "event");
@@ -1307,7 +1317,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (needsElementAt || needsListPathResolver) {
     const classImports = [
       ...(needsElementAt ? [`elementAt as ${runtimeNames.elementAt}`] : []),
-      ...(needsClass ? [`setClassPresence as ${runtimeNames.setClassPresence}`] : []),
+      ...(needsClassPresence ? [`setClassPresence as ${runtimeNames.setClassPresence}`] : []),
+      ...(needsClassValue ? [`setClassValue as ${runtimeNames.setClassValue}`] : []),
     ];
     lines.push(`import { ${classImports.join(", ")} } from "tachyon-dom/runtime/class";`);
   }
@@ -1650,16 +1661,17 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       lines.push(`  cleanups.push(${statement});`);
     } else if (binding.kind === "attr") {
       const target = bindingElementExpression(binding.path);
+      const value = runtimeValueExpression(binding.expression, reactive, sourceName, bindingAliases);
+      const write = (element: string) =>
+        isKnownClassAttribute(binding)
+          ? `${runtimeNames.setClassValue}(${element}, ${value})`
+          : `${runtimeNames.setAttributeValue}(${element}, ${JSON.stringify(binding.name)}, ${value})`;
       if (reactive) {
         const targetName = `__tachyonTarget${targetIndex++}`;
         lines.push(`  const ${targetName} = ${target};`);
-        lines.push(
-          `  cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setAttributeValue}(${targetName}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName, bindingAliases)})));`,
-        );
+        lines.push(`  cleanups.push(${runtimeNames.effect}(() => ${write(targetName)}));`);
       } else {
-        lines.push(
-          `  ${runtimeNames.setAttributeValue}(${target}, ${JSON.stringify(binding.name)}, ${runtimeValueExpression(binding.expression, reactive, sourceName, bindingAliases)});`,
-        );
+        lines.push(`  ${write(target)};`);
       }
     } else if (binding.kind === "style") {
       const target = bindingElementExpression(binding.path);

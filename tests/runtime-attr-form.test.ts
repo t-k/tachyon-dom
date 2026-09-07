@@ -1,10 +1,82 @@
 import { describe, expect, it } from "vitest";
 import { setAttributeValue, setRef, setStyleValue } from "../src/runtime/attr";
-import { setClassPresence } from "../src/runtime/class";
+import { setClassPresence, setClassValue } from "../src/runtime/class";
 import { bindControl, setControlValue, writeModelValue } from "../src/runtime/form";
 import { createMemo, createSignal } from "../src/runtime/signal";
 
 describe("attribute and form runtime helpers", () => {
+  // The compiler now writes a statically named class attribute straight to setClassValue, so the two paths have
+  // to produce the same DOM for every value shape, element namespace, and directive combination.
+  it("writes the same class attribute through the generic setter and the class setter", () => {
+    const values: unknown[] = [
+      null,
+      undefined,
+      false,
+      true,
+      "",
+      "alpha beta",
+      0,
+      42,
+      ["alpha", "beta"],
+      { alpha: true },
+    ];
+    for (const namespace of [undefined, "http://www.w3.org/2000/svg"] as const) {
+      for (const value of values) {
+        const generic = namespace
+          ? document.createElementNS(namespace, "circle")
+          : document.createElement("div");
+        const specialized = namespace
+          ? document.createElementNS(namespace, "circle")
+          : document.createElement("div");
+        document.body.replaceChildren(generic, specialized);
+
+        setAttributeValue(generic, "class", value);
+        setClassValue(specialized, value);
+        expect(specialized.outerHTML).toBe(generic.outerHTML);
+
+        setClassPresence(generic, "active", true);
+        setClassPresence(specialized, "active", true);
+        expect(specialized.outerHTML).toBe(generic.outerHTML);
+
+        setAttributeValue(generic, "class", "replaced");
+        setClassValue(specialized, "replaced");
+        expect(specialized.outerHTML).toBe(generic.outerHTML);
+
+        setClassPresence(generic, "active", false);
+        setClassPresence(specialized, "active", false);
+        expect(specialized.outerHTML).toBe(generic.outerHTML);
+      }
+    }
+  });
+
+  it("recovers the same managed class state after an external attribute change", () => {
+    const generic = document.createElement("div");
+    const specialized = document.createElement("div");
+    document.body.replaceChildren(generic, specialized);
+    setAttributeValue(generic, "class", "base");
+    setClassValue(specialized, "base");
+    setClassPresence(generic, "on", true);
+    setClassPresence(specialized, "on", true);
+
+    generic.setAttribute("class", "external");
+    specialized.setAttribute("class", "external");
+    setAttributeValue(generic, "class", "next");
+    setClassValue(specialized, "next");
+
+    expect(specialized.getAttribute("class")).toBe(generic.getAttribute("class"));
+    expect(specialized.getAttribute("class")).toBe("next on");
+  });
+
+  it("still validates and sanitizes every attribute that is not class", () => {
+    const element = document.createElement("a");
+    document.body.replaceChildren(element);
+
+    expect(() => setAttributeValue(element, "on\u0000click", "x")).toThrow();
+    expect(() => setAttributeValue(element, "href", "javascript:alert(1)")).toThrow();
+    setAttributeValue(element, "href", "https://example.com/");
+    expect(element.getAttribute("href")).toBe("https://example.com/");
+  });
+
   it("retains directive classes when a dynamic base class changes", () => {
     document.body.innerHTML = `<div></div>`;
     const element = document.body.firstElementChild;

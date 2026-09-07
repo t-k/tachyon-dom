@@ -4,17 +4,55 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { compileTemplate, generateClientModule } from "../src/compiler";
 import {
   attributionForMetafile,
+  buildClientBundle,
   checkBundleBudget,
   createClientBundleFixtures,
   findForbiddenInputs,
   findUnwantedFeatureInputs,
   runClientBundleAttribution,
+  summarizeClientBundle,
   validateFixtureBudgets,
 } from "../scripts/client-bundle-attribution.mjs";
 
+const generatedClientEntry = (source: string, options: Record<string, unknown> = {}) => {
+  const compiled = compileTemplate(source);
+  if (!compiled.ok) throw new Error(compiled.error.message);
+  return generateClientModule(compiled.value, { instrumentBindings: false, ...options }).replaceAll(
+    'from "tachyon-dom/',
+    'from "./dist/',
+  );
+};
+
 describe("client bundle attribution", () => {
+  // A template whose only attribute is class must not pull in the generic attribute setter, and with it the
+  // attribute name policy and URL sanitizer, which never applied to class.
+  it("keeps a class-only template free of attribute and URL policy bytes", async () => {
+    const classOnly = await buildClientBundle(
+      generatedClientEntry(`<div class={theme} class:active={selected}><span class={inner}></span></div>`, {
+        reactive: true,
+      }),
+      { cwd: process.cwd() },
+    );
+    const withAttribute = await buildClientBundle(
+      generatedClientEntry(`<div class={theme} title={label}></div>`, { reactive: true }),
+      { cwd: process.cwd() },
+    );
+    const bytesFor = (result: Awaited<ReturnType<typeof buildClientBundle>>, pattern: RegExp) =>
+      summarizeClientBundle(result)
+        .inputs.filter((input) => pattern.test(input.path))
+        .reduce((total, input) => total + input.bytesInOutput, 0);
+
+    expect(bytesFor(classOnly, /runtime[/\\]attr\.js$/)).toBe(0);
+    expect(bytesFor(classOnly, /url-policy\.js$/)).toBe(0);
+    expect(bytesFor(classOnly, /attribute-policy\.js$/)).toBe(0);
+    expect(bytesFor(classOnly, /runtime[/\\]class\.js$/)).toBeGreaterThan(0);
+    expect(bytesFor(withAttribute, /runtime[/\\]attr\.js$/)).toBeGreaterThan(0);
+    expect(bytesFor(withAttribute, /url-policy\.js$/)).toBeGreaterThan(0);
+  }, 60_000);
+
   it("records actual bytesInOutput contributions per output", () => {
     expect(
       attributionForMetafile({
