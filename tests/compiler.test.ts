@@ -1524,6 +1524,12 @@ describe("HTML-first compiler", () => {
   });
 
   it("preserves nested dynamic-region diagnostic paths and reasons", () => {
+    const rootConditional = compileTemplate(
+      `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
+    );
+    if (!rootConditional.ok) throw new Error(rootConditional.error.message);
+    expect(rootConditional.value.client.hydrationDynamicRegionErrors[0]).toContain("at root:");
+
     const nestedConditional = compileTemplate(
       `<main><section><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></section></main>`,
     );
@@ -1538,6 +1544,12 @@ describe("HTML-first compiler", () => {
     );
     if (!nestedList.ok) throw new Error(nestedList.error.message);
     expect(nestedList.value.client.hydrationDynamicRegionErrors[0]).toContain("at root.0");
+
+    const rootList = compileTemplate(
+      `<main><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></main>`,
+    );
+    if (!rootList.ok) throw new Error(rootList.error.message);
+    expect(rootList.value.client.hydrationDynamicRegionErrors[0]).toContain("at root when");
 
     const sharedShape = compileTemplate(
       `<main><if test={visible}><p class="shared">{left}</p></if><p class="shared">{tail}</p></main>`,
