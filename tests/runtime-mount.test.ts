@@ -2128,6 +2128,43 @@ describe("client mount entrypoints", () => {
     if (result.ok) result.value.dispose();
   });
 
+  // A row's boundary id is read from the row scope, so the bounded parent snapshot the compiler emits has to
+  // carry the key it names. When it did not, the id resolved to undefined, the boundary was skipped, and
+  // everything it owned bound at hydrate time instead of waiting for the interaction.
+  it("defers a row hydration boundary whose id comes from the parent scope", async () => {
+    const compiled = compileTemplate(
+      `<main><ul><for each={rows} key={row.id}><li><button hydrate:id={boundaryId} hydrate:interaction="click" on:click={select}>{row.label}</button></li></for></ul></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value));
+    const root = document.createElement("div");
+    const select = vi.fn();
+    let labelReads = 0;
+    const row = {
+      id: "a",
+      get label() {
+        labelReads++;
+        return "A";
+      },
+    };
+    const scope = { rows: [row], boundaryId: "row-a", select };
+    root.innerHTML = renderServerTemplate(compiled.value, scope);
+    const button = root.querySelector("button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Missing row button.");
+
+    labelReads = 0;
+    const result = hydrate(root, module, scope);
+    expect(result.ok).toBe(true);
+    expect(labelReads).toBe(0);
+
+    button.click();
+    await Promise.resolve();
+
+    expect(select).toHaveBeenCalledTimes(1);
+    expect(labelReads).toBeGreaterThan(0);
+    if (result.ok) result.value.dispose();
+  });
+
   it("compares static class tokens while allowing compiler-declared class tokens", () => {
     const compiled = compileTemplate(`<p class="btn" class:active={active}>Hello</p>`);
     if (!compiled.ok) throw new Error(compiled.error.message);

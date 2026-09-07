@@ -238,6 +238,39 @@ describe("static template optimization", () => {
     ).toBe(`["group"]`);
   });
 
+  // A hydration boundary id is read from the row scope at mount time just like any binding, so the bound has to
+  // name the parent keys it reaches. Dropping them left the id unresolved, which silently skipped the boundary
+  // and bound its contents eagerly instead of deferring them.
+  it("names the parent keys a row's hydration boundary ids reach", () => {
+    const keysFor = (source: string) =>
+      generateClientModule(compiled(source), { reactive: true, instrumentBindings: false }).match(
+        /parentScopeKeys: (\[[^\]]*\])/,
+      )?.[1];
+
+    expect(
+      keysFor(
+        `<ul><for each={rows} key={row.id}><li><button hydrate:id={boundaryId} hydrate:interaction="click" on:click={select}>{row.label}</button></li></for></ul>`,
+      ),
+    ).toBe(`["boundaryId","select"]`);
+    // A row-rooted id is provided by the row itself.
+    expect(
+      keysFor(
+        `<ul><for each={rows} key={row.id}><li><button hydrate:id={row.id} hydrate:interaction="click">{row.label}</button></li></for></ul>`,
+      ),
+    ).toBe(`[]`);
+    // A boundary inside a nested region of the row reaches the same parent scope.
+    expect(
+      keysFor(
+        `<ul><for each={rows} key={row.id}><li><if test={row.on}><section hydrate:id={panelId} hydrate:interaction="click">{row.label}</section></if></li></for></ul>`,
+      ),
+    ).toBe(`["panelId"]`);
+    expect(
+      keysFor(
+        `<ul><for each={rows} key={row.id}><li><ul><for each={row.groups} key={group.id}><li hydrate:id={groupId} hydrate:interaction="click">{group.label}</li></for></ul></li></for></ul>`,
+      ),
+    ).toBe(`["groupId"]`);
+  });
+
   it("drops the bound for a row expression that calls something", () => {
     // The callee receives the row scope as `this`, so it can read a parent key the expression never names.
     const result = boundedMatchesUnbounded(`<ul><for each={rows} key={row.id}><li>{lookup()}</li></for></ul>`, {

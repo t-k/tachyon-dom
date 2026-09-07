@@ -2113,7 +2113,10 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
  *
  * Any call gives up the bound: a scope member invoked as a method receives the row scope as `this`, and any
  * function can close over names the expression never mentions.
-
+ *
+ * Every expression the row evaluates at runtime counts, not only the ones that put something on screen: a
+ * hydration boundary's id is read from the row scope too, and a row that cannot resolve it silently loses the
+ * boundary and binds its contents eagerly.
  */
 const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> | undefined => {
   const names = new Set<string>();
@@ -2133,6 +2136,20 @@ const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> | undef
     for (const name of found) {
       const key = aliases.get(name) ?? name;
       if (!provided.has(key)) names.add(key);
+    }
+  };
+
+  // A boundary id is read back with a raw dotted path rather than a compiled reader, so the key it needs is the
+  // name the path starts with, before any alias mapping.
+  const addBoundaryIds = (
+    boundaries: readonly HydrationBoundary[] | undefined,
+    provided: ReadonlySet<string>,
+  ): void => {
+    if (!bounded) return;
+    for (const boundary of boundaries ?? []) {
+      if (boundary.idKind !== "expression") continue;
+      const root = boundary.id.split(".")[0];
+      if (root && !provided.has(root)) names.add(root);
     }
   };
 
@@ -2166,6 +2183,7 @@ const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> | undef
     // The key reader runs against a scope that already binds the item.
     add(list.key, aliasesForBinding(list), provided);
     visitDeclarations(list.stores, list.components, provided);
+    addBoundaryIds(list.hydrationBoundaries, provided);
     visitBindings(list.bindings, provided);
   };
 
@@ -2177,6 +2195,7 @@ const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> | undef
         add(child.test, aliases, provided);
         const branch = new Set(provided);
         visitDeclarations(child.stores, child.components, branch);
+        addBoundaryIds(child.hydrationBoundaries, branch);
         visitBindings(child.bindings, branch);
       } else if (child.kind === "list") {
         // `each` is read in the enclosing scope; the key and the rows are read in the nested one.
