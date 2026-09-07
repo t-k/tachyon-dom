@@ -7,6 +7,18 @@ import { createSignal, createStore, effect, onOwnerCleanup, read, untrack, type 
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { normalizeListKey } from "./key.js";
 import {
+  canAppendWithoutMoving,
+  dynamicElementsFor,
+  emptyParentScope,
+  positionRecords,
+  readItemPath,
+  readPath,
+  replaceDynamicRegion,
+  scopedItemFromSnapshot,
+  syncParentScope,
+  type ParentScopeSnapshot,
+} from "./list-core.js";
+import {
   createHydrationBoundary,
   scheduleHydration,
   type CompiledHydrationBoundary,
@@ -196,11 +208,6 @@ type RowRecord = {
   hydrationCleanups: Array<() => void>;
 };
 
-type ParentScopeSnapshot = {
-  scope: Record<string, unknown> | undefined;
-  values: ReadonlyMap<string, unknown>;
-};
-
 type ListState = {
   signature: string;
   options: KeyedListOptions;
@@ -218,34 +225,7 @@ type ListState = {
 
 type CleanupOutcome = { failed: false } | { failed: true; error: unknown };
 
-type MoveBeforeElement = Element & {
-  moveBefore?: (node: Node, child: Node | null) => void;
-};
-
 const listStates = new WeakMap<Element, ListState>();
-
-const readPath = (scope: Record<string, unknown>, expression: string): unknown => {
-  const parts = expression.split(".");
-  let current: unknown = scope;
-  for (const part of parts) {
-    if (current == null || typeof current !== "object") {
-      return undefined;
-    }
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
-};
-
-const readItemPath = (item: unknown, expression: string, itemName: string): unknown => {
-  if (expression === itemName) {
-    return item;
-  }
-  const prefix = `${itemName}.`;
-  if (!expression.startsWith(prefix)) {
-    return undefined;
-  }
-  return readPath(item as Record<string, unknown>, expression.slice(prefix.length));
-};
 
 const writePath = (scope: Record<string, unknown>, expression: string, value: unknown): void => {
   const parts = expression.split(".");
@@ -293,42 +273,6 @@ const readLiteralExpression = (scope: Record<string, unknown>, expression: strin
   return readPath(scope, expression);
 };
 
-const parentScopeNames = (
-  scope: Record<string, unknown> | undefined,
-  keys: readonly string[] | undefined,
-): readonly string[] => (scope ? (keys ?? Object.keys(scope)) : []);
-
-const parentScopeValuesFor = (
-  scope: Record<string, unknown> | undefined,
-  keys: readonly string[] | undefined,
-): Map<string, unknown> =>
-  new Map(parentScopeNames(scope, keys).map((key) => [key, scope?.[key]] as const));
-
-const emptyParentScope: ParentScopeSnapshot = { scope: undefined, values: new Map() };
-
-/**
- * Compares the parent scope once per list update and shares one snapshot with every row. The comparison reads
- * the live scope instead of a fresh copy, so an update that changes nothing reads each parent key once for the
- * whole list rather than once per row, and allocates no map at all. Rows detect a change by snapshot identity.
- */
-const syncParentScope = (
-  state: { parentScope: ParentScopeSnapshot },
-  scope: Record<string, unknown> | undefined,
-  parentScopeKeys: readonly string[] | undefined,
-): ParentScopeSnapshot => {
-  const previous = state.parentScope;
-  const keys = parentScopeNames(scope, parentScopeKeys);
-  if (
-    previous.scope === scope &&
-    keys.length === previous.values.size &&
-    keys.every((key) => previous.values.has(key) && Object.is(previous.values.get(key), scope?.[key]))
-  ) {
-    return previous;
-  }
-  state.parentScope = { scope, values: parentScopeValuesFor(scope, parentScopeKeys) };
-  return state.parentScope;
-};
-
 const localScopeKeysFor = (options: KeyedListOptions): ReadonlySet<string> =>
   new Set([
     ...(options.stores ?? []).flatMap((store) => [store.name, store.key ?? store.name]),
@@ -348,20 +292,6 @@ const scopedItem = (
 
 // Row scopes are built from the same restricted parent snapshot that updates apply, so a row never starts with
 // a parent key that later updates would stop maintaining.
-const scopedItemFromSnapshot = (
-  itemName: string,
-  item: unknown,
-  indexName: string | undefined,
-  index: number,
-  parent: ReadonlyMap<string, unknown>,
-): Record<string, unknown> => {
-  const scope: Record<string, unknown> = {};
-  for (const [key, value] of parent) scope[key] = value;
-  scope[itemName] = item;
-  if (indexName) scope[indexName] = index;
-  return scope;
-};
-
 const localScopeFor = (
   itemName: string,
   item: unknown,
@@ -911,145 +841,11 @@ const updateRecord = (
   record.revision.update((value) => value + 1);
 };
 
-const moveBefore = (container: Element, node: Node, before: Node | null): void => {
-  const movableContainer = container as MoveBeforeElement;
-  if (typeof movableContainer.moveBefore === "function") {
-    try {
-      movableContainer.moveBefore(node, before);
-      return;
-    } catch (error) {
-      if (!(error instanceof DOMException && error.name === "HierarchyRequestError")) {
-        throw error;
-      }
-    }
-  }
-  container.insertBefore(node, before);
-};
-
-const longestIncreasingSubsequencePositions = (values: readonly number[]): Set<number> => {
-  const predecessors = Array(values.length).fill(-1) as number[];
-  const tails: number[] = [];
-  const tailPositions: number[] = [];
-  for (let index = 0; index < values.length; index++) {
-    const value = values[index] as number;
-    if (value < 0) {
-      continue;
-    }
-    let low = 0;
-    let high = tails.length;
-    while (low < high) {
-      const middle = (low + high) >> 1;
-      if ((tails[middle] as number) < value) {
-        low = middle + 1;
-      } else {
-        high = middle;
-      }
-    }
-    if (low > 0) {
-      predecessors[index] = tailPositions[low - 1] as number;
-    }
-    tails[low] = value;
-    tailPositions[low] = index;
-  }
-  const positions = new Set<number>();
-  let cursor = tailPositions[tails.length - 1] ?? -1;
-  while (cursor >= 0) {
-    positions.add(cursor);
-    cursor = predecessors[cursor] as number;
-  }
-  return positions;
-};
-
 const staticAfterNode = (container: Element, region: KeyedListRegion): ChildNode | undefined => {
   return (
     Array.from(container.childNodes).find((child) => child.nodeType === 8 && child.nodeValue === "tachyon-list") ??
     (region.after > 0 ? Array.from(container.children).at(-region.after) : undefined)
   );
-};
-
-const positionRecords = (
-  container: Element,
-  orderedRecords: readonly RowRecord[],
-  previousRecords: ReadonlyMap<PropertyKey, RowRecord>,
-  region?: KeyedListRegion,
-): void => {
-  const previousKeys = Array.from(previousRecords.keys());
-  const nextKeys = orderedRecords.map((record) => record.key);
-  const sharedLength = Math.min(previousKeys.length, nextKeys.length);
-  let prefixLength = 0;
-  while (prefixLength < sharedLength && previousKeys[prefixLength] === nextKeys[prefixLength]) {
-    prefixLength++;
-  }
-  let suffixLength = 0;
-  while (
-    suffixLength < sharedLength - prefixLength &&
-    previousKeys[previousKeys.length - suffixLength - 1] === nextKeys[nextKeys.length - suffixLength - 1]
-  ) {
-    suffixLength++;
-  }
-  const previousOrder = new Map<PropertyKey, number>();
-  for (let index = prefixLength; index < previousKeys.length - suffixLength; index++) {
-    previousOrder.set(previousKeys[index] as PropertyKey, index);
-  }
-  const stablePositions = longestIncreasingSubsequencePositions(
-    nextKeys.map((key, index) =>
-      index < prefixLength || index >= nextKeys.length - suffixLength ? -1 : (previousOrder.get(key) ?? -1),
-    ),
-  );
-  const staticAfter = region ? (staticAfterNode(container, region) ?? null) : null;
-  let anchor: Node | null = orderedRecords[nextKeys.length - suffixLength]?.nodes[0] ?? staticAfter;
-  for (let index = nextKeys.length - suffixLength - 1; index >= prefixLength; index--) {
-    const record = orderedRecords[index] as RowRecord;
-    if (stablePositions.has(index)) {
-      anchor = record.nodes[0] ?? anchor;
-      continue;
-    }
-    for (let nodeIndex = record.nodes.length - 1; nodeIndex >= 0; nodeIndex--) {
-      const node = record.nodes[nodeIndex] as Node;
-      if (node.parentNode !== container || node.nextSibling !== anchor) {
-        moveBefore(container, node, anchor);
-      }
-      anchor = node;
-    }
-  }
-};
-
-const dynamicElementsFor = (container: Element, region: KeyedListRegion | undefined): Element[] => {
-  const elements = Array.from(container.children);
-  if (!region) return elements;
-  const start = Math.min(elements.length, Math.max(0, region.before));
-  const end = Math.max(start, elements.length - Math.max(0, region.after));
-  return elements.slice(start, end);
-};
-
-const replaceDynamicRegion = (container: Element, region: KeyedListRegion, nodes: readonly Node[]): void => {
-  const childNodes = Array.from(container.childNodes);
-  const firstAfter = staticAfterNode(container, region);
-  const firstDynamic = dynamicElementsFor(container, region)[0];
-  const startNode = firstDynamic ?? firstAfter;
-  const start = startNode ? childNodes.indexOf(startNode) : childNodes.length;
-  const end = firstAfter ? childNodes.indexOf(firstAfter) : childNodes.length;
-  for (const node of childNodes.slice(Math.max(0, start), Math.max(start, end))) node.remove();
-  const fragment = document.createDocumentFragment();
-  fragment.append(...nodes);
-  if (firstAfter?.parentNode === container) container.insertBefore(fragment, firstAfter);
-  else container.append(fragment);
-};
-
-const canAppendWithoutMoving = (
-  nextRecords: ReadonlyMap<PropertyKey, RowRecord>,
-  orderedRecords: readonly RowRecord[],
-  previousRecords: ReadonlyMap<PropertyKey, RowRecord>,
-): boolean => {
-  const previousKeys = Array.from(previousRecords.keys());
-  const nextKeys = orderedRecords.map((record) => record.key);
-  const retainedPrevious = previousKeys.filter((key) => nextRecords.has(key));
-  const retainedNext = nextKeys.filter((key) => previousRecords.has(key));
-  if (retainedPrevious.length !== retainedNext.length) return false;
-  for (let index = 0; index < retainedPrevious.length; index++) {
-    if (retainedPrevious[index] !== retainedNext[index]) return false;
-  }
-  return nextKeys.slice(0, retainedNext.length).every((key) => previousRecords.has(key));
 };
 
 export const mountKeyedList = (
@@ -1165,6 +961,7 @@ export const mountKeyedList = (
         container,
         options.region,
         orderedRecords.flatMap((record) => record.nodes),
+        staticAfterNode(container, options.region),
       );
     } else if (canAdoptServerRows) {
       container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
@@ -1179,7 +976,12 @@ export const mountKeyedList = (
         }
       }
     } else {
-      positionRecords(container, orderedRecords, previousRecords, options.region);
+      positionRecords(
+        container,
+        orderedRecords,
+        previousRecords,
+        options.region ? (staticAfterNode(container, options.region) ?? null) : null,
+      );
     }
     state.records = nextRecords;
     state.initialized = true;

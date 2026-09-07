@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "provenance": {
-    "commit": "995cfdb025df8fd5b039b86b579732ce47e49c4f",
+    "commit": "2dc723d8e362385ad59346b1d7c8f6a8d5ebbf14",
     "dirty": true,
     "node": "v24.14.0",
     "esbuild": "0.28.1",
@@ -14,9 +14,9 @@
   "fixtures": [
     {
       "name": "runtime/list",
-      "inputHash": "85150645f981fda3aaf101d8460d550e094f56b484ae11d89163e7f7429e9d95",
-      "minifiedBytes": 13859,
-      "brotliBytes": 4969
+      "inputHash": "d480d206ef41122ba4833462bded6f60e1c47a4e14b5cb060166fbbdc134bd63",
+      "minifiedBytes": 13887,
+      "brotliBytes": 4983
     },
     {
       "name": "runtime/form",
