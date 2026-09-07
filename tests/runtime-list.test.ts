@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRoot, createSignal, effect, onCleanup } from "../src/runtime/signal";
+import { createStore } from "../src/runtime/store";
 import { mountKeyedList } from "../src/runtime/list";
 
 const stringify = JSON.stringify;
@@ -109,6 +110,117 @@ describe("mountKeyedList", () => {
     expect(reads).toBeLessThanOrEqual(2);
     expect(root.querySelectorAll("li").length).toBe(20);
     expect(root.textContent).toBe("S".repeat(20));
+  });
+
+  // The compiler bounds the parent keys a list's rows can read, so unrelated parent state is never read, copied,
+  // or able to make rows look changed.
+  it("ignores parent keys outside the compiler's bounded set", () => {
+    const root = document.createElement("ul");
+    const reads: string[] = [];
+    const scope: Record<string, unknown> = { shared: "S" };
+    Object.defineProperty(scope, "unrelated", {
+      enumerable: true,
+      configurable: true,
+      get: () => {
+        reads.push("unrelated");
+        return "U";
+      },
+    });
+    const options = () => ({
+      key: "item.id",
+      itemName: "item",
+      parentScopeKeys: ["shared"],
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "shared",
+          read: (rowScope: Record<string, unknown>) => rowScope.shared,
+        },
+      ],
+      updatePolicy: "reference" as const,
+      scope,
+    });
+    const rows = [{ id: "a" }, { id: "b" }];
+
+    mountKeyedList(root, [], rows, options());
+    expect(root.textContent).toBe("SS");
+    expect(reads).toEqual([]);
+
+    const revisions = () => Array.from(root.querySelectorAll("li"), (row) => row.textContent);
+    scope.shared = "S2";
+    mountKeyedList(root, [], rows, options());
+    expect(revisions()).toEqual(["S2", "S2"]);
+    expect(reads).toEqual([]);
+  });
+
+  // A reactive list re-runs whenever the outer effect's dependencies change. Reading only the bounded parent keys
+  // means an unrelated store field never becomes one of those dependencies.
+  it("does not re-run a reactive list when unrelated parent store fields change", () => {
+    const runRows = (parentScopeKeys?: readonly string[]) => {
+      const root = document.createElement("ul");
+      const scope = createStore({ shared: "S", form: "F" });
+      let listRuns = 0;
+      const dispose = createRoot((disposeRoot) => {
+        effect(() => {
+          listRuns++;
+          mountKeyedList(root, [], [{ id: "a" }], {
+            key: "item.id",
+            itemName: "item",
+            templateHtml: `<li><span> </span></li>`,
+            bindings: [
+              {
+                kind: "text" as const,
+                path: [0, 0],
+                expression: "shared",
+                read: (rowScope: Record<string, unknown>) => rowScope.shared,
+              },
+            ],
+            scope,
+            ...(parentScopeKeys ? { parentScopeKeys } : {}),
+          });
+        });
+        return disposeRoot;
+      });
+      const afterMount = listRuns;
+      scope.form = "F2";
+      const afterUnrelated = listRuns;
+      scope.shared = "S2";
+      const afterRelated = listRuns;
+      const text = root.textContent;
+      dispose();
+      return { afterMount, afterUnrelated, afterRelated, text };
+    };
+
+    expect(runRows(["shared"])).toEqual({ afterMount: 1, afterUnrelated: 1, afterRelated: 2, text: "S2" });
+    expect(runRows()).toEqual({ afterMount: 1, afterUnrelated: 2, afterRelated: 3, text: "S2" });
+  });
+
+  it("keeps tracking every parent key when the compiler cannot bound them", () => {
+    const root = document.createElement("ul");
+    const scope: Record<string, unknown> = { shared: "S" };
+    const options = () => ({
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "shared",
+          read: (rowScope: Record<string, unknown>) => rowScope.shared,
+        },
+      ],
+      scope,
+    });
+    const rows = [{ id: "a" }];
+
+    mountKeyedList(root, [], rows, options());
+    scope.shared = "S2";
+    mountKeyedList(root, [], rows, options());
+
+    expect(root.textContent).toBe("S2");
   });
 
   it("applies parent scope changes to every row and clears removed parent keys", () => {

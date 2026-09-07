@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
-import { analyzeConditionalTest, removeConstantFalseConditionals } from "../src/compiler/optimize";
+import {
+  analyzeConditionalTest,
+  expressionScopeNames,
+  listParentScopeNames,
+  removeConstantFalseConditionals,
+} from "../src/compiler/optimize";
 import { mount } from "../src/runtime/mount";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
 
@@ -109,6 +114,59 @@ describe("static template optimization", () => {
   it("leaves a missing or unparsable test for the compiler to reject", () => {
     expect(compileTemplate(`<main><if><span>x</span></if></main>`).ok).toBe(false);
     expect(compileTemplate(`<main><if test="literal"><span>x</span></if></main>`).ok).toBe(false);
+  });
+
+  it("collects the scope names an expression reads", () => {
+    expect([...(expressionScopeNames("a") ?? [])]).toEqual(["a"]);
+    expect([...(expressionScopeNames("a.b.c") ?? [])]).toEqual(["a"]);
+    expect([...(expressionScopeNames("items[index]") ?? [])].sort()).toEqual(["index", "items"]);
+    expect([...(expressionScopeNames("lookup(row, offset)") ?? [])].sort()).toEqual(["lookup", "offset", "row"]);
+    expect([...(expressionScopeNames("`${a} ${b}`") ?? [])].sort()).toEqual(["a", "b"]);
+    expect([...(expressionScopeNames("flag ? yes : no") ?? [])].sort()).toEqual(["flag", "no", "yes"]);
+    expect([...(expressionScopeNames("{ x: a, y: b }") ?? [])].sort()).toEqual(["a", "b"]);
+    expect([...(expressionScopeNames("[a, b.c]") ?? [])].sort()).toEqual(["a", "b"]);
+    expect([...(expressionScopeNames("!a && b > 1") ?? [])].sort()).toEqual(["a", "b"]);
+    expect([...(expressionScopeNames("'text'") ?? [])]).toEqual([]);
+    expect(expressionScopeNames("((")).toBeUndefined();
+  });
+
+  it("bounds a list's parent scope to what its rows can read", () => {
+    const parentScopeKeys = (source: string) => {
+      const binding = compiled(source).client.bindings.find((candidate) => candidate.kind === "list");
+      if (!binding || binding.kind !== "list") throw new Error("Missing list binding.");
+      const names = listParentScopeNames(binding);
+      return names === undefined ? undefined : [...names].sort();
+    };
+
+    expect(parentScopeKeys(`<ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul>`)).toEqual([]);
+    expect(
+      parentScopeKeys(`<ul><for each={rows} key={row.id}><li>{prefix}<b on:click={select}>x</b></li></for></ul>`),
+    ).toEqual(["prefix", "select"]);
+    expect(parentScopeKeys(`<ul><for each={rows} key={row.id}><li>{lookup(row)}</li></for></ul>`)).toEqual(["lookup"]);
+    expect(
+      parentScopeKeys(`<ul><for each={rows} key={row.id}><li><if test={open}>{detail}</if></li></for></ul>`),
+    ).toEqual(["detail", "open"]);
+    // The item name shadows a parent key of the same name, so it never reaches the parent.
+    expect(parentScopeKeys(`<ul><for each={rows} as="prefix" key={prefix.id}><li>{prefix.label}</li></for></ul>`))
+      .toEqual([]);
+    // A nested list's own item and index names shadow too, while its each and key stay parent reads.
+    expect(
+      parentScopeKeys(
+        `<ul><for each={rows} key={row.id}><li><for each={groups} key={group.id}><span>{group.name}{gap}</span></for></li></for></ul>`,
+      ),
+    ).toEqual(["gap", "groups"]);
+    expect(
+      parentScopeKeys(`<ul><for each={rows} index="position" key={row.id}><li>{position}{row.label}</li></for></ul>`),
+    ).toEqual([]);
+  });
+
+  it("emits the bounded parent scope keys in the generated list options", () => {
+    const code = generateClientModule(
+      compiled(`<ul><for each={rows} key={row.id}><li>{prefix}{row.label}</li></for></ul>`),
+      { reactive: true },
+    );
+
+    expect(code).toContain(`parentScopeKeys: ["prefix"],`);
   });
 
   it("returns the same tree object when nothing is removed", () => {

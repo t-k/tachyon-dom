@@ -15,6 +15,8 @@ type TextBinding = {
 type TextKeyedListOptions = {
   signature?: string;
   key: string;
+  /** Parent scope names the compiler proved these rows can read. */
+  parentScopeKeys?: readonly string[];
   keyRead?: ExpressionReader;
   keyReadItem?: (item: unknown) => unknown;
   itemName: string;
@@ -31,6 +33,8 @@ type GeneratedTextBinding = Omit<TextBinding, "read"> & { read: ExpressionReader
 type GeneratedTextKeyedListOptionsBase = {
   signature: string;
   key: string;
+  /** Parent scope names the compiler proved these rows can read. */
+  parentScopeKeys?: readonly string[];
   itemName: string;
   indexName?: string;
   updatePolicy?: "always" | "reference";
@@ -45,6 +49,7 @@ type GeneratedTextKeyedListOptions = GeneratedTextKeyedListOptionsBase &
 
 type TextKeyedListRuntimeOptions = {
   signature: string;
+  parentScopeKeys?: readonly string[];
   itemName: string;
   indexName?: string;
   updatePolicy?: "always" | "reference";
@@ -110,8 +115,16 @@ const readPath = (scope: Record<string, unknown>, expression: string): unknown =
   return current;
 };
 
-const parentScopeValuesFor = (scope: Record<string, unknown> | undefined): Map<string, unknown> =>
-  new Map(scope ? Object.keys(scope).map((key) => [key, scope[key]] as const) : []);
+const parentScopeNames = (
+  scope: Record<string, unknown> | undefined,
+  keys: readonly string[] | undefined,
+): readonly string[] => (scope ? (keys ?? Object.keys(scope)) : []);
+
+const parentScopeValuesFor = (
+  scope: Record<string, unknown> | undefined,
+  keys: readonly string[] | undefined,
+): Map<string, unknown> =>
+  new Map(parentScopeNames(scope, keys).map((key) => [key, scope?.[key]] as const));
 
 const emptyParentScope: ParentScopeSnapshot = { scope: undefined, values: new Map() };
 
@@ -123,9 +136,10 @@ const emptyParentScope: ParentScopeSnapshot = { scope: undefined, values: new Ma
 const syncParentScope = (
   state: { parentScope: ParentScopeSnapshot },
   scope: Record<string, unknown> | undefined,
+  parentScopeKeys: readonly string[] | undefined,
 ): ParentScopeSnapshot => {
   const previous = state.parentScope;
-  const keys = scope ? Object.keys(scope) : [];
+  const keys = parentScopeNames(scope, parentScopeKeys);
   if (
     previous.scope === scope &&
     keys.length === previous.values.size &&
@@ -133,7 +147,7 @@ const syncParentScope = (
   ) {
     return previous;
   }
-  state.parentScope = { scope, values: parentScopeValuesFor(scope) };
+  state.parentScope = { scope, values: parentScopeValuesFor(scope, parentScopeKeys) };
   return state.parentScope;
 };
 
@@ -142,6 +156,21 @@ const readItemPath = (item: unknown, expression: string, itemName: string): unkn
   const prefix = `${itemName}.`;
   if (!expression.startsWith(prefix)) return undefined;
   return readPath(item as Record<string, unknown>, expression.slice(prefix.length));
+};
+
+// Row scopes are built from the same restricted parent snapshot that updates apply.
+const scopedItemFromSnapshot = (
+  itemName: string,
+  item: unknown,
+  indexName: string | undefined,
+  index: number,
+  parent: ReadonlyMap<string, unknown>,
+): Record<string, unknown> => {
+  const scope: Record<string, unknown> = {};
+  for (const [key, value] of parent) scope[key] = value;
+  scope[itemName] = item;
+  if (indexName) scope[indexName] = index;
+  return scope;
 };
 
 const scopedItem = (
@@ -188,6 +217,7 @@ const resolveGeneratedOptions = (options: GeneratedTextKeyedListOptions): TextKe
     ...(options.updatePolicy ? { updatePolicy: options.updatePolicy } : {}),
     ...(options.region ? { region: options.region } : {}),
     ...(options.scope ? { scope: options.scope } : {}),
+    ...(options.parentScopeKeys ? { parentScopeKeys: options.parentScopeKeys } : {}),
     templateHtml: options.templateHtml,
     bindings: options.bindings,
     readKey,
@@ -210,6 +240,7 @@ const resolveLegacyOptions = (options: TextKeyedListOptions): TextKeyedListRunti
     ...(options.updatePolicy ? { updatePolicy: options.updatePolicy } : {}),
     ...(options.region ? { region: options.region } : {}),
     ...(options.scope ? { scope: options.scope } : {}),
+    ...(options.parentScopeKeys ? { parentScopeKeys: options.parentScopeKeys } : {}),
     templateHtml: options.templateHtml,
     bindings: options.bindings,
     readKey,
@@ -349,7 +380,7 @@ const createRecord = (
     key,
     element,
     nodes,
-    scope: scopedItem(options.itemName, item, options.indexName, index, options.scope),
+    scope: scopedItemFromSnapshot(options.itemName, item, options.indexName, index, parentScope.values),
     cleanups: [],
     lastValues: [],
     item,
@@ -579,7 +610,7 @@ const mountTextKeyedListResolved = (
     seenKeys.add(key);
     entries.push({ item, index, key });
   }
-  const parentScope = syncParentScope(state, options.scope);
+  const parentScope = syncParentScope(state, options.scope, options.parentScopeKeys);
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];
   const createdRecords: RowRecord[] = [];

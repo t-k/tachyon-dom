@@ -154,6 +154,8 @@ type HydrationPlan = {
 type KeyedListOptions = {
   signature?: string;
   key: string;
+  /** Parent scope names the compiler proved these rows can read. Absent means every parent key is tracked. */
+  parentScopeKeys?: readonly string[];
   keyRead?: ExpressionReader;
   keyReadItem?: (item: unknown) => unknown;
   itemName: string;
@@ -291,8 +293,16 @@ const readLiteralExpression = (scope: Record<string, unknown>, expression: strin
   return readPath(scope, expression);
 };
 
-const parentScopeValuesFor = (scope: Record<string, unknown> | undefined): Map<string, unknown> =>
-  new Map(scope ? Object.keys(scope).map((key) => [key, scope[key]] as const) : []);
+const parentScopeNames = (
+  scope: Record<string, unknown> | undefined,
+  keys: readonly string[] | undefined,
+): readonly string[] => (scope ? (keys ?? Object.keys(scope)) : []);
+
+const parentScopeValuesFor = (
+  scope: Record<string, unknown> | undefined,
+  keys: readonly string[] | undefined,
+): Map<string, unknown> =>
+  new Map(parentScopeNames(scope, keys).map((key) => [key, scope?.[key]] as const));
 
 const emptyParentScope: ParentScopeSnapshot = { scope: undefined, values: new Map() };
 
@@ -304,9 +314,10 @@ const emptyParentScope: ParentScopeSnapshot = { scope: undefined, values: new Ma
 const syncParentScope = (
   state: { parentScope: ParentScopeSnapshot },
   scope: Record<string, unknown> | undefined,
+  parentScopeKeys: readonly string[] | undefined,
 ): ParentScopeSnapshot => {
   const previous = state.parentScope;
-  const keys = scope ? Object.keys(scope) : [];
+  const keys = parentScopeNames(scope, parentScopeKeys);
   if (
     previous.scope === scope &&
     keys.length === previous.values.size &&
@@ -314,7 +325,7 @@ const syncParentScope = (
   ) {
     return previous;
   }
-  state.parentScope = { scope, values: parentScopeValuesFor(scope) };
+  state.parentScope = { scope, values: parentScopeValuesFor(scope, parentScopeKeys) };
   return state.parentScope;
 };
 
@@ -335,22 +346,36 @@ const scopedItem = (
   scope: Record<string, unknown> | undefined,
 ): Record<string, unknown> => ({ ...scope, [itemName]: item, ...(indexName ? { [indexName]: index } : {}) });
 
+// Row scopes are built from the same restricted parent snapshot that updates apply, so a row never starts with
+// a parent key that later updates would stop maintaining.
+const scopedItemFromSnapshot = (
+  itemName: string,
+  item: unknown,
+  indexName: string | undefined,
+  index: number,
+  parent: ReadonlyMap<string, unknown>,
+): Record<string, unknown> => {
+  const scope: Record<string, unknown> = {};
+  for (const [key, value] of parent) scope[key] = value;
+  scope[itemName] = item;
+  if (indexName) scope[indexName] = index;
+  return scope;
+};
+
 const localScopeFor = (
   itemName: string,
   item: unknown,
   indexName: string | undefined,
   index: number,
-  sourceScope: Record<string, unknown> | undefined,
+  parent: ReadonlyMap<string, unknown>,
   options: KeyedListOptions,
 ): Record<string, unknown> => {
   const definitions = [
     ...(options.stores ?? []),
     ...(options.components ?? []).flatMap((component) => component.stores),
   ];
-  const scope =
-    definitions.length > 0
-      ? createStore(scopedItem(itemName, item, indexName, index, sourceScope))
-      : scopedItem(itemName, item, indexName, index, sourceScope);
+  const base = scopedItemFromSnapshot(itemName, item, indexName, index, parent);
+  const scope = definitions.length > 0 ? createStore(base) : base;
   for (const store of options.stores ?? []) {
     scope[store.key ?? store.name] = readExpression(scope, store.initial, store.read);
   }
@@ -767,7 +792,7 @@ const createRecord = (
   if (!element) {
     return undefined;
   }
-  const scope = localScopeFor(options.itemName, item, options.indexName, index, options.scope, options);
+  const scope = localScopeFor(options.itemName, item, options.indexName, index, parentScope.values, options);
   const adoptedNodes = new Set<Node>(existingElements ?? []);
   const record: RowRecord = {
     key,
@@ -1078,7 +1103,7 @@ export const mountKeyedList = (
     seenKeys.add(key);
     entries.push({ item, index, key });
   }
-  const parentScope = syncParentScope(state, options.scope);
+  const parentScope = syncParentScope(state, options.scope, options.parentScopeKeys);
   const rowStores = hasRowStoresFor(options);
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];

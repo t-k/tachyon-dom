@@ -39,6 +39,7 @@ import {
   expressionLocationForText,
 } from "../utils.js";
 import { isAssignableExpression } from "../expression.js";
+import { listParentScopeNames } from "../optimize.js";
 
 type LoweredNode = {
   html: string;
@@ -2014,6 +2015,15 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
   return `{ ${fields.join(", ")} }`;
 };
 
+/**
+ * Names the rows of this list can read from the parent scope. Omitted when the analysis cannot bound them, in
+ * which case the runtime keeps tracking every parent key.
+ */
+const parentScopeKeysField = (binding: ListBinding): string[] => {
+  const names = listParentScopeNames(binding);
+  return names ? [`    parentScopeKeys: ${JSON.stringify([...names].sort())},`] : [];
+};
+
 const emitListBinding = (
   binding: ListBinding,
   reactive: boolean,
@@ -2034,6 +2044,7 @@ const emitListBinding = (
       : `    keyRead: (scope) => ${bindingReadExpression(binding.key, aliases)},`,
     `    itemName: ${JSON.stringify(binding.itemName)},`,
     ...(binding.indexName ? [`    indexName: ${JSON.stringify(binding.indexName)},`] : []),
+    ...parentScopeKeysField(binding),
     ...(binding.updatePolicy ? [`    updatePolicy: ${JSON.stringify(binding.updatePolicy)},`] : []),
     ...(binding.region ? [`    region: ${JSON.stringify(binding.region)},`] : []),
     `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
