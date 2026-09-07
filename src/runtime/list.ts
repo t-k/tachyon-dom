@@ -19,7 +19,7 @@ type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void
 type TextBinding = {
   kind: "text";
   path: number[];
-  expression: string;
+  expression?: string;
   read?: ExpressionReader;
 };
 
@@ -27,7 +27,7 @@ type ClassBinding = {
   kind: "class";
   path: number[];
   className: string;
-  expression: string;
+  expression?: string;
   read?: ExpressionReader;
 };
 
@@ -35,7 +35,7 @@ type EventBinding = {
   kind: "event";
   path: number[];
   eventName: string;
-  handler: string;
+  handler?: string;
   read?: ExpressionReader;
 };
 
@@ -43,7 +43,7 @@ type AttributeBinding = {
   kind: "attr";
   path: number[];
   name: string;
-  expression: string;
+  expression?: string;
   read?: ExpressionReader;
 };
 
@@ -51,7 +51,7 @@ type StyleBinding = {
   kind: "style";
   path: number[];
   name: string;
-  expression: string;
+  expression?: string;
   read?: ExpressionReader;
 };
 
@@ -65,7 +65,7 @@ type ModelBinding = {
   kind: "model";
   path: number[];
   property: "value" | "checked";
-  expression: string;
+  expression?: string;
   read?: ExpressionReader;
   write?: ExpressionWriter;
 };
@@ -92,14 +92,14 @@ type NestedListBinding = {
 type StoreDefinition = {
   name: string;
   key?: string;
-  initial: string;
+  initial?: string;
   read?: ExpressionReader;
 };
 
 type ComponentProp = {
   name: string;
   key?: string;
-  expression: string;
+  expression?: string;
   read?: ExpressionReader;
 };
 
@@ -261,14 +261,14 @@ const writePath = (scope: Record<string, unknown>, expression: string, value: un
 
 const readBinding = (
   scope: Record<string, unknown>,
-  binding: { expression: string; read?: ExpressionReader },
-): unknown => read(binding.read ? binding.read(scope) : readPath(scope, binding.expression));
+  binding: { expression?: string; read?: ExpressionReader },
+): unknown => read(binding.read ? binding.read(scope) : readPath(scope, binding.expression ?? ""));
 
 const readHandler = (scope: Record<string, unknown>, binding: EventBinding): unknown =>
-  binding.read ? binding.read(scope) : readPath(scope, binding.handler);
+  binding.read ? binding.read(scope) : readPath(scope, binding.handler ?? "");
 
-const readExpression = (scope: Record<string, unknown>, expression: string, reader?: ExpressionReader): unknown =>
-  read(reader ? reader(scope) : readLiteralExpression(scope, expression));
+const readExpression = (scope: Record<string, unknown>, expression: string | undefined, reader?: ExpressionReader): unknown =>
+  read(reader ? reader(scope) : readLiteralExpression(scope, expression ?? ""));
 
 const readLiteralExpression = (scope: Record<string, unknown>, expression: string): unknown => {
   const value = expression.trim();
@@ -732,8 +732,8 @@ const bindRowControls = (record: RowRecord, plan: BindingPlan, cleanups: Array<(
             binding.write(record.scope, value);
             return;
           }
-          const target = binding.read ? binding.read(record.scope) : readPath(record.scope, binding.expression);
-          writeModelValue(target, value, () => writePath(record.scope, binding.expression, value));
+          const target = binding.read ? binding.read(record.scope) : readPath(record.scope, binding.expression ?? "");
+          writeModelValue(target, value, () => writePath(record.scope, binding.expression ?? "", value));
         },
       ),
     );

@@ -8,7 +8,7 @@ type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 type TextBinding = {
   kind: "text";
   path: number[];
-  expression: string;
+  expression?: string;
   read?: ExpressionReader;
 };
 
@@ -244,7 +244,7 @@ const resolveLegacyOptions = (options: TextKeyedListOptions): TextKeyedListRunti
     templateHtml: options.templateHtml,
     bindings: options.bindings,
     readKey,
-    readBinding: (scope, binding) => read(binding.read ? binding.read(scope) : readPath(scope, binding.expression)),
+    readBinding: (scope, binding) => read(binding.read ? binding.read(scope) : readPath(scope, binding.expression ?? "")),
     a: defaultAfterNode,
   };
 };

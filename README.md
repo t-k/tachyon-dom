@@ -57,7 +57,7 @@ See the [syntax specification](docs/syntax-spec.md) for supported expressions an
 
 `import { createSignal } from "tachyon-dom"` bundles to **940 bytes minified** in the current esbuild contract.
 
-Quick example client bundle: 13616 bytes minified, 4904 bytes Brotli, including the counter, text-only keyed-list binding code, and browser runtime. CI requires the minified baseline exactly, permits 1% Brotli variance across Node/zlib patch versions, enforces absolute 16000-byte minified and 5200-byte Brotli budgets, and rejects TypeScript, parse5, compiler, server, app, language-server, and runtime diagnostics modules from both browser metafiles. `pnpm check:client-bundle-attribution` records seven smaller fixtures with the same build settings and keeps their esbuild contribution data and provenance in a unique ignored artifact.
+Quick example client bundle: 13593 bytes minified, 4901 bytes Brotli, including the counter, text-only keyed-list binding code, and browser runtime. CI requires the minified baseline exactly, permits 1% Brotli variance across Node/zlib patch versions, enforces absolute 16000-byte minified and 5200-byte Brotli budgets, and rejects TypeScript, parse5, compiler, server, app, language-server, and runtime diagnostics modules from both browser metafiles. `pnpm check:client-bundle-attribution` records seven smaller fixtures with the same build settings and keeps their esbuild contribution data and provenance in a unique ignored artifact.
 
 ```sh
 pnpm build

@@ -18,7 +18,7 @@ type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 type TextBinding = {
   kind: "text";
   path: number[];
-  expression: string;
+  expression?: string;
   read?: ExpressionReader;
 };
 
@@ -26,7 +26,7 @@ type ClassBinding = {
   kind: "class";
   path: number[];
   className: string;
-  expression: string;
+  expression?: string;
   read?: ExpressionReader;
 };
 
@@ -34,7 +34,7 @@ type EventBinding = {
   kind: "event";
   path: number[];
   eventName: string;
-  handler: string;
+  handler?: string;
   read?: ExpressionReader;
 };
 
@@ -42,7 +42,7 @@ type AttributeBinding = {
   kind: "attr";
   path: number[];
   name: string;
-  expression: string;
+  expression?: string;
   read?: ExpressionReader;
 };
 
@@ -50,7 +50,7 @@ type StyleBinding = {
   kind: "style";
   path: number[];
   name: string;
-  expression: string;
+  expression?: string;
   read?: ExpressionReader;
 };
 
@@ -547,7 +547,7 @@ const readPath = (scope: Record<string, unknown>, expression: string): unknown =
 };
 
 const readBinding = (scope: Record<string, unknown>, binding: Exclude<ConditionalCoreBinding, EventBinding>): unknown =>
-  read(binding.read ? binding.read(scope) : readPath(scope, binding.expression));
+  read(binding.read ? binding.read(scope) : readPath(scope, binding.expression ?? ""));
 
 const cleanupState = (state: Pick<ConditionalCoreState, "nodes" | "cleanups">): void => {
   let firstError: unknown;
@@ -613,7 +613,7 @@ const bindNodes = (state: ConditionalCoreState, options: ConditionalCoreOptions,
       const element = node as Element;
       if (!(element instanceof Element)) continue;
       const listener: EventListener = (event) => {
-        const handler = binding.read ? binding.read(state.scope) : readPath(state.scope, binding.handler);
+        const handler = binding.read ? binding.read(state.scope) : readPath(state.scope, binding.handler ?? "");
         if (typeof handler === "function") (handler as EventListener)(event);
       };
       state.cleanups.push(delegateTarget(element, binding.eventName, element, listener));

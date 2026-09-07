@@ -1932,14 +1932,14 @@ const bindingReadExpression = (expression: string, aliases: ReadonlyMap<string, 
 const serializeStoreDefinition = (store: StoreDefinition): string => {
   const key = declarationKeyFor(store, store.name);
   const keyField = key === store.name ? "" : `, key: ${JSON.stringify(key)}`;
-  return `{ name: ${JSON.stringify(store.name)}${keyField}, initial: ${JSON.stringify(store.initial)}, read: (scope) => ${bindingReadExpression(store.initial, aliasesForDeclaration(store))} }`;
+  return `{ name: ${JSON.stringify(store.name)}${keyField}, read: (scope) => ${bindingReadExpression(store.initial, aliasesForDeclaration(store))} }`;
 };
 
 const serializeComponentBoundary = (component: NonNullable<ListBinding["components"]>[number]): string => {
   const props = component.props
     .map(
       (prop) =>
-        `{ name: ${JSON.stringify(prop.name)}, ${declarationKeyFor(prop, prop.name) === prop.name ? "" : `key: ${JSON.stringify(declarationKeyFor(prop, prop.name))}, `}expression: ${JSON.stringify(prop.expression)}, read: (scope) => ${bindingReadExpression(prop.expression, aliasesForDeclaration(prop))} }`,
+        `{ name: ${JSON.stringify(prop.name)}, ${declarationKeyFor(prop, prop.name) === prop.name ? "" : `key: ${JSON.stringify(declarationKeyFor(prop, prop.name))}, `}read: (scope) => ${bindingReadExpression(prop.expression, aliasesForDeclaration(prop))} }`,
     )
     .join(", ");
   const stores = component.stores.map(serializeStoreDefinition).join(", ");
@@ -1952,33 +1952,29 @@ const serializeStoreDefinitions = (stores: readonly StoreDefinition[]): string =
 const serializeComponentBoundaries = (components: readonly NonNullable<ListBinding["components"]>[number][]): string =>
   `[${components.map(serializeComponentBoundary).join(", ")}]`;
 
+// Generated bindings carry compiled readers, so the expression strings they were parsed from never ship. A ref
+// is the exception: the runtime writes back through its path.
 const serializeListRowBinding = (binding: ListBinding["bindings"][number]): string => {
   const fields: string[] = [`kind: ${JSON.stringify(binding.kind)}`, `path: ${JSON.stringify(binding.path)}`];
   const aliases = aliasesForBinding(binding);
   if (binding.kind === "text") {
-    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
   } else if (binding.kind === "class") {
     fields.push(`className: ${JSON.stringify(binding.className)}`);
-    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
   } else if (binding.kind === "event") {
     fields.push(`eventName: ${JSON.stringify(binding.eventName)}`);
-    fields.push(`handler: ${JSON.stringify(binding.handler)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.handler, aliases)}`);
   } else if (binding.kind === "attr") {
     fields.push(`name: ${JSON.stringify(binding.name)}`);
-    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
   } else if (binding.kind === "style") {
     fields.push(`name: ${JSON.stringify(binding.name)}`);
-    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
   } else if (binding.kind === "ref") {
     fields.push(`expression: ${JSON.stringify(binding.expression)}`);
   } else if (binding.kind === "model") {
     fields.push(`property: ${JSON.stringify(binding.property)}`);
-    fields.push(`expression: ${JSON.stringify(binding.expression)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
     fields.push(
       `write: (scope, value) => ${runtimeNames.writeModelValue}(${bindingReadExpression(binding.expression, aliases)}, value, () => { ${bindingReadExpression(binding.expression, aliases)} = value; })`,

@@ -17,7 +17,7 @@ import {
 type TextBinding = {
   kind: "text";
   path: number[];
-  expression: string;
+  expression?: string;
   read?: (scope: Record<string, unknown>) => unknown;
 };
 
@@ -25,7 +25,7 @@ type ClassBinding = {
   kind: "class";
   path: number[];
   className: string;
-  expression: string;
+  expression?: string;
   read?: (scope: Record<string, unknown>) => unknown;
 };
 
@@ -33,7 +33,7 @@ type EventBinding = {
   kind: "event";
   path: number[];
   eventName: string;
-  handler: string;
+  handler?: string;
   read?: (scope: Record<string, unknown>) => unknown;
 };
 
@@ -41,7 +41,7 @@ type AttributeBinding = {
   kind: "attr";
   path: number[];
   name: string;
-  expression: string;
+  expression?: string;
   read?: (scope: Record<string, unknown>) => unknown;
 };
 
@@ -49,7 +49,7 @@ type StyleBinding = {
   kind: "style";
   path: number[];
   name: string;
-  expression: string;
+  expression?: string;
   read?: (scope: Record<string, unknown>) => unknown;
 };
 
@@ -63,7 +63,7 @@ type ModelBinding = {
   kind: "model";
   path: number[];
   property: "value" | "checked";
-  expression: string;
+  expression?: string;
   read?: (scope: Record<string, unknown>) => unknown;
   write?: (scope: Record<string, unknown>, value: unknown) => void;
 };
@@ -89,14 +89,14 @@ type NestedListBinding = {
 type StoreDefinition = {
   name: string;
   key?: string;
-  initial: string;
+  initial?: string;
   read?: (scope: Record<string, unknown>) => unknown;
 };
 
 type ComponentProp = {
   name: string;
   key?: string;
-  expression: string;
+  expression?: string;
   read?: (scope: Record<string, unknown>) => unknown;
 };
 
@@ -252,9 +252,9 @@ const localScopeKeysFor = (options: ConditionalOptions): ReadonlySet<string> =>
 
 const readExpression = (
   scope: Record<string, unknown>,
-  expression: string,
+  expression: string | undefined,
   reader: ((scope: Record<string, unknown>) => unknown) | undefined,
-): unknown => read(reader ? reader(scope) : readLiteralExpression(scope, expression));
+): unknown => read(reader ? reader(scope) : readLiteralExpression(scope, expression ?? ""));
 
 const scopeFor = (scope: Record<string, unknown>, options: ConditionalOptions): Record<string, unknown> => {
   const definitions = [
@@ -303,18 +303,18 @@ const updateScope = (
 const readBinding = (
   scope: Record<string, unknown>,
   binding: Exclude<ConditionalBinding, EventBinding | RefBinding | NestedListBinding | NestedConditionalBinding>,
-): unknown => read(binding.read ? binding.read(scope) : readLiteralExpression(scope, binding.expression));
+): unknown => read(binding.read ? binding.read(scope) : readLiteralExpression(scope, binding.expression ?? ""));
 
 const readEvent = (scope: Record<string, unknown>, binding: EventBinding): unknown =>
-  binding.read ? binding.read(scope) : readPath(scope, binding.handler);
+  binding.read ? binding.read(scope) : readPath(scope, binding.handler ?? "");
 
 const writeBinding = (scope: Record<string, unknown>, binding: ModelBinding, value: unknown): void => {
   if (binding.write) {
     binding.write(scope, value);
     return;
   }
-  const target = binding.read ? binding.read(scope) : readPath(scope, binding.expression);
-  writeModelValue(target, value, () => writePath(scope, binding.expression, value));
+  const target = binding.read ? binding.read(scope) : readPath(scope, binding.expression ?? "");
+  writeModelValue(target, value, () => writePath(scope, binding.expression ?? "", value));
 };
 
 const cleanup = (state: ConditionalState): void => {
