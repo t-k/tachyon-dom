@@ -96,6 +96,11 @@ export type ConditionalCoreAdoptionGuard = (
   laterConditionals: readonly ConditionalCoreLaterDescriptor[] | undefined,
 ) => boolean;
 
+/** A mount-only module only needs each conditional's template position. */
+export type ConditionalCoreMountDescriptor = {
+  path: readonly number[];
+};
+
 export type ConditionalCoreAnchorDescriptor = {
   path: readonly number[];
   visible: unknown;
@@ -228,7 +233,7 @@ const liveLocationForLogicalPath = (
     : undefined;
 };
 
-const orderedPreparedConditionals = (descriptors: readonly ConditionalCoreAnchorDescriptor[]): PreparedConditional[] =>
+const orderedPreparedConditionals = (descriptors: readonly ConditionalCoreMountDescriptor[]): PreparedConditional[] =>
   descriptors
     .map((descriptor) => ({
       path: descriptor.path,
@@ -244,6 +249,25 @@ const orderedPreparedConditionals = (descriptors: readonly ConditionalCoreAnchor
       }
       return 0;
     });
+
+/**
+ * Client-only preparation. A mount renders the template itself, so every conditional slot is the placeholder
+ * comment the template carries and there is no server shape to inspect, adopt, or defer to.
+ */
+export const prepareConditionalCoreForMount = (
+  root: Node,
+  descriptors: readonly ConditionalCoreMountDescriptor[],
+): void => {
+  const plan: PreparedPathPlan = { invalid: new Set() };
+  preparedPathPlans.set(root, plan);
+  for (const descriptor of orderedPreparedConditionals(descriptors)) {
+    const parent = liveNodeForLogicalPath(root, descriptor.path.slice(0, -1), undefined, true);
+    const index = descriptor.index + conditionalRegionOffset(root, descriptor.parentKey, descriptor.index);
+    const candidate = parent ? logicalChildren(parent)[index] : undefined;
+    if (candidate instanceof Comment && !isHydrationMarker(candidate)) registerAnchor(root, descriptor.path, candidate);
+    else plan.invalid.add(descriptor.key);
+  }
+};
 
 type ConditionalAdoption = (
   parent: Node,

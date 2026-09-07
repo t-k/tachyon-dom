@@ -55,6 +55,19 @@ export const evaluateGeneratedClientModule = (
     .replace(/^export const /gm, "const ");
   return new Function(
     ...names,
-    `${executable}; const hydrationDynamicRegionErrors = Array.isArray(hydrationDynamicRegions) ? hydrationDynamicRegions.errors : undefined; return { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind: typeof bind === "function" ? bind : undefined, hydrate: typeof hydrate === "function" ? hydrate : undefined };`,
+    // A mount-only module declares no hydration metadata at all, so each export is read only when it exists.
+    `${executable};
+     const has = (name) => { try { return eval("typeof " + name) !== "undefined"; } catch { return false; } };
+     const regions = has("hydrationDynamicRegions") ? hydrationDynamicRegions : undefined;
+     return {
+       templateHtml,
+       ...(has("mountOnly") ? { mountOnly } : {}),
+       hydrationBoundaries: has("hydrationBoundaries") ? hydrationBoundaries : undefined,
+       hydrationDynamicAttributes: has("hydrationDynamicAttributes") ? hydrationDynamicAttributes : undefined,
+       hydrationDynamicRegions: regions,
+       hydrationDynamicRegionErrors: Array.isArray(regions) ? regions.errors : undefined,
+       bind: typeof bind === "function" ? bind : undefined,
+       hydrate: typeof hydrate === "function" ? hydrate : undefined,
+     };`,
   )(...values) as ClientTemplateModule<Record<string, unknown>>;
 };

@@ -236,6 +236,11 @@ export type GenerateClientModuleOptions = {
    */
   hydrateOnly?: boolean;
   /**
+   * Generate a mount-only module: hydration metadata, the hydrate entry, and the server shape matching a
+   * conditional needs to adopt SSR output are all left out. Exclusive with `hydrateOnly` and hydration chunks.
+   */
+  mountOnly?: boolean;
+  /**
    * Binding location instrumentation. Direct compiler output enables it by
    * default with a deterministic anonymous identity. Vite disables it for
    * builds that do not have a development source root; production defines can

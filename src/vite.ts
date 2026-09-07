@@ -244,6 +244,7 @@ const codeForTarget = (
   hydrationBoundaryId?: string,
   hydrationChunkImports?: Readonly<Record<string, string>>,
   hydrateOnly = false,
+  mountOnly = false,
   instrumentation?: { templateId: string; sourceRevision: string; mapSourceOffset: (offset: number) => number },
 ): string => {
   if (scriptOnly) {
@@ -262,6 +263,7 @@ const codeForTarget = (
     ...(hydrationBoundaryId ? { hydrationBoundaryId } : {}),
     ...(hydrationChunkImports ? { hydrationChunkImports } : {}),
     ...(hydrateOnly ? { hydrateOnly: true } : {}),
+    ...(mountOnly ? { mountOnly: true } : {}),
     ...instrumentation,
   });
 };
@@ -294,8 +296,12 @@ const hydrationBoundaryIdFor = (id: string): string | undefined => queryForId(id
 /** `./Page.td?client&hydrate-only` requests a module without boundary bindings or `bind`. */
 const isHydrateOnlyRequest = (id: string): boolean => queryForId(id).has("hydrate-only");
 
+/** `./Page.td?client&mount-only` requests a module without hydration metadata or server shape matching. */
+const isMountOnlyRequest = (id: string): boolean => queryForId(id).has("mount-only");
+
 /** Declarations and type checks run once per source file, for the primary request only. */
-const isPrimaryRequest = (id: string): boolean => hydrationBoundaryIdFor(id) === undefined && !isHydrateOnlyRequest(id);
+const isPrimaryRequest = (id: string): boolean =>
+  hydrationBoundaryIdFor(id) === undefined && !isHydrateOnlyRequest(id) && !isMountOnlyRequest(id);
 
 const hydrationChunkImportsFor = (
   id: string,
@@ -486,6 +492,10 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
           ? hydrationChunkImportsFor(id, result.value.template.client.hydrationBoundaries)
           : undefined;
       const hydrateOnly = resolvedTarget === "client" && hydrationBoundaryId === undefined && isHydrateOnlyRequest(id);
+      const mountOnly = resolvedTarget === "client" && hydrationBoundaryId === undefined && isMountOnlyRequest(id);
+      if (hydrateOnly && mountOnly) {
+        throw new Error(`A Tachyon client request cannot be both hydrate-only and mount-only: ${id}`);
+      }
       // Binding location instrumentation is a development aid: it names the
       // template relative to the Vite root (never an absolute path; without a
       // resolved root nothing is emitted) and is omitted from every build
@@ -513,6 +523,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         hydrationBoundaryId,
         hydrationChunkImports,
         hydrateOnly,
+        mountOnly,
         instrumentation,
       )}`;
       const emitSourceMap = shouldEmitSourceMap({

@@ -50,6 +50,12 @@ declare module "*.td?client" {
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
 }
 
+declare module "*.td?client&mount-only" {
+  export const mountOnly: true;
+  export const templateHtml: string;
+  export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
+}
+
 declare module "*.td?client&hydrate-only" {
   export const hydrateOnly: true;
   export const templateHtml: string;

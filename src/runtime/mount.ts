@@ -20,6 +20,8 @@ type ClientHydrationDynamicRegions = readonly ClientHydrationDynamicRegion[] & {
 
 export type ClientTemplateModule<Scope extends Record<string, unknown> = Record<string, unknown>> = {
   templateHtml: string;
+  /** Set by a module generated with `?client&mount-only`: it carries no hydration metadata. */
+  mountOnly?: true;
   hydrationBoundaries?: readonly CompiledHydrationBoundary[];
   hydrationChunks?: Readonly<Record<string, () => Promise<HydrationBoundaryChunk> | HydrationBoundaryChunk>>;
   hydrationDynamicAttributes?: readonly ClientHydrationDynamicAttribute[];
@@ -304,6 +306,12 @@ export const hydrate = <Scope extends Record<string, unknown>>(
   module: HydratableTemplateModule<Scope>,
   scope?: Scope,
 ): Result<MountHandle, HydrateError> => {
+  // Checked before anything reads or replaces the server DOM.
+  if ((module as { mountOnly?: unknown }).mountOnly === true) {
+    return err({
+      message: "Cannot hydrate a mount-only client module; generate it without mount-only to hydrate server output.",
+    });
+  }
   if (hydratedRoots.has(root)) {
     return err({ message: "Hydration root is already hydrated; dispose the previous handle first." });
   }

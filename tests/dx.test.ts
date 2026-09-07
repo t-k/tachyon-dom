@@ -1902,6 +1902,37 @@ export const bindRows = (root, rows, options) => effect(() => {
     ).rejects.toThrow("Cannot generate hydration chunk for boundary td-h-1.");
   });
 
+  it("generates a mount-only module without hydration metadata and rejects mixing it with hydrate-only", async () => {
+    const plugin = tachyonDom({ reactive: true });
+    if (typeof plugin.transform !== "function") throw new Error("Missing transform hook.");
+    const context = {
+      error(error: string): never {
+        throw new Error(error);
+      },
+    } as never;
+    const transformHook = plugin.transform;
+    const source = `<main><if test={visible}><button on:click={save}>{label}</button></if><p>{tail}</p></main>`;
+    const transform = async (id: string): Promise<string> => {
+      const result = await transformHook.call(context, source, id);
+      return typeof result === "object" ? String(result?.code ?? "") : "";
+    };
+
+    const mountOnly = await transform("/src/panel.td?client&mount-only");
+    const regular = await transform("/src/panel.td");
+
+    expect(mountOnly).toContain("export const mountOnly = true;");
+    expect(mountOnly).toContain("export const bind");
+    expect(mountOnly).not.toContain("export const hydrationBoundaries");
+    expect(mountOnly).not.toContain("export const hydrationDynamicRegions");
+    expect(mountOnly).toContain("prepareConditionalCoreForMount as");
+    expect(regular).toContain("export const hydrationDynamicRegions");
+    expect(regular).not.toContain("mountOnly");
+
+    await expect(
+      transformHook.call(context, source, "/src/panel.td?client&mount-only&hydrate-only"),
+    ).rejects.toThrow("cannot be both hydrate-only and mount-only");
+  });
+
   it("keeps boundary-only runtime modules out of the hydrate-only entry's static module graph", async () => {
     await mkdir(path.join(process.cwd(), "node_modules", ".cache"), { recursive: true });
     const dir = await mkdtemp(path.join(process.cwd(), "node_modules", ".cache", "tachyon-hydrate-only-"));

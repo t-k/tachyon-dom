@@ -750,6 +750,7 @@ const runtimeNames = {
   mountConditional: "__tachyonMountConditional",
   mountConditionalCore: "__tachyonMountConditionalCore",
   prepareConditionalCore: "__tachyonPrepareConditionalCore",
+  prepareConditionalCoreForMount: "__tachyonPrepareConditionalCoreForMount",
   prepareConditionalCoreWithAdoptionGuard: "__tachyonPrepareConditionalCoreWithAdoptionGuard",
   prepareConditionalCoreWithStaticAttributes: "__tachyonPrepareConditionalCoreWithStaticAttributes",
   prepareConditionalCoreWithAdoptionGuardAndStaticAttributes:
@@ -910,7 +911,7 @@ const hexDigest = (bytes: Uint8Array): string =>
 const sourceRevisionFor = (source: string): string => hexDigest(sha256(utf8ToBytes(source)));
 
 const clientModuleCacheKey = (options: GenerateClientModuleOptions): string =>
-  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}\0${options.hydrationBoundaryId ?? ""}\0${options.hydrationChunk === true ? "chunk" : ""}\0${options.hydrateOnly === true ? "hydrate-only" : ""}\0${options.instrumentBindings === false ? "0" : "1"}\0${options.templateId ?? ""}\0${options.sourceRevision ?? ""}\0${JSON.stringify(options.hydrationChunkImports ?? {})}`;
+  `${options.reactive === true ? "1" : "0"}\0${options.defaultScopeName ?? ""}\0${options.hydrationBoundaryId ?? ""}\0${options.hydrationChunk === true ? "chunk" : ""}\0${options.hydrateOnly === true ? "hydrate-only" : ""}\0${options.mountOnly === true ? "mount-only" : ""}\0${options.instrumentBindings === false ? "0" : "1"}\0${options.templateId ?? ""}\0${options.sourceRevision ?? ""}\0${JSON.stringify(options.hydrationChunkImports ?? {})}`;
 
 /** Maps each compiled boundary to the template node it was lowered from. */
 const hydrationBoundaryNodes = new WeakMap<HydrationBoundary, ElementNode>();
@@ -1185,6 +1186,12 @@ export const generateClientHydrationChunkModule = (
 };
 
 export const generateClientModule = (template: CompiledTemplate, options: GenerateClientModuleOptions = {}): string => {
+  if (
+    options.mountOnly === true &&
+    (options.hydrateOnly === true || options.hydrationChunk === true || options.hydrationBoundaryId !== undefined)
+  ) {
+    throw new TypeError("A mount-only client module cannot also be hydrate-only or a hydration chunk.");
+  }
   if (options.hydrationBoundaryId !== undefined) {
     return generateClientHydrationChunkModule(template, options.hydrationBoundaryId, options);
   }
@@ -1199,6 +1206,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   const allBindings = template.client.bindings;
   const hydrateOnly = options.hydrateOnly === true;
+  const mountOnly = options.mountOnly === true;
   const withinHydrationBoundary = (binding: ClientBinding): boolean =>
     template.client.hydrationBoundaries.some((boundary) =>
       boundary.path.every((part, index) => binding.path[index] === part),
@@ -1380,14 +1388,16 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       const conditionalCoreImports = [
         `mountConditionalCore as ${runtimeNames.mountConditionalCore}`,
         `${
-          needsConditionalCoreShapeMatcher
-            ? needsConditionalCoreAdoptionGuard
-              ? "prepareConditionalCoreWithAdoptionGuardAndStaticAttributes"
-              : "prepareConditionalCoreWithStaticAttributes"
-            : needsConditionalCoreAdoptionGuard
-              ? "prepareConditionalCoreWithAdoptionGuard"
-              : "prepareConditionalCore"
-        } as ${runtimeNames.prepareConditionalCore}`,
+          mountOnly
+            ? "prepareConditionalCoreForMount"
+            : needsConditionalCoreShapeMatcher
+              ? needsConditionalCoreAdoptionGuard
+                ? "prepareConditionalCoreWithAdoptionGuardAndStaticAttributes"
+                : "prepareConditionalCoreWithStaticAttributes"
+              : needsConditionalCoreAdoptionGuard
+                ? "prepareConditionalCoreWithAdoptionGuard"
+                : "prepareConditionalCore"
+        } as ${mountOnly ? runtimeNames.prepareConditionalCoreForMount : runtimeNames.prepareConditionalCore}`,
         `preparedNodeAt as ${runtimeNames.preparedNodeAt}`,
       ];
       lines.push(`import { ${conditionalCoreImports.join(", ")} } from "tachyon-dom/runtime/conditional-core";`);
@@ -1439,13 +1449,18 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`};`);
   }
   lines.push(`export const templateHtml = ${JSON.stringify(template.client.templateHtml)};`);
-  lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
-  lines.push(`export const hydrationDynamicAttributes = ${JSON.stringify(hydrationDynamicAttributes)};`);
-  lines.push(`export const hydrationDynamicRegions = ${JSON.stringify(template.client.hydrationDynamicRegions)};`);
-  if (template.client.hydrationDynamicRegionErrors.length > 0) {
-    lines.push(`hydrationDynamicRegions.errors = ${JSON.stringify(template.client.hydrationDynamicRegionErrors)};`);
+  if (mountOnly) {
+    // Hydration metadata exists to validate server output; a mount-only module never sees any.
+    lines.push(`export const mountOnly = true;`);
+  } else {
+    lines.push(`export const hydrationBoundaries = ${JSON.stringify(template.client.hydrationBoundaries)};`);
+    lines.push(`export const hydrationDynamicAttributes = ${JSON.stringify(hydrationDynamicAttributes)};`);
+    lines.push(`export const hydrationDynamicRegions = ${JSON.stringify(template.client.hydrationDynamicRegions)};`);
+    if (template.client.hydrationDynamicRegionErrors.length > 0) {
+      lines.push(`hydrationDynamicRegions.errors = ${JSON.stringify(template.client.hydrationDynamicRegionErrors)};`);
+    }
+    lines.push(`export const componentBoundaries = ${JSON.stringify(template.client.components)};`);
   }
-  lines.push(`export const componentBoundaries = ${JSON.stringify(template.client.components)};`);
   if (hasHydrationChunks) {
     const loaders = Object.entries(hydrationChunkImports)
       .map(([key, moduleId]) => `${JSON.stringify(key)}: () => import(${JSON.stringify(moduleId)})`)
@@ -1560,6 +1575,15 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
           : `  const ${visibilityName} = ${runtimeValueExpression(binding.test, false, sourceName, aliasesForBinding(binding))};`,
       );
     }
+    if (mountOnly) {
+      // A mount renders the template itself, so only the conditional positions are needed.
+      lines.push(
+        `  ${runtimeNames.prepareConditionalCoreForMount}(root, [${bindings
+          .filter((binding) => binding.kind === "if")
+          .map((binding) => `{ path: ${JSON.stringify(binding.path)} }`)
+          .join(", ")}]);`,
+      );
+    } else {
     lines.push(`  ${runtimeNames.prepareConditionalCore}(root, [`);
     for (const binding of bindings) {
       if (binding.kind !== "if") continue;
@@ -1600,6 +1624,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       );
     }
     lines.push(`  ]);`);
+    }
   }
   const listPathExpression = (path: readonly number[]): string | undefined => {
     const lists = listPathsForBinding(path);
