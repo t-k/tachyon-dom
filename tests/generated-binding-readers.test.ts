@@ -53,6 +53,20 @@ describe("generated binding readers", () => {
     );
   });
 
+  // The generated writer assigns straight into the object the path names, so the property it writes has to be
+  // one the expression parser allows. It rejects the prototype keys before any code is generated.
+  it("refuses to compile a ref that would write a prototype key", () => {
+    for (const source of [
+      `<div ref={obj.__proto__}></div>`,
+      `<div ref={obj.constructor}></div>`,
+      `<div ref={obj.prototype}></div>`,
+      `<ul><for each={rows} key={row.id}><li ref={row.__proto__}></li></for></ul>`,
+    ]) {
+      const result = compileTemplate(source);
+      expect([source, result.ok]).toEqual([source, false]);
+    }
+  });
+
   it("leaves a ref alone when the object that would hold it is missing", () => {
     const module = evaluateGeneratedClientModule(generated(`<div ref={refs.panel}></div>`));
     const root = document.createElement("div");

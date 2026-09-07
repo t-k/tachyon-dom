@@ -69,20 +69,32 @@ describe("static pages without a client entry", () => {
 });
 
 describe("tachyonApp client entry emission", () => {
-  const emitPages = (clientEntry?: "always" | "when-required") => {
-    const plugin = tachyonApp(app(), clientEntry ? { clientEntry } : {});
+  type EntryOptions = Parameters<typeof tachyonApp>[1];
+
+  const runBundle = (
+    options: EntryOptions = {},
+    bundle: Record<string, unknown> = {
+      "assets/entry.js": { type: "chunk", isEntry: true, fileName: "assets/entry.js", code: "", imports: [], dynamicImports: [] },
+    },
+  ) => {
+    const plugin = tachyonApp(app(), options);
     if (typeof plugin.generateBundle !== "function") throw new Error("Missing generateBundle hook.");
     const emitted = new Map<string, string>();
+    const warnings: string[] = [];
     const context = {
       emitFile({ fileName, source }: { fileName: string; source: string }) {
         emitted.set(fileName, source);
       },
+      warn(message: string) {
+        warnings.push(message);
+      },
     } as never;
-    plugin.generateBundle.call(context, {} as never, {
-      "assets/entry.js": { type: "chunk", isEntry: true, fileName: "assets/entry.js" },
-    } as never, false as never);
-    return emitted;
+    plugin.generateBundle.call(context, {} as never, bundle as never, false as never);
+    return { pages: emitted, warnings, bundle };
   };
+
+  const emitPages = (clientEntry?: "always" | "when-required") =>
+    runBundle(clientEntry ? { clientEntry } : {}).pages;
 
   it("puts the entry on every page by default", () => {
     const pages = emitPages();
@@ -100,6 +112,80 @@ describe("tachyonApp client entry emission", () => {
     for (const fileName of ["text.html", "event.html", "list.html", "island.html", "setup.html"]) {
       expect([fileName, pages.get(fileName)?.includes("assets/entry.js")]).toEqual([fileName, true]);
     }
+  });
+
+  // The entry is application code. Nothing in it is generated, so the plugin cannot see whether it also does
+  // something every page needs; an entry with any code of its own therefore stays on every page.
+  it("keeps an entry that does work of its own on every page", () => {
+    const { pages, warnings } = runBundle(
+      { clientEntry: "when-required" },
+      {
+        "assets/entry.js": {
+          type: "chunk",
+          isEntry: true,
+          fileName: "assets/entry.js",
+          code: `document.addEventListener("click", () => {});\n//# sourceMappingURL=entry.js.map\n`,
+          imports: [],
+          dynamicImports: [],
+        },
+      },
+    );
+
+    for (const [fileName, source] of pages) {
+      expect([fileName, source.includes("assets/entry.js")]).toEqual([fileName, true]);
+    }
+    expect(warnings.join("\n")).toContain("assets/entry.js");
+  });
+
+  it("omits an entry that does work once the app declares it only mounts pages", () => {
+    const { pages, warnings } = runBundle(
+      { clientEntry: "when-required", clientEntryScope: "pages" },
+      {
+        "assets/entry.js": {
+          type: "chunk",
+          isEntry: true,
+          fileName: "assets/entry.js",
+          code: `import "./page.js";`,
+          imports: [],
+          dynamicImports: [],
+        },
+      },
+    );
+
+    expect(pages.get("index.html")).not.toContain("assets/entry.js");
+    expect(pages.get("event.html")).toContain("assets/entry.js");
+    expect(warnings).toEqual([]);
+  });
+
+  // Nothing loads a chunk every page left out, so the build stops shipping it at all.
+  it("drops an entry chunk and its private chunks when no page loads them", () => {
+    const staticOnly = defineApp({
+      pages: [{ path: "/", fileName: "index.html", template: `<main><h1>Static</h1></main>` }],
+    });
+    const plugin = tachyonApp(staticOnly, { clientEntry: "when-required" });
+    if (typeof plugin.generateBundle !== "function") throw new Error("Missing generateBundle hook.");
+    const bundle: Record<string, unknown> = {
+      "assets/entry.js": {
+        type: "chunk",
+        isEntry: true,
+        fileName: "assets/entry.js",
+        code: "",
+        imports: ["assets/shared.js"],
+        dynamicImports: [],
+      },
+      "assets/entry.js.map": { type: "asset", fileName: "assets/entry.js.map" },
+      "assets/shared.js": { type: "chunk", isEntry: false, fileName: "assets/shared.js", code: "", imports: [], dynamicImports: [] },
+      "assets/site.css": { type: "asset", fileName: "assets/site.css" },
+    };
+    plugin.generateBundle.call({ emitFile() {}, warn() {} } as never, {} as never, bundle as never, false as never);
+
+    expect(Object.keys(bundle)).toEqual(["assets/site.css"]);
+  });
+
+  it("keeps the entry chunk when at least one page loads it", () => {
+    const { bundle } = runBundle({ clientEntry: "when-required" });
+
+    expect(Object.keys(bundle)).toContain("assets/entry.js");
   });
 
   it("keeps the same page markup apart from the entry script", () => {

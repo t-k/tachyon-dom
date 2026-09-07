@@ -62,9 +62,19 @@ export type TachyonAppViteOptions = {
   /**
    * `"always"` (the default) puts the client entry on every page. `"when-required"` omits it from pages the
    * compiler proves need no client work: no client binding, hydration boundary, store, component boundary, or
-   * `<script setup>`. A shared entry's own side effects then do not run on those pages.
+   * `<script setup>`.
+   *
+   * The entry is application code, so the plugin cannot see whether it also does something every page needs. An
+   * entry that has code of its own is therefore kept on every page and the build reports that it was. Declare
+   * `clientEntryScope: "pages"` when the entry only mounts or hydrates page modules.
    */
   clientEntry?: "always" | "when-required";
+  /**
+   * What the client entry does. `"shared"` (the default) means it may do work every page needs, so
+   * `clientEntry: "when-required"` keeps it wherever it has code of its own. `"pages"` declares that it only
+   * mounts or hydrates page modules, which lets a page with no client work leave it out.
+   */
+  clientEntryScope?: "shared" | "pages";
   htmlWhitespace?: HtmlWhitespacePolicy;
   /** @deprecated Use `htmlWhitespace` instead. */
   minifyHtml?: boolean;
@@ -680,6 +690,49 @@ export const tachyonSsr = (options: TachyonSsrViteOptions): Plugin => ({
   },
 });
 
+/**
+ * Whether a built chunk does anything of its own. A source map link and blank lines are not work; anything
+ * else is, including comments an unminified build keeps, because guessing in the other direction would drop
+ * code a page needs.
+ */
+const chunkHasWork = (code: string | undefined): boolean =>
+  (code ?? "")
+    .replace(/\/\/# sourceMappingURL=.*$/gm, "")
+    .replace(/^\s*(?:"use strict";|'use strict';)\s*$/gm, "")
+    .trim().length > 0;
+
+type BundleChunk = {
+  type: string;
+  fileName: string;
+  isEntry?: boolean;
+  code?: string;
+  imports?: readonly string[];
+  dynamicImports?: readonly string[];
+};
+
+/** The chunks only this entry reaches, so removing the entry cannot orphan a chunk another entry still needs. */
+const chunksOnlyReachableFrom = (bundle: Record<string, BundleChunk>, entryFileName: string): string[] => {
+  const reach = (start: string): Set<string> => {
+    const seen = new Set<string>();
+    const queue = [start];
+    while (queue.length > 0) {
+      const name = queue.pop() as string;
+      if (seen.has(name)) continue;
+      const chunk = bundle[name];
+      if (!chunk || chunk.type !== "chunk") continue;
+      seen.add(name);
+      queue.push(...(chunk.imports ?? []), ...(chunk.dynamicImports ?? []));
+    }
+    return seen;
+  };
+  const shared = new Set<string>();
+  for (const chunk of Object.values(bundle)) {
+    if (chunk.type !== "chunk" || !chunk.isEntry || chunk.fileName === entryFileName) continue;
+    for (const name of reach(chunk.fileName)) shared.add(name);
+  }
+  return [...reach(entryFileName)].filter((name) => !shared.has(name));
+};
+
 export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {}): Plugin => {
   const configuredWhitespace = configuredAppHtmlWhitespace(options);
   const whitespaceFor = (mode: "development" | "production"): HtmlWhitespacePolicy =>
@@ -695,7 +748,12 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
         }
         response.statusCode = 200;
         response.setHeader("Content-Type", "text/html; charset=utf-8");
-        const needsClientEntry = options.clientEntry !== "when-required" || app.requiresClientEntry(page.path);
+        // The dev server has no built chunk to inspect, so it only leaves the entry out where the app itself
+        // declared the entry is page scoped. Anything else keeps it, which is the safe direction.
+        const needsClientEntry =
+          options.clientEntry !== "when-required" ||
+          options.clientEntryScope !== "pages" ||
+          app.requiresClientEntry(page.path);
         response.end(
           app.renderDocument(page.path, {
             assets: {
@@ -712,9 +770,21 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
       const cssFiles = Object.values(bundle).flatMap((item) =>
         item.type === "asset" && item.fileName.endsWith(".css") ? [item.fileName] : [],
       );
+      // An entry that does work of its own may be doing it for every page, and only the app knows. Unless the
+      // app declared the entry page scoped, that entry stays everywhere rather than silently not running.
+      const entryDoesSharedWork =
+        options.clientEntryScope !== "pages" && entry?.type === "chunk" && chunkHasWork(entry.code);
+      const omitsClientEntry = options.clientEntry === "when-required" && !entryDoesSharedWork;
+      if (options.clientEntry === "when-required" && entryDoesSharedWork && entry) {
+        this.warn(
+          `Keeping the client entry ${entry.fileName} on every page: it has code of its own, which may be work every page needs. Set clientEntryScope: "pages" if it only mounts or hydrates page modules.`,
+        );
+      }
+      let loadedByAPage = false;
       for (const page of app.pages) {
         const prefix = page.assetPrefix ?? ".";
-        const needsClientEntry = options.clientEntry !== "when-required" || app.requiresClientEntry(page.path);
+        const needsClientEntry = !omitsClientEntry || app.requiresClientEntry(page.path);
+        loadedByAPage ||= needsClientEntry;
         const assets: TachyonAppAssets = {
           scripts: entry && entry.type === "chunk" && needsClientEntry ? [prefixed(prefix, entry.fileName)] : [],
           styles: cssFiles.map((fileName) => prefixed(prefix, fileName)),
@@ -727,6 +797,13 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
           }),
           type: "asset",
         });
+      }
+      // Nothing loads a chunk every page left out, so it does not need to be shipped.
+      if (entry && !loadedByAPage) {
+        for (const fileName of chunksOnlyReachableFrom(bundle as unknown as Record<string, BundleChunk>, entry.fileName)) {
+          delete bundle[fileName];
+          delete bundle[`${fileName}.map`];
+        }
       }
     },
   };

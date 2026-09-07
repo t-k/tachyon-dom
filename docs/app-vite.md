@@ -34,6 +34,18 @@ When a `.td` module uses `<script setup>`, Vite compiles setup declarations into
 
 App document `htmlWhitespace` is a separate tag-syntax policy. Use `"preserve-tags"` or `"normalize-tags"`; it does not condense text-node indentation. See the [whitespace migration guide](migrations/whitespace.md) for compatibility behavior and boundary-specific failures.
 
+## Client Entry on Static Pages
+
+`tachyonApp(app, { clientEntry: "when-required" })` leaves the client entry off pages the compiler proves need no client work: no client binding, hydration boundary, store, component boundary, or `<script setup>`. Such a page then requests no JavaScript at all, and when no page loads the entry the build stops emitting the entry chunk.
+
+The entry is application code, so the plugin cannot see whether it also does work every page needs. An entry that has code of its own is therefore kept on every page and the build reports that it was. Add `clientEntryScope: "pages"` to declare that the entry only mounts or hydrates page modules:
+
+```ts
+tachyonApp(app, { appScript: "/src/client/main.ts", clientEntry: "when-required", clientEntryScope: "pages" });
+```
+
+The development server has no built chunk to inspect, so it omits the entry only under `clientEntryScope: "pages"`; otherwise it serves the entry as it always did.
+
 ## Source Maps
 
 All build commands omit inline source maps by default, including custom modes such as `staging` and `test`, so compiled template source is not embedded in deployment artifacts unintentionally. Development server transforms continue to include inline maps. Set `productionSourceMap: true` to opt a build in.
