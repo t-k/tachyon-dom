@@ -9,7 +9,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/enhancement`: small progressive enhancement registry for SSR markup that opts in with `data-td-enhance`.
 - `runtime/event`: direct event listener binding.
 - `runtime/list`: keyed list mounting, reuse, move, multi-root item support, row-local stores/components/hydration boundaries, and precomputed binding plans that avoid rebuilding per-row binding subsets.
-- `runtime/list-path`: compiler path resolution for bindings after keyed-list output expands around static siblings.
+- `runtime/list-path`: compiler path resolution for bindings after keyed-list output expands around static siblings. The expansion offset applies only to logical children after the list's recorded static prefix; prepared conditional paths can supply the same resolver as a child offset.
 - `runtime/keyed-rows`: dependency-free keyed table-row list where the live DOM is the single source of truth (no shadow item/row arrays). Bulk creation binds and clones a reusable multi-row chunk; remove/swap/select are O(1) DOM operations. Suited to large data tables that do not need per-row reactivity.
 - `runtime/virtual-list`: fixed-height virtualized lists with overscan, imperative updates, index scrolling, and ARIA position metadata.
 - `runtime/conditional`: conditional DOM mounting.
