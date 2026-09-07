@@ -34,6 +34,25 @@ const dynamicChildCount = (container: Node, region: DynamicListRegion | undefine
 const isStrictPathPrefix = (prefix: readonly number[], path: readonly number[]): boolean =>
   prefix.length < path.length && prefix.every((part, index) => part === path[index]);
 
+const pathEquals = (left: readonly number[], right: readonly number[]): boolean =>
+  left.length === right.length && left.every((part, index) => part === right[index]);
+
+const listAffectsChild = (list: DynamicListPath, childIndex: number): boolean =>
+  !list.region || childIndex >= list.region.before;
+
+/** Returns the expanded child count for lists owned by one logical parent. */
+export const dynamicListChildOffset = (
+  container: Node | undefined,
+  parentPath: readonly number[],
+  childIndex: number,
+  lists: readonly DynamicListPath[],
+): number =>
+  container
+    ? lists
+        .filter((list) => pathEquals(list.path, parentPath) && listAffectsChild(list, childIndex))
+        .reduce((offset, list) => offset + dynamicChildCount(container, list.region), 0)
+    : 0;
+
 /** Resolves a compiler path after preceding keyed-list output has expanded. */
 export const nodeAtWithDynamicLists = (
   root: Node,
@@ -45,9 +64,9 @@ export const nodeAtWithDynamicLists = (
   for (const list of orderedLists) {
     if (!isStrictPathPrefix(list.path, path)) continue;
     const container = nodeAt(root, actualPath.slice(0, list.path.length));
-    const count = container ? dynamicChildCount(container, list.region) : 0;
     const index = list.path.length;
-    actualPath[index] = (actualPath[index] ?? 0) + count;
+    actualPath[index] =
+      (actualPath[index] ?? 0) + dynamicListChildOffset(container, list.path, actualPath[index] ?? 0, [list]);
   }
   const node = nodeAt(root, actualPath);
   if (!node) throw new TypeError(`Missing generated binding node at path ${path.join(".")}.`);

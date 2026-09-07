@@ -118,6 +118,8 @@ type PreparedPathPlan = {
   invalid: Set<string>;
 };
 
+export type PreparedPathChildOffset = (container: Node, parentPath: readonly number[], childIndex: number) => number;
+
 const states = new WeakMap<Comment, ConditionalCoreState>();
 const ownerCleanupDisposers = new WeakMap<Comment, () => void>();
 const anchorsByRoot = new WeakMap<Node, Map<string, Comment>>();
@@ -232,7 +234,12 @@ const initialNodeAt = (
   return initialNodes.get(pathKey(rawPath)) ?? (rawPath.length === 0 ? root : undefined);
 };
 
-const preparedNodeFor = (root: Node, path: readonly number[], plan: PreparedPathPlan): Node | undefined => {
+const preparedNodeFor = (
+  root: Node,
+  path: readonly number[],
+  plan: PreparedPathPlan,
+  childOffset?: PreparedPathChildOffset,
+): Node | undefined => {
   let current: Node | undefined = root;
   const parentPath: number[] = [];
   for (const logicalIndex of path) {
@@ -248,6 +255,7 @@ const preparedNodeFor = (root: Node, path: readonly number[], plan: PreparedPath
       else if (state && state.nodes.length > 0) actualIndex += state.nodes.length;
       else if (plan.modes.get(descriptor.key) === "expanded") actualIndex += descriptor.nodeCount;
     }
+    if (childOffset) actualIndex += childOffset(current, parentPath, logicalIndex);
     current = logicalChildren(current)[actualIndex];
     parentPath.push(logicalIndex);
   }
@@ -560,7 +568,7 @@ export const prepareConditionalCoreWithAdoptionGuardAndStaticAttributes = (
 };
 
 /** Resolves a generated binding path after conditional anchors and SSR branches are prepared. */
-export const preparedNodeAt = (root: Node, path: readonly number[]): Node => {
+export const preparedNodeAt = (root: Node, path: readonly number[], childOffset?: PreparedPathChildOffset): Node => {
   const plan = preparedPathPlans.get(root);
   if (!plan) {
     const node = nodeAt(root, path);
@@ -570,7 +578,7 @@ export const preparedNodeAt = (root: Node, path: readonly number[]): Node => {
   if (path.some((_, index) => plan.invalid.has(pathKey(path.slice(0, index + 1))))) {
     throw new TypeError(`Cannot resolve generated binding path ${path.join(".")}.`);
   }
-  const node = preparedNodeFor(root, path, plan);
+  const node = preparedNodeFor(root, path, plan, childOffset);
   if (!node) throw new TypeError(`Missing generated binding node at path ${path.join(".")}.`);
   return node;
 };

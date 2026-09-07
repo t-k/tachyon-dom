@@ -1422,6 +1422,43 @@ describe("HTML-first compiler", () => {
     expect(generateClientModule(result.value)).toContain(`region: {"before":1,"after":1}`);
   });
 
+  it.each([
+    `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
+    `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
+  ])("diagnoses dynamic conditional shape overlap with a static sibling", (source) => {
+    const result = compileTemplate(source);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.client.hydrationDynamicRegionErrors).toHaveLength(1);
+    expect(result.value.client.hydrationDynamicRegionErrors[0]).toContain("dynamic attribute shape overlaps");
+  });
+
+  it("applies list path correction only after a static prefix and composes it with conditional paths", () => {
+    const withSiblings = compileTemplate(
+      `<main><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
+    );
+    if (!withSiblings.ok) throw new Error(withSiblings.error.message);
+    const siblingCode = generateClientModule(withSiblings.value, { reactive: true, instrumentBindings: false });
+
+    expect(siblingCode).toContain(`__tachyonTextAt(root, [0,0])`);
+    expect(siblingCode).not.toContain(`__tachyonNodeAtWithDynamicLists(root, [0,0]`);
+    expect(siblingCode).toContain(`__tachyonNodeAtWithDynamicLists(root, [1,0]`);
+
+    const withConditional = compileTemplate(
+      `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></section><aside><if test={visible}><b>{head}</b></if></aside></main>`,
+    );
+    if (!withConditional.ok) throw new Error(withConditional.error.message);
+    const conditionalCode = generateClientModule(withConditional.value, { reactive: true, instrumentBindings: false });
+
+    expect(conditionalCode).toContain(
+      `dynamicListChildOffset as __tachyonDynamicListChildOffset, nodeAtWithDynamicLists as __tachyonNodeAtWithDynamicLists`,
+    );
+    expect(conditionalCode).toContain(
+      `__tachyonPreparedNodeAt(root, [0,0,0], (container, parentPath, childIndex) => __tachyonDynamicListChildOffset`,
+    );
+  });
+
   it("renders keyed lists on the server", () => {
     const result = compileTemplate(
       `<tbody><for each={rows} key={row.id}><tr class:danger={row.selected}><td>{row.id}</td><td>{row.label}</td></tr></for></tbody>`,

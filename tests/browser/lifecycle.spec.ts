@@ -51,6 +51,10 @@ declare global {
       conditionalShapes: Array<{ ok: boolean; staticPreserved: boolean; tailUpdated: boolean }>;
       componentSplit: { ok: boolean; unchanged: boolean; identityPreserved: boolean; message: string };
       listFooter: { mountCorrect: boolean; hydrateCorrect: boolean };
+      dynamicShapes: Array<{ ok: boolean; unchanged: boolean; staticPreserved: boolean; message: string }>;
+      dynamicAttributes: { ok: boolean; identity: boolean; titleUpdated: boolean; classToggled: boolean };
+      listHeader: { mountCorrect: boolean; hydrateCorrect: boolean };
+      listSeparateParent: { mountCorrect: boolean; hydrateCorrect: boolean };
     };
     __conditionalReady?: boolean;
   }
@@ -168,10 +172,27 @@ test("runs generated adjacent conditional mount and SSR hydration regressions in
     { ok: true, staticPreserved: true, tailUpdated: true },
     { ok: true, staticPreserved: true, tailUpdated: true },
   ]);
+  expect(result.dynamicShapes).toEqual([
+    {
+      ok: false,
+      unchanged: true,
+      staticPreserved: true,
+      message: expect.stringContaining("dynamic attribute shape overlaps"),
+    },
+    {
+      ok: false,
+      unchanged: true,
+      staticPreserved: true,
+      message: expect.stringContaining("dynamic attribute shape overlaps"),
+    },
+  ]);
+  expect(result.dynamicAttributes).toEqual({ ok: true, identity: true, titleUpdated: true, classToggled: true });
   expect(result.componentSplit.ok).toBe(false);
   expect(result.componentSplit.unchanged).toBe(true);
   expect(result.componentSplit.identityPreserved).toBe(true);
   expect(result.componentSplit.message).toContain("multiple direct dynamic regions");
   expect(result.listFooter).toEqual({ mountCorrect: true, hydrateCorrect: true });
+  expect(result.listHeader).toEqual({ mountCorrect: true, hydrateCorrect: true });
+  expect(result.listSeparateParent).toEqual({ mountCorrect: true, hydrateCorrect: true });
   expect(["chromium", "firefox", "webkit"]).toContain(browserName);
 });

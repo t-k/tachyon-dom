@@ -167,10 +167,92 @@ export const runConditionalShapeCase = () => {
   const tailUpdated = staticSibling?.textContent === "Client tail 2";
   hydrated.value.dispose();
   return { ok: true, staticPreserved, tailUpdated };
+      };
+`,
+    };
+  });
+  const dynamicShapeModules = [
+    `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
+    `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
+  ].map((shapeSource, index) => {
+    const shapeCompiled = compileTemplate(shapeSource);
+    if (!shapeCompiled.ok) throw new Error(shapeCompiled.error.message);
+    const shapeGenerated = generateClientModule(shapeCompiled.value, { reactive: true, instrumentBindings: false });
+    const shapeMarkup = renderServerTemplate(shapeCompiled.value, {
+      visible: false,
+      title: "server branch",
+      active: false,
+      left: "SSR branch",
+      tail: "SSR static",
+    });
+    return {
+      fileName: `conditional-dynamic-shape-${index}.js`,
+      source: `import { createSignal } from "tachyon-dom";
+import { hydrate } from "tachyon-dom/runtime/mount";
+${shapeGenerated}
+const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
+const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
+export const runDynamicShapeCase = () => {
+  const root = document.createElement("div");
+  root.innerHTML = ${JSON.stringify(shapeMarkup)};
+  const before = root.innerHTML;
+  const staticSibling = root.querySelector("main > p");
+  const result = hydrate(root, clientModule, {
+    visible: createSignal(false),
+    title: createSignal("client branch"),
+    active: createSignal(false),
+    left: createSignal("client branch"),
+    tail: createSignal("client static"),
+  });
+  if (result.ok) result.value.dispose();
+  return {
+    ok: result.ok,
+    unchanged: root.innerHTML === before,
+    staticPreserved: root.querySelector("main > p") === staticSibling,
+    message: result.ok ? "" : result.error.message,
+  };
 };
 `,
     };
   });
+  const dynamicAttributeSource = `<main><if test={visible}><p title={title} class:active={active}>{label}</p></if><footer>{tail}</footer></main>`;
+  const dynamicAttributeCompiled = compileTemplate(dynamicAttributeSource);
+  if (!dynamicAttributeCompiled.ok) throw new Error(dynamicAttributeCompiled.error.message);
+  const dynamicAttributeGenerated = generateClientModule(dynamicAttributeCompiled.value, {
+    reactive: true,
+    instrumentBindings: false,
+  });
+  const dynamicAttributeModule = {
+    fileName: "conditional-dynamic-attribute.js",
+    source: `import { createSignal } from "tachyon-dom";
+import { hydrate } from "tachyon-dom/runtime/mount";
+${dynamicAttributeGenerated}
+const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
+const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
+export const runDynamicAttributeCase = () => {
+  const root = document.createElement("div");
+  root.innerHTML = ${JSON.stringify(renderServerTemplate(dynamicAttributeCompiled.value, { visible: true, title: "server title", active: false, label: "server label", tail: "server footer" }))};
+  const paragraph = root.querySelector("p");
+  const active = createSignal(false);
+  const result = hydrate(root, clientModule, {
+    visible: createSignal(true),
+    title: createSignal("client title"),
+    active,
+    label: createSignal("client label"),
+    tail: createSignal("client footer"),
+  });
+  if (!result.ok) return { ok: false, identity: false, titleUpdated: false, classToggled: false };
+  active.set(true);
+  const classAdded = paragraph?.classList.contains("active") === true;
+  active.set(false);
+  const classToggled = classAdded && paragraph?.classList.contains("active") === false;
+  const titleUpdated = paragraph?.getAttribute("title") === "client title";
+  const identity = root.querySelector("p") === paragraph;
+  result.value.dispose();
+  return { ok: true, identity, titleUpdated, classToggled };
+};
+`,
+  };
   const componentSplitSource = `<main><component name="Region"><for each={rows} key={row.id}><p>{row.label}</p></for></component><if test={active}><button>{label}</button></if><footer>{tail}</footer></main>`;
   const componentSplitCompiled = compileTemplate(componentSplitSource);
   if (!componentSplitCompiled.ok) throw new Error(componentSplitCompiled.error.message);
@@ -263,10 +345,127 @@ export const runListFooterCase = () => {
 };
 `,
   };
+  const listHeaderSource = `<main><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`;
+  const listHeaderCompiled = compileTemplate(listHeaderSource);
+  if (!listHeaderCompiled.ok) throw new Error(listHeaderCompiled.error.message);
+  const listHeaderGenerated = generateClientModule(listHeaderCompiled.value, {
+    reactive: true,
+    instrumentBindings: false,
+  });
+  const listHeaderModule = {
+    fileName: "generated-list-header.js",
+    source: `import { createSignal } from "tachyon-dom";
+import { hydrate, mount } from "tachyon-dom/runtime/mount";
+${listHeaderGenerated}
+const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
+const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
+export const runListHeaderCase = () => {
+  const first = { id: "a", label: "A" };
+  const second = { id: "b", label: "B" };
+  const third = { id: "c", label: "C" };
+  const root = document.createElement("div");
+  const rows = createSignal([first, second]);
+  const head = createSignal("H");
+  const tail = createSignal("F");
+  const mounted = mount(root, clientModule, { rows, head, tail });
+  const header = root.querySelector("header");
+  const footer = root.querySelector("footer");
+  head.set("H2");
+  tail.set("F2");
+  rows.set([second, third, first]);
+  const mountCorrect = root.querySelector("header") === header && root.querySelector("footer") === footer && root.textContent === "H2BCAF2";
+  mounted.dispose();
+
+  const hydratedRoot = document.createElement("div");
+  hydratedRoot.innerHTML = ${JSON.stringify(
+    renderServerTemplate(listHeaderCompiled.value, {
+      head: "SSR head",
+      rows: [
+        { id: "a", label: "A" },
+        { id: "b", label: "B" },
+      ],
+      tail: "SSR footer",
+    }),
+  )};
+  const serverHeader = hydratedRoot.querySelector("header");
+  const serverFooter = hydratedRoot.querySelector("footer");
+  const hydratedHead = createSignal("H");
+  const hydratedTail = createSignal("F");
+  const hydratedRows = createSignal([first, second]);
+  const hydrated = hydrate(hydratedRoot, clientModule, { rows: hydratedRows, head: hydratedHead, tail: hydratedTail });
+  if (!hydrated.ok) return { mountCorrect, hydrateCorrect: false };
+  hydratedHead.set("H2");
+  hydratedTail.set("F2");
+  hydratedRows.set([second, third, first]);
+  const hydrateCorrect = hydratedRoot.querySelector("header") === serverHeader && hydratedRoot.querySelector("footer") === serverFooter && hydratedRoot.textContent === "H2BCAF2";
+  hydrated.value.dispose();
+  return { mountCorrect, hydrateCorrect };
+};
+`,
+  };
+  const listConditionalSource = `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></section><aside><if test={visible}><b>{head}</b></if></aside></main>`;
+  const listConditionalCompiled = compileTemplate(listConditionalSource);
+  if (!listConditionalCompiled.ok) throw new Error(listConditionalCompiled.error.message);
+  const listConditionalGenerated = generateClientModule(listConditionalCompiled.value, {
+    reactive: true,
+    instrumentBindings: false,
+  });
+  const listConditionalModule = {
+    fileName: "generated-list-separate-parent.js",
+    source: `import { createSignal } from "tachyon-dom";
+import { hydrate, mount } from "tachyon-dom/runtime/mount";
+${listConditionalGenerated}
+const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
+const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
+const rowsFor = () => [{ id: "a", label: "A" }, { id: "b", label: "B" }];
+export const runListSeparateParentCase = () => {
+  const run = (mode) => {
+    const root = document.createElement("div");
+    const rows = createSignal(rowsFor());
+    const tail = createSignal("F");
+    const head = createSignal("H");
+    const visible = createSignal(true);
+    let handle;
+    if (mode === "hydrate") {
+      root.innerHTML = ${JSON.stringify(
+        renderServerTemplate(listConditionalCompiled.value, {
+          rows: [
+            { id: "a", label: "A" },
+            { id: "b", label: "B" },
+          ],
+          tail: "SSR footer",
+          head: "SSR heading",
+          visible: true,
+        }),
+      )};
+      const result = hydrate(root, clientModule, { rows, tail, head, visible });
+      if (!result.ok) return false;
+      handle = result.value;
+    } else {
+      handle = mount(root, clientModule, { rows, tail, head, visible });
+    }
+    const footer = root.querySelector("footer");
+    tail.set("F2");
+    rows.set([{ id: "b", label: "B" }, { id: "c", label: "C" }, { id: "a", label: "A" }]);
+    const correct = root.textContent === "BCAF2H" && root.querySelector("footer") === footer;
+    handle.dispose();
+    return correct;
+  };
+  return { mountCorrect: run("mount"), hydrateCorrect: run("hydrate") };
+};
+`,
+  };
   await Promise.all(
-    [...sharedParentModules, ...conditionalShapeModules, componentSplitModule, listFooterModule].map(
-      ({ fileName, source: generatedSource }) => writeFile(resolve(outDir, fileName), generatedSource),
-    ),
+    [
+      ...sharedParentModules,
+      ...conditionalShapeModules,
+      ...dynamicShapeModules,
+      dynamicAttributeModule,
+      componentSplitModule,
+      listFooterModule,
+      listHeaderModule,
+      listConditionalModule,
+    ].map(({ fileName, source: generatedSource }) => writeFile(resolve(outDir, fileName), generatedSource)),
   );
   const sharedImports = sharedParentModules
     .map(
@@ -279,8 +478,14 @@ export const runListFooterCase = () => {
       ({ fileName }, index) =>
         `import { runConditionalShapeCase as runConditionalShape${index} } from "./${fileName}";`,
     ),
+    ...dynamicShapeModules.map(
+      ({ fileName }, index) => `import { runDynamicShapeCase as runDynamicShape${index} } from "./${fileName}";`,
+    ),
+    `import { runDynamicAttributeCase } from "./${dynamicAttributeModule.fileName}";`,
     `import { runComponentSplitCase } from "./${componentSplitModule.fileName}";`,
     `import { runListFooterCase } from "./${listFooterModule.fileName}";`,
+    `import { runListHeaderCase } from "./${listHeaderModule.fileName}";`,
+    `import { runListSeparateParentCase } from "./${listConditionalModule.fileName}";`,
   ].join("\n");
   await writeFile(
     entrySource,
@@ -402,8 +607,12 @@ window.runConditionalFollowup = () => {
     hydrate: hydrateResult,
     sharedParent: { before: runSharedParentBefore(), after: runSharedParentAfter() },
     conditionalShapes: [runConditionalShape0(), runConditionalShape1()],
+    dynamicShapes: [runDynamicShape0(), runDynamicShape1()],
+    dynamicAttributes: runDynamicAttributeCase(),
     componentSplit: runComponentSplitCase(),
     listFooter: runListFooterCase(),
+    listHeader: runListHeaderCase(),
+    listSeparateParent: runListSeparateParentCase(),
   };
 };
 window.__conditionalReady = true;

@@ -329,7 +329,7 @@ describe("client mount entrypoints", () => {
     root.innerHTML = renderServerTemplate(compiled.value, {
       visible: true,
       title: "server title",
-      active: true,
+      active: false,
       label: "server label",
       tail: "server footer",
     });
@@ -348,6 +348,10 @@ describe("client mount entrypoints", () => {
     expect(serverParagraph?.classList.contains("active")).toBe(false);
     expect(serverParagraph?.textContent).toBe("client label");
     expect(root.querySelector("footer")?.textContent).toBe("client footer");
+    active.set(true);
+    expect(serverParagraph?.classList.contains("active")).toBe(true);
+    active.set(false);
+    expect(serverParagraph?.classList.contains("active")).toBe(false);
     if (result.ok) result.value.dispose();
   });
 
@@ -1015,46 +1019,52 @@ describe("client mount entrypoints", () => {
     result.value.dispose();
   });
 
-  it.each(["mount", "hydrate"] as const)("composes generated list binding paths with an unrelated conditional in %s", (mode) => {
-    const compiled = compileTemplate(
-      `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></section><aside><if test={visible}><b>{head}</b></if></aside></main>`,
-    );
-    if (!compiled.ok) throw new Error(compiled.error.message);
-    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
-    const first = { id: "a", label: "A" };
-    const second = { id: "b", label: "B" };
-    const third = { id: "c", label: "C" };
-    const rows = createSignal([first, second]);
-    const tail = createSignal("F");
-    const head = createSignal("H");
-    const visible = createSignal(true);
-    const root = document.createElement("div");
-    if (mode === "hydrate") {
-      root.innerHTML = renderServerTemplate(compiled.value, {
-        rows: [first, second],
-        tail: "SSR footer",
-        head: "SSR heading",
-        visible: true,
-      });
-    }
-    const result = mode === "mount" ? mount(root, module, { rows, tail, head, visible }) : hydrate(root, module, { rows, tail, head, visible });
-    if (!result.ok) throw new Error(result.error.message);
-    const footer = root.querySelector("footer");
+  it.each(["mount", "hydrate"] as const)(
+    "composes generated list binding paths with an unrelated conditional in %s",
+    (mode) => {
+      const compiled = compileTemplate(
+        `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></section><aside><if test={visible}><b>{head}</b></if></aside></main>`,
+      );
+      if (!compiled.ok) throw new Error(compiled.error.message);
+      const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+      const first = { id: "a", label: "A" };
+      const second = { id: "b", label: "B" };
+      const third = { id: "c", label: "C" };
+      const rows = createSignal([first, second]);
+      const tail = createSignal("F");
+      const head = createSignal("H");
+      const visible = createSignal(true);
+      const root = document.createElement("div");
+      if (mode === "hydrate") {
+        root.innerHTML = renderServerTemplate(compiled.value, {
+          rows: [first, second],
+          tail: "SSR footer",
+          head: "SSR heading",
+          visible: true,
+        });
+      }
+      const result =
+        mode === "mount"
+          ? { ok: true as const, value: mount(root, module, { rows, tail, head, visible }) }
+          : hydrate(root, module, { rows, tail, head, visible });
+      if (!result.ok) throw new Error(result.error.message);
+      const footer = root.querySelector("footer");
 
-    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["A", "B"]);
-    expect(footer?.textContent).toBe("F");
-    tail.set("F2");
-    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["A", "B"]);
-    expect(footer?.textContent).toBe("F2");
+      expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["A", "B"]);
+      expect(footer?.textContent).toBe("F");
+      tail.set("F2");
+      expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["A", "B"]);
+      expect(footer?.textContent).toBe("F2");
 
-    rows.set([second, third, first]);
-    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["B", "C", "A"]);
-    expect(root.querySelector("footer")).toBe(footer);
-    expect(footer?.textContent).toBe("F2");
-    result.value.dispose();
-    tail.set("ignored");
-    expect(footer?.textContent).toBe("F2");
-  });
+      rows.set([second, third, first]);
+      expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["B", "C", "A"]);
+      expect(root.querySelector("footer")).toBe(footer);
+      expect(footer?.textContent).toBe("F2");
+      result.value.dispose();
+      tail.set("ignored");
+      expect(footer?.textContent).toBe("F2");
+    },
+  );
 
   it("reconciles generated text rows with indexes, outer signals, and nested signals", () => {
     const compiled = compileTemplate(
