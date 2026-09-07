@@ -2169,8 +2169,8 @@ const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> | undef
     boundaries: readonly HydrationBoundary[] | undefined,
     provided: ReadonlySet<string>,
   ): void => {
-    if (!bounded) return;
     for (const boundary of boundaries ?? []) {
+      // The same condition the runtime resolves an id under: anything else is a literal it already holds.
       if (boundary.idKind !== "expression") continue;
       const root = boundary.id.split(".")[0];
       if (root && !provided.has(root)) names.add(root);

@@ -78,6 +78,23 @@ describe("generated binding readers", () => {
     expect(scope.refs.panel).toBeUndefined();
   });
 
+  // A container that is present but is not something a property can be written to is left alone the same way a
+  // missing one is, rather than throwing out of the whole bind.
+  it("leaves a ref alone when the value in its container's place cannot hold one", () => {
+    const module = evaluateGeneratedClientModule(generated(`<div ref={refs.panel}></div>`));
+
+    // `typeof null` is "object", so a null container has to be caught by the null check rather than the type one.
+    for (const refs of [null, "text", 7, true, Symbol("refs"), () => undefined]) {
+      const root = document.createElement("div");
+      const scope = { refs };
+      const handle = mount(root, module, scope);
+
+      expect([typeof refs, scope.refs]).toEqual([typeof refs, refs]);
+      expect(() => handle.dispose()).not.toThrow();
+      expect([typeof refs, scope.refs]).toEqual([typeof refs, refs]);
+    }
+  });
+
   // A region's signature only has to change when its shape changes. A build that ships no development
   // instrumentation identifies it by a digest of that shape rather than by a second copy of the template HTML
   // and of every expression string the readers already replaced.
