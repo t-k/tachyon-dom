@@ -1307,7 +1307,23 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const needsElementAt = needsClass || needsAttr || needsModel || needsTextList || (reactive && needsList);
   const needsNodeAt = reactive && needsGenericConditional;
-  const needsManualCleanup = reactive || needsEvent || needsModel || needsRef || needsTextList || hasDefaultScope;
+  // Manual cleanup only pays for itself when something actually registers a disposer. A reactive template with
+  // no reactive binding, store, or component boundary registers nothing, so it keeps the bare root disposer.
+  // Reactive list, conditional, component, and value bindings wrap their work in an effect and register its
+  // disposer; without reactivity they run once and register nothing. Events, models, refs, and text lists always
+  // register one.
+  const registersReactiveCleanup =
+    reactive &&
+    (needsList ||
+      needsConditional ||
+      needsStore ||
+      template.client.components.length > 0 ||
+      bindings.some(
+        (binding) =>
+          binding.kind === "text" || binding.kind === "class" || binding.kind === "attr" || binding.kind === "style",
+      ));
+  const needsManualCleanup =
+    registersReactiveCleanup || needsEvent || needsModel || needsRef || needsTextList || hasDefaultScope;
   const lines: string[] = [];
   if (needsText) {
     lines.push(
@@ -1756,8 +1772,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       lines.push(`  }`);
     }
   }
-  lines.push(`  return () => {`);
   if (needsManualCleanup) {
+    lines.push(`  return () => {`);
     lines.push(`    let __tachyonCleanupError;`);
     lines.push(`    let __tachyonCleanupFailed = false;`);
     lines.push(`    for (const cleanup of cleanups) {`);
@@ -1766,25 +1782,21 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`        __tachyonCleanupFailed = true;`);
     lines.push(`      }`);
     lines.push(`    }`);
-  }
-  lines.push(`    try { __tachyonDisposeRoot(); } catch (error) {`);
-  if (needsManualCleanup) {
+    lines.push(`    try { __tachyonDisposeRoot(); } catch (error) {`);
     lines.push(`      if (!__tachyonCleanupFailed) __tachyonCleanupError = error;`);
     lines.push(`      __tachyonCleanupFailed = true;`);
     lines.push(`    }`);
     lines.push(`    if (__tachyonCleanupFailed) throw __tachyonCleanupError;`);
-  } else {
-    lines.push(`      throw error;`);
-    lines.push(`    }`);
-  }
-  lines.push(`  };`);
-  if (needsManualCleanup) {
+    lines.push(`  };`);
     lines.push(`  } catch (error) {`);
     lines.push(`    for (const cleanup of cleanups.splice(0).reverse()) {`);
     lines.push(`      try { cleanup(); } catch {}`);
     lines.push(`    }`);
     lines.push(`    throw error;`);
     lines.push(`  }`);
+  } else {
+    // Nothing registered a disposer, so the module's disposer is the reactive root's own idempotent one.
+    lines.push(`  return __tachyonDisposeRoot;`);
   }
   lines.push(`});`);
   if (emitsHydrate && hasHydrationChunks) {

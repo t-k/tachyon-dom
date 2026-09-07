@@ -1,7 +1,7 @@
 {
   "static": {
-    "maxMinifiedBytes": 1385,
-    "maxBrotliBytes": 600
+    "maxMinifiedBytes": 1356,
+    "maxBrotliBytes": 598
   },
   "signal-only": {
     "maxMinifiedBytes": 968,

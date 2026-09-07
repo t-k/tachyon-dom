@@ -919,7 +919,15 @@ describe("HTML-first compiler", () => {
       `export const bind = (root, inputScope = {}) => __tachyonCreateRoot((__tachyonDisposeRoot) => {`,
     );
     expect(code).toContain(`const scope = inputScope;`);
-    expect(code).toContain(`__tachyonDisposeRoot();`);
+    // Nothing in this template registers a disposer, so the module returns the root's own idempotent one.
+    expect(code).toContain(`return __tachyonDisposeRoot;`);
+    expect(code).not.toContain(`const cleanups = [];`);
+
+    const withCleanup = compileTemplate(`<button on:click={save}>{label}</button>`);
+    if (!withCleanup.ok) throw new Error(withCleanup.error.message);
+    const cleanupCode = generateClientModule(withCleanup.value);
+    expect(cleanupCode).toContain(`const cleanups = [];`);
+    expect(cleanupCode).toContain(`__tachyonDisposeRoot();`);
   });
 
   it("generates class bindings against nested element paths", () => {
