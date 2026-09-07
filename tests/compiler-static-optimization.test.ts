@@ -182,14 +182,29 @@ describe("static template optimization", () => {
         { label: "LABEL", rows: [{ id: "a" }] },
       ],
       [
-        "row store beside a parent read",
-        `<ul><for each={rows} key={row.id}><li><store seen={0}/><b>{caption}</b></li></for></ul>`,
+        "row store initial reads a parent key",
+        `<ul><for each={rows} key={row.id}><li><store seen={caption}/><b>{seen}</b></li></for></ul>`,
         { caption: "CAPTION", rows: [{ id: "a" }] },
       ],
       [
         "nested conditional inside a row",
         `<ul><for each={rows} key={row.id}><li><b>{row.id}</b><if test={open}><i>{detail}</i></if></li></for></ul>`,
         { open: true, detail: "D", rows: [{ id: "a" }] },
+      ],
+      [
+        "index name shadows a parent key of the same name",
+        `<ul><for each={rows} index="position" key={row.id}><li>{position}:{row.id}</li></for></ul>`,
+        { position: "PARENT", rows: [{ id: "a" }, { id: "b" }] },
+      ],
+      [
+        "row component store initial reads a parent key",
+        `<ul><for each={rows} key={row.id}><li><component name="Row"><b><store seen={caption}/>{seen}</b></component></li></for></ul>`,
+        { caption: "CAPTION", rows: [{ id: "a" }] },
+      ],
+      [
+        "conditional inside a row declares its own store",
+        `<ul><for each={rows} key={row.id}><li><b>{row.id}</b><if test={open}><store seen={caption}/><i>{seen}</i></if></li></for></ul>`,
+        { open: true, caption: "CAPTION", rows: [{ id: "a" }] },
       ],
       [
         "nested list each and key read the enclosing scope",
@@ -203,6 +218,26 @@ describe("static template optimization", () => {
       expect([name, result.bounded]).toEqual([name, result.unbounded]);
       expect([name, result.keys.length]).toEqual([name, 1]);
     }
+  });
+
+  it("names exactly the parent keys the rows reach", () => {
+    const keysFor = (source: string) =>
+      generateClientModule(compiled(source), { reactive: true, instrumentBindings: false }).match(
+        /parentScopeKeys: (\[[^\]]*\])/,
+      )?.[1];
+
+    expect(keysFor(`<ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul>`)).toBe(`[]`);
+    expect(keysFor(`<ul><for each={rows} key={row.id}><li>{prefix}{row.label}</li></for></ul>`)).toBe(`["prefix"]`);
+    // A row store's own key is provided by the row; only its initial expression reaches the parent.
+    expect(keysFor(`<ul><for each={rows} key={row.id}><li><store seen={caption}/><b>{seen}</b></li></for></ul>`)).toBe(
+      `["caption"]`,
+    );
+    // A nested list's item name shadows only inside it, so the outer read still names the parent key.
+    expect(
+      keysFor(
+        `<ul><for each={rows} key={row.id}><li><b>{group}</b><for each={row.groups} key={group.id}><i>{group.label}</i></for></li></for></ul>`,
+      ),
+    ).toBe(`["group"]`);
   });
 
   it("drops the bound for a row expression that calls something", () => {
