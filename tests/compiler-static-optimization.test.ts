@@ -248,6 +248,43 @@ describe("static template optimization", () => {
     handle.dispose();
   });
 
+  // 085 evaluated converting a closed local counter into direct DOM writes. The input scope can replace both the
+  // state and the handler a setup declares, which is the counterexample that keeps that conversion unsound.
+  it("lets the input scope replace a setup's own state and handler", () => {
+    const code = generateClientModule(compiled(`<button on:click={increment}>{count}</button>`), {
+      reactive: true,
+      instrumentBindings: false,
+      defaultScopeName: "setup",
+    });
+    const withSetup = code.replace(
+      "const __tachyonCreateScope",
+      `const setup = () => {
+  const own = createSignal(0);
+  return { count: own, increment: () => own.update((value) => value + 1) };
+};
+const __tachyonCreateScope`,
+    );
+    const module = evaluateGeneratedClientModule(
+      `import { createSignal as createSignal } from "tachyon-dom/runtime/signal";\n${withSetup}`,
+    );
+    const root = document.createElement("div");
+    const external = createSignal(41);
+    const calls: string[] = [];
+    const handle = mount(root, module, {
+      count: external,
+      increment: () => {
+        calls.push("external");
+        external.update((value) => value + 1);
+      },
+    });
+
+    expect(root.textContent).toBe("41");
+    root.querySelector("button")?.click();
+    expect(calls).toEqual(["external"]);
+    expect(root.textContent).toBe("42");
+    handle.dispose();
+  });
+
   it("returns the same tree object when nothing is removed", () => {
     const template = compiled(`<main><if test={visible}><span>x</span></if></main>`);
     const optimized = removeConstantFalseConditionals(template.root as never);
