@@ -22,7 +22,20 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/stream-client`: browser stream chunk reading.
 - `runtime/error-boundary`: DOM-mounted client fallback boundaries.
 
-Browser feature bundles have independent minified and Brotli budgets for `runtime/list`, `runtime/form`, `runtime/conditional`, and `runtime/router`. The current generated-list baselines are 35016 minified/10504 Brotli bytes and 10892 minified/3721 Brotli bytes for conditional bindings; the checks leave a small Brotli variance margin while rejecting compiler, server, TypeScript, parse5, and language-server inputs from the browser graph. Run `pnpm check:browser-feature-budgets` after changing one of these modules.
+Browser feature bundles have independent minified and Brotli budgets. Checks reject compiler, server, TypeScript, parse5, and language-server inputs. After building, run `pnpm update:runtime-sizes` to refresh the measurement JSON and this table together; review any budget changes separately. CI runs `pnpm check:runtime-sizes` to reject stale measurements or documentation. The conditional budget allows approximately 3% over the baseline recorded when the budget was tightened; budgets never increase automatically.
+
+<!-- browser-feature-sizes:start -->
+Browser feature measurements (bytes):
+
+| Fixture | Minified | Brotli |
+| --- | ---: | ---: |
+| runtime/list | 35497 | 10682 |
+| runtime/form | 2703 | 1089 |
+| runtime/conditional | 14172 | 4759 |
+| runtime/router | 18678 | 6269 |
+
+Source: [measurement JSON](../scripts/browser-feature-sizes.json). It records the commit, dirty state, input hashes, Node/esbuild versions, production define, minification, and Brotli conditions. CI uploads fresh reports as the browser-feature-measurements artifact. These feature fixtures differ from the client bundle attribution fixtures and Quick Example.
+<!-- browser-feature-sizes:end -->
 
 ## Mount and Hydrate Entrypoints
 

@@ -276,7 +276,9 @@
     "verify:whitespace-types": "pnpm build && node scripts/verify-whitespace-policy-types.mjs",
     "prepublishOnly": "pnpm build && pnpm verify:url-policy-codegen && pnpm verify:package && pnpm check:exports && pnpm check:size",
     "lint": "oxlint .",
-    "format": "oxfmt --write ."
+    "format": "oxfmt --write .",
+    "update:runtime-sizes": "node scripts/verify-browser-feature-budgets.mjs --write-baseline && node scripts/browser-feature-report.mjs --write",
+    "check:runtime-sizes": "node scripts/verify-browser-feature-budgets.mjs --check-baseline && node scripts/browser-feature-report.mjs"
   },
   "dependencies": {
     "@noble/hashes": "^2.2.0",

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "commit": "44077b43405a652710aef9183ffb208fea918390",
+    "dirty": true,
+    "node": "v24.14.0",
+    "esbuild": "0.28.1",
+    "minify": true,
+    "define": {
+      "__TACHYON_PRODUCTION__": "true"
+    },
+    "compression": "node:brotli-default"
+  },
+  "fixtures": [
+    {
+      "name": "runtime/list",
+      "inputHash": "447c1f998cf6629225f4f3a7835d93d5fc4740bef8a43bec8f8c977dd0e3df3b",
+      "minifiedBytes": 35497,
+      "brotliBytes": 10682
+    },
+    {
+      "name": "runtime/form",
+      "inputHash": "21142186b046bc2b4b7a88715106227f15453ba570002c6de2e29f0cee35ced8",
+      "minifiedBytes": 2703,
+      "brotliBytes": 1089
+    },
+    {
+      "name": "runtime/conditional",
+      "inputHash": "c98173a57599f3dc4dcb40b207a6f534cccbfcc108d2f564e2772854fbecee52",
+      "minifiedBytes": 14172,
+      "brotliBytes": 4759
+    },
+    {
+      "name": "runtime/router",
+      "inputHash": "32fac5c4ea3a9e6fc1b804be713f455a03a51bc6fe290b178fed3c10e038e577",
+      "minifiedBytes": 18678,
+      "brotliBytes": 6269
+    }
+  ]
+}

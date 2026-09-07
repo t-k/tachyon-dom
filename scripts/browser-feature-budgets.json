@@ -1,6 +1,18 @@
 {
-  "runtime/list": { "maxMinifiedBytes": 36143, "maxBrotliBytes": 11015 },
-  "runtime/form": { "maxMinifiedBytes": 3072, "maxBrotliBytes": 2048 },
-  "runtime/conditional": { "maxMinifiedBytes": 35957, "maxBrotliBytes": 11003 },
-  "runtime/router": { "maxMinifiedBytes": 20480, "maxBrotliBytes": 8192 }
+  "runtime/list": {
+    "maxMinifiedBytes": 36143,
+    "maxBrotliBytes": 11015
+  },
+  "runtime/form": {
+    "maxMinifiedBytes": 3072,
+    "maxBrotliBytes": 2048
+  },
+  "runtime/conditional": {
+    "maxMinifiedBytes": 14600,
+    "maxBrotliBytes": 4910
+  },
+  "runtime/router": {
+    "maxMinifiedBytes": 20480,
+    "maxBrotliBytes": 8192
+  }
 }

@@ -33,3 +33,4 @@ examples/**/*.td.d.ts
 .agents/skills/td-open-issue-flow/
 .coverage-ledger/
 editors/*/target/
+benchmark/browser-feature-results/
