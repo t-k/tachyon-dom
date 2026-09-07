@@ -269,6 +269,89 @@ describe("client mount entrypoints", () => {
   });
 
   it.each([
+    `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
+    `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
+  ])("rejects dynamic conditional shape overlap before changing a static sibling", (source) => {
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    expect(compiled.value.client.hydrationDynamicRegionErrors).toHaveLength(1);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      visible: false,
+      title: "branch title",
+      active: false,
+      left: "branch",
+      tail: "static",
+    });
+    const before = root.innerHTML;
+    const staticSibling = root.querySelector("main > p");
+    let owners = 0;
+    let effects = 0;
+    let subscriptions = 0;
+    let cleanups = 0;
+    const restoreHooks = setRuntimeLifecycleHooks({
+      ownerCreated: () => owners++,
+      effectCreated: () => effects++,
+      subscriptionChanged: (delta) => (subscriptions += delta),
+      cleanupChanged: (delta) => (cleanups += delta),
+    });
+    try {
+      const result = hydrate(root, module, {
+        visible: createSignal(false),
+        title: createSignal("client title"),
+        active: createSignal(false),
+        left: createSignal("client branch"),
+        tail: createSignal("client static"),
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Dynamic conditional shape overlap unexpectedly hydrated.");
+      expect(result.error.message).toContain("ambiguous conditional hydration");
+    } finally {
+      restoreHooks();
+    }
+    expect(root.innerHTML).toBe(before);
+    expect(root.querySelector("main > p")).toBe(staticSibling);
+    expect(owners).toBe(0);
+    expect(effects).toBe(0);
+    expect(subscriptions).toBe(0);
+    expect(cleanups).toBe(0);
+  });
+
+  it("hydrates a dynamic conditional root attribute when its sibling shape is distinct", () => {
+    const compiled = compileTemplate(
+      `<main><if test={visible}><p title={title} class:active={active}>{label}</p></if><footer>{tail}</footer></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      visible: true,
+      title: "server title",
+      active: true,
+      label: "server label",
+      tail: "server footer",
+    });
+    const serverParagraph = root.querySelector("p");
+    const visible = createSignal(true);
+    const title = createSignal("client title");
+    const active = createSignal(false);
+    const label = createSignal("client label");
+    const tail = createSignal("client footer");
+
+    const result = hydrate(root, module, { visible, title, active, label, tail });
+
+    expect(result.ok).toBe(true);
+    expect(root.querySelector("p")).toBe(serverParagraph);
+    expect(serverParagraph?.getAttribute("title")).toBe("client title");
+    expect(serverParagraph?.classList.contains("active")).toBe(false);
+    expect(serverParagraph?.textContent).toBe("client label");
+    expect(root.querySelector("footer")?.textContent).toBe("client footer");
+    if (result.ok) result.value.dispose();
+  });
+
+  it.each([
     `<main><p data-kind="same">Before</p><if test={visible}><p data-kind="same">{label}</p></if><p data-kind="same">After</p></main>`,
     `<main><if test={leftVisible}><p data-kind="same">{left}</p></if><if test={rightVisible}><p data-kind="same">{right}</p></if><footer>Static</footer></main>`,
   ])("rejects ambiguous conditional adoption before changing same-shaped SSR siblings", (source) => {
@@ -882,6 +965,95 @@ describe("client mount entrypoints", () => {
     expect(hydratedRoot.querySelector("main")?.textContent).toBe("BCAHydrated footer 2");
     expect(hydratedRoot.querySelector("footer")).toBe(serverFooter);
     hydrated.value.dispose();
+  });
+
+  it.each([0, 1, 2] as const)("keeps a generated list header binding before %i rows", (count) => {
+    const compiled = compileTemplate(
+      `<main><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const initialRows = Array.from({ length: count }, (_, id) => ({ id: String(id), label: `R${id}` }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      head: "H",
+      rows: initialRows,
+      tail: "F",
+    });
+    const header = root.querySelector("header");
+    const footer = root.querySelector("footer");
+    const head = createSignal("H");
+    const tail = createSignal("F");
+    const rows = createSignal(initialRows);
+    const result = hydrate(root, module, { head, tail, rows });
+    if (!result.ok) throw new Error(result.error.message);
+
+    expect(root.querySelector("header")).toBe(header);
+    expect(root.querySelector("footer")).toBe(footer);
+    expect(header?.textContent).toBe("H");
+    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(
+      initialRows.map((row) => row.label),
+    );
+
+    head.set("H2");
+    tail.set("F2");
+    expect(header?.textContent).toBe("H2");
+    expect(footer?.textContent).toBe("F2");
+    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(
+      initialRows.map((row) => row.label),
+    );
+
+    const reorderedRows = [...initialRows].reverse().concat({ id: "new", label: "Rnew" });
+    rows.set(reorderedRows);
+    expect(header?.textContent).toBe("H2");
+    expect(footer?.textContent).toBe("F2");
+    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(
+      reorderedRows.map((row) => row.label),
+    );
+    expect(root.querySelector("header")).toBe(header);
+    expect(root.querySelector("footer")).toBe(footer);
+    result.value.dispose();
+  });
+
+  it.each(["mount", "hydrate"] as const)("composes generated list binding paths with an unrelated conditional in %s", (mode) => {
+    const compiled = compileTemplate(
+      `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></section><aside><if test={visible}><b>{head}</b></if></aside></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const first = { id: "a", label: "A" };
+    const second = { id: "b", label: "B" };
+    const third = { id: "c", label: "C" };
+    const rows = createSignal([first, second]);
+    const tail = createSignal("F");
+    const head = createSignal("H");
+    const visible = createSignal(true);
+    const root = document.createElement("div");
+    if (mode === "hydrate") {
+      root.innerHTML = renderServerTemplate(compiled.value, {
+        rows: [first, second],
+        tail: "SSR footer",
+        head: "SSR heading",
+        visible: true,
+      });
+    }
+    const result = mode === "mount" ? mount(root, module, { rows, tail, head, visible }) : hydrate(root, module, { rows, tail, head, visible });
+    if (!result.ok) throw new Error(result.error.message);
+    const footer = root.querySelector("footer");
+
+    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["A", "B"]);
+    expect(footer?.textContent).toBe("F");
+    tail.set("F2");
+    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["A", "B"]);
+    expect(footer?.textContent).toBe("F2");
+
+    rows.set([second, third, first]);
+    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["B", "C", "A"]);
+    expect(root.querySelector("footer")).toBe(footer);
+    expect(footer?.textContent).toBe("F2");
+    result.value.dispose();
+    tail.set("ignored");
+    expect(footer?.textContent).toBe("F2");
   });
 
   it("reconciles generated text rows with indexes, outer signals, and nested signals", () => {
