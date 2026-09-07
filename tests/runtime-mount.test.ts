@@ -357,6 +357,41 @@ describe("client mount entrypoints", () => {
     if (result.ok) result.value.dispose();
   });
 
+  it("hydrates an event-bearing sibling when its DOM shape is distinct", () => {
+    const source = `<main><if test={visible}><p title={title}>{left}</p></if><button data-static="yes" on:click={save}>{tail}</button></main>`;
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    expect(compiled.value.client.hydrationDynamicRegionErrors).toHaveLength(0);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      visible: false,
+      title: "branch title",
+      left: "branch",
+      tail: "static",
+    });
+    const button = root.querySelector("button");
+    const tail = createSignal("static");
+    let clicks = 0;
+    const result = hydrate(root, module, {
+      visible: createSignal(false),
+      title: createSignal("client title"),
+      left: createSignal("client branch"),
+      tail,
+      save: () => clicks++,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(root.querySelector("button")).toBe(button);
+    tail.set("updated");
+    expect(button?.textContent).toBe("updated");
+    button?.click();
+    expect(clicks).toBe(1);
+    if (result.ok) result.value.dispose();
+    button?.click();
+    expect(clicks).toBe(1);
+  });
+
   it.each([
     `<main><p data-kind="same">Before</p><if test={visible}><p data-kind="same">{label}</p></if><p data-kind="same">After</p></main>`,
     `<main><if test={leftVisible}><p data-kind="same">{left}</p></if><if test={rightVisible}><p data-kind="same">{right}</p></if><footer>Static</footer></main>`,
