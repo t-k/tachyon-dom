@@ -30,7 +30,7 @@ describe("client mount entrypoints", () => {
       "<p>{user?.[key()](arg())}</p>",
       "/src/optional-computed.td?client",
     );
-    if (!result || typeof result !== "object") throw new Error("Missing generated module");
+    if (!result || typeof result !== "object" || typeof result.code !== "string") throw new Error("Missing generated module");
     const module = evaluateGeneratedClientModule(result.code);
     const root = document.createElement("main");
     const handle = mount(root, module, {
