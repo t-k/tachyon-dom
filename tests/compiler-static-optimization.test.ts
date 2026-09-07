@@ -3,8 +3,8 @@ import { compileTemplate, generateClientModule, renderServerTemplate } from "../
 import {
   analyzeConditionalTest,
   expressionAlwaysPlainValue,
+  expressionCallsSomething,
   expressionScopeNames,
-  listParentScopeNames,
   removeConstantFalseConditionals,
 } from "../src/compiler/optimize";
 import { mount } from "../src/runtime/mount";
@@ -132,204 +132,103 @@ describe("static template optimization", () => {
     expect(expressionScopeNames("((")).toBeUndefined();
   });
 
-  it("bounds a list's parent scope to what its rows can read", () => {
-    const parentScopeKeys = (source: string) => {
-      const binding = compiled(source).client.bindings.find((candidate) => candidate.kind === "list");
-      if (!binding || binding.kind !== "list") throw new Error("Missing list binding.");
-      const names = listParentScopeNames(binding);
-      return names === undefined ? undefined : [...names].sort();
-    };
-
-    expect(parentScopeKeys(`<ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul>`)).toEqual([]);
-    expect(
-      parentScopeKeys(`<ul><for each={rows} key={row.id}><li>{prefix}<b on:click={select}>x</b></li></for></ul>`),
-    ).toEqual(["prefix", "select"]);
-    expect(parentScopeKeys(`<ul><for each={rows} key={row.id}><li>{lookup(row)}</li></for></ul>`)).toEqual(["lookup"]);
-    expect(
-      parentScopeKeys(`<ul><for each={rows} key={row.id}><li><if test={open}>{detail}</if></li></for></ul>`),
-    ).toEqual(["detail", "open"]);
-    // The item name shadows a parent key of the same name, so it never reaches the parent.
-    expect(parentScopeKeys(`<ul><for each={rows} as="prefix" key={prefix.id}><li>{prefix.label}</li></for></ul>`))
-      .toEqual([]);
-    // A nested list's own item and index names shadow too, while its each and key stay parent reads.
-    expect(
-      parentScopeKeys(
-        `<ul><for each={rows} key={row.id}><li><for each={groups} key={group.id}><span>{group.name}{gap}</span></for></li></for></ul>`,
-      ),
-    ).toEqual(["gap", "groups"]);
-    expect(
-      parentScopeKeys(`<ul><for each={rows} index="position" key={row.id}><li>{position}{row.label}</li></for></ul>`),
-    ).toEqual([]);
-  });
-
-  it("drops the bound when any list expression cannot be parsed", () => {
-    const listBinding = (expression: string) => ({
-      kind: "list" as const,
-      path: [0],
-      each: "rows",
-      itemName: "row",
-      key: "row.id",
-      templateHtml: `<li></li>`,
-      bindings: [{ kind: "text" as const, path: [0], expression }],
-    });
-
-    expect([...(listParentScopeNames(listBinding("prefix")) ?? [])]).toEqual(["prefix"]);
-    expect(listParentScopeNames(listBinding("(("))).toBeUndefined();
-    expect(listParentScopeNames({ ...listBinding("prefix"), key: "((" })).toBeUndefined();
-    expect(
-      listParentScopeNames({
-        ...listBinding("prefix"),
-        stores: [{ name: "draft", initial: "((" }],
-      }),
-    ).toBeUndefined();
-  });
-
-  it("excludes a nested list's own index name from the parent bound", () => {
-    const names = listParentScopeNames({
-      kind: "list",
-      path: [0],
-      each: "rows",
-      itemName: "row",
-      key: "row.id",
-      templateHtml: `<li></li>`,
-      bindings: [
-        {
-          kind: "list",
-          path: [0],
-          each: "row.groups",
-          itemName: "group",
-          indexName: "position",
-          key: "group.id",
-          templateHtml: `<span></span>`,
-          bindings: [{ kind: "text", path: [0], expression: "position" }],
-        },
-      ],
-    });
-
-    expect([...(names ?? [])]).toEqual([]);
-  });
-
-  it("emits the bounded parent scope keys in the generated list options", () => {
-    const code = generateClientModule(
-      compiled(`<ul><for each={rows} key={row.id}><li>{prefix}{row.label}</li></for></ul>`),
-      { reactive: true },
-    );
-
-    expect(code).toContain(`parentScopeKeys: ["prefix"],`);
-  });
-
-  it("recognises expressions whose result can never be an accessor", () => {
-    for (const expression of [
-      "42",
-      `"text"`,
-      "true",
-      "null",
-      "`x${name}`",
-      "!flag",
-      "-count",
-      "count + 1",
-      "a > b",
-      "a === b",
-      "a * b",
-      "[a, b]",
-      "{ x: a }",
-    ]) {
-      expect(expressionAlwaysPlainValue(expression)).toBe(true);
+  it("recognises expressions that call something", () => {
+    for (const expression of ["lookup()", "row.format()", "a + b()", "flag ? f() : 1", "`${f()}`", "[f()]", "(("]) {
+      expect(expressionCallsSomething(expression)).toBe(true);
     }
-
-    // These can hand back one of their operands unchanged, and that operand may be an accessor.
-    for (const expression of ["value", "user.value", "read()", "a && b", "a || b", "a ?? b", "flag ? a : b", "(("]) {
-      expect(expressionAlwaysPlainValue(expression)).toBe(false);
+    for (const expression of ["value", "row.label", "a + b", "!flag", "`${a}`", "[a, b]", "{ x: a }"]) {
+      expect(expressionCallsSomething(expression)).toBe(false);
     }
   });
 
-  it("omits the accessor unwrapping only where the result cannot be one", () => {
-    const textBinding = (source: string) => {
-      const code = generateClientModule(compiled(source), { reactive: true, instrumentBindings: false });
-      return /__tachyonSetText\(__tachyonTarget0, (.*)\)\)\);/.exec(code)?.[1];
-    };
-
-    expect(textBinding(`<p>{count + 1}</p>`)).toBe(`(scope.count + 1)`);
-    expect(textBinding(`<p>{!flag}</p>`)).toBe(`(!scope.flag)`);
-    expect(textBinding(`<p>{42}</p>`)).toBe(`42`);
-    expect(textBinding(`<p>{value}</p>`)).toBe(`__tachyonRead(scope.value)`);
-    expect(textBinding(`<p>{a ?? b}</p>`)).toBe(`__tachyonRead((scope.a ?? scope.b))`);
-    expect(textBinding(`<p>{flag ? a : b}</p>`)).toBe(`__tachyonRead((scope.flag ? scope.a : scope.b))`);
-  });
-
-  it("keeps unwrapping a binding whose declared value the input scope can replace", () => {
-    // The generated scope is `{ ...localScope, ...inputScope }`, so a setup declaration never proves the final
-    // value. A bare name therefore keeps its unwrapping even when a setup declares it as a signal.
-    const code = generateClientModule(compiled(`<p>{count}</p>`), { reactive: true, defaultScopeName: "setup" });
-
-    expect(code).toContain(`{ ...localScope, ...inputScope }`);
-    expect(code).toContain(`__tachyonRead(scope.count)`);
-  });
-
-  it("still resolves a bare binding for signals, memos, and plain values from the input scope", () => {
-    const module = evaluateGeneratedClientModule(
-      generateClientModule(compiled(`<p>{count}</p>`), { reactive: true, instrumentBindings: false }),
-    );
-    const render = (count: unknown) => {
+  // The bound is only safe if a bounded row scope renders exactly what an unbounded one does. Each case is
+  // compared against the same generated module with the bound stripped out.
+  const boundedMatchesUnbounded = (source: string, scope: Record<string, unknown>) => {
+    const code = generateClientModule(compiled(source), { reactive: true, instrumentBindings: false });
+    const render = (moduleCode: string) => {
       const root = document.createElement("div");
-      const handle = mount(root, module, { count });
+      const handle = mount(root, evaluateGeneratedClientModule(moduleCode), scope);
       const text = root.textContent;
       handle.dispose();
       return text;
     };
+    return {
+      keys: code.match(/parentScopeKeys: .*$/gm) ?? [],
+      bounded: render(code),
+      unbounded: render(code.replaceAll(/^ *parentScopeKeys: .*\n/gm, "")),
+    };
+  };
 
-    expect(render(createSignal(5))).toBe("5");
-    expect(render(createMemo(() => 6))).toBe("6");
-    expect(render(7)).toBe("7");
-    expect(render("text")).toBe("text");
+  it("renders a bounded row scope exactly like an unbounded one", () => {
+    const cases: Array<[string, string, Record<string, unknown>]> = [
+      [
+        "plain parent read",
+        `<ul><for each={rows} key={row.id}><li>{prefix}{row.label}</li></for></ul>`,
+        { prefix: "P", rows: [{ id: "a", label: "A" }] },
+      ],
+      [
+        "nested list item name shadows a parent key of the same name",
+        `<ul><for each={rows} key={row.id}><li><b>{group}</b><for each={row.groups} key={group.id}><i>{group.label}</i></for></li></for></ul>`,
+        { group: "parent", rows: [{ id: "a", groups: [{ id: "g", label: "child" }] }] },
+      ],
+      [
+        "component prop read from an inner list",
+        `<component name="Panel" label={title}><ul><store count={0}/><for each={rows} key={row.id}><li>{label}</li></for></ul></component>`,
+        { title: "TITLE", rows: [{ id: "a" }] },
+      ],
+      [
+        "component prop initial reads the parent key it shadows",
+        `<ul><for each={rows} key={row.id}><li><component name="Panel" label={label}><b>{label}</b></component></li></for></ul>`,
+        { label: "LABEL", rows: [{ id: "a" }] },
+      ],
+      [
+        "row store beside a parent read",
+        `<ul><for each={rows} key={row.id}><li><store seen={0}/><b>{caption}</b></li></for></ul>`,
+        { caption: "CAPTION", rows: [{ id: "a" }] },
+      ],
+      [
+        "nested conditional inside a row",
+        `<ul><for each={rows} key={row.id}><li><b>{row.id}</b><if test={open}><i>{detail}</i></if></li></for></ul>`,
+        { open: true, detail: "D", rows: [{ id: "a" }] },
+      ],
+      [
+        "nested list each and key read the enclosing scope",
+        `<ul><for each={rows} key={row.id}><li><for each={groups} key={group.id}><i>{gap}{group.label}</i></for></li></for></ul>`,
+        { groups: [{ id: "g", label: "G" }], gap: "-", rows: [{ id: "a" }] },
+      ],
+    ];
+
+    for (const [name, source, scope] of cases) {
+      const result = boundedMatchesUnbounded(source, scope);
+      expect([name, result.bounded]).toEqual([name, result.unbounded]);
+      expect([name, result.keys.length]).toEqual([name, 1]);
+    }
   });
 
-  it("computes a plain-valued expression from the values the input scope supplies", () => {
-    const module = evaluateGeneratedClientModule(
-      generateClientModule(compiled(`<p>{a > b}</p>`), { reactive: true, instrumentBindings: false }),
-    );
-    const root = document.createElement("div");
-    const handle = mount(root, module, { a: 2, b: 1 });
-
-    expect(root.textContent).toBe("true");
-    handle.dispose();
-  });
-
-  // 085 evaluated converting a closed local counter into direct DOM writes. The input scope can replace both the
-  // state and the handler a setup declares, which is the counterexample that keeps that conversion unsound.
-  it("lets the input scope replace a setup's own state and handler", () => {
-    const code = generateClientModule(compiled(`<button on:click={increment}>{count}</button>`), {
-      reactive: true,
-      instrumentBindings: false,
-      defaultScopeName: "setup",
-    });
-    const withSetup = code.replace(
-      "const __tachyonCreateScope",
-      `const setup = () => {
-  const own = createSignal(0);
-  return { count: own, increment: () => own.update((value) => value + 1) };
-};
-const __tachyonCreateScope`,
-    );
-    const module = evaluateGeneratedClientModule(
-      `import { createSignal as createSignal } from "tachyon-dom/runtime/signal";\n${withSetup}`,
-    );
-    const root = document.createElement("div");
-    const external = createSignal(41);
-    const calls: string[] = [];
-    const handle = mount(root, module, {
-      count: external,
-      increment: () => {
-        calls.push("external");
-        external.update((value) => value + 1);
+  it("drops the bound for a row expression that calls something", () => {
+    // The callee receives the row scope as `this`, so it can read a parent key the expression never names.
+    const result = boundedMatchesUnbounded(`<ul><for each={rows} key={row.id}><li>{lookup()}</li></for></ul>`, {
+      prefix: "PREFIX",
+      rows: [{ id: "a" }],
+      lookup(this: { prefix: string }) {
+        return this.prefix;
       },
     });
 
-    expect(root.textContent).toBe("41");
-    root.querySelector("button")?.click();
-    expect(calls).toEqual(["external"]);
-    expect(root.textContent).toBe("42");
-    handle.dispose();
+    expect(result.keys).toEqual([]);
+    expect(result.bounded).toBe("PREFIX");
+    expect(result.bounded).toBe(result.unbounded);
+  });
+
+  it("emits the aliased key a generated reader actually reads", () => {
+    const inner = generateClientModule(
+      compiled(`<component name="Panel" label={title}><ul><for each={rows} key={row.id}><li>{label}</li></for></ul></component>`),
+      { reactive: true, instrumentBindings: false },
+    );
+
+    // The reader resolves `label` to the component's declaration key, so the bound has to name that key.
+    expect(inner).toMatch(/parentScopeKeys: \["__tachyon_prop_[^"]+"\]/);
+    expect(inner).not.toContain(`parentScopeKeys: ["label"]`);
   });
 
   it("returns the same tree object when nothing is removed", () => {

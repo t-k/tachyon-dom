@@ -1912,10 +1912,11 @@ export const bindRows = (root, rows, options) => effect(() => {
     } as never;
     const transformHook = plugin.transform;
     const source = `<main><if test={visible}><button on:click={save}>{label}</button></if><p>{tail}</p></main>`;
-    const transform = async (id: string): Promise<string> => {
-      const result = await transformHook.call(context, source, id);
+    const transform2 = async (code: string, id: string): Promise<string> => {
+      const result = await transformHook.call(context, code, id);
       return typeof result === "object" ? String(result?.code ?? "") : "";
     };
+    const transform = (id: string): Promise<string> => transform2(source, id);
 
     const mountOnly = await transform("/src/panel.td?client&mount-only");
     const regular = await transform("/src/panel.td");
@@ -1931,6 +1932,22 @@ export const bindRows = (root, rows, options) => effect(() => {
     await expect(
       transformHook.call(context, source, "/src/panel.td?client&mount-only&hydrate-only"),
     ).rejects.toThrow("cannot be both hydrate-only and mount-only");
+    await expect(
+      transformHook.call(context, source, "/src/panel.td?client&mount-only&tachyon-hydration=td-h-1"),
+    ).rejects.toThrow("cannot also request a hydration chunk");
+    await expect(transformHook.call(context, source, "/src/panel.td?server&mount-only")).rejects.toThrow(
+      "must target the client",
+    );
+
+    // A template that declares a hydration boundary cannot be requested as mount-only at all, so the hydrate
+    // entry, the chunk loaders, and the hydration runtime never reach a mount-only module.
+    const boundarySource = `<main><section hydrate:interaction="click"><button on:click={save}>Save</button></section></main>`;
+    await expect(
+      transformHook.call(context, boundarySource, "/src/island.td?client&mount-only"),
+    ).rejects.toThrow("cannot contain hydration boundaries");
+    const boundaryNormal = await transform2(boundarySource, "/src/island.td?client");
+    expect(boundaryNormal).toContain("export const hydrate");
+    expect(boundaryNormal).toContain("hydrationChunks");
   });
 
   it("keeps boundary-only runtime modules out of the hydrate-only entry's static module graph", async () => {

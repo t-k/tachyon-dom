@@ -877,7 +877,6 @@ const updateRecord = (
   index: number,
   options: KeyedListOptions,
   parentScope: ParentScopeSnapshot,
-  hasRowStores: boolean,
 ): void => {
   const scopeChanged = record.appliedParentScope !== parentScope;
   if (scopeChanged) {
@@ -901,9 +900,9 @@ const updateRecord = (
   if (options.indexName) record.scope[options.indexName] = index;
   const itemChanged = !Object.is(record.item, item);
   const indexChanged = record.index !== index;
-  // Component props read the row scope, so they only need recomputing when something that scope exposes moved.
-  // Row stores are the one input this function does not own, so keep recomputing while any exist.
-  if (scopeChanged || itemChanged || indexChanged || hasRowStores) updateComponentProps(record.scope, options);
+  // Recomputed on every update. An item kept by reference can still have different internals, and a prop
+  // expression can read them, so skipping this on an unchanged reference would leave the prop stale.
+  updateComponentProps(record.scope, options);
   record.item = item;
   record.index = index;
   if (options.updatePolicy === "reference" && !itemChanged && !indexChanged && !scopeChanged) {
@@ -911,9 +910,6 @@ const updateRecord = (
   }
   record.revision.update((value) => value + 1);
 };
-
-const hasRowStoresFor = (options: KeyedListOptions): boolean =>
-  (options.stores?.length ?? 0) > 0 || (options.components ?? []).some((component) => component.stores.length > 0);
 
 const moveBefore = (container: Element, node: Node, before: Node | null): void => {
   const movableContainer = container as MoveBeforeElement;
@@ -1104,7 +1100,6 @@ export const mountKeyedList = (
     entries.push({ item, index, key });
   }
   const parentScope = syncParentScope(state, options.scope, options.parentScopeKeys);
-  const rowStores = hasRowStoresFor(options);
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];
   const createdRecords: RowRecord[] = [];
@@ -1158,7 +1153,7 @@ export const mountKeyedList = (
         continue;
       }
       if (existing) {
-        updateRecord(record, entry.item, entry.index, options, parentScope, rowStores);
+        updateRecord(record, entry.item, entry.index, options, parentScope);
       } else {
         createdRecords.push(record);
       }

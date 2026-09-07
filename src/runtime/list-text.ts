@@ -277,7 +277,12 @@ const resolveLegacyOptions = (options: TextKeyedListOptions): TextKeyedListRunti
   };
 };
 
-const cleanupRecord = (record: RowRecord): void => {
+/**
+ * Releases a row's registered work. `preservedNodes` are server-rendered nodes this row adopted rather than
+ * created: a row that fails while binding releases its listeners but leaves that markup where it was, which is
+ * what the general keyed list does.
+ */
+const cleanupRecord = (record: RowRecord, preservedNodes?: ReadonlySet<Node>): void => {
   let firstError: unknown;
   let failed = false;
   try {
@@ -293,7 +298,7 @@ const cleanupRecord = (record: RowRecord): void => {
       if (!failed) firstError = error;
       failed = true;
     } finally {
-      node.parentNode?.removeChild(node);
+      if (!preservedNodes?.has(node)) node.parentNode?.removeChild(node);
     }
   }
   if (failed) throw firstError;
@@ -428,7 +433,18 @@ const createRecord = (
     appliedParentScope: parentScope,
     revision: createSignal(0),
   };
-  bindRow(record, options);
+  // A row that fails part way through binding never reaches the caller's created list, so it releases what it
+  // already registered here instead of leaving listeners on markup nobody owns.
+  try {
+    bindRow(record, options);
+  } catch (error) {
+    try {
+      cleanupRecord(record, new Set(existingElements ?? []));
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Text list row creation and cleanup failed.");
+    }
+    throw error;
+  }
   return record;
 };
 

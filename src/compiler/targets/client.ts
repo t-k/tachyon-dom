@@ -39,7 +39,7 @@ import {
   expressionLocationForText,
 } from "../utils.js";
 import { isAssignableExpression } from "../expression.js";
-import { expressionAlwaysPlainValue, listParentScopeNames } from "../optimize.js";
+import { expressionAlwaysPlainValue, expressionCallsSomething, expressionScopeNames } from "../optimize.js";
 
 type LoweredNode = {
   html: string;
@@ -1198,6 +1198,13 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   ) {
     throw new TypeError("A mount-only client module cannot also be hydrate-only or a hydration chunk.");
   }
+  // Hydration boundaries only mean anything against server output, so a template that declares one cannot be
+  // compiled as mount-only. Accepting it would emit the hydrate entry the mode exists to leave out.
+  if (options.mountOnly === true && template.client.hydrationBoundaries.length > 0) {
+    throw new TypeError(
+      "A mount-only client module cannot contain hydration boundaries; remove hydrate: directives or generate it without mount-only.",
+    );
+  }
   if (options.hydrationBoundaryId !== undefined) {
     return generateClientHydrationChunkModule(template, options.hydrationBoundaryId, options);
   }
@@ -2053,9 +2060,92 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
 };
 
 /**
- * Names the rows of this list can read from the parent scope. Omitted when the analysis cannot bound them, in
- * which case the runtime keeps tracking every parent key.
+ * Parent scope keys a keyed list's rows read, or `undefined` when the analysis cannot bound them.
+ *
+ * A row scope is the bounded parent snapshot plus the item, the index, and the row's own declarations, each
+ * stored under the declaration key the generated readers use. So a name is a parent dependency exactly when the
+ * key its reader resolves to - after the same alias mapping the reader applies - is not provided by this row or
+ * by an enclosing row. Nested regions are walked with their own provided keys, so a nested list's item name
+ * shadows only inside that list.
+ *
+ * Any call gives up the bound: a scope member invoked as a method receives the row scope as `this`, and any
+ * function can close over names the expression never mentions.
  */
+const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> | undefined => {
+  const names = new Set<string>();
+  let bounded = true;
+
+  const add = (expression: string, aliases: ReadonlyMap<string, string>, provided: ReadonlySet<string>): void => {
+    if (!bounded) return;
+    if (expressionCallsSomething(expression)) {
+      bounded = false;
+      return;
+    }
+    const found = expressionScopeNames(expression);
+    if (!found) {
+      bounded = false;
+      return;
+    }
+    for (const name of found) {
+      const key = aliases.get(name) ?? name;
+      if (!provided.has(key)) names.add(key);
+    }
+  };
+
+  const visitDeclarations = (
+    stores: readonly StoreDefinition[] | undefined,
+    components: readonly ComponentBoundary[] | undefined,
+    provided: Set<string>,
+  ): void => {
+    // Each initial expression is evaluated before its own name joins the row scope, so it can read a parent key
+    // of the same name.
+    for (const store of stores ?? []) {
+      add(store.initial, aliasesForDeclaration(store), provided);
+      provided.add(declarationKeyFor(store, store.name));
+    }
+    for (const component of components ?? []) {
+      for (const prop of component.props) {
+        add(prop.expression, aliasesForDeclaration(prop), provided);
+        provided.add(declarationKeyFor(prop, prop.name));
+      }
+      for (const store of component.stores) {
+        add(store.initial, aliasesForDeclaration(store), provided);
+        provided.add(declarationKeyFor(store, store.name));
+      }
+    }
+  };
+
+  const visitList = (list: ListBinding, enclosing: ReadonlySet<string>): void => {
+    const provided = new Set(enclosing);
+    provided.add(list.itemName);
+    if (list.indexName) provided.add(list.indexName);
+    // The key reader runs against a scope that already binds the item.
+    add(list.key, aliasesForBinding(list), provided);
+    visitDeclarations(list.stores, list.components, provided);
+    visitBindings(list.bindings, provided);
+  };
+
+  const visitBindings = (children: readonly ClientBinding[], provided: ReadonlySet<string>): void => {
+    for (const child of children) {
+      const aliases = aliasesForBinding(child);
+      if (child.kind === "event") add(child.handler, aliases, provided);
+      else if (child.kind === "if") {
+        add(child.test, aliases, provided);
+        const branch = new Set(provided);
+        visitDeclarations(child.stores, child.components, branch);
+        visitBindings(child.bindings, branch);
+      } else if (child.kind === "list") {
+        // `each` is read in the enclosing scope; the key and the rows are read in the nested one.
+        add(child.each, aliases, provided);
+        visitList(child, provided);
+      } else add(child.expression, aliases, provided);
+    }
+  };
+
+  visitList(binding, new Set<string>());
+  return bounded ? names : undefined;
+};
+
 const parentScopeKeysField = (binding: ListBinding): string[] => {
   const names = listParentScopeNames(binding);
   return names ? [`    parentScopeKeys: ${JSON.stringify([...names].sort())},`] : [];
@@ -2086,9 +2176,11 @@ const generatedRowBindingFields = (binding: ListBinding): string[] => {
     }
     return `{ ${path}, ${read} }`;
   };
+  // The handler is read when the event fires, not when the listener is registered, so replacing an item's
+  // handler under the same key takes effect the way the generic runtime's rows already do.
   const serializeEvent = (child: (typeof events)[number]): string =>
     child.kind === "event"
-      ? `{ path: ${JSON.stringify(child.path)}, bind: (element, scope) => ${runtimeNames.delegate}(element, ${JSON.stringify(child.eventName)}, [], ${bindingReadExpression(child.handler, aliasesForBinding(child))}) }`
+      ? `{ path: ${JSON.stringify(child.path)}, bind: (element, scope) => ${runtimeNames.delegate}(element, ${JSON.stringify(child.eventName)}, [], (event) => { const handler = ${bindingReadExpression(child.handler, aliasesForBinding(child))}; if (typeof handler === "function") handler(event); }) }`
       : "";
   return [
     `    bindings: [${values.map(serializeValue).join(", ")}],`,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compileTemplate, generateClientModule } from "../src/compiler";
 import { mountConditional } from "../src/runtime/conditional";
 import { mountKeyedList } from "../src/runtime/list";
+import { cleanupTextKeyedList, mountGeneratedTextKeyedList } from "../src/runtime/list-text";
 import { mount } from "../src/runtime/mount";
 import { createSignal } from "../src/runtime/signal";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
@@ -150,6 +151,79 @@ describe("generated row bindings", () => {
     handle.dispose();
     root.querySelector("li")?.click();
     expect(clicked).toEqual(["click", "click"]);
+  });
+
+  // The handler is read when the event fires, so replacing it under the same key takes effect on the next click.
+  it("calls the handler the row currently holds, not the one it was bound with", () => {
+    const module = rowModule(`<ul><for each={rows} key={row.id}><li on:click={row.handler}>{row.label}</li></for></ul>`);
+    const root = document.createElement("div");
+    const calls: string[] = [];
+    const row = (label: string, handler: (() => void) | undefined) => ({ id: "a", label, handler });
+    const rows = createSignal([row("A", () => void calls.push("old"))]);
+    const handle = mount(root, module, { rows });
+    const firstRow = root.querySelector("li");
+
+    firstRow?.click();
+    rows.set([row("B", () => void calls.push("new"))]);
+    expect(root.querySelector("li")).toBe(firstRow);
+    expect(root.textContent).toBe("B");
+    firstRow?.click();
+
+    // A handler replaced by something that is not callable is skipped rather than thrown at.
+    rows.set([row("C", undefined)]);
+    expect(() => firstRow?.click()).not.toThrow();
+
+    rows.set([row("D", () => void calls.push("third"))]);
+    firstRow?.click();
+    handle.dispose();
+    firstRow?.click();
+
+    expect(calls).toEqual(["old", "new", "third"]);
+  });
+
+  // A row that adopts server markup and then fails to bind leaves that markup in the document, so its listeners
+  // have to come off; otherwise the page keeps reacting through a row nobody owns.
+  it("releases an adopted row's listeners when its own binding fails while creating it", () => {
+    const root = document.createElement("ul");
+    root.innerHTML = `<li>server</li>`;
+    const serverRow = root.firstElementChild;
+    let clicks = 0;
+    const options = {
+      signature: "rollback",
+      key: "item.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          read: () => {
+            throw new Error("reader failed");
+          },
+        },
+      ],
+      events: [
+        {
+          path: [] as number[],
+          bind: (element: Element): (() => void) => {
+            const listener = (): void => {
+              clicks++;
+            };
+            element.addEventListener("click", listener);
+            return () => element.removeEventListener("click", listener);
+          },
+        },
+      ],
+    };
+
+    expect(() => mountGeneratedTextKeyedList(root, [], [{ id: "a" }], options)).toThrow("reader failed");
+    cleanupTextKeyedList(root, []);
+    (serverRow as HTMLElement | null)?.click();
+
+    expect(clicks).toBe(0);
+    // The server markup itself is left where it was, the way the general keyed list leaves it.
+    expect(root.firstElementChild).toBe(serverRow);
   });
 
   it("still rejects an unsafe URL attribute in a generated row", () => {

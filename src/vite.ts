@@ -460,6 +460,18 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         return null;
       }
       const resolvedTarget = targetForId(id, target);
+      // Mode exclusivity is decided from the query alone, before any of it can fall away silently.
+      if (isMountOnlyRequest(id)) {
+        if (isHydrateOnlyRequest(id)) {
+          this.error(`A Tachyon client request cannot be both hydrate-only and mount-only: ${id}`);
+        }
+        if (hydrationBoundaryIdFor(id) !== undefined) {
+          this.error(`A Tachyon mount-only request cannot also request a hydration chunk: ${id}`);
+        }
+        if (resolvedTarget !== "client") {
+          this.error(`A Tachyon mount-only request must target the client: ${id}`);
+        }
+      }
       const result = diagnoseTachyonSfc(source, {
         whitespace: options.templateWhitespace ?? "preserve",
         target: resolvedTarget,
@@ -498,10 +510,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
           ? hydrationChunkImportsFor(id, result.value.template.client.hydrationBoundaries)
           : undefined;
       const hydrateOnly = resolvedTarget === "client" && hydrationBoundaryId === undefined && isHydrateOnlyRequest(id);
-      const mountOnly = resolvedTarget === "client" && hydrationBoundaryId === undefined && isMountOnlyRequest(id);
-      if (hydrateOnly && mountOnly) {
-        throw new Error(`A Tachyon client request cannot be both hydrate-only and mount-only: ${id}`);
-      }
+      const mountOnly = resolvedTarget === "client" && isMountOnlyRequest(id);
       // Binding location instrumentation is a development aid: it names the
       // template relative to the Vite root (never an absolute path; without a
       // resolved root nothing is emitted) and is omitted from every build

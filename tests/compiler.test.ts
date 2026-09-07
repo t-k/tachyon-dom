@@ -1733,7 +1733,10 @@ describe("HTML-first compiler", () => {
     // The setters come from this module, so the adapter itself imports none of them.
     expect(code).toContain(`apply: (node, value) => __tachyonSetAttributeValue(node, "title", value)`);
     expect(code).toContain(`apply: (node, value) => __tachyonSetClassPresence(node, "on", value)`);
-    expect(code).toContain(`bind: (element, scope) => __tachyonDelegate(element, "click", [], scope.select)`);
+    // The handler is looked up when the event fires, not when the listener is registered.
+    expect(code).toContain(
+      `bind: (element, scope) => __tachyonDelegate(element, "click", [], (event) => { const handler = scope.select; if (typeof handler === "function") handler(event); })`,
+    );
   });
 
   it("keeps rows the adapter cannot drive on the generic list runtime", () => {

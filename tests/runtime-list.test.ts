@@ -197,6 +197,69 @@ describe("mountKeyedList", () => {
     expect(runRows()).toEqual({ afterMount: 1, afterUnrelated: 2, afterRelated: 3, text: "S2" });
   });
 
+  // The default policy re-reads a row on every update, so a component prop reading the same item object's
+  // internals has to be recomputed even though the item reference did not change.
+  it("recomputes component props when a kept item's internals change", () => {
+    const root = document.createElement("ul");
+    const item = { id: 1, label: "before" };
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [{ kind: "text" as const, path: [0], expression: "label" }],
+      components: [
+        { path: [], name: "Row", props: [{ name: "label", expression: "item.label" }], stores: [] },
+      ],
+    };
+
+    mountKeyedList(root, [], [item], options);
+    const firstRow = root.firstChild;
+    expect(root.textContent).toBe("before");
+
+    item.label = "after";
+    mountKeyedList(root, [], [item], options);
+
+    expect(root.textContent).toBe("after");
+    expect(root.firstChild).toBe(firstRow);
+  });
+
+  it("keeps a reference-policy row untouched when nothing it owns changed", () => {
+    const root = document.createElement("ul");
+    const item = { id: 1, label: "same" };
+    let propReads = 0;
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      updatePolicy: "reference" as const,
+      templateHtml: `<li> </li>`,
+      bindings: [{ kind: "text" as const, path: [0], expression: "label" }],
+      components: [
+        {
+          path: [],
+          name: "Row",
+          props: [
+            {
+              name: "label",
+              expression: "item.label",
+              read: (scope: Record<string, unknown>) => {
+                propReads++;
+                return (scope.item as { label: string }).label;
+              },
+            },
+          ],
+          stores: [],
+        },
+      ],
+    };
+
+    mountKeyedList(root, [], [item], options);
+    const afterMount = propReads;
+    mountKeyedList(root, [], [item], options);
+
+    expect(root.textContent).toBe("same");
+    expect(propReads).toBe(afterMount + 1);
+  });
+
   it("keeps tracking every parent key when the compiler cannot bound them", () => {
     const root = document.createElement("ul");
     const scope: Record<string, unknown> = { shared: "S" };

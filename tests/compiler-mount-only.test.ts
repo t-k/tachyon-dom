@@ -50,6 +50,30 @@ describe("mount-only client modules", () => {
     }
   });
 
+  // A hydration boundary only means something against server output. Compiling one as mount-only would emit the
+  // hydrate entry, the chunk loaders, and the hydration runtime the mode exists to leave out.
+  it("rejects a template that declares a hydration boundary", () => {
+    const withBoundary = compiled(
+      `<main><section hydrate:interaction="click"><button on:click={save}>Save</button></section></main>`,
+    );
+
+    expect(() => generateClientModule(withBoundary, { reactive: true, mountOnly: true })).toThrow(
+      /hydration boundaries/,
+    );
+
+    // Without the mode the same template keeps its boundary metadata, and the hydrate entry and chunk loaders
+    // appear as soon as a caller supplies the chunk imports.
+    const normal = generateClientModule(withBoundary, { reactive: true });
+    expect(normal).toContain("export const hydrationBoundaries");
+    expect(normal).not.toContain("export const mountOnly");
+    const withChunks = generateClientModule(withBoundary, {
+      reactive: true,
+      hydrationChunkImports: { "td-h-1": "./island.td?client&tachyon-hydration=td-h-1" },
+    });
+    expect(withChunks).toContain("export const hydrate");
+    expect(withChunks).toContain("hydrationChunks");
+  });
+
   it("caches the two modes separately", () => {
     const template = compiled(templates.conditional);
     const normal = generateClientModule(template, { reactive: true });
