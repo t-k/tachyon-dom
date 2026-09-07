@@ -1799,6 +1799,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
           reactive,
           sourceName,
           listIndex++,
+          instrumentBindings,
           targetName,
           bindingAliases,
           bindingElementExpression,
@@ -1815,6 +1816,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
           reactive,
           sourceName,
           conditionalIndex++,
+          instrumentBindings,
           targetName,
           bindingAliases,
           bindingNodeExpression,
@@ -1959,37 +1961,59 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   return code;
 };
 
-const listSignature = (binding: ListBinding): string =>
-  `list:${JSON.stringify({
-    path: binding.path,
-    each: binding.each,
-    key: binding.key,
-    itemName: binding.itemName,
-    indexName: binding.indexName,
-    updatePolicy: binding.updatePolicy,
-    region: binding.region,
-    templateHtml: binding.templateHtml,
-    bindings: binding.bindings.map((child) => {
-      if (child.kind === "list" || child.kind === "if") {
-        return { kind: child.kind };
-      }
-      return child;
-    }),
-    stores: binding.stores ?? [],
-    hydrationBoundaries: binding.hydrationBoundaries ?? [],
-    components: binding.components ?? [],
-  })}`;
+/**
+ * A generated region's identity. The runtime only compares it: two options objects with the same signature
+ * describe the same list or branch, so a container already holding one can keep its DOM.
+ *
+ * The structure it is built from is a development diagnostic - it is what a duplicate-key warning points at -
+ * so it is spelled out only in a module that carries the rest of the development instrumentation. Every other
+ * build identifies the same shape by a digest of it, rather than shipping the template HTML and every
+ * expression string a second time next to the readers that replaced them.
+ */
+const regionSignature = (prefix: string, structure: unknown, detailed: boolean): string => {
+  const detail = JSON.stringify(structure);
+  return `${prefix}:${detailed ? detail : hexDigest(sha256(utf8ToBytes(detail))).slice(0, 16)}`;
+};
 
-const conditionalSignature = (binding: ConditionalBinding): string =>
-  `if:${JSON.stringify({
-    path: binding.path,
-    test: binding.test,
-    templateHtml: binding.templateHtml,
-    bindings: binding.bindings,
-    stores: binding.stores ?? [],
-    hydrationBoundaries: binding.hydrationBoundaries ?? [],
-    components: binding.components ?? [],
-  })}`;
+const listSignature = (binding: ListBinding, detailed: boolean): string =>
+  regionSignature(
+    "list",
+    {
+      path: binding.path,
+      each: binding.each,
+      key: binding.key,
+      itemName: binding.itemName,
+      indexName: binding.indexName,
+      updatePolicy: binding.updatePolicy,
+      region: binding.region,
+      templateHtml: binding.templateHtml,
+      bindings: binding.bindings.map((child) => {
+        if (child.kind === "list" || child.kind === "if") {
+          return { kind: child.kind };
+        }
+        return child;
+      }),
+      stores: binding.stores ?? [],
+      hydrationBoundaries: binding.hydrationBoundaries ?? [],
+      components: binding.components ?? [],
+    },
+    detailed,
+  );
+
+const conditionalSignature = (binding: ConditionalBinding, detailed: boolean): string =>
+  regionSignature(
+    "if",
+    {
+      path: binding.path,
+      test: binding.test,
+      templateHtml: binding.templateHtml,
+      bindings: binding.bindings,
+      stores: binding.stores ?? [],
+      hydrationBoundaries: binding.hydrationBoundaries ?? [],
+      components: binding.components ?? [],
+    },
+    detailed,
+  );
 
 const bindingReadExpression = (expression: string, aliases: ReadonlyMap<string, string> = new Map()): string =>
   expressionToScopeAccess(expression, new Set(), "scope", aliases);
@@ -2042,7 +2066,7 @@ const serializeComponentBoundaries = (components: readonly NonNullable<ListBindi
 
 // Generated bindings carry compiled readers, so the expression strings they were parsed from never ship. A ref
 // is the exception: the runtime writes back through its path.
-const serializeListRowBinding = (binding: ListBinding["bindings"][number]): string => {
+const serializeListRowBinding = (binding: ListBinding["bindings"][number], detailed: boolean): string => {
   const fields: string[] = [`kind: ${JSON.stringify(binding.kind)}`, `path: ${JSON.stringify(binding.path)}`];
   const aliases = aliasesForBinding(binding);
   if (binding.kind === "text") {
@@ -2071,7 +2095,7 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
     );
   } else if (binding.kind === "list") {
     const itemKeyExpression = simpleItemKeyExpression(binding.key, binding.itemName);
-    fields.push(`signature: ${JSON.stringify(listSignature(binding))}`);
+    fields.push(`signature: ${JSON.stringify(listSignature(binding, detailed))}`);
     fields.push(`each: ${JSON.stringify(binding.each)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.each, aliases)}`);
     fields.push(`itemName: ${JSON.stringify(binding.itemName)}`);
@@ -2088,16 +2112,16 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number]): stri
         : `keyRead: (scope) => ${bindingReadExpression(binding.key, aliases)}`,
     );
     fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
-    fields.push(`bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}]`);
+    fields.push(`bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}]`);
   } else if (binding.kind === "if") {
-    fields.push(`signature: ${JSON.stringify(conditionalSignature(binding))}`);
+    fields.push(`signature: ${JSON.stringify(conditionalSignature(binding, detailed))}`);
     fields.push(`test: ${JSON.stringify(binding.test)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.test, aliases)}`);
     fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
     fields.push(`stores: ${serializeStoreDefinitions(binding.stores ?? [])}`);
     fields.push(`hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])}`);
     fields.push(`components: ${serializeComponentBoundaries(binding.components ?? [])}`);
-    fields.push(`bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}]`);
+    fields.push(`bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}]`);
   }
   return `{ ${fields.join(", ")} }`;
 };
@@ -2285,6 +2309,7 @@ const emitListBinding = (
   reactive: boolean,
   sourceName: string,
   index: number,
+  detailed: boolean,
   targetName?: string,
   aliases: ReadonlyMap<string, string> = new Map(),
   targetExpression: (path: readonly number[]) => string = elementExpression,
@@ -2293,7 +2318,7 @@ const emitListBinding = (
   const itemKeyExpression = simpleItemKeyExpression(binding.key, binding.itemName);
   const listOptions = [
     `  const ${optionsName} = {`,
-    `    signature: ${JSON.stringify(listSignature(binding))},`,
+    `    signature: ${JSON.stringify(listSignature(binding, detailed))},`,
     `    key: ${JSON.stringify(binding.key)},`,
     itemKeyExpression
       ? `    keyReadItem: (${binding.itemName}) => ${itemKeyExpression},`
@@ -2310,7 +2335,7 @@ const emitListBinding = (
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     ...(isTextOnlyList(binding)
       ? generatedRowBindingFields(binding)
-      : [`    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`]),
+      : [`    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}],`]),
     `  };`,
   ].join("\n");
   const target = targetName ?? "root";
@@ -2334,6 +2359,7 @@ const emitConditionalBinding = (
   reactive: boolean,
   sourceName: string,
   index: number,
+  detailed: boolean,
   targetName?: string,
   aliases: ReadonlyMap<string, string> = new Map(),
   targetExpression: (path: readonly number[]) => string = nodeExpression,
@@ -2343,7 +2369,7 @@ const emitConditionalBinding = (
   const useCore = usesConditionalCore(binding);
   const conditionalOptions = [
     `  const ${optionsName} = {`,
-    `    signature: ${JSON.stringify(conditionalSignature(binding))},`,
+    `    signature: ${JSON.stringify(conditionalSignature(binding, detailed))},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     ...(useCore
       ? generatedBranchBindingFields(binding)
@@ -2351,7 +2377,7 @@ const emitConditionalBinding = (
           `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
           `    hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])},`,
           `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
-          `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
+          `    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}],`,
         ]),
     `  };`,
   ].join("\n");

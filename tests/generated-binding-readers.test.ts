@@ -78,6 +78,40 @@ describe("generated binding readers", () => {
     expect(scope.refs.panel).toBeUndefined();
   });
 
+  // A region's signature only has to change when its shape changes. A build that ships no development
+  // instrumentation identifies it by a digest of that shape rather than by a second copy of the template HTML
+  // and of every expression string the readers already replaced.
+  it("identifies generated regions by a digest when the module ships no instrumentation", () => {
+    const source = `<main><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul><if test={open}><b>{title}</b></if></main>`;
+    const production = generated(source, { reactive: true });
+    const development = generated(source, { reactive: true, instrumentBindings: true });
+
+    expect(production).toMatch(/signature: "list:[0-9a-f]{16}",/);
+    expect(production).toMatch(/signature: "if:[0-9a-f]{16}",/);
+    expect(production).not.toContain(`templateHtml\\"`);
+    // The readable structure is still there for the build that carries the rest of the diagnostics.
+    expect(development).toContain(`signature: "list:{`);
+    expect(development).toContain(`signature: "if:{`);
+  });
+
+  it("keeps a region's digest stable for its shape and distinct between shapes", () => {
+    const digestsFor = (source: string) =>
+      [...generated(source, { reactive: true }).matchAll(/signature: "((?:list|if):[0-9a-f]{16})"/g)].map(
+        (match) => match[1],
+      );
+    const rows = `<ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul>`;
+
+    expect(digestsFor(rows)).toEqual(digestsFor(rows));
+    // A different binding inside the row is a different shape.
+    expect(digestsFor(rows)).not.toEqual(
+      digestsFor(`<ul><for each={rows} key={row.id}><li>{row.title}</li></for></ul>`),
+    );
+    // So is a different template.
+    expect(digestsFor(rows)).not.toEqual(
+      digestsFor(`<ul><for each={rows} key={row.id}><b>{row.label}</b></for></ul>`),
+    );
+  });
+
   // A ref's cleanup has to clear the object it was written into, not whatever the path resolves to later. A row
   // whose item is replaced under the same key rebinds against a scope that already holds the new item, so a
   // cleanup that re-resolved the path would leave the element on the item it was taken off.
