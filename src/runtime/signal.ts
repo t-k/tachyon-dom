@@ -15,6 +15,8 @@ type EffectRunner = {
   errorOwner: ReactiveErrorOwner | undefined;
   owner: Owner | undefined;
   runOwner: Owner;
+  /** Monotonic run counter; async continuations capture it so a stale rejection can be recognised. */
+  generation: number;
   registration: CleanupRegistration | undefined;
   run: () => void;
 };
@@ -311,13 +313,18 @@ const cleanup = (runner: EffectRunner, createNextRunOwner: boolean): void => {
     }
   }
   runner.dependencies.clear();
+  // A run that registered no cleanup left its owner empty, so the next run can keep the same object instead of
+  // disposing one and allocating another. Development builds always allocate so lifecycle diagnostics still see
+  // one ownerCreated/ownerDisposed pair per run, including when hooks are installed after the effect starts.
+  const reuseEmptyOwner =
+    !lifecycleDiagnosticsEnabled && createNextRunOwner && !runner.disposed && runner.runOwner.head === undefined;
   try {
-    disposeOwner(runner.runOwner);
+    if (!reuseEmptyOwner) disposeOwner(runner.runOwner);
   } catch (error) {
     if (!failed) firstError = error;
     failed = true;
   }
-  if (createNextRunOwner && !runner.disposed) {
+  if (createNextRunOwner && !runner.disposed && !reuseEmptyOwner) {
     runner.runOwner = createOwner();
   }
   if (failed) throw firstError;
@@ -549,8 +556,10 @@ const scheduleUnhandledError = (error: unknown): void => {
   }
 };
 
-const reportAsyncEffectError = (runner: EffectRunner, runOwner: Owner, error: unknown): void => {
-  if (runner.disposed || runOwner.disposed) return;
+// A reused owner is never disposed between runs, so the owner's disposed flag alone can no longer tell a stale
+// rejection from a current one. The run generation captured at scheduling time does.
+const reportAsyncEffectError = (runner: EffectRunner, runOwner: Owner, generation: number, error: unknown): void => {
+  if (runner.disposed || runOwner.disposed || runner.generation !== generation) return;
   const delivered = deliverError(runner.errorOwner, error);
   if (delivered.handled) return;
   scheduleUnhandledError(delivered.error);
@@ -574,11 +583,13 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
     errorOwner,
     owner: currentOwner,
     runOwner: createOwner(),
+    generation: 0,
     registration: undefined,
     run: () => {
       if (runner.disposed) {
         return;
       }
+      runner.generation += 1;
       let cleanupError: unknown;
       let cleanupFailed = false;
       try {
@@ -601,6 +612,7 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
       if (lifecycleDiagnosticsEnabled) currentBindingLocation = bindingLocation;
       activeEffect = runner;
       const runOwner = runner.runOwner;
+      const generation = runner.generation;
       currentOwner = runner.owner;
       currentEffectOwner = runOwner;
       currentErrorOwner = runner.errorOwner;
@@ -619,7 +631,7 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
             }
           }
         } else if (isPromiseLike(returned)) {
-          void Promise.resolve(returned).catch((error) => reportAsyncEffectError(runner, runOwner, error));
+          void Promise.resolve(returned).catch((error) => reportAsyncEffectError(runner, runOwner, generation, error));
         }
       } catch (error) {
         callbackError = error;

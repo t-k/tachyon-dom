@@ -74,5 +74,6 @@ describe("representative template benchmark", () => {
     }
     expect(result.workload.buildMode).toBe("generated-client-source");
     expect(result.workload.memoryMeasurement).toBe("heap-delta-only");
-  });
+    // Runs the full representative workload with real compilation, so it needs more than the default timeout.
+  }, 60_000);
 });
