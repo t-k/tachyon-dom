@@ -446,7 +446,16 @@ export const runListTextOnlyCase = () => {
   };
   const runHydrate = () => {
     const root = document.createElement("div");
-    root.innerHTML = ${JSON.stringify(renderServerTemplate(listTextOnlyCompiled.value, { head: "SSR head", tail: "SSR tail", rows: [first, second] }))};
+    root.innerHTML = ${JSON.stringify(
+      renderServerTemplate(listTextOnlyCompiled.value, {
+        head: "SSR head",
+        tail: "SSR tail",
+        rows: [
+          { id: "a", label: "A" },
+          { id: "b", label: "B" },
+        ],
+      }),
+    )};
     const serverRows = Array.from(root.querySelectorAll("p"));
     const rows = createSignal(rowsFor());
     const head = createSignal("H");

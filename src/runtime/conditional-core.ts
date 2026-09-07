@@ -129,8 +129,7 @@ const preparedPathPlans = new WeakMap<Node, PreparedPathPlan>();
 const pathKey = (path: readonly number[]): string => path.join(".");
 
 const isHydrationMarker = (node: Node): boolean =>
-  node.nodeType === Node.COMMENT_NODE &&
-  ((node.nodeValue ?? "").startsWith("tachyon-hydrate:") || (node.nodeValue ?? "") === "tachyon-list");
+  node.nodeType === Node.COMMENT_NODE && (node.nodeValue ?? "").startsWith("tachyon-hydrate:");
 
 const logicalChildren = (node: Node): Node[] =>
   Array.from(node.childNodes).filter((child) => !isHydrationMarker(child));

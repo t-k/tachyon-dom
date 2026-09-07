@@ -63,12 +63,9 @@ const renderChildren = (
 ): string =>
   childPathEntries(children, path)
     .map((entry, index) =>
-      `${
-        transparentListRootFor(entry.child) &&
-        listNeedsBoundaryMarker(children, index)
-          ? listBoundaryMarker
-          : ""
-      }${renderNode(entry.child, scope, entry.path)}`,
+      `${renderNode(entry.child, scope, entry.path)}${
+        transparentListRootFor(entry.child) && listNeedsBoundaryMarker(children, index) ? listBoundaryMarker : ""
+      }`,
     )
     .join("");
 
@@ -82,9 +79,9 @@ const renderChildExpressions = (
       const marker =
         transparentListRootFor(entry.child) &&
         listNeedsBoundaryMarker(children, index)
-          ? `${jsString(listBoundaryMarker)} + `
+          ? ` + ${jsString(listBoundaryMarker)}`
           : "";
-      return `${marker}${renderNodeExpression(entry.child, locals, entry.path)}`;
+      return `${renderNodeExpression(entry.child, locals, entry.path)}${marker}`;
     })
     .join(" + ");
 

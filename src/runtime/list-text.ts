@@ -54,6 +54,7 @@ type TextKeyedListRuntimeOptions = {
   bindings: TextBinding[];
   readKey: (item: unknown, index: number) => unknown;
   readBinding: (scope: Record<string, unknown>, binding: TextBinding) => unknown;
+  a: (container: Element, region: TextKeyedListRegion) => ChildNode | null | undefined;
 };
 
 type TextKeyedListRegion = {
@@ -132,14 +133,7 @@ const scopedItem = (
 
 const nodeAt = (root: Node, path: readonly number[]): Node => {
   let current = root;
-  for (const index of path) {
-    const children = Array.from(current.childNodes).filter(
-      (child) =>
-        child.nodeType !== 8 ||
-        (!(child.nodeValue ?? "").startsWith("tachyon-hydrate:") && (child.nodeValue ?? "") !== "tachyon-list"),
-    );
-    current = children[index] as Node;
-  }
+  for (const index of path) current = current.childNodes[index] as Node;
   return current;
 };
 
@@ -177,6 +171,7 @@ const resolveGeneratedOptions = (options: GeneratedTextKeyedListOptions): TextKe
     bindings: options.bindings,
     readKey,
     readBinding: (scope, binding) => read((binding as GeneratedTextBinding).read(scope)),
+    a: defaultAfterNode,
   };
 };
 
@@ -198,6 +193,7 @@ const resolveLegacyOptions = (options: TextKeyedListOptions): TextKeyedListRunti
     bindings: options.bindings,
     readKey,
     readBinding: (scope, binding) => read(binding.read ? binding.read(scope) : readPath(scope, binding.expression)),
+    a: defaultAfterNode,
   };
 };
 
@@ -408,26 +404,19 @@ const longestIncreasingSubsequencePositions = (values: readonly number[]): Set<n
   return positions;
 };
 
-const logicalChildNodes = (container: Node): ChildNode[] =>
-  Array.from(container.childNodes).filter(
-    (child) =>
-      child.nodeType !== 8 ||
-      (!(child.nodeValue ?? "").startsWith("tachyon-hydrate:") && (child.nodeValue ?? "") !== "tachyon-list"),
-  );
+const defaultAfterNode = (container: Element, region: TextKeyedListRegion): ChildNode | undefined =>
+  region.after ? Array.from(container.children).at(-region.after) : undefined;
 
-const staticAfterNode = (container: Element, region: TextKeyedListRegion): ChildNode | undefined => {
-  if (region.logicalAfter !== undefined && region.logicalAfter > 0) {
-    const children = logicalChildNodes(container);
-    return children[children.length - region.logicalAfter];
-  }
-  return region.after > 0 ? Array.from(container.children).at(-region.after) : undefined;
-};
+const boundaryAfterNode = (container: Element, region: TextKeyedListRegion): ChildNode | undefined =>
+  Array.from(container.childNodes).find((child) => (child.nodeType & 8) && child.nodeValue == "tachyon-list") ||
+  defaultAfterNode(container, region);
 
 const positionRecords = (
   container: Element,
   orderedRecords: readonly RowRecord[],
   previousRecords: ReadonlyMap<PropertyKey, RowRecord>,
-  region?: TextKeyedListRegion,
+  region: TextKeyedListRegion | undefined,
+  afterNode: (container: Element, region: TextKeyedListRegion) => ChildNode | null | undefined,
 ): void => {
   const previousKeys = Array.from(previousRecords.keys());
   const nextKeys = orderedRecords.map((record) => record.key);
@@ -452,7 +441,7 @@ const positionRecords = (
       index < prefixLength || index >= nextKeys.length - suffixLength ? -1 : (previousOrder.get(key) ?? -1),
     ),
   );
-  const staticAfter = region ? (staticAfterNode(container, region) ?? null) : null;
+  const staticAfter = region ? (afterNode(container, region) ?? null) : null;
   let anchor: Node | null = orderedRecords[nextKeys.length - suffixLength]?.nodes[0] ?? staticAfter;
   for (let index = nextKeys.length - suffixLength - 1; index >= prefixLength; index--) {
     const record = orderedRecords[index] as RowRecord;
@@ -471,14 +460,19 @@ const positionRecords = (
 const dynamicElementsFor = (container: Element, region: TextKeyedListRegion | undefined): Element[] => {
   const elements = Array.from(container.children);
   if (!region) return elements;
-  const start = Math.min(elements.length, Math.max(0, region.before));
-  const end = Math.max(start, elements.length - Math.max(0, region.after));
+  const start = Math.max(0, region.before);
+  const end = Math.max(start, elements.length - region.after);
   return elements.slice(start, end);
 };
 
-const replaceDynamicRegion = (container: Element, region: TextKeyedListRegion, nodes: readonly Node[]): void => {
+const replaceDynamicRegion = (
+  container: Element,
+  region: TextKeyedListRegion,
+  nodes: readonly Node[],
+  afterNode: (container: Element, region: TextKeyedListRegion) => ChildNode | null | undefined,
+): void => {
   const childNodes = Array.from(container.childNodes);
-  const firstAfter = staticAfterNode(container, region);
+  const firstAfter = afterNode(container, region);
   const firstDynamic = dynamicElementsFor(container, region)[0];
   const startNode = firstDynamic ?? firstAfter;
   const start = startNode ? childNodes.indexOf(startNode) : childNodes.length;
@@ -521,6 +515,7 @@ const mountTextKeyedListResolved = (
   const container = nodeAt(root, path);
   if (!(container instanceof Element)) return;
   const state = getListState(container, options);
+  const afterNode = options.a;
   const cleanupRecordsNotIn = (
     records: Map<PropertyKey, RowRecord>,
     keep: Pick<ReadonlySet<PropertyKey>, "has">,
@@ -590,19 +585,20 @@ const mountTextKeyedListResolved = (
         container,
         options.region,
         orderedRecords.flatMap((record) => record.nodes),
+        afterNode,
       );
     } else if (canAdoptServerRows) container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
     else if (canAppendWithoutMoving(nextRecords, orderedRecords, previousRecords)) {
       const previousKeys = new Set(previousRecords.keys());
       for (const record of orderedRecords) {
         if (!previousKeys.has(record.key)) {
-          const staticAfter = options.region ? staticAfterNode(container, options.region) : undefined;
+          const staticAfter = options.region ? afterNode(container, options.region) : undefined;
           if (!staticAfter) {
             container.append(...record.nodes);
           } else for (const node of record.nodes) container.insertBefore(node, staticAfter);
         }
       }
-    } else positionRecords(container, orderedRecords, previousRecords, options.region);
+    } else positionRecords(container, orderedRecords, previousRecords, options.region, afterNode);
     state.records = nextRecords;
     state.initialized = true;
     createdRecords.length = 0;
@@ -634,6 +630,18 @@ export const mountGeneratedTextKeyedList = (
   mountTextKeyedListResolved(root, path, items, resolveGeneratedOptions(options));
 };
 
+export const mountGeneratedTextKeyedListWithBoundary = (
+  root: Element,
+  path: readonly number[],
+  items: readonly unknown[] | undefined,
+  options: GeneratedTextKeyedListOptions,
+): void => {
+  mountTextKeyedListResolved(root, path, items, {
+    ...resolveGeneratedOptions(options),
+    a: boundaryAfterNode,
+  });
+};
+
 /**
  * Mounts text-only rows from the compatibility descriptor. `templateHtml` must be trusted compiler output, never untrusted input.
  */
@@ -643,5 +651,11 @@ export const mountTextKeyedList = (
   items: readonly unknown[] | undefined,
   options: TextKeyedListOptions,
 ): void => {
-  mountTextKeyedListResolved(root, path, items, resolveLegacyOptions(options));
+  const resolved = resolveLegacyOptions(options);
+  mountTextKeyedListResolved(
+    root,
+    path,
+    items,
+    options.region?.logicalAfter === undefined ? resolved : { ...resolved, a: boundaryAfterNode },
+  );
 };

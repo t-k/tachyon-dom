@@ -56,11 +56,10 @@ const renderChildYieldStatements = (
   path: number[],
 ): string[] =>
   childPathEntries(children, path).flatMap((entry, index) => [
-    ...(transparentListRootFor(entry.child) &&
-    listNeedsBoundaryMarker(children, index)
+    ...renderNodeYieldStatements(entry.child, locals, indent, entry.path),
+    ...(transparentListRootFor(entry.child) && listNeedsBoundaryMarker(children, index)
       ? [`${indent}yield ${jsString(listBoundaryMarker)};`]
       : []),
-    ...renderNodeYieldStatements(entry.child, locals, indent, entry.path),
   ]);
 
 const renderForYieldStatements = (

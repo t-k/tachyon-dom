@@ -906,19 +906,11 @@ const longestIncreasingSubsequencePositions = (values: readonly number[]): Set<n
   return positions;
 };
 
-const logicalChildNodes = (container: Node): ChildNode[] =>
-  Array.from(container.childNodes).filter(
-    (child) =>
-      child.nodeType !== 8 ||
-      (!(child.nodeValue ?? "").startsWith("tachyon-hydrate:") && (child.nodeValue ?? "") !== "tachyon-list"),
-  );
-
 const staticAfterNode = (container: Element, region: KeyedListRegion): ChildNode | undefined => {
-  if (region.logicalAfter !== undefined && region.logicalAfter > 0) {
-    const children = logicalChildNodes(container);
-    return children[children.length - region.logicalAfter];
-  }
-  return region.after > 0 ? Array.from(container.children).at(-region.after) : undefined;
+  return (
+    Array.from(container.childNodes).find((child) => child.nodeType === 8 && child.nodeValue === "tachyon-list") ??
+    (region.after > 0 ? Array.from(container.children).at(-region.after) : undefined)
+  );
 };
 
 const positionRecords = (

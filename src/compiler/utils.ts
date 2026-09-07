@@ -259,23 +259,20 @@ export const emitsElementRoot = (node: TemplateNode): boolean => {
   return true;
 };
 
-const emitsLogicalOutput = (node: TemplateNode): boolean => {
-  if (node.type === "text") return textExpressionSegments(node.value).some((segment) => segment.value.length > 0);
-  if (node.tagName === "store" || node.tagName === "for") return false;
-  if (node.tagName === "component") return renderableChildren(node).some(emitsLogicalOutput);
-  return true;
+const emitsLogicalText = (node: TemplateNode): boolean => {
+  if (node.type === "text")
+    return textExpressionSegments(node.value).some(
+      (segment) => segment.kind === "expression" || segment.value.trim().length > 0,
+    );
+  if (node.tagName === "component") return renderableChildren(node).some(emitsLogicalText);
+  return false;
 };
 
 /** Separates a list from text-only siblings that would otherwise merge into one DOM Text node. */
 export const listBoundaryMarker = "<!--tachyon-list-->";
 
 export const listNeedsBoundaryMarker = (children: readonly TemplateNode[], index: number): boolean => {
-  const siblings = [...children.slice(0, index), ...children.slice(index + 1)];
-  return (
-    siblings.length > 0 &&
-    siblings.every((child) => !emitsElementRoot(child)) &&
-    siblings.some((child) => emitsLogicalOutput(child))
-  );
+  return children.slice(index + 1).some(emitsLogicalText);
 };
 
 export const escapeMarker = (value: unknown): string =>

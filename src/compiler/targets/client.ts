@@ -331,6 +331,16 @@ const loweredNodeCount = (node: TemplateNode): number => {
 const loweredNodeCountFor = (children: readonly TemplateNode[]): number =>
   children.reduce((count, child) => count + loweredNodeCount(child), 0);
 
+const logicalBoundaryNodeCount = (node: TemplateNode): number => {
+  if (node.type !== "text") return loweredNodeCount(node);
+  const segments = textExpressionSegments(node.value);
+  if (!segments.some((segment) => segment.kind === "expression" || segment.value.trim().length > 0)) return 0;
+  return segments.filter((segment) => segment.value.length > 0).length * 2 - 1;
+};
+
+const logicalBoundaryNodeCountFor = (children: readonly TemplateNode[]): number =>
+  children.reduce((count, child) => count + logicalBoundaryNodeCount(child), 0);
+
 const listRegionFor = (children: readonly TemplateNode[], index: number): ListBinding["region"] => {
   const dynamicChildren = children.filter(
     (child) => child.type === "element" && (child.tagName === "for" || child.tagName === "if"),
@@ -340,8 +350,8 @@ const listRegionFor = (children: readonly TemplateNode[], index: number): ListBi
   }
   const before = children.slice(0, index).filter(emitsElementRoot).length;
   const after = children.slice(index + 1).filter(emitsElementRoot).length;
-  const logicalBefore = loweredNodeCountFor(children.slice(0, index));
-  const logicalAfter = loweredNodeCountFor(children.slice(index + 1));
+  const logicalBefore = logicalBoundaryNodeCountFor(children.slice(0, index));
+  const logicalAfter = logicalBoundaryNodeCountFor(children.slice(index + 1));
   return before + after > 0 || logicalBefore + logicalAfter > 0
     ? {
         before,
@@ -722,6 +732,7 @@ const runtimeNames = {
   preparedNodeAt: "__tachyonPreparedNodeAt",
   mountKeyedList: "__tachyonMountKeyedList",
   mountTextKeyedList: "__tachyonMountTextKeyedList",
+  mountTextKeyedListWithBoundary: "__tachyonMountTextKeyedListWithBoundary",
   nodeAt: "__tachyonNodeAt",
   nodeAtWithDynamicLists: "__tachyonNodeAtWithDynamicLists",
   dynamicListChildOffset: "__tachyonDynamicListChildOffset",
@@ -1137,6 +1148,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsRef = bindings.some((binding) => binding.kind === "ref");
   const needsList = bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding));
   const needsTextList = bindings.some((binding) => binding.kind === "list" && isTextOnlyList(binding));
+  const needsTextListBoundary = bindings.some(
+    (binding) => binding.kind === "list" && isTextOnlyList(binding) && binding.region?.logicalAfter !== undefined,
+  );
   const needsConditional = bindings.some((binding) => binding.kind === "if");
   const needsConditionalCore = bindings.some((binding) => binding.kind === "if" && usesConditionalCore(binding));
   const needsGenericConditional = bindings.some((binding) => binding.kind === "if" && !usesConditionalCore(binding));
@@ -1229,8 +1243,15 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`import { mountKeyedList as ${runtimeNames.mountKeyedList} } from "tachyon-dom/runtime/list";`);
   }
   if (needsTextList) {
+    const textListImports = [
+      `cleanupTextKeyedList as ${runtimeNames.cleanupTextKeyedList}`,
+      `mountGeneratedTextKeyedList as ${runtimeNames.mountTextKeyedList}`,
+      ...(needsTextListBoundary
+        ? [`mountGeneratedTextKeyedListWithBoundary as ${runtimeNames.mountTextKeyedListWithBoundary}`]
+        : []),
+    ];
     lines.push(
-      `import { cleanupTextKeyedList as ${runtimeNames.cleanupTextKeyedList}, mountGeneratedTextKeyedList as ${runtimeNames.mountTextKeyedList} } from "tachyon-dom/runtime/list-text";`,
+      `import { ${textListImports.join(", ")} } from "tachyon-dom/runtime/list-text";`,
     );
   }
   if (needsConditional) {
@@ -1909,7 +1930,11 @@ const emitListBinding = (
   ].join("\n");
   const target = targetName ?? "root";
   const path = targetName ? [] : binding.path;
-  const mount = isTextOnlyList(binding) ? runtimeNames.mountTextKeyedList : runtimeNames.mountKeyedList;
+  const mount = isTextOnlyList(binding)
+    ? binding.region?.logicalAfter !== undefined
+      ? runtimeNames.mountTextKeyedListWithBoundary
+      : runtimeNames.mountTextKeyedList
+    : runtimeNames.mountKeyedList;
   const statement = `${mount}(${target}, ${JSON.stringify(path)}, ${runtimeValueExpression(binding.each, reactive, sourceName, aliases)}, ${optionsName})`;
   const targetDeclaration = targetName ? `  const ${targetName} = ${targetExpression(binding.path)};\n` : "";
   const invocation = reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`;
