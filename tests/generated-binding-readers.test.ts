@@ -38,6 +38,12 @@ describe("generated binding readers", () => {
       `write: (scope, value) => { const target = scope.refs; if (target != null && typeof target === "object") target["item"] = value; }`,
     );
 
+    // Every step to the container is optional, so a deeper path still leaves a missing container alone.
+    const deep = generated(`<ul><for each={rows} key={row.id}><li ref={refs.deep.item}></li></for></ul>`);
+    expect(deep).toContain(`read: (scope) => scope.refs?.deep?.item`);
+    expect(deep).toContain(`const target = scope.refs?.deep;`);
+    expect(deep).toContain(`target["item"] = value`);
+
     const topLevel = generated(`<div ref={panel}></div>`);
     expect(topLevel).toContain(`bindRef as`);
     expect(topLevel).not.toContain(`setRef`);
