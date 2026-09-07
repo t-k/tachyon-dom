@@ -1515,6 +1515,39 @@ describe("HTML-first compiler", () => {
     expect(result.value.client.hydrationDynamicRegionErrors).toHaveLength(expectedErrors);
   });
 
+  it("keeps direct text children out of dynamic region classification", () => {
+    const result = compileTemplate(`<main>prefix<if test={visible}><span>{left}</span></if></main>`);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.client.hydrationDynamicRegionErrors).toHaveLength(0);
+  });
+
+  it("preserves nested dynamic-region diagnostic paths and reasons", () => {
+    const nestedConditional = compileTemplate(
+      `<main><section><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></section></main>`,
+    );
+    if (!nestedConditional.ok) throw new Error(nestedConditional.error.message);
+    expect(nestedConditional.value.client.hydrationDynamicRegionErrors[0]).toContain("at root.0:");
+    expect(nestedConditional.value.client.hydrationDynamicRegionErrors[0]).toContain(
+      "its dynamic attribute shape overlaps another sibling.",
+    );
+
+    const nestedList = compileTemplate(
+      `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></section></main>`,
+    );
+    if (!nestedList.ok) throw new Error(nestedList.error.message);
+    expect(nestedList.value.client.hydrationDynamicRegionErrors[0]).toContain("at root.0");
+
+    const sharedShape = compileTemplate(
+      `<main><if test={visible}><p class="shared">{left}</p></if><p class="shared">{tail}</p></main>`,
+    );
+    if (!sharedShape.ok) throw new Error(sharedShape.error.message);
+    expect(sharedShape.value.client.hydrationDynamicRegionErrors[0]).toContain(
+      "its client shape is shared by another sibling.",
+    );
+  });
+
   it("applies list path correction only after a static prefix and composes it with conditional paths", () => {
     const withSiblings = compileTemplate(
       `<main><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
