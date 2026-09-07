@@ -53,6 +53,19 @@ const hydrationShapesForChildren = (children: readonly TemplateNode[]): string[]
 const hydrationShapeForChildren = (children: readonly TemplateNode[]): string =>
   JSON.stringify(hydrationShapesForChildren(children));
 
+const matcherAttributeIsIgnored = (attribute: { name: string; value: string | true }): boolean => {
+  const name = attribute.name.toLowerCase();
+  return (
+    isHydrationAttribute(name) ||
+    name.startsWith("on:") ||
+    name.startsWith("bind:") ||
+    name.startsWith("style:") ||
+    name.startsWith("class:") ||
+    name === "ref" ||
+    readExpressionAttribute(attribute.value) !== undefined
+  );
+};
+
 const hydrationShapeForRegion = (children: readonly TemplateNode[]): string => {
   const shapes = hydrationShapesForChildren(children);
   return shapes.length === 1 ? (shapes[0] as string) : JSON.stringify(shapes);
@@ -61,17 +74,7 @@ const hydrationShapeForRegion = (children: readonly TemplateNode[]): string => {
 const hydrationShapeForStaticAttributes = (node: ElementNode): string[] =>
   node.attrs
     .flatMap((attr) => {
-      if (
-        isHydrationAttribute(attr.name) ||
-        attr.name.startsWith("on:") ||
-        attr.name.startsWith("bind:") ||
-        attr.name.startsWith("style:") ||
-        attr.name.startsWith("class:") ||
-        attr.name === "ref" ||
-        readExpressionAttribute(attr.value)
-      ) {
-        return [];
-      }
+      if (matcherAttributeIsIgnored(attr)) return [];
       return [[attr.name.toLowerCase(), attr.value === true ? "" : attr.value] as const];
     })
     .sort(([left], [right]) => left.localeCompare(right))
@@ -327,7 +330,9 @@ const loweredNodeCount = (node: TemplateNode): number => {
     const segmentCount = textExpressionSegments(node.value).filter((segment) => segment.value.length > 0).length;
     return segmentCount === 0 ? 0 : segmentCount * 2 - 1;
   }
-  return node.tagName === "store" || node.tagName === "for" ? 0 : 1;
+  if (node.tagName === "store" || node.tagName === "for") return 0;
+  if (node.tagName === "component") return loweredNodeCountFor(renderableChildren(node));
+  return 1;
 };
 
 const loweredNodeCountFor = (children: readonly TemplateNode[]): number =>
@@ -639,7 +644,7 @@ const lowerNode = (node: TemplateNode, path: number[], context: ClientLoweringCo
   }
   return {
     html: lowerElement(node, path, context),
-    nodeCount: node.tagName === "store" || node.tagName === "for" ? 0 : 1,
+    nodeCount: loweredNodeCount(node),
   };
 };
 
@@ -899,15 +904,6 @@ const matcherAttributeAllowed = (
 const matcherStaticAttributeValue = (value: string | true): string => (value === true ? "" : value);
 
 const matcherTokens = (value: string): Set<string> => new Set(value.split(/\s+/).filter(Boolean));
-
-const matcherAttributeIsIgnored = (attribute: { name: string; value: string | true }): boolean =>
-  isHydrationAttribute(attribute.name) ||
-  attribute.name.startsWith("on:") ||
-  attribute.name.startsWith("bind:") ||
-  attribute.name.startsWith("style:") ||
-  attribute.name.startsWith("class:") ||
-  attribute.name === "ref" ||
-  readExpressionAttribute(attribute.value) !== undefined;
 
 const conditionalShapeMayAdopt = (
   expected: TemplateNode,

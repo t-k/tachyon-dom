@@ -1467,6 +1467,13 @@ describe("HTML-first compiler", () => {
     expect(textPrefixList).toMatchObject({ kind: "list", region: { before: 1, after: 1, logicalBefore: 2 } });
     const textPrefixCode = generateClientModule(withTextPrefix.value, { reactive: true, instrumentBindings: false });
     expect(textPrefixCode).toContain(`region: {"before":1,"after":1,"logicalBefore":2}`);
+
+    const withTextComponent = compileTemplate(
+      `<main><component name="Prefix">intro{prefix}</component><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
+    );
+    if (!withTextComponent.ok) throw new Error(withTextComponent.error.message);
+    const textComponentList = withTextComponent.value.client.bindings.find((binding) => binding.kind === "list");
+    expect(textComponentList).toMatchObject({ kind: "list", region: { before: 1, after: 1, logicalBefore: 4 } });
   });
 
   it("renders keyed lists on the server", () => {

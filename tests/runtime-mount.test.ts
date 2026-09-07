@@ -1108,6 +1108,41 @@ describe("client mount entrypoints", () => {
     expect(root.querySelectorAll("p")).toHaveLength(0);
   });
 
+  it("keeps list paths aligned after a transparent component with text nodes", () => {
+    const source = `<main><component name="Prefix">intro{prefix}</component><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`;
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const first = { id: "a", label: "A" };
+    const second = { id: "b", label: "B" };
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      prefix: "P",
+      head: "H",
+      rows: [first, second],
+      tail: "F",
+    });
+    const header = root.querySelector("header");
+    const footer = root.querySelector("footer");
+    const prefix = createSignal("P");
+    const head = createSignal("H");
+    const tail = createSignal("F");
+    const rows = createSignal([first, second]);
+    const result = hydrate(root, module, { prefix, head, tail, rows });
+    if (!result.ok) throw new Error(result.error.message);
+
+    prefix.set("P2");
+    head.set("H2");
+    tail.set("F2");
+    expect(root.querySelector("header")).toBe(header);
+    expect(header?.textContent).toBe("H2");
+    expect(root.querySelector("footer")).toBe(footer);
+    expect(footer?.textContent).toBe("F2");
+    expect(root.textContent).toBe("introP2H2ABF2");
+    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["A", "B"]);
+    result.value.dispose();
+  });
+
   it.each(["mount", "hydrate"] as const)(
     "composes generated list binding paths with an unrelated conditional in %s",
     (mode) => {
