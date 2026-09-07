@@ -271,6 +271,7 @@ describe("client mount entrypoints", () => {
   it.each([
     `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
     `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
+    `<main><if test={visible}><p title={title}>{left}</p></if><p title="static" on:click={save}>{tail}</p></main>`,
   ])("rejects dynamic conditional shape overlap before changing a static sibling", (source) => {
     const compiled = compileTemplate(source);
     if (!compiled.ok) throw new Error(compiled.error.message);
@@ -303,6 +304,7 @@ describe("client mount entrypoints", () => {
         active: createSignal(false),
         left: createSignal("client branch"),
         tail: createSignal("client static"),
+        save: () => undefined,
       });
 
       expect(result.ok).toBe(false);
@@ -1017,6 +1019,93 @@ describe("client mount entrypoints", () => {
     expect(root.querySelector("header")).toBe(header);
     expect(root.querySelector("footer")).toBe(footer);
     result.value.dispose();
+  });
+
+  it.each([false, true] as const)("keeps a generated list header binding after a static text prefix (%s)", (withIf) => {
+    const inner = `intro<header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer>`;
+    const source = withIf
+      ? `<main><section>${inner}</section><aside><if test={visible}><b>branch</b></if></aside></main>`
+      : `<main>${inner}</main>`;
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    for (const count of [0, 1, 2] as const) {
+      const initialRows = Array.from({ length: count }, (_, id) => ({ id: String(id), label: `R${id}` }));
+      const root = document.createElement("div");
+      root.innerHTML = renderServerTemplate(compiled.value, {
+        head: "H",
+        rows: initialRows,
+        tail: "F",
+        visible: true,
+      });
+      const header = root.querySelector("header");
+      const footer = root.querySelector("footer");
+      const head = createSignal("H");
+      const tail = createSignal("F");
+      const rows = createSignal(initialRows);
+      const visible = createSignal(true);
+      const result = hydrate(root, module, { head, tail, rows, visible });
+      if (!result.ok) throw new Error(result.error.message);
+
+      head.set("H2");
+      tail.set("F2");
+      expect(root.querySelector("header")).toBe(header);
+      expect(header?.textContent).toBe("H2");
+      expect(root.querySelector("footer")).toBe(footer);
+      expect(footer?.textContent).toBe("F2");
+      expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(
+        initialRows.map((row) => row.label),
+      );
+
+      const reorderedRows = [...initialRows].reverse().concat({ id: "new", label: "Rnew" });
+      rows.set(reorderedRows);
+      expect(root.querySelector("header")).toBe(header);
+      expect(root.querySelector("footer")).toBe(footer);
+      expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(
+        reorderedRows.map((row) => row.label),
+      );
+      result.value.dispose();
+    }
+  });
+
+  it("keeps list paths aligned across multiple static text nodes and SSR hydration markers", () => {
+    const source = `<main>intro<span>gap</span>tail<header hydrate>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`;
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const first = { id: "a", label: "A" };
+    const second = { id: "b", label: "B" };
+    const third = { id: "c", label: "C" };
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      head: "H",
+      rows: [first, second],
+      tail: "F",
+    });
+    const header = root.querySelector("header");
+    const footer = root.querySelector("footer");
+    const head = createSignal("H");
+    const tail = createSignal("F");
+    const rows = createSignal([first, second]);
+    const result = hydrate(root, module, { head, tail, rows });
+    if (!result.ok) throw new Error(result.error.message);
+
+    head.set("H2");
+    tail.set("F2");
+    expect(root.querySelector("header")).toBe(header);
+    expect(header?.textContent).toBe("H2");
+    expect(root.querySelector("footer")).toBe(footer);
+    expect(footer?.textContent).toBe("F2");
+    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["A", "B"]);
+
+    rows.set([third, second, first]);
+    expect(root.querySelector("header")).toBe(header);
+    expect(root.querySelector("footer")).toBe(footer);
+    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["C", "B", "A"]);
+    rows.set([second]);
+    expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["B"]);
+    result.value.dispose();
+    expect(root.querySelectorAll("p")).toHaveLength(0);
   });
 
   it.each(["mount", "hydrate"] as const)(

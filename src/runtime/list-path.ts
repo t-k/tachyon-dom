@@ -1,6 +1,8 @@
 type DynamicListRegion = {
   before: number;
   after: number;
+  /** Logical child index used by generated binding paths. */
+  logicalBefore?: number;
 };
 
 export type DynamicListPath = {
@@ -38,7 +40,7 @@ const pathEquals = (left: readonly number[], right: readonly number[]): boolean 
   left.length === right.length && left.every((part, index) => part === right[index]);
 
 const listAffectsChild = (list: DynamicListPath, childIndex: number): boolean =>
-  !list.region || childIndex >= list.region.before;
+  !list.region || childIndex >= (list.region.logicalBefore ?? list.region.before);
 
 /** Returns the expanded child count for lists owned by one logical parent. */
 export const dynamicListChildOffset = (

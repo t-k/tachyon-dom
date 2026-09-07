@@ -171,6 +171,7 @@ type KeyedListOptions = {
 type KeyedListRegion = {
   before: number;
   after: number;
+  logicalBefore?: number;
 };
 
 type RowRecord = {

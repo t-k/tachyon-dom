@@ -174,6 +174,7 @@ export const runConditionalShapeCase = () => {
   const dynamicShapeModules = [
     `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
     `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
+    `<main><if test={visible}><p title={title}>{left}</p></if><p title="static" on:click={save}>{tail}</p></main>`,
   ].map((shapeSource, index) => {
     const shapeCompiled = compileTemplate(shapeSource);
     if (!shapeCompiled.ok) throw new Error(shapeCompiled.error.message);
@@ -184,6 +185,7 @@ export const runConditionalShapeCase = () => {
       active: false,
       left: "SSR branch",
       tail: "SSR static",
+      save: () => undefined,
     });
     return {
       fileName: `conditional-dynamic-shape-${index}.js`,
@@ -203,6 +205,7 @@ export const runDynamicShapeCase = () => {
     active: createSignal(false),
     left: createSignal("client branch"),
     tail: createSignal("client static"),
+    save: () => undefined,
   });
   if (result.ok) result.value.dispose();
   return {
@@ -345,7 +348,7 @@ export const runListFooterCase = () => {
 };
 `,
   };
-  const listHeaderSource = `<main><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`;
+  const listHeaderSource = `<main>intro<header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`;
   const listHeaderCompiled = compileTemplate(listHeaderSource);
   if (!listHeaderCompiled.ok) throw new Error(listHeaderCompiled.error.message);
   const listHeaderGenerated = generateClientModule(listHeaderCompiled.value, {
@@ -373,7 +376,7 @@ export const runListHeaderCase = () => {
   head.set("H2");
   tail.set("F2");
   rows.set([second, third, first]);
-  const mountCorrect = root.querySelector("header") === header && root.querySelector("footer") === footer && root.textContent === "H2BCAF2";
+  const mountCorrect = root.querySelector("header") === header && root.querySelector("footer") === footer && root.textContent === "introH2BCAF2";
   mounted.dispose();
 
   const hydratedRoot = document.createElement("div");
@@ -397,7 +400,7 @@ export const runListHeaderCase = () => {
   hydratedHead.set("H2");
   hydratedTail.set("F2");
   hydratedRows.set([second, third, first]);
-  const hydrateCorrect = hydratedRoot.querySelector("header") === serverHeader && hydratedRoot.querySelector("footer") === serverFooter && hydratedRoot.textContent === "H2BCAF2";
+  const hydrateCorrect = hydratedRoot.querySelector("header") === serverHeader && hydratedRoot.querySelector("footer") === serverFooter && hydratedRoot.textContent === "introH2BCAF2";
   hydrated.value.dispose();
   return { mountCorrect, hydrateCorrect };
 };
@@ -607,7 +610,7 @@ window.runConditionalFollowup = () => {
     hydrate: hydrateResult,
     sharedParent: { before: runSharedParentBefore(), after: runSharedParentAfter() },
     conditionalShapes: [runConditionalShape0(), runConditionalShape1()],
-    dynamicShapes: [runDynamicShape0(), runDynamicShape1()],
+    dynamicShapes: [runDynamicShape0(), runDynamicShape1(), runDynamicShape2()],
     dynamicAttributes: runDynamicAttributeCase(),
     componentSplit: runComponentSplitCase(),
     listFooter: runListFooterCase(),

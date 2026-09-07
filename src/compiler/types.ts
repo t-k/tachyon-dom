@@ -106,6 +106,8 @@ export type ListBinding = {
 export type ListRegion = {
   before: number;
   after: number;
+  /** Logical child index used when resolving bindings after the list. */
+  logicalBefore?: number;
 };
 
 export type ConditionalBinding = {

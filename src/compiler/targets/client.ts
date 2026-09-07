@@ -321,6 +321,18 @@ const emitsElementRoot = (node: TemplateNode): boolean => {
   return true;
 };
 
+/** Counts the client child nodes used by generated binding paths, including text separators. */
+const loweredNodeCount = (node: TemplateNode): number => {
+  if (node.type === "text") {
+    const segmentCount = textExpressionSegments(node.value).filter((segment) => segment.value.length > 0).length;
+    return segmentCount === 0 ? 0 : segmentCount * 2 - 1;
+  }
+  return node.tagName === "store" || node.tagName === "for" ? 0 : 1;
+};
+
+const loweredNodeCountFor = (children: readonly TemplateNode[]): number =>
+  children.reduce((count, child) => count + loweredNodeCount(child), 0);
+
 const listRegionFor = (children: readonly TemplateNode[], index: number): ListBinding["region"] => {
   const dynamicChildren = children.filter(
     (child) => child.type === "element" && (child.tagName === "for" || child.tagName === "if"),
@@ -330,7 +342,14 @@ const listRegionFor = (children: readonly TemplateNode[], index: number): ListBi
   }
   const before = children.slice(0, index).filter(emitsElementRoot).length;
   const after = children.slice(index + 1).filter(emitsElementRoot).length;
-  return before + after > 0 ? { before, after } : undefined;
+  const logicalBefore = loweredNodeCountFor(children.slice(0, index));
+  return before + after > 0
+    ? {
+        before,
+        after,
+        ...(logicalBefore !== before ? { logicalBefore } : {}),
+      }
+    : undefined;
 };
 
 const lowerComponent = (node: ElementNode, path: number[], context: ClientLoweringContext): string => {
@@ -881,6 +900,15 @@ const matcherStaticAttributeValue = (value: string | true): string => (value ===
 
 const matcherTokens = (value: string): Set<string> => new Set(value.split(/\s+/).filter(Boolean));
 
+const matcherAttributeIsIgnored = (attribute: { name: string; value: string | true }): boolean =>
+  isHydrationAttribute(attribute.name) ||
+  attribute.name.startsWith("on:") ||
+  attribute.name.startsWith("bind:") ||
+  attribute.name.startsWith("style:") ||
+  attribute.name.startsWith("class:") ||
+  attribute.name === "ref" ||
+  readExpressionAttribute(attribute.value) !== undefined;
+
 const conditionalShapeMayAdopt = (
   expected: TemplateNode,
   actual: TemplateNode,
@@ -893,17 +921,7 @@ const conditionalShapeMayAdopt = (
   if (expected.tagName.toLowerCase() !== actual.tagName.toLowerCase()) return false;
 
   for (const expectedAttribute of expected.attrs) {
-    if (
-      isHydrationAttribute(expectedAttribute.name) ||
-      expectedAttribute.name.startsWith("on:") ||
-      expectedAttribute.name.startsWith("bind:") ||
-      expectedAttribute.name.startsWith("style:") ||
-      expectedAttribute.name.startsWith("class:") ||
-      expectedAttribute.name === "ref" ||
-      readExpressionAttribute(expectedAttribute.value)
-    ) {
-      continue;
-    }
+    if (matcherAttributeIsIgnored(expectedAttribute)) continue;
     const actualAttribute = matcherAttributeFor(actual, expectedAttribute.name);
     if (!actualAttribute) return false;
     const dynamicAttribute = matcherAttributeAllowed(dynamicAttributes, path, expectedAttribute.name);
@@ -915,17 +933,7 @@ const conditionalShapeMayAdopt = (
     }
   }
   for (const actualAttribute of actual.attrs) {
-    if (
-      isHydrationAttribute(actualAttribute.name) ||
-      actualAttribute.name.startsWith("on:") ||
-      actualAttribute.name.startsWith("bind:") ||
-      actualAttribute.name.startsWith("style:") ||
-      actualAttribute.name.startsWith("class:") ||
-      actualAttribute.name === "ref" ||
-      readExpressionAttribute(actualAttribute.value)
-    ) {
-      return false;
-    }
+    if (matcherAttributeIsIgnored(actualAttribute)) continue;
     if (matcherAttributeFor(expected, actualAttribute.name)) {
       const expectedAttribute = matcherAttributeFor(expected, actualAttribute.name);
       const dynamicAttribute = matcherAttributeAllowed(dynamicAttributes, path, actualAttribute.name);
@@ -1122,7 +1130,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         return [];
       }
       const childIndex = path[candidate.path.length];
-      if (candidate.region && (childIndex === undefined || childIndex < candidate.region.before)) return [];
+      const logicalBefore = candidate.region?.logicalBefore ?? candidate.region?.before ?? 0;
+      if (candidate.region && (childIndex === undefined || childIndex < logicalBefore)) return [];
       return [{ path: candidate.path, ...(candidate.region ? { region: candidate.region } : {}) }];
     });
   const needsListPathResolver = bindings.some(

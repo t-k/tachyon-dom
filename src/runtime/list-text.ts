@@ -59,6 +59,7 @@ type TextKeyedListRuntimeOptions = {
 type TextKeyedListRegion = {
   before: number;
   after: number;
+  logicalBefore?: number;
 };
 
 type RowRecord = {

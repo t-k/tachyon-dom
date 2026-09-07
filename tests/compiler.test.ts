@@ -1425,6 +1425,7 @@ describe("HTML-first compiler", () => {
   it.each([
     `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
     `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
+    `<main><if test={visible}><p title={title}>{left}</p></if><p title="static" on:click={save}>{tail}</p></main>`,
   ])("diagnoses dynamic conditional shape overlap with a static sibling", (source) => {
     const result = compileTemplate(source);
 
@@ -1457,6 +1458,15 @@ describe("HTML-first compiler", () => {
     expect(conditionalCode).toContain(
       `__tachyonPreparedNodeAt(root, [0,0,0], (container, parentPath, childIndex) => __tachyonDynamicListChildOffset`,
     );
+
+    const withTextPrefix = compileTemplate(
+      `<main>intro<header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
+    );
+    if (!withTextPrefix.ok) throw new Error(withTextPrefix.error.message);
+    const textPrefixList = withTextPrefix.value.client.bindings.find((binding) => binding.kind === "list");
+    expect(textPrefixList).toMatchObject({ kind: "list", region: { before: 1, after: 1, logicalBefore: 2 } });
+    const textPrefixCode = generateClientModule(withTextPrefix.value, { reactive: true, instrumentBindings: false });
+    expect(textPrefixCode).toContain(`region: {"before":1,"after":1,"logicalBefore":2}`);
   });
 
   it("renders keyed lists on the server", () => {
