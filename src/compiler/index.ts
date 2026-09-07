@@ -1,4 +1,5 @@
 import { err, ok, type Result } from "../result.js";
+import { removeConstantFalseConditionals } from "./optimize.js";
 import { createTemplateIr } from "./ir.js";
 import { parseTemplate } from "./parser.js";
 import { lowerClientTemplate } from "./targets/client.js";
@@ -56,7 +57,9 @@ export const compileTemplate = (
   if (!normalized.ok) {
     return rememberCompiledTemplate(cacheKey, err(normalized.error));
   }
-  const root = normalized.value;
+  // Static optimization runs on the normalized tree so template HTML, SSR output, binding paths, and hydration
+  // regions are all derived from the same reduced structure.
+  const { root } = removeConstantFalseConditionals(normalized.value);
   const irResult = createTemplateIr(root);
   if (!irResult.ok) {
     return rememberCompiledTemplate(cacheKey, err(irResult.error));
