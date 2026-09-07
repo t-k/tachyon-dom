@@ -170,7 +170,10 @@ export const nodeAt = (root: Node, path: readonly number[]): Node => {
     let cursor = 0;
     let next: Node | undefined;
     for (const child of Array.from(current.childNodes)) {
-      if (child.nodeType === 8 && (child.nodeValue ?? "").startsWith("tachyon-hydrate:")) continue;
+      if (
+        child.nodeType === 8 &&
+        ((child.nodeValue ?? "").startsWith("tachyon-hydrate:") || (child.nodeValue ?? "") === "tachyon-list")
+      ) continue;
       if (cursor++ === index) {
         next = child;
         break;

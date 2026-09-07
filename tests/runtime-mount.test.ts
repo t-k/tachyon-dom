@@ -321,6 +321,56 @@ describe("client mount entrypoints", () => {
     expect(cleanups).toBe(0);
   });
 
+  it("rejects a conditional whose static sibling has an expression-valued comparison attribute", () => {
+    const compiled = compileTemplate(
+      `<main><if test={visible}><p title="same" class:active={active}>{left}</p></if><p title={title}>{tail}</p></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    expect(compiled.value.client.hydrationDynamicRegionErrors).toHaveLength(1);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      visible: false,
+      title: "same",
+      active: false,
+      left: "branch",
+      tail: "static",
+    });
+    const before = root.innerHTML;
+    const staticSibling = root.querySelector("main > p");
+    let owners = 0;
+    let effects = 0;
+    let subscriptions = 0;
+    let cleanups = 0;
+    const restoreHooks = setRuntimeLifecycleHooks({
+      ownerCreated: () => owners++,
+      effectCreated: () => effects++,
+      subscriptionChanged: (delta) => (subscriptions += delta),
+      cleanupChanged: (delta) => (cleanups += delta),
+    });
+    try {
+      const result = hydrate(root, module, {
+        visible: createSignal(false),
+        title: createSignal("same"),
+        active: createSignal(false),
+        left: createSignal("client branch"),
+        tail: createSignal("client static"),
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expression-valued conditional shape overlap unexpectedly hydrated.");
+      expect(result.error.message).toContain("ambiguous conditional hydration");
+    } finally {
+      restoreHooks();
+    }
+    expect(root.innerHTML).toBe(before);
+    expect(root.querySelector("main > p")).toBe(staticSibling);
+    expect(owners).toBe(0);
+    expect(effects).toBe(0);
+    expect(subscriptions).toBe(0);
+    expect(cleanups).toBe(0);
+  });
+
   it("hydrates a dynamic conditional root attribute when its sibling shape is distinct", () => {
     const compiled = compileTemplate(
       `<main><if test={visible}><p title={title} class:active={active}>{label}</p></if><footer>{tail}</footer></main>`,
@@ -1143,6 +1193,93 @@ describe("client mount entrypoints", () => {
     expect(root.querySelectorAll("p")).toHaveLength(0);
   });
 
+  it.each([
+    ["static-prefix", `<main>intro<for each={rows} key={row.id}><p>{row.label}</p></for></main>`, "intro", ""],
+    ["static-suffix", `<main><for each={rows} key={row.id}><p>{row.label}</p></for>tail</main>`, "", "tail"],
+    ["static-both", `<main>intro<for each={rows} key={row.id}><p>{row.label}</p></for>tail</main>`, "intro", "tail"],
+    ["dynamic-prefix", `<main>{head}<for each={rows} key={row.id}><p>{row.label}</p></for>tail</main>`, "H", "tail"],
+    ["dynamic-suffix", `<main>intro<for each={rows} key={row.id}><p>{row.label}</p></for>{tail}</main>`, "intro", "F"],
+    ["dynamic-both", `<main>{head}<for each={rows} key={row.id}><p>{row.label}</p></for>{tail}</main>`, "H", "F"],
+  ] as const)("keeps Text-only list siblings and bindings aligned for %s", (_name, source, initialPrefix, initialSuffix) => {
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+
+    for (const count of [0, 1, 2]) {
+      for (const mode of ["mount", "hydrate"] as const) {
+        const initialRows = Array.from({ length: count }, (_, id) => ({ id: String(id), label: `R${id}` }));
+        const root = document.createElement("div");
+        const head = createSignal("H");
+        const tail = createSignal("F");
+        const rows = createSignal(initialRows);
+        if (mode === "hydrate") {
+          root.innerHTML = renderServerTemplate(compiled.value, {
+            head: "H",
+            tail: "F",
+            rows: initialRows,
+          });
+        }
+        const handle =
+          mode === "mount"
+            ? mount(root, module, { head, tail, rows })
+            : (() => {
+                const result = hydrate(root, module, { head, tail, rows });
+                if (!result.ok) throw new Error(result.error.message);
+                return result.value;
+              })();
+        const main = root.querySelector("main");
+        if (!(main instanceof HTMLElement)) throw new Error("Missing Text-only list root.");
+        const preservedTextNodes = Array.from(main.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE);
+        const expectedInitialPrefix = initialPrefix === "H" ? "H" : initialPrefix;
+        const expectedInitialSuffix = initialSuffix === "F" ? "F" : initialSuffix;
+        const expectedText = (prefix: string, suffix: string, values: readonly { label: string }[]) =>
+          `${prefix}${values.map((row) => row.label).join("")}${suffix}`;
+
+        expect(main.textContent).toBe(expectedText(expectedInitialPrefix, expectedInitialSuffix, initialRows));
+        head.set("H2");
+        tail.set("F2");
+        const updatedPrefix = initialPrefix === "H" ? "H2" : initialPrefix;
+        const updatedSuffix = initialSuffix === "F" ? "F2" : initialSuffix;
+        expect(main.textContent).toBe(expectedText(updatedPrefix, updatedSuffix, initialRows));
+        expect(preservedTextNodes.every((node) => main.contains(node))).toBe(true);
+
+        const initialFirstRow = main.querySelector("p");
+        const updatedRows = [
+          { id: "0", label: "U0" },
+          { id: "1", label: "U1" },
+        ];
+        rows.set(updatedRows);
+        expect(main.textContent).toBe(expectedText(updatedPrefix, updatedSuffix, updatedRows));
+        if (count > 0) expect(main.querySelector("p")).toBe(initialFirstRow);
+        const updatedElements = Array.from(main.querySelectorAll("p"));
+
+        const reorderedRows = [...updatedRows].reverse();
+        rows.set(reorderedRows);
+        expect(Array.from(main.querySelectorAll("p"))).toEqual([updatedElements[1], updatedElements[0]]);
+        const appendedRows = [...reorderedRows, { id: "2", label: "A2" }];
+        rows.set(appendedRows);
+        expect(main.textContent).toBe(expectedText(updatedPrefix, updatedSuffix, appendedRows));
+        const appendedElements = Array.from(main.querySelectorAll("p"));
+        const removedRow = appendedRows[1];
+        if (!removedRow) throw new Error("Missing retained row for removal.");
+        const removedRows = [removedRow];
+        rows.set(removedRows);
+        expect(main.textContent).toBe(expectedText(updatedPrefix, updatedSuffix, removedRows));
+        expect(appendedElements[0]?.isConnected).toBe(false);
+        expect(preservedTextNodes.every((node) => main.contains(node))).toBe(true);
+
+        handle.dispose();
+        const disposedText = main.textContent;
+        expect(disposedText).toBe(expectedText(updatedPrefix, updatedSuffix, []));
+        head.set("H3");
+        tail.set("F3");
+        rows.set([]);
+        expect(main.textContent).toBe(disposedText);
+        expect(preservedTextNodes.every((node) => main.contains(node))).toBe(true);
+      }
+    }
+  });
+
   it("keeps list paths aligned after a transparent component with text nodes", () => {
     const source = `<main><component name="Prefix">intro{prefix}</component><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`;
     const compiled = compileTemplate(source);
@@ -1176,6 +1313,57 @@ describe("client mount entrypoints", () => {
     expect(root.textContent).toBe("introP2H2ABF2");
     expect(Array.from(root.querySelectorAll("p"), (row) => row.textContent)).toEqual(["A", "B"]);
     result.value.dispose();
+  });
+
+  it.each(["mount", "hydrate"] as const)("keeps a list root inside a transparent component aligned in %s", (mode) => {
+    const source = `<main><header>{head}</header><component name="Rows"><for each={rows} key={row.id}><p>{row.label}</p></for></component><footer>{tail}</footer></main>`;
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const first = { id: "a", label: "A" };
+    const second = { id: "b", label: "B" };
+    const third = { id: "c", label: "C" };
+    const head = createSignal("H");
+    const tail = createSignal("F");
+    const rows = createSignal([first, second]);
+    const root = document.createElement("div");
+    if (mode === "hydrate") {
+      root.innerHTML = renderServerTemplate(compiled.value, { head: "H", tail: "F", rows: [first, second] });
+    }
+    const result =
+      mode === "mount"
+        ? { ok: true as const, value: mount(root, module, { head, tail, rows }) }
+        : hydrate(root, module, { head, tail, rows });
+    if (!result.ok) throw new Error(result.error.message);
+    const header = root.querySelector("header");
+    const footer = root.querySelector("footer");
+    const initialRows = Array.from(root.querySelectorAll("p"));
+
+    expect(root.textContent).toBe("HABF");
+    head.set("H2");
+    tail.set("F2");
+    expect(root.textContent).toBe("H2ABF2");
+    expect(root.querySelector("header")).toBe(header);
+    expect(root.querySelector("footer")).toBe(footer);
+    expect(Array.from(root.querySelectorAll("p"))).toEqual(initialRows);
+
+    rows.set([second, third, first]);
+    const reorderedRows = Array.from(root.querySelectorAll("p"));
+    expect(root.textContent).toBe("H2BCAF2");
+    expect(reorderedRows[0]).toBe(initialRows[1]);
+    expect(reorderedRows[2]).toBe(initialRows[0]);
+
+    rows.set([third]);
+    expect(root.textContent).toBe("H2CF2");
+    expect(root.querySelector("header")).toBe(header);
+    expect(root.querySelector("footer")).toBe(footer);
+    expect(reorderedRows[0]?.isConnected).toBe(false);
+
+    result.value.dispose();
+    expect(root.textContent).toBe("H2F2");
+    tail.set("ignored");
+    rows.set([]);
+    expect(root.textContent).toBe("H2F2");
   });
 
   it.each(["mount", "hydrate"] as const)(

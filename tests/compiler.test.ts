@@ -1426,6 +1426,7 @@ describe("HTML-first compiler", () => {
     `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
     `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
     `<main><if test={visible}><p title={title}>{left}</p></if><p title="static" on:click={save}>{tail}</p></main>`,
+    `<main><if test={visible}><p title="same" class:active={active}>{left}</p></if><p title={title}>{tail}</p></main>`,
   ])("diagnoses dynamic conditional shape overlap with a static sibling", (source) => {
     const result = compileTemplate(source);
 
@@ -1474,6 +1475,30 @@ describe("HTML-first compiler", () => {
     if (!withTextComponent.ok) throw new Error(withTextComponent.error.message);
     const textComponentList = withTextComponent.value.client.bindings.find((binding) => binding.kind === "list");
     expect(textComponentList).toMatchObject({ kind: "list", region: { before: 1, after: 1, logicalBefore: 4 } });
+
+    const withTextOnlySiblings = compileTemplate(
+      `<main>{head}<for each={rows} key={row.id}><p>{row.label}</p></for>{tail}</main>`,
+    );
+    if (!withTextOnlySiblings.ok) throw new Error(withTextOnlySiblings.error.message);
+    const textOnlyList = withTextOnlySiblings.value.client.bindings.find((binding) => binding.kind === "list");
+    expect(textOnlyList).toMatchObject({
+      kind: "list",
+      region: { before: 0, after: 0, logicalBefore: 1, logicalAfter: 1 },
+    });
+    expect(generateClientModule(withTextOnlySiblings.value, { reactive: true, instrumentBindings: false })).toContain(
+      `region: {"before":0,"after":0,"logicalBefore":1,"logicalAfter":1}`,
+    );
+
+    const withComponentList = compileTemplate(
+      `<main><header>{head}</header><component name="Rows"><for each={rows} key={row.id}><p>{row.label}</p></for></component><footer>{tail}</footer></main>`,
+    );
+    if (!withComponentList.ok) throw new Error(withComponentList.error.message);
+    const componentList = withComponentList.value.client.bindings.find((binding) => binding.kind === "list");
+    expect(componentList).toMatchObject({
+      kind: "list",
+      path: [],
+      region: { before: 1, after: 1 },
+    });
   });
 
   it("renders keyed lists on the server", () => {

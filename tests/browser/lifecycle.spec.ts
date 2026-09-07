@@ -54,6 +54,7 @@ declare global {
       dynamicShapes: Array<{ ok: boolean; unchanged: boolean; staticPreserved: boolean; message: string }>;
       dynamicAttributes: { ok: boolean; identity: boolean; titleUpdated: boolean; classToggled: boolean };
       listHeader: { mountCorrect: boolean; hydrateCorrect: boolean };
+      listTextOnly: { mountCorrect: boolean; hydrateCorrect: boolean };
       listSeparateParent: { mountCorrect: boolean; hydrateCorrect: boolean };
     };
     __conditionalReady?: boolean;
@@ -199,6 +200,7 @@ test("runs generated adjacent conditional mount and SSR hydration regressions in
   expect(result.componentSplit.message).toContain("multiple direct dynamic regions");
   expect(result.listFooter).toEqual({ mountCorrect: true, hydrateCorrect: true });
   expect(result.listHeader).toEqual({ mountCorrect: true, hydrateCorrect: true });
+  expect(result.listTextOnly).toEqual({ mountCorrect: true, hydrateCorrect: true });
   expect(result.listSeparateParent).toEqual({ mountCorrect: true, hydrateCorrect: true });
   expect(["chromium", "firefox", "webkit"]).toContain(browserName);
 });

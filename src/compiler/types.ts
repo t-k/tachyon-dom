@@ -108,6 +108,8 @@ export type ListRegion = {
   after: number;
   /** Logical child index used when resolving bindings after the list. */
   logicalBefore?: number;
+  /** Logical child count after the list used to resolve dynamic output boundaries. */
+  logicalAfter?: number;
 };
 
 export type ConditionalBinding = {

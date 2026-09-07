@@ -406,6 +406,65 @@ export const runListHeaderCase = () => {
 };
 `,
   };
+  const listTextOnlySource = `<main>{head}<for each={rows} key={row.id}><p>{row.label}</p></for>{tail}</main>`;
+  const listTextOnlyCompiled = compileTemplate(listTextOnlySource);
+  if (!listTextOnlyCompiled.ok) throw new Error(listTextOnlyCompiled.error.message);
+  const listTextOnlyGenerated = generateClientModule(listTextOnlyCompiled.value, {
+    reactive: true,
+    instrumentBindings: false,
+  });
+  const listTextOnlyModule = {
+    fileName: "generated-list-text-only-siblings.js",
+    source: `import { createSignal } from "tachyon-dom";
+import { hydrate, mount } from "tachyon-dom/runtime/mount";
+${listTextOnlyGenerated}
+const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
+const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind };
+const rowsFor = () => [{ id: "a", label: "A" }, { id: "b", label: "B" }];
+export const runListTextOnlyCase = () => {
+  const first = { id: "a", label: "A" };
+  const second = { id: "b", label: "B" };
+  const third = { id: "c", label: "C" };
+  const runMount = () => {
+    const root = document.createElement("div");
+    const rows = createSignal([first, second]);
+    const head = createSignal("H");
+    const tail = createSignal("F");
+    const mounted = mount(root, clientModule, { rows, head, tail });
+    const main = root.querySelector("main");
+    const initialRows = Array.from(root.querySelectorAll("p"));
+    head.set("H2");
+    tail.set("F2");
+    rows.set([second, third, first]);
+    const currentRows = Array.from(root.querySelectorAll("p"));
+    const correct =
+      main?.textContent === "H2BCAF2" &&
+      currentRows[0] === initialRows[1] &&
+      currentRows[2] === initialRows[0];
+    mounted.dispose();
+    return correct;
+  };
+  const runHydrate = () => {
+    const root = document.createElement("div");
+    root.innerHTML = ${JSON.stringify(renderServerTemplate(listTextOnlyCompiled.value, { head: "SSR head", tail: "SSR tail", rows: [first, second] }))};
+    const serverRows = Array.from(root.querySelectorAll("p"));
+    const rows = createSignal(rowsFor());
+    const head = createSignal("H");
+    const tail = createSignal("F");
+    const hydrated = hydrate(root, clientModule, { rows, head, tail });
+    if (!hydrated.ok) return false;
+    head.set("H2");
+    tail.set("F2");
+    rows.set([second, third, first]);
+    const currentRows = Array.from(root.querySelectorAll("p"));
+    const correct = root.textContent === "H2BCAF2" && currentRows[0] === serverRows[1] && currentRows[2] === serverRows[0];
+    hydrated.value.dispose();
+    return correct;
+  };
+  return { mountCorrect: runMount(), hydrateCorrect: runHydrate() };
+};
+`,
+  };
   const listConditionalSource = `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></section><aside><if test={visible}><b>{head}</b></if></aside></main>`;
   const listConditionalCompiled = compileTemplate(listConditionalSource);
   if (!listConditionalCompiled.ok) throw new Error(listConditionalCompiled.error.message);
@@ -467,6 +526,7 @@ export const runListSeparateParentCase = () => {
       componentSplitModule,
       listFooterModule,
       listHeaderModule,
+      listTextOnlyModule,
       listConditionalModule,
     ].map(({ fileName, source: generatedSource }) => writeFile(resolve(outDir, fileName), generatedSource)),
   );
@@ -488,6 +548,7 @@ export const runListSeparateParentCase = () => {
     `import { runComponentSplitCase } from "./${componentSplitModule.fileName}";`,
     `import { runListFooterCase } from "./${listFooterModule.fileName}";`,
     `import { runListHeaderCase } from "./${listHeaderModule.fileName}";`,
+    `import { runListTextOnlyCase } from "./${listTextOnlyModule.fileName}";`,
     `import { runListSeparateParentCase } from "./${listConditionalModule.fileName}";`,
   ].join("\n");
   await writeFile(
@@ -615,6 +676,7 @@ window.runConditionalFollowup = () => {
     componentSplit: runComponentSplitCase(),
     listFooter: runListFooterCase(),
     listHeader: runListHeaderCase(),
+    listTextOnly: runListTextOnlyCase(),
     listSeparateParent: runListSeparateParentCase(),
   };
 };

@@ -3,6 +3,8 @@ type DynamicListRegion = {
   after: number;
   /** Logical child index used by generated binding paths. */
   logicalBefore?: number;
+  /** Logical child count after the list used to bound dynamic output. */
+  logicalAfter?: number;
 };
 
 export type DynamicListPath = {
@@ -12,7 +14,9 @@ export type DynamicListPath = {
 
 const logicalChildren = (node: Node): Node[] =>
   Array.from(node.childNodes).filter(
-    (child) => child.nodeType !== 8 || !(child.nodeValue ?? "").startsWith("tachyon-hydrate:"),
+    (child) =>
+      child.nodeType !== 8 ||
+      (!(child.nodeValue ?? "").startsWith("tachyon-hydrate:") && (child.nodeValue ?? "") !== "tachyon-list"),
   );
 
 const nodeAt = (root: Node, path: readonly number[]): Node | undefined => {
@@ -28,8 +32,16 @@ const dynamicChildCount = (container: Node, region: DynamicListRegion | undefine
   const firstAfter = region.after > 0 ? elements.at(-region.after) : undefined;
   const firstDynamic = elements[region.before];
   const startNode = firstDynamic ?? firstAfter;
-  const start = startNode ? children.indexOf(startNode) : children.length;
-  const end = firstAfter ? children.indexOf(firstAfter) : children.length;
+  const legacyStart = startNode ? children.indexOf(startNode) : children.length;
+  const legacyEnd = firstAfter ? children.indexOf(firstAfter) : children.length;
+  const start =
+    region.logicalBefore === undefined
+      ? legacyStart
+      : Math.min(children.length, Math.max(0, region.logicalBefore));
+  const end =
+    region.logicalAfter === undefined
+      ? legacyEnd
+      : Math.max(start, children.length - Math.max(0, region.logicalAfter));
   return Math.max(0, end - start);
 };
 

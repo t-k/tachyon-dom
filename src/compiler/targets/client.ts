@@ -19,18 +19,22 @@ import { storeDefinitionsFor } from "../ir.js";
 import type { ExpressionSourceLocation } from "../utils.js";
 import {
   attrExpression,
+  emitsElementRoot,
   expressionToScopeAccess,
   hydrationBoundaryFor,
   isHydrationAttribute,
   isVoidElement,
   isStoreNode,
   itemNameFromKey,
+  listBoundaryMarker,
+  listNeedsBoundaryMarker,
   attrString,
   assertSafeIdentifierName,
   readExpressionAttribute,
   renderableChildren,
   serializeStaticAttr,
   textExpressionSegments,
+  transparentListRootFor,
   expressionLocationForAttribute,
   expressionLocationForText,
 } from "../utils.js";
@@ -313,17 +317,6 @@ const componentStores = (
   return stores;
 };
 
-const emitsElementRoot = (node: TemplateNode): boolean => {
-  if (node.type === "text") return false;
-  if (node.tagName === "for" || node.tagName === "if" || node.tagName === "store") return false;
-  if (node.tagName === "outlet" || node.tagName === "slot") return false;
-  if (node.tagName === "component") {
-    const children = renderableChildren(node);
-    return children.length === 1 && emitsElementRoot(children[0] as TemplateNode);
-  }
-  return true;
-};
-
 /** Counts the client child nodes used by generated binding paths, including text separators. */
 const loweredNodeCount = (node: TemplateNode): number => {
   if (node.type === "text") {
@@ -348,16 +341,23 @@ const listRegionFor = (children: readonly TemplateNode[], index: number): ListBi
   const before = children.slice(0, index).filter(emitsElementRoot).length;
   const after = children.slice(index + 1).filter(emitsElementRoot).length;
   const logicalBefore = loweredNodeCountFor(children.slice(0, index));
-  return before + after > 0
+  const logicalAfter = loweredNodeCountFor(children.slice(index + 1));
+  return before + after > 0 || logicalBefore + logicalAfter > 0
     ? {
         before,
         after,
         ...(logicalBefore !== before ? { logicalBefore } : {}),
+        ...(logicalAfter !== after ? { logicalAfter } : {}),
       }
     : undefined;
 };
 
-const lowerComponent = (node: ElementNode, path: number[], context: ClientLoweringContext): string => {
+const lowerComponent = (
+  node: ElementNode,
+  path: number[],
+  context: ClientLoweringContext,
+  listRegion?: ListBinding["region"],
+): string => {
   const props = componentPropsForNode(node, path, context);
   const stores = componentStores(node, path, context);
   const ownScope = createChildScope(context.lexicalScope);
@@ -386,7 +386,9 @@ const lowerComponent = (node: ElementNode, path: number[], context: ClientLoweri
     return "";
   }
   if (children.length === 1) {
-    return lowerNode(children[0] as TemplateNode, path, childContext).html;
+    const child = children[0] as TemplateNode;
+    const childPath = child.type === "element" && child.tagName === "for" ? path.slice(0, -1) : path;
+    return lowerNode(child, childPath, childContext, listRegion).html;
   }
   let html = "";
   let domIndex = 0;
@@ -492,7 +494,12 @@ const lowerList = (
   );
 };
 
-const lowerElement = (node: ElementNode, path: number[], context: ClientLoweringContext): string => {
+const lowerElement = (
+  node: ElementNode,
+  path: number[],
+  context: ClientLoweringContext,
+  listRegion?: ListBinding["region"],
+): string => {
   if (node.tagName === "outlet") {
     return "<!--tachyon-outlet-->";
   }
@@ -500,7 +507,7 @@ const lowerElement = (node: ElementNode, path: number[], context: ClientLowering
     return `<!--tachyon-slot:${attrString(node, "name") ?? "default"}-->`;
   }
   if (node.tagName === "for") {
-    context.bindings.push(lowerList(node, path, context));
+    context.bindings.push(lowerList(node, path, context, listRegion));
     return "";
   }
   if (node.tagName === "if") {
@@ -511,7 +518,7 @@ const lowerElement = (node: ElementNode, path: number[], context: ClientLowering
     return "";
   }
   if (node.tagName === "component") {
-    return lowerComponent(node, path, context);
+    return lowerComponent(node, path, context, listRegion);
   }
 
   recordHydrationDynamicRegionErrors(node, path, context);
@@ -620,7 +627,20 @@ const lowerElement = (node: ElementNode, path: number[], context: ClientLowering
       context.bindings.push(
         lowerList(child, path, context, listRegionFor(node.children, node.children.indexOf(child))),
       );
+      if (listNeedsBoundaryMarker(node.children, node.children.indexOf(child))) {
+        children += listBoundaryMarker;
+      }
       continue;
+    }
+    const transparentListRoot = transparentListRootFor(child);
+    const flattenedChildren = transparentListRoot ? domChildren(node) : undefined;
+    const flattenedIndex = transparentListRoot ? flattenedChildren?.indexOf(transparentListRoot) : undefined;
+    const childListRegion =
+      transparentListRoot && flattenedChildren && flattenedIndex !== undefined && flattenedIndex >= 0
+        ? listRegionFor(flattenedChildren, flattenedIndex)
+        : undefined;
+    if (transparentListRoot) {
+      context.hydrationDynamicRegions.push({ path: [...path], index: domIndex, kind: "list" });
     }
     if (child.type === "element" && child.tagName === "if") {
       context.hydrationDynamicRegions.push({ path: [...path], index: domIndex, kind: "conditional" });
@@ -629,7 +649,10 @@ const lowerElement = (node: ElementNode, path: number[], context: ClientLowering
       addStoreDefinitions(child, [...path, domIndex], context);
       continue;
     }
-    const lowered = lowerNode(child, [...path, domIndex], context);
+    const lowered = lowerNode(child, [...path, domIndex], context, childListRegion);
+    if (transparentListRoot && flattenedChildren && flattenedIndex !== undefined && flattenedIndex >= 0) {
+      if (listNeedsBoundaryMarker(flattenedChildren, flattenedIndex)) children += listBoundaryMarker;
+    }
     children += lowered.html;
     domIndex += lowered.nodeCount;
   }
@@ -638,12 +661,17 @@ const lowerElement = (node: ElementNode, path: number[], context: ClientLowering
     : `<${node.tagName}${attrs.join("")}>${children}</${node.tagName}>`;
 };
 
-const lowerNode = (node: TemplateNode, path: number[], context: ClientLoweringContext): LoweredNode => {
+const lowerNode = (
+  node: TemplateNode,
+  path: number[],
+  context: ClientLoweringContext,
+  listRegion?: ListBinding["region"],
+): LoweredNode => {
   if (node.type === "text") {
     return lowerTextNode(node, path, context);
   }
   return {
-    html: lowerElement(node, path, context),
+    html: lowerElement(node, path, context, listRegion),
     nodeCount: loweredNodeCount(node),
   };
 };
@@ -920,6 +948,7 @@ const conditionalShapeMayAdopt = (
     if (matcherAttributeIsIgnored(expectedAttribute)) continue;
     const actualAttribute = matcherAttributeFor(actual, expectedAttribute.name);
     if (!actualAttribute) return false;
+    if (matcherAttributeIsIgnored(actualAttribute)) continue;
     const dynamicAttribute = matcherAttributeAllowed(dynamicAttributes, path, expectedAttribute.name);
     if (
       !dynamicAttribute &&

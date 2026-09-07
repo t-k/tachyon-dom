@@ -8,6 +8,8 @@ import {
   attrString,
   assertSafeIdentifierName,
   childPathEntries,
+  listBoundaryMarker,
+  listNeedsBoundaryMarker,
   escapeHtml,
   escapeMarker,
   expressionToScopeAccess,
@@ -22,6 +24,7 @@ import {
   renderableChildren,
   serializeStaticAttr,
   textExpressionSegments,
+  transparentListRootFor,
 } from "../utils.js";
 
 const componentScope = (node: ElementNode, scope: Record<string, unknown>): Record<string, unknown> => {
@@ -52,6 +55,38 @@ const componentScope = (node: ElementNode, scope: Record<string, unknown>): Reco
   node.children.forEach(applyStores);
   return next;
 };
+
+const renderChildren = (
+  children: readonly TemplateNode[],
+  scope: Record<string, unknown>,
+  path: readonly number[],
+): string =>
+  childPathEntries(children, path)
+    .map((entry, index) =>
+      `${
+        transparentListRootFor(entry.child) &&
+        listNeedsBoundaryMarker(children, index)
+          ? listBoundaryMarker
+          : ""
+      }${renderNode(entry.child, scope, entry.path)}`,
+    )
+    .join("");
+
+const renderChildExpressions = (
+  children: readonly TemplateNode[],
+  locals: ReadonlySet<string>,
+  path: readonly number[],
+): string =>
+  childPathEntries(children, path)
+    .map((entry, index) => {
+      const marker =
+        transparentListRootFor(entry.child) &&
+        listNeedsBoundaryMarker(children, index)
+          ? `${jsString(listBoundaryMarker)} + `
+          : "";
+      return `${marker}${renderNodeExpression(entry.child, locals, entry.path)}`;
+    })
+    .join(" + ");
 
 const hasStaticMetaRefreshMode = (node: ElementNode): boolean =>
   node.tagName.toLowerCase() === "meta" &&
@@ -111,9 +146,7 @@ const renderFor = (node: ElementNode, scope: Record<string, unknown>, path: numb
   return items
     .map((item, index) => {
       const childScope = { ...scope, [itemName]: item, ...(indexName ? { [indexName]: index } : {}) };
-      return childPathEntries(node.children, path)
-        .map((entry) => renderNode(entry.child, childScope, entry.path))
-        .join("");
+      return renderChildren(node.children, childScope, path);
     })
     .join("");
 };
@@ -132,7 +165,7 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
   }
   if (node.tagName === "if") {
     return readPath(scope, attrExpression(node, "test") ?? "false")
-      ? node.children.map((child) => renderNode(child, scope)).join("")
+      ? renderChildren(node.children, scope, path)
       : "";
   }
   if (node.tagName === "store") {
@@ -144,12 +177,12 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
     if (children.length === 1) {
       return renderNode(children[0] as TemplateNode, next, path);
     }
-    return children.map((child, index) => renderNode(child, next, [...path, index])).join("");
+    return renderChildren(children, next, path);
   }
   if (node.tagName === "await") {
     const thenName = attrString(node, "then") ?? "value";
     const value = readPath(scope, attrExpression(node, "value") ?? "undefined");
-    return node.children.map((child) => renderNode(child, { ...scope, [thenName]: value })).join("");
+    return renderChildren(node.children, { ...scope, [thenName]: value }, path);
   }
 
   const attrs: string[] = [];
@@ -207,9 +240,7 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
   }
   const html = isVoidElement(node)
     ? `<${node.tagName}${attrs.join("")}>`
-    : `<${node.tagName}${attrs.join("")}>${childPathEntries(node.children, path)
-        .map((entry) => renderNode(entry.child, scope, entry.path))
-        .join("")}</${node.tagName}>`;
+    : `<${node.tagName}${attrs.join("")}>${renderChildren(node.children, scope, path)}</${node.tagName}>`;
   if (!hydrateBoundary) {
     return html;
   }
@@ -376,9 +407,7 @@ const renderForExpression = (node: ElementNode, locals: ReadonlySet<string>, pat
   const childLocals = new Set(locals);
   childLocals.add(itemName);
   if (indexName) childLocals.add(indexName);
-  const childExpression = childPathEntries(node.children, path)
-    .map((entry) => renderNodeExpression(entry.child, childLocals, entry.path))
-    .join(" + ");
+  const childExpression = renderChildExpressions(node.children, childLocals, path);
   const callbackParameters = indexName ? `(${itemName}, ${indexName})` : `(${itemName})`;
   return `(Array.isArray(${eachAccess}) ? ${eachAccess}.map(${callbackParameters} => ${childExpression || `""`}).join("") : "")`;
 };
@@ -400,9 +429,7 @@ const renderElementExpression = (
   }
   if (node.tagName === "if") {
     const test = expressionToScopeAccess(attrExpression(node, "test") ?? "false", locals);
-    const childExpression = childPathEntries(node.children, path)
-      .map((entry) => renderNodeExpression(entry.child, locals, entry.path))
-      .join(" + ");
+    const childExpression = renderChildExpressions(node.children, locals, path);
     return `(${test} ? ${childExpression || `""`} : "")`;
   }
   if (node.tagName === "store") {
@@ -423,9 +450,8 @@ const renderElementExpression = (
   }
 
   const parts: string[] = [renderOpenTagExpression(node, locals)];
-  parts.push(
-    ...childPathEntries(node.children, path).map((entry) => renderNodeExpression(entry.child, locals, entry.path)),
-  );
+  const childExpression = renderChildExpressions(node.children, locals, path);
+  if (childExpression) parts.push(childExpression);
   if (!isVoidElement(node)) {
     parts.push(jsString(`</${node.tagName}>`));
   }

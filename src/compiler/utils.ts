@@ -240,6 +240,44 @@ export const itemNameFromKey = (key: string): string => {
 export const renderableChildren = (node: ElementNode): TemplateNode[] =>
   node.children.filter((child) => child.type !== "text" || child.value.length > 0);
 
+export const transparentListRootFor = (node: TemplateNode): ElementNode | undefined => {
+  if (node.type !== "element") return undefined;
+  if (node.tagName === "for") return node;
+  if (node.tagName !== "component") return undefined;
+  const children = renderableChildren(node);
+  return children.length === 1 ? transparentListRootFor(children[0] as TemplateNode) : undefined;
+};
+
+export const emitsElementRoot = (node: TemplateNode): boolean => {
+  if (node.type === "text") return false;
+  if (node.tagName === "for" || node.tagName === "if" || node.tagName === "store") return false;
+  if (node.tagName === "outlet" || node.tagName === "slot") return false;
+  if (node.tagName === "component") {
+    const children = renderableChildren(node);
+    return children.length === 1 && emitsElementRoot(children[0] as TemplateNode);
+  }
+  return true;
+};
+
+const emitsLogicalOutput = (node: TemplateNode): boolean => {
+  if (node.type === "text") return textExpressionSegments(node.value).some((segment) => segment.value.length > 0);
+  if (node.tagName === "store" || node.tagName === "for") return false;
+  if (node.tagName === "component") return renderableChildren(node).some(emitsLogicalOutput);
+  return true;
+};
+
+/** Separates a list from text-only siblings that would otherwise merge into one DOM Text node. */
+export const listBoundaryMarker = "<!--tachyon-list-->";
+
+export const listNeedsBoundaryMarker = (children: readonly TemplateNode[], index: number): boolean => {
+  const siblings = [...children.slice(0, index), ...children.slice(index + 1)];
+  return (
+    siblings.length > 0 &&
+    siblings.every((child) => !emitsElementRoot(child)) &&
+    siblings.some((child) => emitsLogicalOutput(child))
+  );
+};
+
 export const escapeMarker = (value: unknown): string =>
   String(value ?? "")
     .replaceAll("--", "- -")

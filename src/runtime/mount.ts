@@ -100,7 +100,9 @@ const templateRootFor = (templateHtml: string): Element | undefined => {
 const tagNameFor = (element: Element): string => element.tagName.toLowerCase();
 
 const hydrationChildNodes = (node: Node): Node[] =>
-  Array.from(node.childNodes).filter((child) => child.nodeType !== Node.COMMENT_NODE || child.nodeValue === "td:text");
+  Array.from(node.childNodes).filter(
+    (child) => child.nodeType !== Node.COMMENT_NODE || child.nodeValue === "td:text",
+  );
 
 const hydrationPathLabel = (path: readonly number[]): string => (path.length === 0 ? "root" : `root.${path.join(".")}`);
 

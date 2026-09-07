@@ -14,9 +14,12 @@ import {
   itemNameFromKey,
   jsOptionalPropertyAccess,
   jsString,
+  listBoundaryMarker,
+  listNeedsBoundaryMarker,
   readExpressionAttribute,
   renderableChildren,
   textExpressionSegments,
+  transparentListRootFor,
 } from "../utils.js";
 import { hasDynamicUrlAttribute, renderOpenTagExpression } from "./server.js";
 
@@ -46,6 +49,20 @@ const renderTextYieldStatements = (node: TextNode, locals: ReadonlySet<string>, 
   return statements;
 };
 
+const renderChildYieldStatements = (
+  children: readonly TemplateNode[],
+  locals: ReadonlySet<string>,
+  indent: string,
+  path: number[],
+): string[] =>
+  childPathEntries(children, path).flatMap((entry, index) => [
+    ...(transparentListRootFor(entry.child) &&
+    listNeedsBoundaryMarker(children, index)
+      ? [`${indent}yield ${jsString(listBoundaryMarker)};`]
+      : []),
+    ...renderNodeYieldStatements(entry.child, locals, indent, entry.path),
+  ]);
+
 const renderForYieldStatements = (
   node: ElementNode,
   locals: ReadonlySet<string>,
@@ -66,9 +83,7 @@ const renderForYieldStatements = (
       ? `${indent}  for (const [${indexName}, ${itemName}] of ${eachAccess}.entries()) {`
       : `${indent}  for (const ${itemName} of ${eachAccess}) {`,
   ];
-  for (const entry of childPathEntries(node.children, path)) {
-    statements.push(...renderNodeYieldStatements(entry.child, childLocals, `${indent}    `, entry.path));
-  }
+  statements.push(...renderChildYieldStatements(node.children, childLocals, `${indent}    `, path));
   statements.push(`${indent}  }`, `${indent}}`);
   return statements;
 };
@@ -92,9 +107,7 @@ const renderElementYieldStatements = (
   }
   if (node.tagName === "if") {
     const statements = [`${indent}if (${expressionToScopeAccess(attrExpression(node, "test") ?? "false", locals)}) {`];
-    for (const entry of childPathEntries(node.children, path)) {
-      statements.push(...renderNodeYieldStatements(entry.child, locals, `${indent}  `, entry.path));
-    }
+    statements.push(...renderChildYieldStatements(node.children, locals, `${indent}  `, path));
     statements.push(`${indent}}`);
     return statements;
   }
@@ -119,9 +132,7 @@ const renderElementYieldStatements = (
       statements.push(
         `${indent}    const ${thenName} = await ${expressionToScopeAccess(attrExpression(node, "value") ?? "undefined", locals)};`,
       );
-      for (const entry of childPathEntries(node.children, path)) {
-        statements.push(...renderNodeYieldStatements(entry.child, childLocals, `${indent}    `, entry.path));
-      }
+      statements.push(...renderChildYieldStatements(node.children, childLocals, `${indent}    `, path));
       statements.push(`${indent}  } catch {`);
       statements.push(`${indent}    yield ${jsString(errorText)};`);
       statements.push(`${indent}  }`);
@@ -131,9 +142,7 @@ const renderElementYieldStatements = (
     statements.push(
       `${indent}  const ${thenName} = await ${expressionToScopeAccess(attrExpression(node, "value") ?? "undefined", locals)};`,
     );
-    for (const entry of childPathEntries(node.children, path)) {
-      statements.push(...renderNodeYieldStatements(entry.child, childLocals, `${indent}  `, entry.path));
-    }
+    statements.push(...renderChildYieldStatements(node.children, childLocals, `${indent}  `, path));
     statements.push(`${indent}}`);
     return statements;
   }
@@ -149,9 +158,7 @@ const renderElementYieldStatements = (
     );
   }
   statements.push(`${indent}yield ${renderOpenTagExpression(node, locals)};`);
-  for (const entry of childPathEntries(node.children, path)) {
-    statements.push(...renderNodeYieldStatements(entry.child, locals, indent, entry.path));
-  }
+  statements.push(...renderChildYieldStatements(node.children, locals, indent, path));
   if (!isVoidElement(node)) {
     statements.push(`${indent}yield ${jsString(`</${node.tagName}>`)};`);
   }
@@ -201,9 +208,7 @@ const renderComponentYieldStatements = (
   if (children.length === 1) {
     statements.push(...renderNodeYieldStatements(children[0] as TemplateNode, localNames, `${indent}  `, path));
   } else {
-    for (const [index, child] of children.entries()) {
-      statements.push(...renderNodeYieldStatements(child, localNames, `${indent}  `, [...path, index]));
-    }
+    statements.push(...renderChildYieldStatements(children, localNames, `${indent}  `, path));
   }
   statements.push(`${indent}}`);
   return statements;
