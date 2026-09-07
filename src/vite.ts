@@ -59,6 +59,12 @@ export type TachyonDomRoutesViteOptions = {
 
 export type TachyonAppViteOptions = {
   appScript?: string;
+  /**
+   * `"always"` (the default) puts the client entry on every page. `"when-required"` omits it from pages the
+   * compiler proves need no client work: no client binding, hydration boundary, store, component boundary, or
+   * `<script setup>`. A shared entry's own side effects then do not run on those pages.
+   */
+  clientEntry?: "always" | "when-required";
   htmlWhitespace?: HtmlWhitespacePolicy;
   /** @deprecated Use `htmlWhitespace` instead. */
   minifyHtml?: boolean;
@@ -680,10 +686,11 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
         }
         response.statusCode = 200;
         response.setHeader("Content-Type", "text/html; charset=utf-8");
+        const needsClientEntry = options.clientEntry !== "when-required" || app.requiresClientEntry(page.path);
         response.end(
           app.renderDocument(page.path, {
             assets: {
-              scripts: [options.appScript ?? `${page.assetPrefix ?? "."}/main.ts`],
+              scripts: needsClientEntry ? [options.appScript ?? `${page.assetPrefix ?? "."}/main.ts`] : [],
               styles: [`${page.assetPrefix ?? "."}/styles.css`],
             },
             whitespace: whitespaceFor("development"),
@@ -698,8 +705,9 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
       );
       for (const page of app.pages) {
         const prefix = page.assetPrefix ?? ".";
+        const needsClientEntry = options.clientEntry !== "when-required" || app.requiresClientEntry(page.path);
         const assets: TachyonAppAssets = {
-          scripts: entry && entry.type === "chunk" ? [prefixed(prefix, entry.fileName)] : [],
+          scripts: entry && entry.type === "chunk" && needsClientEntry ? [prefixed(prefix, entry.fileName)] : [],
           styles: cssFiles.map((fileName) => prefixed(prefix, fileName)),
         };
         this.emitFile({

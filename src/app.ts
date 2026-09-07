@@ -84,6 +84,8 @@ export type TachyonAppRenderResult = {
 export type TachyonApp = {
   pages: readonly TachyonAppPage[];
   pageForPath: (path: string) => TachyonAppPage | undefined;
+  /** Whether the page at `path` needs a client entry; unknown paths report `true`. */
+  requiresClientEntry: (path: string) => boolean;
   renderRoute: (path: string) => string;
   renderShell: (path: string) => string;
   renderDocument: (path: string, options?: TachyonAppDocumentOptions) => string;
@@ -144,12 +146,32 @@ export const minifyHtml = normalizeHtmlTagWhitespace;
 const templateSource = (template: string | TypedTemplate<TemplateScope>): string =>
   typeof template === "string" ? template : template.source;
 
-const compilePage = (page: TachyonAppPage, templateWhitespace: TemplateWhitespacePolicy): CompiledTemplate => {
+const compileSfc = (page: TachyonAppPage, templateWhitespace: TemplateWhitespacePolicy) => {
   const result = compileTachyonSfc(templateSource(page.template), { whitespace: templateWhitespace });
   if (!result.ok) {
     throw new Error(result.error.message);
   }
-  return result.value.template;
+  return result.value;
+};
+
+const compilePage = (page: TachyonAppPage, templateWhitespace: TemplateWhitespacePolicy): CompiledTemplate =>
+  compileSfc(page, templateWhitespace).template;
+
+/**
+ * Whether a page needs a client entry at all. Everything that could reach the client counts: any remaining
+ * client binding, hydration boundary, store, or component boundary, and any `<script setup>`, whose statements
+ * the compiler does not prove side-effect free. Only a page with none of them is served without one.
+ */
+const pageRequiresClientEntry = (page: TachyonAppPage, templateWhitespace: TemplateWhitespacePolicy): boolean => {
+  const compiled = compileSfc(page, templateWhitespace);
+  const { client } = compiled.template;
+  return (
+    compiled.descriptor.script !== undefined ||
+    client.bindings.length > 0 ||
+    client.hydrationBoundaries.length > 0 ||
+    client.stores.length > 0 ||
+    client.components.length > 0
+  );
 };
 
 const compilePageRenderer = (
@@ -297,9 +319,15 @@ export const defineApp = <const Pages extends readonly TachyonAppPage<any>[]>(
     return { status: 404, html: documentFor(fallbackPage, routeHtml, options, fallback?.assets) };
   };
 
+  const requiresClientEntry = (path: string): boolean => {
+    const page = pageForPath(path);
+    return page ? pageRequiresClientEntry(page, definition.templateWhitespace ?? "preserve") : true;
+  };
+
   return {
     pages,
     pageForPath,
+    requiresClientEntry,
     renderDocument,
     renderResponse,
     renderRoute,
