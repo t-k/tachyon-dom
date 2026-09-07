@@ -371,6 +371,86 @@ describe("client mount entrypoints", () => {
     expect(cleanups).toBe(0);
   });
 
+  it("rejects a conditional whose static sibling derives its class from a class directive", () => {
+    const compiled = compileTemplate(
+      `<main><if test={visible}><p class="active" title="static">{left}</p></if><p class:active={active} title="static">{tail}</p></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    expect(compiled.value.client.hydrationDynamicRegionErrors).toHaveLength(1);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      visible: false,
+      active: false,
+      left: "branch",
+      tail: "static",
+    });
+    const before = root.innerHTML;
+    const staticSibling = root.querySelector("main > p");
+    let owners = 0;
+    let effects = 0;
+    let subscriptions = 0;
+    let cleanups = 0;
+    const restoreHooks = setRuntimeLifecycleHooks({
+      ownerCreated: () => owners++,
+      effectCreated: () => effects++,
+      subscriptionChanged: (delta) => (subscriptions += delta),
+      cleanupChanged: (delta) => (cleanups += delta),
+    });
+    try {
+      const result = hydrate(root, module, {
+        visible: createSignal(false),
+        active: createSignal(true),
+        left: createSignal("client branch"),
+        tail: createSignal("client static"),
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Class directive conditional shape overlap unexpectedly hydrated.");
+      expect(result.error.message).toContain("ambiguous conditional hydration");
+    } finally {
+      restoreHooks();
+    }
+    expect(root.innerHTML).toBe(before);
+    expect(root.querySelector("main > p")).toBe(staticSibling);
+    expect(owners).toBe(0);
+    expect(effects).toBe(0);
+    expect(subscriptions).toBe(0);
+    expect(cleanups).toBe(0);
+  });
+
+  it("hydrates a class-directive sibling when its generated token is distinct", () => {
+    const compiled = compileTemplate(
+      `<main><if test={visible}><p class="active">{left}</p></if><p class:other={active}>{tail}</p></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    expect(compiled.value.client.hydrationDynamicRegionErrors).toHaveLength(0);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      visible: false,
+      active: false,
+      left: "branch",
+      tail: "static",
+    });
+    const staticSibling = root.querySelector("main > p");
+    const visible = createSignal(false);
+    const active = createSignal(false);
+    const tail = createSignal("client static");
+
+    const result = hydrate(root, module, { visible, active, tail });
+
+    expect(result.ok).toBe(true);
+    expect(root.querySelector("main > p")).toBe(staticSibling);
+    expect(staticSibling?.className).toBe("");
+    expect(staticSibling?.textContent).toBe("client static");
+    tail.set("updated static");
+    expect(staticSibling?.textContent).toBe("updated static");
+    active.set(true);
+    expect(staticSibling?.className).toBe("other");
+    if (result.ok) result.value.dispose();
+  });
+
   it("hydrates a dynamic conditional root attribute when its sibling shape is distinct", () => {
     const compiled = compileTemplate(
       `<main><if test={visible}><p title={title} class:active={active}>{label}</p></if><footer>{tail}</footer></main>`,

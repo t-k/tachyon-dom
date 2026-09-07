@@ -192,6 +192,12 @@ test("runs generated adjacent conditional mount and SSR hydration regressions in
       staticPreserved: true,
       message: expect.stringContaining("dynamic attribute shape overlaps"),
     },
+    {
+      ok: false,
+      unchanged: true,
+      staticPreserved: true,
+      message: expect.stringContaining("dynamic attribute shape overlaps"),
+    },
   ]);
   expect(result.dynamicAttributes).toEqual({ ok: true, identity: true, titleUpdated: true, classToggled: true });
   expect(result.componentSplit.ok).toBe(false);

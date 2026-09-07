@@ -1436,6 +1436,80 @@ describe("HTML-first compiler", () => {
     expect(result.value.client.hydrationDynamicRegionErrors[0]).toContain("dynamic attribute shape overlaps");
   });
 
+  it.each([
+    [
+      `<main><if test={visible}><p class="active" title="static">{left}</p></if><p class:active={active} title="static">{tail}</p></main>`,
+      1,
+    ],
+    [
+      `<main><if test={visible}><p class="base active">{left}</p></if><p class="base" class:active={active}>{tail}</p></main>`,
+      1,
+    ],
+    [`<main><if test={visible}><p class="active">{left}</p></if><p class:other={active}>{tail}</p></main>`, 0],
+    [`<main><if test={visible}><p style="color:red">{left}</p></if><p style:color={color}>{tail}</p></main>`, 1],
+    [`<main><if test={visible}><p style="color:red">{left}</p></if><p style:background={color}>{tail}</p></main>`, 0],
+    [
+      `<main><if test={visible}><p style="color:red">{left}</p></if><p style="color:blue" style:color={color}>{tail}</p></main>`,
+      1,
+    ],
+    [
+      `<main><if test={visible}><p class="base active">{left}</p></if><p class:base={active} class:active={active}>{tail}</p></main>`,
+      1,
+    ],
+    [`<main><if test={visible}><p class="base active">{left}</p></if><p class:base={active}>{tail}</p></main>`, 0],
+    [
+      `<main><if test={visible}><p class="base active">{left}</p></if><p class="base extra" class:active={active}>{tail}</p></main>`,
+      0,
+    ],
+    [
+      `<main><if test={visible}><p style="color:red;background:blue">{left}</p></if><p style:color={color} style:background={background}>{tail}</p></main>`,
+      1,
+    ],
+    [
+      `<main><if test={visible}><p style="color:red;background:blue">{left}</p></if><p style:color={color}>{tail}</p></main>`,
+      0,
+    ],
+    [
+      `<main><if test={visible}><p style="color:red;background:blue">{left}</p></if><p style="color:green" style:background={background}>{tail}</p></main>`,
+      0,
+    ],
+    [
+      `<main><if test={visible}><p style="color:red;background:blue">{left}</p></if><p style="color:red" style:background={background}>{tail}</p></main>`,
+      1,
+    ],
+    [`<main><if test={visible}><p class="active ">{left}</p></if><p class:active={active}>{tail}</p></main>`, 1],
+    [
+      `<main><if test={visible}><section><span>{left}</span><span class="active">{left}</span></section></if><section><span>{tail}</span><span class:active={active}>{tail}</span></section></main>`,
+      1,
+    ],
+    [
+      `<main><if test={visible}><section><span>{left}</span></section></if><section><span class:active={active}>{tail}</span><span>{tail}</span></section></main>`,
+      0,
+    ],
+    [
+      `<main><if test={visible}><section><span class="wrong">{left}</span><span class="active">{left}</span></section></if><section><span class="different">{tail}</span><span class:active={active}>{tail}</span></section></main>`,
+      0,
+    ],
+    [
+      `<main><if test={visible}><p class="label active" data-label="foo">{left}</p></if><p class:active={active} data-label="foo">{tail}</p></main>`,
+      0,
+    ],
+    [
+      `<main><if test={visible}><p class="active">{left}</p><span>{left}</span></if><p class:active={active}>{tail}</p></main>`,
+      0,
+    ],
+    [
+      `<main><if test={visible}><p style="color: red; background: blue">{left}</p></if><p style="color: red" style:background={background}>{tail}</p></main>`,
+      1,
+    ],
+  ])("matches generated class and style attributes against conditional siblings %#", (source, expectedErrors) => {
+    const result = compileTemplate(source);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.client.hydrationDynamicRegionErrors).toHaveLength(expectedErrors);
+  });
+
   it("applies list path correction only after a static prefix and composes it with conditional paths", () => {
     const withSiblings = compileTemplate(
       `<main><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,

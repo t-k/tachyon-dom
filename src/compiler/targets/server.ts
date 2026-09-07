@@ -62,10 +62,11 @@ const renderChildren = (
   path: readonly number[],
 ): string =>
   childPathEntries(children, path)
-    .map((entry, index) =>
-      `${renderNode(entry.child, scope, entry.path)}${
-        transparentListRootFor(entry.child) && listNeedsBoundaryMarker(children, index) ? listBoundaryMarker : ""
-      }`,
+    .map(
+      (entry, index) =>
+        `${renderNode(entry.child, scope, entry.path)}${
+          transparentListRootFor(entry.child) && listNeedsBoundaryMarker(children, index) ? listBoundaryMarker : ""
+        }`,
     )
     .join("");
 
@@ -77,8 +78,7 @@ const renderChildExpressions = (
   childPathEntries(children, path)
     .map((entry, index) => {
       const marker =
-        transparentListRootFor(entry.child) &&
-        listNeedsBoundaryMarker(children, index)
+        transparentListRootFor(entry.child) && listNeedsBoundaryMarker(children, index)
           ? ` + ${jsString(listBoundaryMarker)}`
           : "";
       return `${renderNodeExpression(entry.child, locals, entry.path)}${marker}`;
@@ -161,9 +161,7 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
     return renderFor(node, scope, path);
   }
   if (node.tagName === "if") {
-    return readPath(scope, attrExpression(node, "test") ?? "false")
-      ? renderChildren(node.children, scope, path)
-      : "";
+    return readPath(scope, attrExpression(node, "test") ?? "false") ? renderChildren(node.children, scope, path) : "";
   }
   if (node.tagName === "store") {
     return "";
@@ -440,9 +438,7 @@ const renderElementExpression = (
     const thenName = attrString(node, "then") ?? "value";
     const childLocals = new Set(locals);
     childLocals.add(thenName);
-    const childExpression = childPathEntries(node.children, path)
-      .map((entry) => renderNodeExpression(entry.child, childLocals, entry.path))
-      .join(" + ");
+    const childExpression = renderChildExpressions(node.children, childLocals, path);
     return `(((${thenName}) => ${childExpression || `""`})(${value}))`;
   }
 

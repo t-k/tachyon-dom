@@ -95,6 +95,7 @@ const hydrationShapeForNode = (node: TemplateNode): string => {
 type HydrationDirectChild = {
   kind: "static" | "list" | "conditional";
   shape: string;
+  node: TemplateNode;
 };
 
 const hydrationDirectChildren = (children: readonly TemplateNode[]): HydrationDirectChild[] =>
@@ -103,16 +104,24 @@ const hydrationDirectChildren = (children: readonly TemplateNode[]): HydrationDi
       const renderable = renderableChildren(child);
       return renderable.length === 1
         ? hydrationDirectChildren(renderable)
-        : [{ kind: "static", shape: hydrationShapeForNode(child) }];
+        : [{ kind: "static", shape: hydrationShapeForNode(child), node: child }];
     }
     if (child.type === "element" && child.tagName === "if") {
-      return [{ kind: "conditional", shape: hydrationShapeForRegion(child.children) }];
+      return [{ kind: "conditional", shape: hydrationShapeForRegion(child.children), node: child }];
     }
     if (child.type === "element" && child.tagName === "for") {
-      return [{ kind: "list", shape: hydrationShapeForRegion(child.children) }];
+      return [{ kind: "list", shape: hydrationShapeForRegion(child.children), node: child }];
     }
-    return [{ kind: "static", shape: hydrationShapeForNode(child) }];
+    return [{ kind: "static", shape: hydrationShapeForNode(child), node: child }];
   });
+
+const hasGeneratedHydrationAttribute = (node: TemplateNode): boolean =>
+  node.type === "element" &&
+  (node.attrs.some(({ name }) => {
+    const normalizedName = name.toLowerCase();
+    return normalizedName.startsWith("class:") || normalizedName.startsWith("style:");
+  }) ||
+    node.children.some(hasGeneratedHydrationAttribute));
 
 const recordHydrationDynamicRegionErrors = (
   node: ElementNode,
@@ -130,13 +139,28 @@ const recordHydrationDynamicRegionErrors = (
   }
   for (const [index, child] of children.entries()) {
     if (child.kind !== "conditional" || child.shape.length === 0) continue;
-    const hasAmbiguousSibling = children.some(
+    const hasAmbiguousShapeSibling = children.some(
       (sibling, siblingIndex) => siblingIndex !== index && sibling.shape === child.shape && sibling.shape.length > 0,
     );
-    if (!hasAmbiguousSibling) continue;
+    const hasGeneratedAttributeSibling = children.some((sibling, siblingIndex) => {
+      if (siblingIndex === index || !hasGeneratedHydrationAttribute(sibling.node)) return false;
+      if (child.node.type !== "element" || child.node.tagName !== "if") return false;
+      const expectedChildren = matcherChildren(child.node.children);
+      const actualChildren = matcherChildren([sibling.node]);
+      return (
+        expectedChildren.length === actualChildren.length &&
+        expectedChildren.every((expectedChild, childIndex) =>
+          conditionalShapeMayAdopt(expectedChild, actualChildren[childIndex] as TemplateNode, [], []),
+        )
+      );
+    });
+    if (!hasAmbiguousShapeSibling && !hasGeneratedAttributeSibling) continue;
     const label = path.length === 0 ? "root" : `root.${path.join(".")}`;
+    const reason = hasGeneratedAttributeSibling
+      ? "its dynamic attribute shape overlaps another sibling."
+      : "its client shape is shared by another sibling.";
     context.hydrationDynamicRegionErrors.push(
-      `Hydration cannot safely adopt an ambiguous conditional hydration region at ${label}: its client shape is shared by another sibling.`,
+      `Hydration cannot safely adopt an ambiguous conditional hydration region at ${label}: ${reason}`,
     );
     return;
   }
@@ -922,6 +946,11 @@ const matcherChildren = (children: readonly TemplateNode[]): TemplateNode[] =>
 const matcherAttributeFor = (node: ElementNode, name: string): { name: string; value: string | true } | undefined =>
   node.attrs.find((attribute) => attribute.name.toLowerCase() === name.toLowerCase());
 
+const matcherGeneratedAttributesFor = (node: ElementNode, name: string): { name: string; value: string | true }[] => {
+  const prefix = name.toLowerCase() === "class" ? "class:" : name.toLowerCase() === "style" ? "style:" : "";
+  return prefix.length === 0 ? [] : node.attrs.filter((attribute) => attribute.name.toLowerCase().startsWith(prefix));
+};
+
 const matcherAttributeAllowed = (
   dynamicAttributes:
     | readonly ReturnType<typeof conditionalDynamicAttributes>[number][]
@@ -944,6 +973,59 @@ const matcherStaticAttributeValue = (value: string | true): string => (value ===
 
 const matcherTokens = (value: string): Set<string> => new Set(value.split(/\s+/).filter(Boolean));
 
+const matcherStyleProperties = (value: string | true): Map<string, string> =>
+  new Map(
+    matcherStaticAttributeValue(value)
+      .split(";")
+      .flatMap((part) => {
+        const separator = part.indexOf(":");
+        if (separator < 1) return [];
+        const name = part.slice(0, separator).trim().toLowerCase();
+        return name.length > 0 ? [[name, part.slice(separator + 1).trim()] as const] : [];
+      }),
+  );
+
+const matcherGeneratedAttributeMayOverlap = (
+  expected: { name: string; value: string | true },
+  actual: ElementNode,
+  dynamicAttribute: { kind?: "value" | "token" } | undefined,
+): boolean | undefined => {
+  const name = expected.name.toLowerCase();
+  const generated = matcherGeneratedAttributesFor(actual, name);
+  if (generated.length === 0) return undefined;
+  if (dynamicAttribute?.kind === "token" && name === "class") return true;
+  if (dynamicAttribute && name === "style") return true;
+
+  if (name === "class") {
+    const expectedTokens = matcherTokens(matcherStaticAttributeValue(expected.value));
+    const staticAttribute = matcherAttributeFor(actual, name);
+    const staticTokens = staticAttribute
+      ? matcherTokens(matcherStaticAttributeValue(staticAttribute.value))
+      : new Set<string>();
+    const generatedTokens = matcherTokens(generated.map((attribute) => attribute.name.slice(6)).join(" "));
+    if (Array.from(staticTokens).some((token) => !expectedTokens.has(token))) return false;
+    return Array.from(expectedTokens).every((token) => staticTokens.has(token) || generatedTokens.has(token));
+  }
+
+  if (name === "style") {
+    const expectedProperties = matcherStyleProperties(expected.value);
+    const staticAttribute = matcherAttributeFor(actual, name);
+    const staticProperties = staticAttribute
+      ? matcherStyleProperties(staticAttribute.value)
+      : new Map<string, string>();
+    const generatedProperties = new Set(generated.map((attribute) => attribute.name.slice(6).toLowerCase()));
+    for (const [property, value] of staticProperties) {
+      if (generatedProperties.has(property)) continue;
+      if (expectedProperties.get(property) !== value) return false;
+    }
+    return Array.from(expectedProperties.keys()).every(
+      (property) => staticProperties.has(property) || generatedProperties.has(property),
+    );
+  }
+
+  return undefined;
+};
+
 const conditionalShapeMayAdopt = (
   expected: TemplateNode,
   actual: TemplateNode,
@@ -957,10 +1039,15 @@ const conditionalShapeMayAdopt = (
 
   for (const expectedAttribute of expected.attrs) {
     if (matcherAttributeIsIgnored(expectedAttribute)) continue;
+    const dynamicAttribute = matcherAttributeAllowed(dynamicAttributes, path, expectedAttribute.name);
+    const generatedOverlap = matcherGeneratedAttributeMayOverlap(expectedAttribute, actual, dynamicAttribute);
+    if (generatedOverlap !== undefined) {
+      if (!generatedOverlap) return false;
+      continue;
+    }
     const actualAttribute = matcherAttributeFor(actual, expectedAttribute.name);
     if (!actualAttribute) return false;
     if (matcherAttributeIsIgnored(actualAttribute)) continue;
-    const dynamicAttribute = matcherAttributeAllowed(dynamicAttributes, path, expectedAttribute.name);
     if (
       !dynamicAttribute &&
       matcherStaticAttributeValue(actualAttribute.value) !== matcherStaticAttributeValue(expectedAttribute.value)
@@ -973,6 +1060,13 @@ const conditionalShapeMayAdopt = (
     if (matcherAttributeFor(expected, actualAttribute.name)) {
       const expectedAttribute = matcherAttributeFor(expected, actualAttribute.name);
       const dynamicAttribute = matcherAttributeAllowed(dynamicAttributes, path, actualAttribute.name);
+      const generatedOverlap = expectedAttribute
+        ? matcherGeneratedAttributeMayOverlap(expectedAttribute, actual, dynamicAttribute)
+        : undefined;
+      if (generatedOverlap !== undefined) {
+        if (!generatedOverlap) return false;
+        continue;
+      }
       if (dynamicAttribute?.kind === "token" && actualAttribute.name.toLowerCase() === "class" && expectedAttribute) {
         const expectedTokens = matcherTokens(matcherStaticAttributeValue(expectedAttribute.value));
         const actualTokens = matcherTokens(matcherStaticAttributeValue(actualAttribute.value));
@@ -1250,9 +1344,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         ? [`mountGeneratedTextKeyedListWithBoundary as ${runtimeNames.mountTextKeyedListWithBoundary}`]
         : []),
     ];
-    lines.push(
-      `import { ${textListImports.join(", ")} } from "tachyon-dom/runtime/list-text";`,
-    );
+    lines.push(`import { ${textListImports.join(", ")} } from "tachyon-dom/runtime/list-text";`);
   }
   if (needsConditional) {
     if (needsConditionalCore) {

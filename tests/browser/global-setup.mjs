@@ -172,17 +172,30 @@ export const runConditionalShapeCase = () => {
     };
   });
   const dynamicShapeModules = [
-    `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
-    `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
-    `<main><if test={visible}><p title={title}>{left}</p></if><p title="static" on:click={save}>{tail}</p></main>`,
-  ].map((shapeSource, index) => {
+    {
+      source: `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
+      active: false,
+    },
+    {
+      source: `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
+      active: false,
+    },
+    {
+      source: `<main><if test={visible}><p title={title}>{left}</p></if><p title="static" on:click={save}>{tail}</p></main>`,
+      active: false,
+    },
+    {
+      source: `<main><if test={visible}><p class="active" title="static">{left}</p></if><p class:active={active} title="static">{tail}</p></main>`,
+      active: true,
+    },
+  ].map(({ source: shapeSource, active: serverActive }, index) => {
     const shapeCompiled = compileTemplate(shapeSource);
     if (!shapeCompiled.ok) throw new Error(shapeCompiled.error.message);
     const shapeGenerated = generateClientModule(shapeCompiled.value, { reactive: true, instrumentBindings: false });
     const shapeMarkup = renderServerTemplate(shapeCompiled.value, {
       visible: false,
       title: "server branch",
-      active: false,
+      active: serverActive,
       left: "SSR branch",
       tail: "SSR static",
       save: () => undefined,
@@ -202,7 +215,7 @@ export const runDynamicShapeCase = () => {
   const result = hydrate(root, clientModule, {
     visible: createSignal(false),
     title: createSignal("client branch"),
-    active: createSignal(false),
+    active: createSignal(${serverActive}),
     left: createSignal("client branch"),
     tail: createSignal("client static"),
     save: () => undefined,
@@ -680,7 +693,7 @@ window.runConditionalFollowup = () => {
     hydrate: hydrateResult,
     sharedParent: { before: runSharedParentBefore(), after: runSharedParentAfter() },
     conditionalShapes: [runConditionalShape0(), runConditionalShape1()],
-    dynamicShapes: [runDynamicShape0(), runDynamicShape1(), runDynamicShape2()],
+    dynamicShapes: [${dynamicShapeModules.map((_, index) => `runDynamicShape${index}()`).join(", ")}],
     dynamicAttributes: runDynamicAttributeCase(),
     componentSplit: runComponentSplitCase(),
     listFooter: runListFooterCase(),

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { compileTemplate, generateServerStreamModule } from "../src/compiler";
+import {
+  compileTemplate,
+  generateServerModule,
+  generateServerStreamModule,
+  renderServerTemplate,
+} from "../src/compiler";
 import { renderToReadableStream, renderToResponse } from "../src/server/stream";
 
 const readStream = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
@@ -125,9 +130,7 @@ describe("server stream adapter", () => {
   });
 
   it("keeps a text-only list boundary in generated stream output", async () => {
-    const result = compileTemplate(
-      `<main>{head}<for each={rows} key={row.id}><p>{row.label}</p></for>{tail}</main>`,
-    );
+    const result = compileTemplate(`<main>{head}<for each={rows} key={row.id}><p>{row.label}</p></for>{tail}</main>`);
     if (!result.ok) throw new Error(result.error.message);
     const module = generateServerStreamModule(result.value).replace("export const stream", "const stream");
     const stream = new Function(`${module}; return stream;`)() as (
@@ -140,6 +143,30 @@ describe("server stream adapter", () => {
     }
 
     expect(chunks.join("").replaceAll("<!---->", "")).toBe(`<main>H<p>A</p><!--tachyon-list-->F</main>`);
+  });
+
+  it.each([0, 1, 2])("keeps a list boundary in generated synchronous SSR inside await for %i rows", async (count) => {
+    const result = compileTemplate(
+      `<main><await value={rows} then="resolved"><for each={resolved} key={row.id}><p>{row.label}</p></for>{tail}</await></main>`,
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    const server = await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerModule(result.value)).toString("base64")}`
+    );
+    const streamServer = await import(
+      `data:text/javascript;base64,${Buffer.from(generateServerStreamModule(result.value)).toString("base64")}`
+    );
+    const rows = Array.from({ length: count }, (_, index) => ({ id: index, label: `R${index}` }));
+    const scope = { rows, tail: "F" };
+    const generated = server.render(scope);
+    const direct = renderServerTemplate(result.value, scope);
+    let streamed = "";
+    for await (const chunk of streamServer.stream(scope)) streamed += chunk;
+
+    expect(generated).toBe(direct);
+    expect(streamed).toBe(direct);
+    expect(generated.match(/<!--tachyon-list-->/g)).toHaveLength(1);
+    expect(generated.indexOf("<!--tachyon-list-->")).toBeLessThan(generated.indexOf("F"));
   });
 
   it("flushes generated stream chunks at the byte threshold even without await boundaries", async () => {
