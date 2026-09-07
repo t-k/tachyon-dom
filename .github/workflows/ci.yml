@@ -9,8 +9,78 @@ on:
 
 permissions: {}
 
+# Every gate is its own job, and no job waits for another: a bundle size that drifts by a few bytes has to
+# report as one failing job, not stop the run before the tests behind it say anything.
 jobs:
+  verify:
+    name: Lint, types, and package contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
+      - run: pnpm build
+
+      - run: pnpm check:template-types
+
+      - run: pnpm verify:url-policy-codegen
+
+      - run: pnpm verify:package
+
+      - run: pnpm verify:clean-consumer
+
+      - run: pnpm verify:starters
+
+      - run: pnpm check:exports
+
+      - run: pnpm check:size
+
+      - run: pnpm verify:whitespace-types
+
   test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          run_install: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The production-hydration and example end-to-end tests drive Chromium from Vitest.
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - run: pnpm build
+
+      - run: pnpm test
+
+  browser:
+    name: Browser tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -31,23 +101,31 @@ jobs:
 
       - run: pnpm exec playwright install --with-deps chromium firefox webkit
 
-      - run: pnpm lint
-
       - run: pnpm build
 
-      - run: pnpm check:template-types
+      - run: pnpm test:browser
 
-      - run: pnpm verify:url-policy-codegen
+  sizes:
+    name: Bundle sizes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - run: pnpm verify:package
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          run_install: false
 
-      - run: pnpm verify:clean-consumer
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
 
-      - run: pnpm verify:starters
+      - run: pnpm install --frozen-lockfile
 
-      - run: pnpm check:exports
-
-      - run: pnpm check:size
+      - run: pnpm build
 
       - run: pnpm check:browser-entry
 
@@ -65,11 +143,29 @@ jobs:
 
       - run: pnpm check:quick-example-size
 
-      - run: pnpm verify:whitespace-types
+  benchmark:
+    name: Local comparison smoke
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - run: pnpm test
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          run_install: false
 
-      - run: pnpm test:browser
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - run: pnpm build
 
       - run: pnpm bench:local:smoke
-        if: github.event_name == 'workflow_dispatch'
