@@ -1548,6 +1548,16 @@ describe("HTML-first compiler", () => {
     );
   });
 
+  it("requires every child in a generated-attribute sibling shape to match", () => {
+    const result = compileTemplate(
+      `<main><if test={visible}><section><span>{left}</span><span class="wrong">{left}</span></section></if><section><span>{tail}</span><span class:active={active}>{tail}</span></section></main>`,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(result.value.client.hydrationDynamicRegionErrors).toHaveLength(0);
+  });
+
   it("applies list path correction only after a static prefix and composes it with conditional paths", () => {
     const withSiblings = compileTemplate(
       `<main><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
