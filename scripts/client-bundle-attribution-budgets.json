@@ -16,15 +16,15 @@
     "maxBrotliBytes": 815
   },
   "text-only-list": {
-    "maxMinifiedBytes": 13155,
-    "maxBrotliBytes": 4773
+    "maxMinifiedBytes": 13281,
+    "maxBrotliBytes": 4774
   },
   "minimal-if": {
     "maxMinifiedBytes": 16515,
     "maxBrotliBytes": 5589
   },
   "composite-quick-example": {
-    "maxMinifiedBytes": 13934,
-    "maxBrotliBytes": 4993
+    "maxMinifiedBytes": 14060,
+    "maxBrotliBytes": 4985
   }
 }

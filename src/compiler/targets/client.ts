@@ -2065,7 +2065,7 @@ const parentScopeKeysField = (binding: ListBinding): string[] => {
  * Value bindings and row listeners for the generated list adapter. Each binding carries the setter it needs, so
  * the adapter module never imports the class, attribute, or event runtimes itself.
  */
-const generatedRowBindingFields = (binding: ListBinding, aliases: ReadonlyMap<string, string>): string[] => {
+const generatedRowBindingFields = (binding: ListBinding): string[] => {
   const values = binding.bindings.filter((child) => child.kind !== "event");
   const events = binding.bindings.filter((child) => child.kind === "event");
   const serializeValue = (child: (typeof values)[number]): string => {
@@ -2125,7 +2125,7 @@ const emitListBinding = (
     `    scope: ${sourceName},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     ...(isTextOnlyList(binding)
-      ? generatedRowBindingFields(binding, aliases)
+      ? generatedRowBindingFields(binding)
       : [`    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`]),
     `  };`,
   ].join("\n");
