@@ -1,9 +1,30 @@
 {
-  "static": { "maxMinifiedBytes": 1385, "maxBrotliBytes": 598 },
-  "signal-only": { "maxMinifiedBytes": 968, "maxBrotliBytes": 512 },
-  "reactive-text": { "maxMinifiedBytes": 4637, "maxBrotliBytes": 1754 },
-  "event-only": { "maxMinifiedBytes": 1859, "maxBrotliBytes": 815 },
-  "text-only-list": { "maxMinifiedBytes": 12491, "maxBrotliBytes": 4535 },
-  "minimal-if": { "maxMinifiedBytes": 16468, "maxBrotliBytes": 5548 },
-  "composite-quick-example": { "maxMinifiedBytes": 13269, "maxBrotliBytes": 4760 }
+  "static": {
+    "maxMinifiedBytes": 1385,
+    "maxBrotliBytes": 598
+  },
+  "signal-only": {
+    "maxMinifiedBytes": 968,
+    "maxBrotliBytes": 512
+  },
+  "reactive-text": {
+    "maxMinifiedBytes": 4637,
+    "maxBrotliBytes": 1754
+  },
+  "event-only": {
+    "maxMinifiedBytes": 1859,
+    "maxBrotliBytes": 815
+  },
+  "text-only-list": {
+    "maxMinifiedBytes": 12601,
+    "maxBrotliBytes": 4597
+  },
+  "minimal-if": {
+    "maxMinifiedBytes": 16381,
+    "maxBrotliBytes": 5528
+  },
+  "composite-quick-example": {
+    "maxMinifiedBytes": 13379,
+    "maxBrotliBytes": 4818
+  }
 }

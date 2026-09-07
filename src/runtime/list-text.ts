@@ -73,14 +73,19 @@ type RowRecord = {
   lastValues: unknown[];
   item: unknown;
   index: number;
-  sourceScope: Record<string, unknown> | undefined;
-  sourceScopeSnapshot: Map<string, unknown>;
+  appliedParentScope: ParentScopeSnapshot;
   revision: Signal<number>;
+};
+
+type ParentScopeSnapshot = {
+  scope: Record<string, unknown> | undefined;
+  values: ReadonlyMap<string, unknown>;
 };
 
 type ListState = {
   signature: string;
   options: TextKeyedListRuntimeOptions;
+  parentScope: ParentScopeSnapshot;
   records: Map<PropertyKey, RowRecord>;
   template: HTMLTemplateElement;
   elementIndices: number[];
@@ -105,15 +110,31 @@ const readPath = (scope: Record<string, unknown>, expression: string): unknown =
   return current;
 };
 
-const sourceScopeSnapshotFor = (scope: Record<string, unknown> | undefined): Map<string, unknown> =>
+const parentScopeValuesFor = (scope: Record<string, unknown> | undefined): Map<string, unknown> =>
   new Map(scope ? Object.keys(scope).map((key) => [key, scope[key]] as const) : []);
 
-const sourceScopeChanged = (previous: ReadonlyMap<string, unknown>, next: ReadonlyMap<string, unknown>): boolean => {
-  if (previous.size !== next.size) return true;
-  for (const [key, value] of previous) {
-    if (!next.has(key) || !Object.is(next.get(key), value)) return true;
+const emptyParentScope: ParentScopeSnapshot = { scope: undefined, values: new Map() };
+
+/**
+ * Compares the parent scope once per list update and shares one snapshot with every row. The comparison reads
+ * the live scope instead of a fresh copy, so an update that changes nothing reads each parent key once for the
+ * whole list rather than once per row, and allocates no map at all. Rows detect a change by snapshot identity.
+ */
+const syncParentScope = (
+  state: { parentScope: ParentScopeSnapshot },
+  scope: Record<string, unknown> | undefined,
+): ParentScopeSnapshot => {
+  const previous = state.parentScope;
+  const keys = scope ? Object.keys(scope) : [];
+  if (
+    previous.scope === scope &&
+    keys.length === previous.values.size &&
+    keys.every((key) => previous.values.has(key) && Object.is(previous.values.get(key), scope?.[key]))
+  ) {
+    return previous;
   }
-  return false;
+  state.parentScope = { scope, values: parentScopeValuesFor(scope) };
+  return state.parentScope;
 };
 
 const readItemPath = (item: unknown, expression: string, itemName: string): unknown => {
@@ -250,6 +271,7 @@ const getListState = (container: Element, options: TextKeyedListRuntimeOptions):
   const next: ListState = {
     signature,
     options,
+    parentScope: emptyParentScope,
     records: new Map(),
     template,
     elementIndices: Array.from(template.content.childNodes).flatMap((node, index) =>
@@ -310,6 +332,7 @@ const createRecord = (
   key: PropertyKey,
   item: unknown,
   options: TextKeyedListRuntimeOptions,
+  parentScope: ParentScopeSnapshot,
   existingElements?: readonly Element[],
   index = 0,
 ): RowRecord | undefined => {
@@ -331,26 +354,32 @@ const createRecord = (
     lastValues: [],
     item,
     index,
-    sourceScope: options.scope,
-    sourceScopeSnapshot: sourceScopeSnapshotFor(options.scope),
+    appliedParentScope: parentScope,
     revision: createSignal(0),
   };
   bindRow(record, options);
   return record;
 };
 
-const updateRecord = (record: RowRecord, item: unknown, index: number, options: TextKeyedListRuntimeOptions): void => {
-  const nextSourceScopeSnapshot = sourceScopeSnapshotFor(options.scope);
-  const scopeChanged =
-    record.sourceScope !== options.scope || sourceScopeChanged(record.sourceScopeSnapshot, nextSourceScopeSnapshot);
-  for (const key of record.sourceScopeSnapshot.keys()) {
-    if (!nextSourceScopeSnapshot.has(key) && key !== options.itemName && key !== options.indexName) {
-      record.scope[key] = undefined;
+const updateRecord = (
+  record: RowRecord,
+  item: unknown,
+  index: number,
+  options: TextKeyedListRuntimeOptions,
+  parentScope: ParentScopeSnapshot,
+): void => {
+  const scopeChanged = record.appliedParentScope !== parentScope;
+  if (scopeChanged) {
+    for (const key of record.appliedParentScope.values.keys()) {
+      if (!parentScope.values.has(key) && key !== options.itemName && key !== options.indexName) {
+        record.scope[key] = undefined;
+      }
     }
-  }
-  for (const [key, value] of nextSourceScopeSnapshot) {
-    if (key === options.itemName || key === options.indexName) continue;
-    record.scope[key] = value;
+    for (const [key, value] of parentScope.values) {
+      if (key === options.itemName || key === options.indexName) continue;
+      record.scope[key] = value;
+    }
+    record.appliedParentScope = parentScope;
   }
   record.scope[options.itemName] = item;
   if (options.indexName) record.scope[options.indexName] = index;
@@ -358,8 +387,6 @@ const updateRecord = (record: RowRecord, item: unknown, index: number, options: 
   const indexChanged = record.index !== index;
   record.item = item;
   record.index = index;
-  record.sourceScope = options.scope;
-  record.sourceScopeSnapshot = nextSourceScopeSnapshot;
   if (options.updatePolicy === "reference" && !itemChanged && !indexChanged && !scopeChanged) return;
   record.revision.update((value) => value + 1);
 };
@@ -552,6 +579,7 @@ const mountTextKeyedListResolved = (
     seenKeys.add(key);
     entries.push({ item, index, key });
   }
+  const parentScope = syncParentScope(state, options.scope);
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];
   const createdRecords: RowRecord[] = [];
@@ -573,9 +601,10 @@ const mountTextKeyedListResolved = (
             (entryIndex + 1) * state.elementIndices.length,
           )
         : undefined;
-      const record = existing ?? createRecord(state, entry.key, entry.item, options, adoptable, entry.index);
+      const record =
+        existing ?? createRecord(state, entry.key, entry.item, options, parentScope, adoptable, entry.index);
       if (!record) continue;
-      if (existing) updateRecord(record, entry.item, entry.index, options);
+      if (existing) updateRecord(record, entry.item, entry.index, options, parentScope);
       else createdRecords.push(record);
       nextRecords.set(entry.key, record);
       orderedRecords.push(record);

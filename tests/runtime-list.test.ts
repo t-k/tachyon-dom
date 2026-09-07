@@ -72,6 +72,115 @@ describe("mountKeyedList", () => {
     expect(root.textContent).toBe("B2");
   });
 
+  // The parent scope is compared once per update, not once per row, so a list of R rows reads S parent keys
+  // O(S) times instead of O(R x S).
+  it("reads the parent scope once per update instead of once per row", () => {
+    const root = document.createElement("ul");
+    let reads = 0;
+    const scope: Record<string, unknown> = {};
+    Object.defineProperty(scope, "shared", {
+      enumerable: true,
+      configurable: true,
+      get: () => {
+        reads++;
+        return "S";
+      },
+    });
+    const options = {
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "shared",
+          read: (rowScope: Record<string, unknown>) => rowScope.shared,
+        },
+      ],
+      scope,
+    };
+    const rows = Array.from({ length: 20 }, (_, index) => ({ id: `row-${index}` }));
+
+    mountKeyedList(root, [], rows, options);
+    reads = 0;
+    mountKeyedList(root, [], rows, options);
+
+    expect(reads).toBeLessThanOrEqual(2);
+    expect(root.querySelectorAll("li").length).toBe(20);
+    expect(root.textContent).toBe("S".repeat(20));
+  });
+
+  it("applies parent scope changes to every row and clears removed parent keys", () => {
+    const root = document.createElement("ul");
+    const options = (scope: Record<string, unknown>) => ({
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span><b> </b></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "shared",
+          read: (rowScope: Record<string, unknown>) => rowScope.shared,
+        },
+        {
+          kind: "text" as const,
+          path: [1, 0],
+          expression: "extra",
+          read: (rowScope: Record<string, unknown>) => rowScope.extra,
+        },
+      ],
+      scope,
+    });
+    const rows = [{ id: "a" }, { id: "b" }];
+
+    mountKeyedList(root, [], rows, options({ shared: "S1", extra: "E1" }));
+    expect(root.textContent).toBe("S1E1S1E1");
+
+    mountKeyedList(root, [], rows, options({ shared: "S2", extra: "E1" }));
+    expect(root.textContent).toBe("S2E1S2E1");
+
+    mountKeyedList(root, [], rows, options({ shared: "S2" }));
+    expect(root.textContent).toBe("S2S2");
+
+    mountKeyedList(root, [], [...rows, { id: "c" }], options({ shared: "S3", extra: "E3" }));
+    expect(root.textContent).toBe("S3E3S3E3S3E3");
+  });
+
+  it("keeps row-local names shadowing parent keys of the same name", () => {
+    const root = document.createElement("ul");
+    const options = (scope: Record<string, unknown>) => ({
+      key: "item.id",
+      itemName: "item",
+      indexName: "position",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "label",
+          read: (rowScope: Record<string, unknown>) => rowScope.label,
+        },
+      ],
+      stores: [
+        {
+          name: "label",
+          initial: "item.id",
+          read: (rowScope: Record<string, unknown>) => (rowScope.item as { id: string }).id,
+        },
+      ],
+      scope,
+    });
+    const rows = [{ id: "a" }, { id: "b" }];
+
+    mountKeyedList(root, [], rows, options({ label: "parent", position: "parent-position" }));
+    expect(root.textContent).toBe("ab");
+
+    mountKeyedList(root, [], rows, options({ label: "changed", position: "changed" }));
+    expect(root.textContent).toBe("ab");
+  });
+
   it("skips DOM moves for stable order and appends only new rows", () => {
     const root = document.createElement("ul");
     const options = {

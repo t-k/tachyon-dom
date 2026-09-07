@@ -9,6 +9,84 @@ afterEach(() => {
 });
 
 describe("mountTextKeyedList", () => {
+  // The parent scope is compared once per update, not once per row.
+  it("reads the parent scope once per update instead of once per row", () => {
+    const root = document.createElement("ul");
+    let reads = 0;
+    const scope: Record<string, unknown> = {};
+    Object.defineProperty(scope, "shared", {
+      enumerable: true,
+      configurable: true,
+      get: () => {
+        reads++;
+        return "S";
+      },
+    });
+    const options = {
+      signature: "shared-parent-read-count",
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "row",
+      scope,
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "shared",
+          read: (rowScope: Record<string, unknown>) => rowScope.shared,
+        },
+      ],
+    };
+    const rows = Array.from({ length: 20 }, (_, index) => ({ id: `row-${index}` }));
+
+    mountGeneratedTextKeyedList(root, [], rows, options);
+    reads = 0;
+    mountGeneratedTextKeyedList(root, [], rows, options);
+
+    expect(reads).toBeLessThanOrEqual(2);
+    expect(root.textContent).toBe("S".repeat(20));
+  });
+
+  it("applies parent scope changes to every row and clears removed parent keys", () => {
+    const root = document.createElement("ul");
+    const options = (scope: Record<string, unknown>) => ({
+      signature: "shared-parent-updates",
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "row",
+      scope,
+      templateHtml: `<li><span> </span><b> </b></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "shared",
+          read: (rowScope: Record<string, unknown>) => rowScope.shared,
+        },
+        {
+          kind: "text" as const,
+          path: [1, 0],
+          expression: "extra",
+          read: (rowScope: Record<string, unknown>) => rowScope.extra,
+        },
+      ],
+    });
+    const rows = [{ id: "a" }, { id: "b" }];
+
+    mountGeneratedTextKeyedList(root, [], rows, options({ shared: "S1", extra: "E1" }));
+    expect(root.textContent).toBe("S1E1S1E1");
+
+    mountGeneratedTextKeyedList(root, [], rows, options({ shared: "S2", extra: "E1" }));
+    expect(root.textContent).toBe("S2E1S2E1");
+
+    mountGeneratedTextKeyedList(root, [], rows, options({ shared: "S2" }));
+    expect(root.textContent).toBe("S2S2");
+
+    mountGeneratedTextKeyedList(root, [], [...rows, { id: "c" }], options({ shared: "S3", extra: "E3" }));
+    expect(root.textContent).toBe("S3E3S3E3S3E3");
+  });
+
   it("reconciles compiler-generated rows through the mandatory reader contract", () => {
     const root = document.createElement("ul");
     const options = {
