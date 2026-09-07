@@ -1539,11 +1539,23 @@ describe("HTML-first compiler", () => {
       "its dynamic attribute shape overlaps another sibling.",
     );
 
+    const deeplyNestedConditional = compileTemplate(
+      `<main><section><article><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></article></section></main>`,
+    );
+    if (!deeplyNestedConditional.ok) throw new Error(deeplyNestedConditional.error.message);
+    expect(deeplyNestedConditional.value.client.hydrationDynamicRegionErrors[0]).toContain("at root.0.0:");
+
     const nestedList = compileTemplate(
       `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></section></main>`,
     );
     if (!nestedList.ok) throw new Error(nestedList.error.message);
     expect(nestedList.value.client.hydrationDynamicRegionErrors[0]).toContain("at root.0");
+
+    const deeplyNestedList = compileTemplate(
+      `<main><section><article><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></article></section></main>`,
+    );
+    if (!deeplyNestedList.ok) throw new Error(deeplyNestedList.error.message);
+    expect(deeplyNestedList.value.client.hydrationDynamicRegionErrors[0]).toContain("at root.0.0");
 
     const rootList = compileTemplate(
       `<main><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></main>`,
