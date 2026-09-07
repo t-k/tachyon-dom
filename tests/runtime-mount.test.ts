@@ -272,6 +272,7 @@ describe("client mount entrypoints", () => {
     `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
     `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
     `<main><if test={visible}><p title={title}>{left}</p></if><p title="static" on:click={save}>{tail}</p></main>`,
+    `<main><if test={visible}><p class="active" title={title}>{left}</p></if><p class={classes} class:extra={active} title="static">{tail}</p></main>`,
   ])("rejects dynamic conditional shape overlap before changing a static sibling", (source) => {
     const compiled = compileTemplate(source);
     if (!compiled.ok) throw new Error(compiled.error.message);
@@ -282,6 +283,7 @@ describe("client mount entrypoints", () => {
       visible: false,
       title: "branch title",
       active: false,
+      classes: "active",
       left: "branch",
       tail: "static",
     });
@@ -302,6 +304,7 @@ describe("client mount entrypoints", () => {
         visible: createSignal(false),
         title: createSignal("client title"),
         active: createSignal(false),
+        classes: createSignal("active"),
         left: createSignal("client branch"),
         tail: createSignal("client static"),
         save: () => undefined,

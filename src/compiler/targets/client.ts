@@ -995,10 +995,11 @@ const matcherGeneratedAttributeMayOverlap = (
   if (generated.length === 0) return undefined;
   if (dynamicAttribute?.kind === "token" && name === "class") return true;
   if (dynamicAttribute && name === "style") return true;
+  const staticAttribute = matcherAttributeFor(actual, name);
+  if (staticAttribute && readExpressionAttribute(staticAttribute.value) !== undefined) return true;
 
   if (name === "class") {
     const expectedTokens = matcherTokens(matcherStaticAttributeValue(expected.value));
-    const staticAttribute = matcherAttributeFor(actual, name);
     const staticTokens = staticAttribute
       ? matcherTokens(matcherStaticAttributeValue(staticAttribute.value))
       : new Set<string>();
@@ -1009,7 +1010,6 @@ const matcherGeneratedAttributeMayOverlap = (
 
   if (name === "style") {
     const expectedProperties = matcherStyleProperties(expected.value);
-    const staticAttribute = matcherAttributeFor(actual, name);
     const staticProperties = staticAttribute
       ? matcherStyleProperties(staticAttribute.value)
       : new Map<string, string>();

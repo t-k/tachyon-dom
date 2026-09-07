@@ -188,7 +188,12 @@ export const runConditionalShapeCase = () => {
       source: `<main><if test={visible}><p class="active" title="static">{left}</p></if><p class:active={active} title="static">{tail}</p></main>`,
       active: true,
     },
-  ].map(({ source: shapeSource, active: serverActive }, index) => {
+    {
+      source: `<main><if test={visible}><p class="active" title={title}>{left}</p></if><p class={classes} class:extra={active} title="static">{tail}</p></main>`,
+      active: false,
+      classes: "active",
+    },
+  ].map(({ source: shapeSource, active: serverActive, classes: serverClasses }, index) => {
     const shapeCompiled = compileTemplate(shapeSource);
     if (!shapeCompiled.ok) throw new Error(shapeCompiled.error.message);
     const shapeGenerated = generateClientModule(shapeCompiled.value, { reactive: true, instrumentBindings: false });
@@ -196,6 +201,7 @@ export const runConditionalShapeCase = () => {
       visible: false,
       title: "server branch",
       active: serverActive,
+      classes: serverClasses,
       left: "SSR branch",
       tail: "SSR static",
       save: () => undefined,
@@ -216,6 +222,7 @@ export const runDynamicShapeCase = () => {
     visible: createSignal(false),
     title: createSignal("client branch"),
     active: createSignal(${serverActive}),
+    classes: createSignal(${JSON.stringify(serverClasses)}),
     left: createSignal("client branch"),
     tail: createSignal("client static"),
     save: () => undefined,

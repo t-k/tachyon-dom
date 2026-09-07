@@ -1427,6 +1427,7 @@ describe("HTML-first compiler", () => {
     `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
     `<main><if test={visible}><p title={title}>{left}</p></if><p title="static" on:click={save}>{tail}</p></main>`,
     `<main><if test={visible}><p title="same" class:active={active}>{left}</p></if><p title={title}>{tail}</p></main>`,
+    `<main><if test={visible}><p class="active" title={title}>{left}</p></if><p class={classes} class:extra={active} title="static">{tail}</p></main>`,
   ])("diagnoses dynamic conditional shape overlap with a static sibling", (source) => {
     const result = compileTemplate(source);
 
@@ -1439,6 +1440,10 @@ describe("HTML-first compiler", () => {
   it.each([
     [
       `<main><if test={visible}><p class="active" title="static">{left}</p></if><p class:active={active} title="static">{tail}</p></main>`,
+      1,
+    ],
+    [
+      `<main><if test={visible}><p class="active" title={title}>{left}</p></if><p class={classes} class:extra={active} title="static">{tail}</p></main>`,
       1,
     ],
     [
