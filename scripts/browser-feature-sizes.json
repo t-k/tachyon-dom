@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "provenance": {
-    "commit": "38348dc799ccb24ef72d3bab2fbf836a4a925f27",
+    "commit": "995cfdb025df8fd5b039b86b579732ce47e49c4f",
     "dirty": true,
     "node": "v24.14.0",
     "esbuild": "0.28.1",
@@ -26,9 +26,9 @@
     },
     {
       "name": "runtime/conditional",
-      "inputHash": "921b76465255ee3fc01519a4cc407a4d117390bbc20c98c5f34d4a95354ebc19",
-      "minifiedBytes": 13511,
-      "brotliBytes": 4595
+      "inputHash": "2d9a9d605d5d9a6a167b35ceeb878469ed8804ddd14856788bde8d86a6e57515",
+      "minifiedBytes": 7925,
+      "brotliBytes": 2877
     },
     {
       "name": "runtime/router",

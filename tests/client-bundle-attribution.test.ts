@@ -26,6 +26,11 @@ const generatedClientEntry = (source: string, options: Record<string, unknown> =
   );
 };
 
+const bytesFor = (result: Awaited<ReturnType<typeof buildClientBundle>>, pattern: RegExp): number =>
+  summarizeClientBundle(result)
+    .inputs.filter((input) => pattern.test(input.path))
+    .reduce((total, input) => total + input.bytesInOutput, 0);
+
 describe("client bundle attribution", () => {
   // A template whose only attribute is class must not pull in the generic attribute setter, and with it the
   // attribute name policy and URL sanitizer, which never applied to class.
@@ -40,17 +45,36 @@ describe("client bundle attribution", () => {
       generatedClientEntry(`<div class={theme} title={label}></div>`, { reactive: true }),
       { cwd: process.cwd() },
     );
-    const bytesFor = (result: Awaited<ReturnType<typeof buildClientBundle>>, pattern: RegExp) =>
-      summarizeClientBundle(result)
-        .inputs.filter((input) => pattern.test(input.path))
-        .reduce((total, input) => total + input.bytesInOutput, 0);
-
     expect(bytesFor(classOnly, /runtime[/\\]attr\.js$/)).toBe(0);
     expect(bytesFor(classOnly, /url-policy\.js$/)).toBe(0);
     expect(bytesFor(classOnly, /attribute-policy\.js$/)).toBe(0);
     expect(bytesFor(classOnly, /runtime[/\\]class\.js$/)).toBeGreaterThan(0);
     expect(bytesFor(withAttribute, /runtime[/\\]attr\.js$/)).toBeGreaterThan(0);
     expect(bytesFor(withAttribute, /url-policy\.js$/)).toBeGreaterThan(0);
+  }, 60_000);
+
+  // 073 moved a lightweight branch's setters into the generated module. A branch that only interpolates text
+  // therefore stops dragging the class, attribute, style, and event runtimes in behind the branch runtime.
+  it("keeps a text-only conditional free of class, attribute, style, and event bytes", async () => {
+    const textOnly = await buildClientBundle(
+      generatedClientEntry(`<main><if test={open}><b>{label}</b></if></main>`, { reactive: true }),
+      { cwd: process.cwd() },
+    );
+    const withSetters = await buildClientBundle(
+      generatedClientEntry(
+        `<main><if test={open}><b class:on={flag} title={tip} style:color={hue} on:click={save}>{label}</b></if></main>`,
+        { reactive: true },
+      ),
+      { cwd: process.cwd() },
+    );
+
+    expect(bytesFor(textOnly, /runtime[/\\]class\.js$/)).toBe(0);
+    expect(bytesFor(textOnly, /runtime[/\\]attr\.js$/)).toBe(0);
+    expect(bytesFor(textOnly, /runtime[/\\]event\.js$/)).toBe(0);
+    expect(bytesFor(textOnly, /runtime[/\\]conditional-core\.js$/)).toBeGreaterThan(0);
+    expect(bytesFor(withSetters, /runtime[/\\]class\.js$/)).toBeGreaterThan(0);
+    expect(bytesFor(withSetters, /runtime[/\\]attr\.js$/)).toBeGreaterThan(0);
+    expect(bytesFor(withSetters, /runtime[/\\]event\.js$/)).toBeGreaterThan(0);
   }, 60_000);
 
   it("records actual bytesInOutput contributions per output", () => {

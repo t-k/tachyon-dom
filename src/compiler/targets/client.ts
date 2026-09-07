@@ -744,11 +744,10 @@ const runtimeNames = {
   createMemo: "__tachyonCreateMemo",
   createRoot: "__tachyonCreateRoot",
   delegate: "__tachyonDelegate",
-  delegateTarget: "__tachyonDelegateTarget",
   effect: "__tachyonEffect",
   elementAt: "__tachyonElementAt",
   mountConditional: "__tachyonMountConditional",
-  mountConditionalCore: "__tachyonMountConditionalCore",
+  mountGeneratedConditional: "__tachyonMountGeneratedConditional",
   prepareConditionalCore: "__tachyonPrepareConditionalCore",
   prepareConditionalCoreForMount: "__tachyonPrepareConditionalCoreForMount",
   prepareConditionalCoreWithAdoptionGuard: "__tachyonPrepareConditionalCoreWithAdoptionGuard",
@@ -1261,23 +1260,29 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   // setter and its name validation and URL sanitization, which never applied to class in the first place.
   const isKnownClassAttribute = (binding: ClientBinding): boolean =>
     binding.kind === "attr" && binding.name.toLowerCase() === "class";
-  // A generated list's rows are driven by setters this module injects, so their kinds decide its imports too.
+  // Generated rows and generated branches are driven by setters this module injects, so their kinds decide its
+  // imports too.
   const generatedRowBindings = bindings.flatMap((binding) =>
     binding.kind === "list" && isTextOnlyList(binding) ? binding.bindings : [],
   );
-  const bindingsNeedingRuntime = [...bindings, ...generatedRowBindings];
-  const needsClassPresence = bindingsNeedingRuntime.some((binding) => binding.kind === "class");
-  const needsClassValue = bindingsNeedingRuntime.some(isKnownClassAttribute);
-  const needsRowDelegate = generatedRowBindings.some((binding) => binding.kind === "event");
-  const needsClass = needsClassPresence || needsClassValue;
-  const needsAttr = bindingsNeedingRuntime.some(
+  const generatedBranchBindings = bindings.flatMap((binding) =>
+    binding.kind === "if" && usesConditionalCore(binding) ? binding.bindings : [],
+  );
+  const needsElementClass = bindings.some((binding) => binding.kind === "class" || isKnownClassAttribute(binding));
+  const needsElementAttr = bindings.some(
     (binding) =>
       (binding.kind === "attr" && !isKnownClassAttribute(binding)) ||
       binding.kind === "style" ||
       binding.kind === "ref",
   );
+  const bindingsNeedingRuntime = [...bindings, ...generatedRowBindings, ...generatedBranchBindings];
+  const needsClassPresence = bindingsNeedingRuntime.some((binding) => binding.kind === "class");
+  const needsClassValue = bindingsNeedingRuntime.some(isKnownClassAttribute);
+  const needsInjectedDelegate = [...generatedRowBindings, ...generatedBranchBindings].some(
+    (binding) => binding.kind === "event",
+  );
   const needsModel = bindings.some(hasModelBinding);
-  const needsEvent = bindings.some((binding) => binding.kind === "event") || needsRowDelegate;
+  const needsEvent = bindings.some((binding) => binding.kind === "event") || needsInjectedDelegate;
   const needsRef = bindings.some((binding) => binding.kind === "ref");
   const needsList = bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding));
   const needsTextList = bindings.some((binding) => binding.kind === "list" && isTextOnlyList(binding));
@@ -1334,7 +1339,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
           hasConditionalSiblingRootShape(template.root, binding)),
     );
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
-  const needsElementAt = needsClass || needsAttr || needsModel || needsTextList || (reactive && needsList);
+  const needsElementAt =
+    needsElementClass || needsElementAttr || needsModel || needsTextList || (reactive && needsList);
   const needsNodeAt = reactive && needsGenericConditional;
   // Manual cleanup only pays for itself when something actually registers a disposer. A reactive template with
   // no reactive binding, store, or component boundary registers nothing, so it keeps the bare root disposer.
@@ -1359,12 +1365,12 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       `import { setText as ${runtimeNames.setText}, textAt as ${runtimeNames.textAt} } from "tachyon-dom/runtime/text";`,
     );
   }
-  if (needsElementAt || needsListPathResolver) {
-    const classImports = [
-      ...(needsElementAt ? [`elementAt as ${runtimeNames.elementAt}`] : []),
-      ...(needsClassPresence ? [`setClassPresence as ${runtimeNames.setClassPresence}`] : []),
-      ...(needsClassValue ? [`setClassValue as ${runtimeNames.setClassValue}`] : []),
-    ];
+  const classImports = [
+    ...(needsElementAt ? [`elementAt as ${runtimeNames.elementAt}`] : []),
+    ...(needsClassPresence ? [`setClassPresence as ${runtimeNames.setClassPresence}`] : []),
+    ...(needsClassValue ? [`setClassValue as ${runtimeNames.setClassValue}`] : []),
+  ];
+  if (classImports.length > 0) {
     lines.push(`import { ${classImports.join(", ")} } from "tachyon-dom/runtime/class";`);
   }
   if (needsListPathResolver) {
@@ -1372,10 +1378,17 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       `import { dynamicListChildOffset as ${runtimeNames.dynamicListChildOffset}, nodeAtWithDynamicLists as ${runtimeNames.nodeAtWithDynamicLists} } from "tachyon-dom/runtime/list-path";`,
     );
   }
-  if (needsAttr) {
-    lines.push(
-      `import { setAttributeValue as ${runtimeNames.setAttributeValue}, setRef as ${runtimeNames.setRef}, setStyleValue as ${runtimeNames.setStyleValue} } from "tachyon-dom/runtime/attr";`,
-    );
+  const attrImports = [
+    ...(bindingsNeedingRuntime.some((binding) => binding.kind === "attr" && !isKnownClassAttribute(binding))
+      ? [`setAttributeValue as ${runtimeNames.setAttributeValue}`]
+      : []),
+    ...(needsRef ? [`setRef as ${runtimeNames.setRef}`] : []),
+    ...(bindingsNeedingRuntime.some((binding) => binding.kind === "style")
+      ? [`setStyleValue as ${runtimeNames.setStyleValue}`]
+      : []),
+  ];
+  if (attrImports.length > 0) {
+    lines.push(`import { ${attrImports.join(", ")} } from "tachyon-dom/runtime/attr";`);
   }
   if (needsModel) {
     lines.push(
@@ -1383,14 +1396,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     );
   }
   if (needsEvent) {
-    const topLevelEvent = bindings.some((binding) => binding.kind === "event");
-    const eventImports = [
-      ...(topLevelEvent && needsConditionalCore ? [`delegateTarget as ${runtimeNames.delegateTarget}`] : []),
-      ...((topLevelEvent && !needsConditionalCore) || needsRowDelegate
-        ? [`delegate as ${runtimeNames.delegate}`]
-        : []),
-    ];
-    lines.push(`import { ${eventImports.join(", ")} } from "tachyon-dom/runtime/event";`);
+    // Every listener this module registers resolves its target first and then delegates with an empty path, so
+    // the target-only variant is never generated.
+    lines.push(`import { delegate as ${runtimeNames.delegate} } from "tachyon-dom/runtime/event";`);
   }
   if (needsList) {
     lines.push(`import { mountKeyedList as ${runtimeNames.mountKeyedList} } from "tachyon-dom/runtime/list";`);
@@ -1408,7 +1416,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (needsConditional) {
     if (needsConditionalCore) {
       const conditionalCoreImports = [
-        `mountConditionalCore as ${runtimeNames.mountConditionalCore}`,
+        `mountGeneratedConditional as ${runtimeNames.mountGeneratedConditional}`,
         `${
           mountOnly
             ? "prepareConditionalCoreForMount"
@@ -1720,9 +1728,12 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         );
       }
     } else if (binding.kind === "event") {
-      const eventTarget = needsConditionalCore ? bindingNodeExpression(binding.path) : JSON.stringify(binding.path);
-      const delegateName = needsConditionalCore ? runtimeNames.delegateTarget : runtimeNames.delegate;
-      const statement = `${delegateName}(root, ${JSON.stringify(binding.eventName)}, ${eventTarget}, ${expressionToScopeAccess(binding.handler, new Set(), scopeName(needsStore), bindingAliases)})`;
+      // Conditional anchors shift the live DOM, so the target is resolved through the prepared path first and
+      // then delegated with an empty path of its own.
+      const [eventRoot, eventPath] = needsConditionalCore
+        ? [bindingNodeExpression(binding.path), "[]"]
+        : ["root", JSON.stringify(binding.path)];
+      const statement = `${runtimeNames.delegate}(${eventRoot}, ${JSON.stringify(binding.eventName)}, ${eventPath}, ${expressionToScopeAccess(binding.handler, new Set(), scopeName(needsStore), bindingAliases)})`;
       lines.push(`  cleanups.push(${statement});`);
     } else if (binding.kind === "attr") {
       const target = bindingElementExpression(binding.path);
@@ -2188,6 +2199,48 @@ const generatedRowBindingFields = (binding: ListBinding): string[] => {
   ];
 };
 
+/**
+ * Value bindings and listeners for a generated conditional branch. The shape mirrors the generated rows: each
+ * value carries its setter, so the branch runtime keeps only the text path.
+ */
+const generatedBranchBindingFields = (binding: ConditionalBinding): string[] => {
+  const values = binding.bindings.filter((child) => child.kind !== "event");
+  const events = binding.bindings.filter((child) => child.kind === "event");
+  const serializeValue = (child: (typeof values)[number]): string => {
+    const read = `read: (scope) => ${bindingReadExpression(
+      child.kind === "text" || child.kind === "class" || child.kind === "attr" || child.kind === "style"
+        ? child.expression
+        : "",
+      aliasesForBinding(child),
+    )}`;
+    const path = `path: ${JSON.stringify(child.path)}`;
+    if (child.kind === "class") {
+      return `{ ${path}, ${read}, apply: (node, value) => ${runtimeNames.setClassPresence}(node, ${JSON.stringify(child.className)}, value) }`;
+    }
+    if (child.kind === "style") {
+      return `{ ${path}, ${read}, apply: (node, value) => ${runtimeNames.setStyleValue}(node, ${JSON.stringify(child.name)}, value) }`;
+    }
+    if (child.kind === "attr") {
+      const setter =
+        child.name.toLowerCase() === "class"
+          ? `${runtimeNames.setClassValue}(node, value)`
+          : `${runtimeNames.setAttributeValue}(node, ${JSON.stringify(child.name)}, value)`;
+      return `{ ${path}, ${read}, apply: (node, value) => ${setter} }`;
+    }
+    return `{ ${path}, ${read} }`;
+  };
+  // A branch kept across runs is rebound to the newest scope without rebinding its listeners, so the handler is
+  // read from the scope the branch currently holds when the event fires.
+  const serializeEvent = (child: (typeof events)[number]): string =>
+    child.kind === "event"
+      ? `{ path: ${JSON.stringify(child.path)}, bind: (element, readScope) => ${runtimeNames.delegate}(element, ${JSON.stringify(child.eventName)}, [], (event) => { const scope = readScope(); const handler = ${bindingReadExpression(child.handler, aliasesForBinding(child))}; if (typeof handler === "function") handler(event); }) }`
+      : "";
+  return [
+    `    bindings: [${values.map(serializeValue).join(", ")}],`,
+    ...(events.length > 0 ? [`    events: [${events.map(serializeEvent).join(", ")}],`] : []),
+  ];
+};
+
 const emitListBinding = (
   binding: ListBinding,
   reactive: boolean,
@@ -2248,22 +2301,26 @@ const emitConditionalBinding = (
   visibilityExpression?: string,
 ): string => {
   const optionsName = `conditionalOptions${index}`;
+  const useCore = usesConditionalCore(binding);
   const conditionalOptions = [
     `  const ${optionsName} = {`,
     `    signature: ${JSON.stringify(conditionalSignature(binding))},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
-    `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
-    `    hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])},`,
-    `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
-    `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
+    ...(useCore
+      ? generatedBranchBindingFields(binding)
+      : [
+          `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
+          `    hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])},`,
+          `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
+          `    bindings: [${binding.bindings.map(serializeListRowBinding).join(", ")}],`,
+        ]),
     `  };`,
   ].join("\n");
-  const useCore = usesConditionalCore(binding);
   const target = targetName ?? "root";
   const path = targetName ? [] : binding.path;
   const visible = visibilityExpression ?? runtimeValueExpression(binding.test, reactive, sourceName, aliases);
   const statement = useCore
-    ? `${runtimeNames.mountConditionalCore}(root, ${JSON.stringify(binding.path)}, ${visible}, ${sourceName}, ${optionsName})`
+    ? `${runtimeNames.mountGeneratedConditional}(root, ${JSON.stringify(binding.path)}, ${visible}, ${sourceName}, ${optionsName})`
     : `${runtimeNames.mountConditional}(${target}, ${JSON.stringify(path)}, ${visible}, ${sourceName}, ${optionsName})`;
   const targetDeclaration =
     useCore || !targetName ? "" : `  const ${targetName} = ${targetExpression(binding.path)};\n`;

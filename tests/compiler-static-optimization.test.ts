@@ -2,13 +2,11 @@ import { describe, expect, it } from "vitest";
 import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
 import {
   analyzeConditionalTest,
-  expressionAlwaysPlainValue,
   expressionCallsSomething,
   expressionScopeNames,
   removeConstantFalseConditionals,
 } from "../src/compiler/optimize";
 import { mount } from "../src/runtime/mount";
-import { createMemo, createSignal } from "../src/runtime/signal";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
 
 const compiled = (source: string, options: Parameters<typeof compileTemplate>[1] = {}) => {

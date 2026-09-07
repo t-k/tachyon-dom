@@ -62,6 +62,37 @@ export type ConditionalCoreOptions = {
   bindings: ConditionalCoreBinding[];
 };
 
+/**
+ * A branch binding the compiler produced. The reader is required: there is no expression string to fall back
+ * to, so a descriptor that forgot one cannot be written.
+ */
+type GeneratedConditionalBinding = {
+  path: number[];
+  read: ExpressionReader;
+  /**
+   * Applies the value to the branch node the compiler resolved. Omitted for a text binding, whose node is the
+   * template's text node. Supplying it here keeps the class, attribute, and style setters out of this module.
+   */
+  apply?: (node: Node, value: unknown) => void;
+};
+
+/**
+ * Registers a branch listener and returns its disposer; the generated module owns the event runtime. The scope
+ * arrives as a getter because a branch kept across runs is rebound to the newest scope without rebinding its
+ * listeners, and the handler has to be read from that one when the event fires.
+ */
+type GeneratedConditionalEvent = {
+  path: number[];
+  bind: (element: Element, scope: () => Record<string, unknown>) => () => void;
+};
+
+export type GeneratedConditionalOptions = {
+  signature: string;
+  templateHtml: string;
+  bindings: readonly GeneratedConditionalBinding[];
+  events?: readonly GeneratedConditionalEvent[];
+};
+
 type ConditionalCoreNodeMatcher = (expected: Node, actual: Node) => boolean;
 
 type ConditionalCoreDynamicAttribute = {
@@ -645,17 +676,40 @@ const bindNodes = (state: ConditionalCoreState, options: ConditionalCoreOptions,
   }
 };
 
+const bindGeneratedNodes = (
+  state: ConditionalCoreState,
+  options: GeneratedConditionalOptions,
+  bindEvents: boolean,
+): void => {
+  for (const binding of options.bindings) {
+    const node = nodeAtState(state, binding.path);
+    if (!node) continue;
+    const value = read(binding.read(state.scope));
+    if (binding.apply) binding.apply(node, value);
+    else setText(textAtState(state, binding.path), value);
+  }
+  if (!bindEvents) return;
+  const currentScope = (): Record<string, unknown> => state.scope;
+  for (const event of options.events ?? []) {
+    const node = nodeAtState(state, event.path);
+    if (node instanceof Element) state.cleanups.push(event.bind(node, currentScope));
+  }
+};
+
 const signatureFor = (options: ConditionalCoreOptions): string => options.signature ?? JSON.stringify(options);
 
-/** Mounts a compiler-proven conditional that only contains text, class, attr, style, and event bindings. */
-export const mountConditionalCore = (
+type ConditionalBinder = (state: ConditionalCoreState, bindEvents: boolean) => void;
+
+const mountPreparedConditional = (
   root: Node,
   path: readonly number[],
   visible: unknown,
   scope: Record<string, unknown>,
-  options: ConditionalCoreOptions,
+  signature: string,
+  templateHtml: string,
+  bind: ConditionalBinder,
 ): void => {
-  const resolution = resolveAnchor(root, path, visible, options.templateHtml);
+  const resolution = resolveAnchor(root, path, visible, templateHtml);
   if (!resolution) return;
   const { anchor, adoptedNodes } = resolution;
   const current = states.get(anchor);
@@ -672,7 +726,6 @@ export const mountConditionalCore = (
     setPreparedConditionalNodeCount(anchor, 0);
     return;
   }
-  const signature = signatureFor(options);
   if (current && current.signature !== signature) cleanupOwnedSubtree(anchor);
   const state =
     current && current.signature === signature
@@ -680,7 +733,7 @@ export const mountConditionalCore = (
       : {
           signature,
           anchor,
-          nodes: adoptedNodes ?? createNodes(options.templateHtml),
+          nodes: adoptedNodes ?? createNodes(templateHtml),
           scope,
           cleanups: [],
         };
@@ -694,5 +747,38 @@ export const mountConditionalCore = (
     state.scope = scope;
   }
   setPreparedConditionalNodeCount(anchor, state.nodes.length);
-  bindNodes(state, options, state !== current);
+  bind(state, state !== current);
 };
+
+/** Mounts a compiler-proven conditional that only contains text, class, attr, style, and event bindings. */
+export const mountConditionalCore = (
+  root: Node,
+  path: readonly number[],
+  visible: unknown,
+  scope: Record<string, unknown>,
+  options: ConditionalCoreOptions,
+): void =>
+  mountPreparedConditional(
+    root,
+    path,
+    visible,
+    scope,
+    signatureFor(options),
+    options.templateHtml,
+    (state, bindEvents) => bindNodes(state, options, bindEvents),
+  );
+
+/**
+ * Mounts a generated conditional. Every value carries its reader and, unless it targets the template's text
+ * node, the setter that applies it, so this entry never classifies a binding or imports a setter of its own.
+ */
+export const mountGeneratedConditional = (
+  root: Node,
+  path: readonly number[],
+  visible: unknown,
+  scope: Record<string, unknown>,
+  options: GeneratedConditionalOptions,
+): void =>
+  mountPreparedConditional(root, path, visible, scope, options.signature, options.templateHtml, (state, bindEvents) =>
+    bindGeneratedNodes(state, options, bindEvents),
+  );

@@ -1070,7 +1070,7 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`signature: "if:`);
     expect(code).toContain(`read: (scope) => scope.label`);
     expect(code).toContain(
-      `cleanups.push(__tachyonEffect(() => __tachyonMountConditionalCore(root, [0], __tachyonConditionalVisibility0(), scope, conditionalOptions0)));`,
+      `cleanups.push(__tachyonEffect(() => __tachyonMountGeneratedConditional(root, [0], __tachyonConditionalVisibility0(), scope, conditionalOptions0)));`,
     );
     expect(code).not.toContain(`__tachyonMountConditional(__tachyonTarget0, [], __tachyonRead(scope.active), scope, {`);
   });
@@ -1847,9 +1847,9 @@ describe("HTML-first compiler", () => {
     expect(code).not.toContain(`nodeAt as __tachyonNodeAt`);
     expect(code).toContain(`const __tachyonTarget`);
     expect(code).toContain(`__tachyonMountTextKeyedList(__tachyonTarget`);
-    expect(code).toContain(`__tachyonMountConditionalCore(root, [1]`);
+    expect(code).toContain(`__tachyonMountGeneratedConditional(root, [1]`);
     expect(code).toContain(
-      `__tachyonMountConditionalCore(root, [1], __tachyonConditionalVisibility0(), scope, conditionalOptions`,
+      `__tachyonMountGeneratedConditional(root, [1], __tachyonConditionalVisibility0(), scope, conditionalOptions`,
     );
     expect(code).not.toContain(`__tachyonMountTextKeyedList(root, [0]`);
     expect(code).not.toContain(`__tachyonMountConditional(root, [1]`);
@@ -1903,7 +1903,7 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(`from "tachyon-dom/runtime/conditional-core"`);
     expect(code).toContain(`const conditionalOptions0 = {`);
     expect(code).toContain(
-      `__tachyonMountConditionalCore(root, [0,0], __tachyonConditionalVisibility0(), scope, conditionalOptions0)`,
+      `__tachyonMountGeneratedConditional(root, [0,0], __tachyonConditionalVisibility0(), scope, conditionalOptions0)`,
     );
   });
 

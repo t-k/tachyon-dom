@@ -101,7 +101,7 @@ describe("browser hydration boundary example", () => {
 });
 
 const expectGeneratedPanels = async (page: Page): Promise<void> => {
-  expect(await page.getByTestId("generated-client").textContent()).toContain(`mountConditional`);
+  expect(await page.getByTestId("generated-client").textContent()).toContain(`mountGeneratedConditional`);
   expect(await page.getByTestId("compiler-ir").textContent()).toContain(`"kind": "component"`);
   expect(await page.getByTestId("stream-chunks").textContent()).toContain(`tachyon-hydrate:counter-panel:start`);
 };
