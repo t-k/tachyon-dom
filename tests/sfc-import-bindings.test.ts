@@ -175,6 +175,7 @@ it.each([
   'const label = globalThis.external; const secret = "READY";',
   'const label = () => eval("this.secret"); const secret = "READY";',
   'let label = () => "OLD"; label = external; const secret = "READY";',
+  'const label = () => "OLD"; label.read = external; const secret = "READY";',
 ])("keeps opaque or dynamically replaced callable scopes intact: %s", (content) => {
   const result = transformSfcScript(
     { attrs: "setup", offset: 0, content },
@@ -194,6 +195,16 @@ it.each([
   );
   if (!result.ok) throw new Error(result.error.message);
   expect(result.value.exposedBindings).toContain("secret");
+});
+
+it.each([
+  ['function label() { return "READY"; } const secret = "READY";', ["label"]],
+  ['const shown = false; const nothing = null; const secret = "READY";', ["nothing", "shown"]],
+  ['const label = () => 1 + 2 > 1 && secret !== ""; const secret = "READY";', ["label"]],
+])("narrows scripts whose exposed values are known declarations: %s", (content, exposed) => {
+  const result = transformSfcScript({ attrs: "setup", offset: 0, content }, { templateIdentifiers: new Set(exposed) });
+  if (!result.ok) throw new Error(result.error.message);
+  expect(result.value.exposedBindings).toEqual(exposed);
 });
 
 it("retains the implicit server slots reference", () => {
