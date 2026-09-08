@@ -15,7 +15,7 @@ import {
   type TachyonAppDefinition,
 } from "./app.js";
 import { resolveHtmlWhitespacePolicy, type HtmlWhitespacePolicy } from "./html-whitespace.js";
-import { generateScriptOnlyModule, templateScopeIdentifiers, transformSfcScript } from "./compiler/sfc.js";
+import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import type { TemplateWhitespacePolicy } from "./compiler/types.js";
 import { diagnoseTachyonSfc, diagnosticFromCompilerError, formatDiagnostic } from "./diagnostics.js";
@@ -497,10 +497,9 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
           );
         }
       }
-      const script = transformSfcScript(
-        result.value.descriptor.script,
-        result.value.scriptOnly ? {} : { templateIdentifiers: templateScopeIdentifiers(result.value.template) },
-      );
+      // Generated entries normalize an omitted scope to `{}`, which keeps every
+      // setup binding; emitting the narrowed return here would only add bytes.
+      const script = transformSfcScript(result.value.descriptor.script);
       if (!script.ok) {
         this.error(formatDiagnostic(diagnosticFromCompilerError(source, script.error), id));
       }

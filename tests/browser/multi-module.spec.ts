@@ -34,6 +34,8 @@ test("isolates real module instances while sharing signals across a production l
   await expect(page.locator("#a1 li")).toHaveText("A0");
   await expect(page.locator("#a2 li")).toHaveText("A0");
   await expect(page.locator("#b li")).toHaveText("B10");
+  // An externally supplied method still reads the setup binding the template never referenced.
+  await expect(page.locator("#scoped [data-label]")).toHaveText("READY");
   for (const id of ["a1", "a2", "b"]) await expect(page.locator(`#${id} [data-shared]`)).toHaveText("0");
   expect(await page.evaluate(() => window.multiModule.events)).toEqual({ a: 0, b: 0, lazy: 0, ssr: 0 });
   expect(requests.some((url) => url.endsWith(manifest.lazyChunk))).toBe(false);

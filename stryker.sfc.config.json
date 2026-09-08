@@ -10,10 +10,11 @@
     "fileName": "reports/mutation/sfc/mutation.json"
   },
   "mutate": [
-    "src/compiler/sfc.ts:64:0-139:0",
-    "src/compiler/sfc.ts:614:0-624:0",
-    "src/compiler/sfc.ts:713:0-757:0",
-    "src/compiler/sfc.ts:768:0-775:0"
+    "src/compiler/sfc.ts:72:0-147:0",
+    "src/compiler/sfc.ts:436:0-442:0",
+    "src/compiler/sfc.ts:625:0-635:0",
+    "src/compiler/sfc.ts:724:0-768:0",
+    "src/compiler/sfc.ts:779:0-787:0"
   ],
   "plugins": ["./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"],
   "reporters": ["clear-text", "html", "json"],

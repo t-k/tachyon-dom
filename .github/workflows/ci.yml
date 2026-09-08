@@ -146,6 +146,8 @@ jobs:
 
       - run: pnpm check:quick-example-size
 
+      - run: pnpm check:sfc-scope-sizes
+
   benchmark:
     name: Local comparison smoke
     if: github.event_name == 'workflow_dispatch'

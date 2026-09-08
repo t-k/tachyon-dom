@@ -53,7 +53,15 @@ export type TransformedSfcScript = {
   setupBindings: string[];
   /** Bindings returned without external input; supplied input keeps every `setupBindings` entry. */
   exposedBindings: string[];
+  /**
+   * `full` returns every setup binding on every call. `dual` also keeps the
+   * no-input narrowed return, which generated entries never reach because they
+   * normalize an omitted scope to `{}`.
+   */
+  scopeEmission: SfcScopeEmission;
 };
+
+export type SfcScopeEmission = "full" | "dual";
 
 export type TransformSfcScriptOptions = {
   /** Direct template references. Unknown or indirect scope access keeps all setup bindings exposed. */
@@ -426,7 +434,10 @@ const transpileScriptContent = (script: TachyonSfcScript): Result<string, Compil
   if (diagnostic) {
     return err(compilerErrorFromDiagnostic(diagnostic, script));
   }
-  return ok(result.outputText.trim());
+  // TypeScript treats an import-free file as a script and prepends a "use strict"
+  // prologue, which is illegal inside the default-parameter setup factory. The
+  // emitted module is strict already, so the directive carries no meaning.
+  return ok(result.outputText.replace(/^\s*"use strict";/, "").trim());
 };
 
 const addBindingNames = (name: BindingName, names: Set<string>): void => {
@@ -759,7 +770,7 @@ export const transformSfcScript = (
   options: TransformSfcScriptOptions = {},
 ): Result<TransformedSfcScript, CompilerError> => {
   if (!script || script.content.trim().length === 0) {
-    return ok({ code: "", setupBindings: [], exposedBindings: [] });
+    return ok({ code: "", setupBindings: [], exposedBindings: [], scopeEmission: "full" });
   }
   const transpiled = transpileScriptContent(script);
   if (!transpiled.ok) {
@@ -772,6 +783,7 @@ export const transformSfcScript = (
     templateIdentifiers && canNarrowSetupScope(script, new Set(referencedBindings))
       ? setupBindings.filter((name) => templateIdentifiers.has(name))
       : setupBindings;
+  const scopeEmission: SfcScopeEmission = exposedBindings.length < setupBindings.length ? "dual" : "full";
   const content = autoImportScriptHelpers(transpiled.value, script);
   if (isSfcSetupScript(script)) {
     const factory = setupFactoryCode(content, script, exposedBindings, setupBindings);
@@ -781,6 +793,7 @@ export const transformSfcScript = (
       defaultScopeName: sfcSetupScopeName,
       setupBindings,
       exposedBindings,
+      scopeEmission,
     });
   }
   const namedScopeExport = /\bexport\s+const\s+scope\s*=/;
@@ -795,10 +808,11 @@ export const transformSfcScript = (
       defaultScopeName: sfcNamedScopeName,
       setupBindings,
       exposedBindings,
+      scopeEmission,
     });
   }
   if (!defaultExport.test(content)) {
-    return ok({ code: `${content.trim()}\n`, setupBindings, exposedBindings });
+    return ok({ code: `${content.trim()}\n`, setupBindings, exposedBindings, scopeEmission });
   }
   const code = content.replace(defaultExport, `const ${sfcDefaultScopeName} =`).trim();
   return ok({
@@ -806,6 +820,7 @@ export const transformSfcScript = (
     defaultScopeName: sfcDefaultScopeName,
     setupBindings,
     exposedBindings,
+    scopeEmission,
   });
 };
 
@@ -830,5 +845,8 @@ export const generateSfcScriptDeclarations = (script: TachyonSfcScript | undefin
         : "Unable to emit script declarations.",
     );
   }
-  return ok(result.outputText.trim());
+  // TypeScript treats an import-free file as a script and prepends a "use strict"
+  // prologue, which is illegal inside the default-parameter setup factory. The
+  // emitted module is strict already, so the directive carries no meaning.
+  return ok(result.outputText.replace(/^\s*"use strict";/, "").trim());
 };

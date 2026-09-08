@@ -114,7 +114,7 @@ it.each([undefined, { attrs: "setup", offset: 0, content: "  \n\t" }])(
     const transformed = transformSfcScript(script, { templateIdentifiers: new Set(["x"]) });
     expect(transformed.ok).toBe(true);
     if (!transformed.ok) throw new Error(transformed.error.message);
-    expect(transformed.value).toEqual({ code: "", setupBindings: [], exposedBindings: [] });
+    expect(transformed.value).toEqual({ code: "", setupBindings: [], exposedBindings: [], scopeEmission: "full" });
   },
 );
 

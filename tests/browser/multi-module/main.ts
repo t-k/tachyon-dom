@@ -1,6 +1,7 @@
 import { hydrate, mount, type MountHandle } from "tachyon-dom/runtime/mount";
 import * as CounterA from "./CounterA.td";
 import * as CounterB from "./CounterB.td";
+import * as ScopedPanel from "./ScopedPanel.td";
 import * as SsrPanel from "./SsrPanel.td";
 import { events, setShared } from "./shared";
 
@@ -13,6 +14,14 @@ const handles = new Map<string, MountHandle>();
 handles.set("a1", mount(container("a1"), CounterA));
 handles.set("a2", mount(container("a2"), CounterA));
 handles.set("b", mount(container("b"), CounterB));
+handles.set(
+  "scoped",
+  mount(container("scoped"), ScopedPanel, {
+    label() {
+      return this.secret;
+    },
+  } as Record<string, unknown>),
+);
 const ssrNode = container("ssr").querySelector("section");
 const hydrated = hydrate(container("ssr"), SsrPanel);
 if (!hydrated.ok) throw new Error(hydrated.error.message);
