@@ -103,3 +103,18 @@ it("collects template identifiers from expressions, attributes, and text alike",
   }
   expect(identifiers.has("missing")).toBe(false);
 });
+
+it.each([undefined, { attrs: "setup", offset: 0, content: "  \n\t" }])(
+  "returns no code and no bindings for an empty setup script (%o)",
+  (script) => {
+    const transformed = transformSfcScript(script, { templateIdentifiers: new Set(["x"]) });
+    expect(transformed.ok).toBe(true);
+    if (!transformed.ok) throw new Error(transformed.error.message);
+    expect(transformed.value).toEqual({ code: "", setupBindings: [], exposedBindings: [] });
+  },
+);
+
+it("collects no identifiers from a template without identifier tokens", () => {
+  expect(templateScopeIdentifiers("").size).toBe(0);
+  expect(templateScopeIdentifiers("1 + 2 <> ...").size).toBe(0);
+});

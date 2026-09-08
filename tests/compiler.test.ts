@@ -1407,12 +1407,13 @@ describe("HTML-first compiler", () => {
 
   it("leaves bindings inside a nested boundary to that boundary's own chunk", () => {
     const result = compileTemplate(
-      `<main><section hydrate:id="outer" hydrate:visible><p>{a}</p><div hydrate:id="inner" hydrate:interaction="click"><button on:click={go}>Go</button><span>{b}</span></div></section></main>`,
+      `<main><section hydrate:id="outer" hydrate:visible><div><p>{a}</p><div hydrate:id="inner" hydrate:interaction="click"><button on:click={go}>Go</button><span>{b}</span></div></div></section></main>`,
     );
     if (!result.ok) throw new Error(result.error.message);
     const [outer, inner] = result.value.client.hydrationBoundaries;
     if (!outer || !inner) throw new Error("Missing boundaries.");
-    expect(inner.path).toEqual([...outer.path, 1]);
+    // The outer text shares the wrapper with the inner boundary, so only a full-prefix match may exclude it.
+    expect(inner.path).toEqual([...outer.path, 0, 1]);
 
     const outerChunk = generateClientHydrationChunkModule(result.value, outer.id, { reactive: true });
     expect(outerChunk).toContain("scope.a");

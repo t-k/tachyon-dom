@@ -1650,14 +1650,15 @@ describe("mountKeyedList", () => {
         },
       ],
       hydrationBoundaries: [
-        { path: [], id: "item.id", idKind: "expression" as const, strategy: "load" as const },
+        // A boundary without a path covers the whole row; the inner one is declared first on purpose.
         {
           path: [1],
           id: "item.innerId",
           idKind: "expression" as const,
           strategy: "interaction" as const,
-          interaction: "click",
+          interaction: "focusin",
         },
+        { id: "item.id", idKind: "expression" as const, strategy: "load" as const },
       ],
     };
     const item = { id: "a", innerId: "a-inner", label: "A", onClick: () => calls.push("a") };
@@ -1667,8 +1668,10 @@ describe("mountKeyedList", () => {
     if (!(button instanceof HTMLButtonElement)) throw new Error("Missing button.");
     // The outer boundary hydrated on load and owns the text, not the button inside the inner boundary.
     expect(root.querySelector("p")?.textContent).toBe("A");
+    button.click();
     expect(calls).toEqual([]);
 
+    button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     button.click();
     expect(calls).toEqual(["a"]);
     button.click();

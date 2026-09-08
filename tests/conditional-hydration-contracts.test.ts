@@ -386,6 +386,36 @@ describe("nested hydration boundaries own their bindings exclusively", () => {
     }
   });
 
+  it("picks the deepest boundary as owner regardless of declaration order or a path-less outer boundary", () => {
+    let clicks = 0;
+    const f = fixture(
+      [
+        { kind: "text", path: [0, 0], read: () => "outer" },
+        { kind: "event", path: [1, 0], eventName: "click", read: () => () => clicks++ },
+      ],
+      [
+        { ...boundaries[1]!, path: [1] },
+        { id: "a", idKind: "static", strategy: "interaction", interaction: "focusin" },
+      ],
+      undefined,
+      `<!----><!--tachyon-hydrate:a:start--><section><p>initial</p><!--tachyon-hydrate:b:start--><aside><button>B</button></aside><!--tachyon-hydrate:b:end--></section><!--tachyon-hydrate:a:end-->`,
+    );
+    try {
+      const button = f.panel.querySelector("button") as HTMLButtonElement;
+      // Only the inner boundary is hydrated: it owns the button even though the outer boundary was declared last.
+      f.handles.get("b")!.hydrate();
+      button.click();
+      expect(clicks).toBe(1);
+      expect(f.panel.querySelector("p")!.textContent).toBe("initial");
+      f.handles.get("a")!.hydrate();
+      expect(f.panel.querySelector("p")!.textContent).toBe("outer");
+      button.click();
+      expect(clicks).toBe(2);
+    } finally {
+      f.dispose();
+    }
+  });
+
   it("leaves the inner boundary inert until it hydrates on its own", () => {
     const f = nestedFixture();
     try {
