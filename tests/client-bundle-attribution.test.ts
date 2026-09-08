@@ -261,7 +261,7 @@ export const unwanted = bindControl;
     }
   });
 
-  it("writes seven attributed fixtures with provenance and unique run artifacts", async () => {
+  it("writes nine attributed fixtures with provenance and unique run artifacts", async () => {
     const artifactRoot = await mkdtemp(join(tmpdir(), "tachyon-client-bundles-"));
     try {
       const first = await runClientBundleAttribution({ cwd: process.cwd(), artifactRoot });
@@ -320,7 +320,16 @@ export const unwanted = bindControl;
         "text-only-list",
         "minimal-if",
         "composite-quick-example",
+        "one-template-page",
+        "thirty-template-page",
       ]);
+      // The many-template page shares the runtime with the one-template page, so it costs less than thirty
+      // copies of it: the difference is what each additional template adds.
+      const one = report.fixtures.find((fixture) => fixture.name === "one-template-page");
+      const thirty = report.fixtures.find((fixture) => fixture.name === "thirty-template-page");
+      if (!one || !thirty) throw new Error("Missing page fixtures.");
+      expect(thirty.minifiedBytes).toBeGreaterThan(one.minifiedBytes);
+      expect(thirty.minifiedBytes).toBeLessThan(one.minifiedBytes * 30);
       for (const fixture of report.fixtures) {
         expect(fixture.sourceSha256).toMatch(/^[a-f0-9]{64}$/);
         expect(fixture.generatedSource.length).toBeGreaterThan(0);

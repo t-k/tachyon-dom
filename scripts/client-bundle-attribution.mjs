@@ -152,6 +152,33 @@ const quickTemplateSource = `<main>
 const generatedTemplateFixture = (source, options = {}, compileOptions = {}) =>
   generatedClientSource(source, options, compileOptions);
 
+// A page with one template and a page with many share the runtime once; what the second one adds per
+// template is the descriptor and glue code the compiler emits. Measuring both keeps a runtime/generated-code
+// trade-off honest: a helper that shrinks one template but grows every descriptor shows up here, not in the
+// single-template fixtures.
+const pageTemplateSource = (index) =>
+  `<section><h2>Panel ${index}</h2><button on:click={toggle}>Toggle</button><if test={open}><ul><for each={rows} key={row.id}><li class:active={row.active}>{row.label}</li></for></ul></if></section>`;
+
+const manyTemplatesPageFixture = (count) => {
+  const imports = new Set();
+  const modules = [];
+  for (let index = 0; index < count; index++) {
+    const generated = generatedTemplateFixture(pageTemplateSource(index), { reactive: true });
+    const body = [];
+    for (const line of generated.split("\n")) {
+      if (/^import .* from "/.test(line)) imports.add(line);
+      else body.push(line.replace(/^export const /, "const "));
+    }
+    modules.push(`const template${index} = (() => {\n${body.join("\n")}\nreturn { templateHtml, bind };\n})();`);
+  }
+  const names = Array.from({ length: count }, (_, index) => `template${index}`);
+  return `${[...imports].join("\n")}
+${modules.join("\n")}
+export const templates = [${names.join(", ")}];
+export const mount = (root, scope) => templates.map((template) => template.bind(root, scope));
+`;
+};
+
 const generatedFixtureOptions = (generateOptions = {}, compileOptions = {}) => ({
   compileOptions,
   generateOptions: { instrumentBindings: false, ...generateOptions },
@@ -175,6 +202,8 @@ export const createClientBundleFixtures = () => {
     { reactive: true },
     { whitespace: "condense" },
   );
+  const oneTemplatePage = manyTemplatesPageFixture(1);
+  const thirtyTemplatePage = manyTemplatesPageFixture(30);
   return [
     {
       name: "static",
@@ -233,6 +262,20 @@ scope.increment = () => scope.count.update((value) => value + 1);
 export const mount = (root) => bind(root, scope);
 `,
       ...generatedFixtureOptions({ reactive: true }, { whitespace: "condense" }),
+    },
+    {
+      name: "one-template-page",
+      source: pageTemplateSource(0),
+      generatedSource: oneTemplatePage,
+      entrySource: oneTemplatePage,
+      ...generatedFixtureOptions({ reactive: true }),
+    },
+    {
+      name: "thirty-template-page",
+      source: `${pageTemplateSource(0)} ... ${pageTemplateSource(29)}`,
+      generatedSource: thirtyTemplatePage,
+      entrySource: thirtyTemplatePage,
+      ...generatedFixtureOptions({ reactive: true }),
     },
   ];
 };

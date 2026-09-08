@@ -26,5 +26,13 @@
   "composite-quick-example": {
     "maxMinifiedBytes": 14014,
     "maxBrotliBytes": 4975
+  },
+  "one-template-page": {
+    "maxMinifiedBytes": 29300,
+    "maxBrotliBytes": 9020
+  },
+  "thirty-template-page": {
+    "maxMinifiedBytes": 60300,
+    "maxBrotliBytes": 9230
   }
 }
