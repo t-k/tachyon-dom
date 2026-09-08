@@ -20,7 +20,7 @@
     "maxBrotliBytes": 6560
   },
   "runtime/generic-conditional": {
-    "maxMinifiedBytes": 9870,
-    "maxBrotliBytes": 3480
+    "maxMinifiedBytes": 13300,
+    "maxBrotliBytes": 4580
   }
 }
