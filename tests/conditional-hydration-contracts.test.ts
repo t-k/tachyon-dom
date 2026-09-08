@@ -416,6 +416,27 @@ describe("nested hydration boundaries own their bindings exclusively", () => {
     }
   });
 
+  it("keeps the inner owner when the enclosing boundary with a longer declaration comes second", () => {
+    let clicks = 0;
+    const f = fixture(
+      [{ kind: "event", path: [0, 1, 0], eventName: "click", read: () => () => clicks++ }],
+      [nestedBoundaries[1]!, nestedBoundaries[0]!],
+      undefined,
+      nestedHtml,
+    );
+    try {
+      const button = f.panel.querySelector("button") as HTMLButtonElement;
+      f.handles.get("a")!.hydrate();
+      button.click();
+      expect(clicks).toBe(0);
+      f.handles.get("b")!.hydrate();
+      button.click();
+      expect(clicks).toBe(1);
+    } finally {
+      f.dispose();
+    }
+  });
+
   it("leaves the inner boundary inert until it hydrates on its own", () => {
     const f = nestedFixture();
     try {
