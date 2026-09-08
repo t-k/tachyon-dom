@@ -1857,6 +1857,83 @@ describe("mountKeyedList", () => {
     expect(calls).toEqual([]);
   });
 
+  it("binds row bindings outside every boundary eagerly while the boundary's own bindings stay deferred", () => {
+    document.body.innerHTML = `<ul id="items"><li><span>Server A</span><!--tachyon-hydrate:a:start--><button>Go</button><!--tachyon-hydrate:a:end--></li></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const calls: string[] = [];
+    const options = {
+      signature: "row-partial-boundary-eager-outside",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span><button>Go</button></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "item.label" },
+        {
+          kind: "event" as const,
+          path: [1],
+          eventName: "click",
+          handler: "item.onClick",
+          read: (scope: Record<string, unknown>) => (scope.item as { onClick: () => void }).onClick,
+        },
+      ],
+      hydrationBoundaries: [
+        {
+          path: [1],
+          id: "item.id",
+          idKind: "expression" as const,
+          strategy: "interaction" as const,
+          interaction: "focusin",
+        },
+      ],
+    };
+    mountKeyedList(root, [], [{ id: "a", label: "A", onClick: () => calls.push("a") }], options);
+    const button = root.querySelector("button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Missing button.");
+    // The text sits outside the boundary, so it is bound as soon as the row is adopted.
+    expect(root.querySelector("span")?.textContent).toBe("A");
+    button.click();
+    expect(calls).toEqual([]);
+    button.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    button.click();
+    expect(calls).toEqual(["a"]);
+    mountKeyedList(root, [], [], options);
+  });
+
+  it("keeps adopted server nodes in place when an eager binding fails after the preflight", () => {
+    document.body.innerHTML = `<ul id="items"><li><span>Server A</span><!--tachyon-hydrate:a:start--><button>Go</button><!--tachyon-hydrate:a:end--></li></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const before = root.innerHTML;
+    const options = {
+      signature: "row-eager-binding-failure",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span><button>Go</button></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          expression: "item.label",
+          read: () => {
+            throw new Error("label failed");
+          },
+        },
+      ],
+      hydrationBoundaries: [
+        {
+          path: [1],
+          id: "item.id",
+          idKind: "expression" as const,
+          strategy: "interaction" as const,
+          interaction: "focusin",
+        },
+      ],
+    };
+    expect(() => mountKeyedList(root, [], [{ id: "a", label: "A" }], options)).toThrow(/label failed/);
+    expect(root.innerHTML).toBe(before);
+  });
+
   it("preflights every adopted SSR row before binding and preserves the existing DOM on failure", () => {
     document.body.innerHTML =
       `<ul id="items"><!--tachyon-hydrate:a:start--><li><span>Server A</span><button>Server A</button></li><!--tachyon-hydrate:a:end-->` +
