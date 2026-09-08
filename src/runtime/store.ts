@@ -61,7 +61,7 @@ export const createScopeStore = (
     overridden.delete(key);
     return false;
   };
-  return new Proxy(
+  const proxy: Record<PropertyKey, unknown> = new Proxy(
     {},
     {
       get(_target, key, receiver) {
@@ -70,15 +70,21 @@ export const createScopeStore = (
         const inputValue = readScopeProperty(scope, key, receiver);
         return useLocal(key, inputValue) ? localValue : inputValue;
       },
-      set(_target, key, value) {
-        if (!localKeys.has(key))
-          overridden.set(
-            key,
-            untrack(() => readScopeProperty(scope, key, state)),
-          );
-        // Establish an own data property before Store assignment: inherited setters
-        // such as __proto__ must not interpret input data as a prototype change.
-        if (!Object.hasOwn(state, key)) {
+      set(_target, key, value, receiver) {
+        if (!localKeys.has(key)) {
+          const inputValue = untrack(() => readScopeProperty(scope, key, receiver));
+          const previous = useLocal(key, inputValue) ? untrack(() => Reflect.get(state, key)) : inputValue;
+          // Compare writes against the visible value, not a stale local override.
+          // Defining the baseline is silent; only the subsequent assignment notifies.
+          Reflect.defineProperty(state, key, {
+            value: previous,
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          });
+          overridden.set(key, inputValue);
+        } else if (!Object.hasOwn(state, key)) {
+          // createStore omits non-enumerable initial keys; never reach inherited setters.
           Reflect.defineProperty(state, key, {
             value: undefined,
             writable: true,
@@ -91,17 +97,24 @@ export const createScopeStore = (
       has: (_target, key) => Object.hasOwn(state, key) || Object.hasOwn(scope, key),
       ownKeys: () => [...new Set([...scopeKeys(scope), ...Reflect.ownKeys(state)])],
       getOwnPropertyDescriptor(_target, key) {
-        const local =
-          localKeys.has(key) ||
-          useLocal(
-            key,
-            untrack(() => readScopeProperty(scope, key, state)),
-          );
+        const input = scopeDescriptor(scope, key);
+        if (!localKeys.has(key) && input && !("value" in input)) {
+          // Inspection must not evaluate accessors, including through nested scopes.
+          return {
+            configurable: true,
+            enumerable: Boolean(input.enumerable),
+            get(this: unknown) {
+              return Reflect.get(proxy, key, this);
+            },
+          };
+        }
+        const local = localKeys.has(key) || useLocal(key, input?.value);
         const descriptor = local
           ? Reflect.getOwnPropertyDescriptor(state, key)
-          : (Reflect.getOwnPropertyDescriptor(scope, key) ?? Reflect.getOwnPropertyDescriptor(state, key));
+          : (input ?? Reflect.getOwnPropertyDescriptor(state, key));
         return descriptor ? { ...descriptor, configurable: true } : undefined;
       },
     },
   );
+  return proxy;
 };

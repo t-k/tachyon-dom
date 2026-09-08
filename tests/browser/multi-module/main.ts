@@ -46,8 +46,8 @@ const otherProps = propsComponent.mount(container("props-other"), { label: "othe
 handles.set("props", propsHandle);
 handles.set("props-other", otherProps);
 const oldProps = container("props").querySelector("main")!;
-const getterComponent = createTemplateComponent<{ label: string }>({ client: GetterPanel });
-const getterHandle = getterComponent.mount(container("getter"), { label: "A" });
+const getterComponent = createTemplateComponent<{ user: { name: string } }>({ client: GetterPanel });
+const getterHandle = getterComponent.mount(container("getter"), { user: { name: "A" } });
 handles.set("getter", getterHandle);
 
 const api = {
@@ -56,7 +56,7 @@ const api = {
   propsAdopted: () => propsNode === container("props").querySelector("main"),
   updateProps: (label: string) => propsHandle.update({ label, started }),
   disposeProps: () => propsHandle.dispose(),
-  updateGetter: (label: string) => getterHandle.update({ label }),
+  updateGetter: (label: string) => getterHandle.update({ user: { name: label } }),
   oldPropsText: () => oldProps.querySelector("[data-label]")!.textContent,
   ssrAdopted: container("ssr").querySelector("section") === ssrNode,
   setShared,

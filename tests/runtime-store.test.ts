@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { effect } from "../src/runtime/signal";
-import { createStore } from "../src/runtime/store";
+import { batch, effect } from "../src/runtime/signal";
+import { createStore, createScopeStore, mergeScopes } from "../src/runtime/store";
 
 describe("store runtime", () => {
   it("tracks effects per assigned top-level property", () => {
@@ -181,4 +181,166 @@ it("lets initial local keys shadow same-named input getters without invoking the
   expect(values).toEqual([1, 2]);
   expect(Object.getOwnPropertyDescriptor(scope, "count")?.value).toBe(2);
   stop();
+});
+
+const scopeFactories = [
+  { name: "single", make: (props: Record<PropertyKey, unknown>) => createScopeStore(props, {}) },
+  { name: "merged", make: (props: Record<PropertyKey, unknown>) => mergeScopes({}, props) },
+  {
+    name: "nested",
+    make: (props: Record<PropertyKey, unknown>) => createScopeStore(mergeScopes({}, props), { count: 0 }),
+  },
+];
+
+it.each(scopeFactories)("notifies repeated local edits and undefined writes in $name scopes", ({ make }) => {
+  const props = createStore({ label: "A" });
+  const scope = make(props);
+  const seen: unknown[] = [];
+  const stop = effect(() => {
+    seen.push(scope.label);
+  });
+  try {
+    scope.label = undefined;
+    expect(scope.label).toBeUndefined();
+    expect(seen).toEqual(["A", undefined]);
+    scope.label = "B";
+    props.label = "C";
+    scope.label = "B";
+    expect(scope.label).toBe("B");
+    expect(seen).toEqual(["A", undefined, "B", "C", "B"]);
+    scope.label = "B";
+    expect(seen).toHaveLength(5);
+    props.label = "D";
+    scope.label = "D";
+    expect(seen).toEqual(["A", undefined, "B", "C", "B", "D"]);
+  } finally {
+    stop();
+  }
+  scope.label = "disposed";
+  expect(seen).toHaveLength(6);
+});
+
+it("inspects nested getter scopes without evaluating getters and uses the public receiver for writes", () => {
+  let reads = 0;
+  const base = {
+    get label(): string {
+      reads++;
+      return (this as unknown as { user: { name: string } }).user.name;
+    },
+  };
+  const props = createStore({ user: { name: "READY" } });
+  const merged = mergeScopes(base, props);
+  const scope = createScopeStore(merged, { count: 0 });
+  const inspect = () => {
+    expect(Object.keys(scope)).toEqual(["label", "user", "count"]);
+    expect("label" in scope).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(scope, "label")?.get).toBeTypeOf("function");
+  };
+  inspect();
+  expect(reads).toBe(0);
+  expect(scope.label).toBe("READY");
+  expect(reads).toBe(1);
+  scope.label = "local";
+  const afterWrite = reads;
+  inspect();
+  expect(reads).toBe(afterWrite);
+  expect(scope.label).toBe("local");
+  const descriptor = Object.getOwnPropertyDescriptor(scope, "label")!;
+  expect(descriptor.get!.call(scope)).toBe("local");
+  props.user = { name: "NEXT" };
+  expect(scope.label).toBe("NEXT");
+  expect(descriptor.get!.call(scope)).toBe("NEXT");
+});
+
+it.each(scopeFactories)("keeps getter edits and batched updates consistent in $name scopes", ({ make }) => {
+  const props = createStore({ value: "A" });
+  const scope = make({
+    get label() {
+      return props.value;
+    },
+  });
+  const seen: unknown[] = [];
+  const stop = effect(() => {
+    seen.push(scope.label);
+  });
+  try {
+    scope.label = "B";
+    props.value = "C";
+    scope.label = "B";
+    expect(scope.label).toBe("B");
+    expect(seen).toEqual(["A", "B", "C", "B"]);
+    batch(() => {
+      props.value = "D";
+      scope.label = "E";
+      scope.label = "F";
+    });
+    expect(scope.label).toBe("F");
+    expect(seen).toEqual(["A", "B", "C", "B", "F"]);
+  } finally {
+    stop();
+  }
+});
+
+it.each(scopeFactories)("only evaluates fresh references on reads in $name scopes", ({ make }) => {
+  let reads = 0;
+  const scope = make({
+    get rows() {
+      reads++;
+      return ["A"];
+    },
+  });
+  const seen: unknown[][] = [[], []];
+  const stops = seen.map((values) =>
+    effect(() => {
+      values.push(scope.rows);
+    }),
+  );
+  try {
+    expect(reads).toBe(2);
+    expect(seen).toEqual([[["A"]], [["A"]]]);
+    void scope.rows;
+    Object.keys(scope);
+    expect(reads).toBe(3);
+    expect(seen.map((values) => values.length)).toEqual([1, 1]);
+  } finally {
+    stops.forEach((stop) => stop());
+  }
+});
+
+it.each([false, true])("preserves local writes over hidden inputs during inspection with accessor=%s", (accessor) => {
+  const props = Object.defineProperty(
+    {},
+    "hidden",
+    accessor
+      ? {
+          get() {
+            throw new Error("Hidden accessor evaluated");
+          },
+        }
+      : { value: "private" },
+  );
+  const scope = createScopeStore(props, {});
+  expect(Object.getOwnPropertyDescriptor(scope, "hidden")).toBeUndefined();
+  scope.hidden = "local";
+  expect(scope.hidden).toBe("local");
+  expect(Object.keys(scope)).toEqual(["hidden"]);
+  expect(Object.getOwnPropertyDescriptor(scope, "hidden")?.value).toBe("local");
+  expect(scope.hidden).toBe("local");
+});
+
+it("keeps non-enumerable initial prototype keys isolated on assignment", () => {
+  const initial = Object.defineProperty({}, "__proto__", { value: null });
+  const scope = createScopeStore({}, initial);
+  let reads = 0;
+  const value = {
+    get injected() {
+      reads++;
+      return true;
+    },
+  };
+  scope.__proto__ = value;
+  expect(scope.injected).toBeUndefined();
+  expect(reads).toBe(0);
+  expect(Object.hasOwn(scope, "__proto__")).toBe(true);
+  expect(scope.__proto__).toBe(value);
 });

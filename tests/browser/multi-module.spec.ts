@@ -165,3 +165,23 @@ test("binds default scope getters that return fresh values without re-evaluation
   await page.evaluate(() => window.multiModule.dispose());
   expect(errors).toEqual([]);
 });
+
+test("repeats local edits after props change in a getter SFC with a store", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(fixture);
+  const input = page.locator("#getter input");
+  const output = page.locator("#getter output");
+  await expect(output).toHaveText("A");
+  await input.fill("B");
+  await expect(output).toHaveText("B");
+  await page.evaluate(() => window.multiModule.updateGetter("C"));
+  await expect(input).toHaveValue("C");
+  await expect(output).toHaveText("C");
+  await input.fill("B");
+  await expect(input).toHaveValue("B");
+  await expect(output).toHaveText("B");
+  await expect(page.locator("#getter [data-first]")).toHaveText("B");
+  await page.evaluate(() => window.multiModule.dispose());
+  expect(errors).toEqual([]);
+});
