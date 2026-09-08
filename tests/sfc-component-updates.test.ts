@@ -217,3 +217,35 @@ it.each([false, true])(
     }
   },
 );
+
+it("binds getters that return fresh values from several bindings without looping", async () => {
+  const compiled = compileTachyonSfc(
+    "<script>export default { get rows() { globalThis.__rowsReads = (globalThis.__rowsReads ?? 0) + 1; return [this.label]; } };</script><main><p>{rows.length}</p><p>{rows[0]}</p><p>{rows.length}</p></main>",
+  );
+  if (!compiled.ok) throw new Error(compiled.error.message);
+  const transformed = transformSfcScript(compiled.value.descriptor.script);
+  if (!transformed.ok) throw new Error(transformed.error.message);
+  const client = evaluateGeneratedClientModule(
+    transformed.value.code +
+      generateClientModule(compiled.value.template, {
+        reactive: true,
+        ...(transformed.value.defaultScopeName ? { defaultScopeName: transformed.value.defaultScopeName } : {}),
+      }),
+  );
+  const globals = globalThis as { __rowsReads?: number };
+  globals.__rowsReads = 0;
+  const component = createTemplateComponent<{ label: string }>({ client });
+  const root = document.createElement("div");
+  const handle = component.mount(root, { label: "A" });
+  try {
+    expect(root.textContent).toBe("1A1");
+    expect(globals.__rowsReads).toBe(3);
+    handle.update({ label: "B" });
+    await Promise.resolve();
+    expect(root.textContent).toBe("1B1");
+    expect(globals.__rowsReads).toBeLessThanOrEqual(6);
+  } finally {
+    handle.dispose();
+    delete globals.__rowsReads;
+  }
+});

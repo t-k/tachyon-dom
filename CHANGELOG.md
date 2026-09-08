@@ -14,6 +14,7 @@ Candidate artifacts are for local verification only. Replace Unreleased with the
 
 ### Fixed
 
+- Stop merged SFC scopes from writing to their local store on reads. Getters that return fresh arrays or objects no longer re-run every binding that reads them, and reading an absent key no longer adds it to `Object.keys()` or `in` checks.
 - Preserve reactive props across generated SFC scopes and template-local stores when using `createTemplateComponent().update()`, without remounting or rerunning setup.
 - Transform non-setup exports using syntax nodes, preserving string/comment contents and references to the original local scope identifiers.
 - Preserve nested and deferred hydration ownership, rollback partially bound branches, and clear refs from their original containers on disposal.

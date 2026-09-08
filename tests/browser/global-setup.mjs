@@ -896,7 +896,7 @@ const buildMultiModuleFixture = async () => {
   const propsMarkup = renderServerTemplate(propsCompiled.value.template, { label: "before", suffix: "!" });
   await writeFile(
     resolve(target, "index.html"),
-    `<!doctype html><html><body><div id="a1"></div><div id="a2"></div><div id="b"></div><div id="scoped"></div><div id="lazy"></div><div id="ssr">${markup}</div><div id="props">${propsMarkup}</div><div id="props-other"></div><script type="module" src="./entry.js"></script></body></html>`,
+    `<!doctype html><html><body><div id="a1"></div><div id="a2"></div><div id="b"></div><div id="scoped"></div><div id="lazy"></div><div id="ssr">${markup}</div><div id="props">${propsMarkup}</div><div id="props-other"></div><div id="getter"></div><script type="module" src="./entry.js"></script></body></html>`,
   );
   await writeFile(resolve(target, "manifest.json"), JSON.stringify({ lazyChunk: lazy.fileName, ssrMarkup: markup }));
 };

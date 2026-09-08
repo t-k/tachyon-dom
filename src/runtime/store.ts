@@ -1,4 +1,4 @@
-import { createStore } from "./signal.js";
+import { createStore, untrack } from "./signal.js";
 export { createStore };
 
 const scopeDescriptor = (scope: Record<PropertyKey, unknown>, key: PropertyKey): PropertyDescriptor | undefined => {
@@ -39,43 +39,67 @@ export const mergeScopes = (
     {},
   );
 
-/** Keep template assignments local while accepting later changes from input props. */
+/**
+ * Keep template assignments local while accepting later changes from input props.
+ *
+ * Reads never write to the local Store: they subscribe to both the input scope and the
+ * local key, then return the local override only while the input still holds the value
+ * it had when the template assigned. Writing on read would notify sibling effects and,
+ * with getters that return fresh objects, re-run them without end.
+ */
 export const createScopeStore = (
   scope: Record<PropertyKey, unknown>,
   initial: Record<PropertyKey, unknown>,
 ): Record<PropertyKey, unknown> => {
   const state = createStore(initial);
-  const localKeys = new Set(Reflect.ownKeys(initial));
-  const sourceValues = new Map<PropertyKey, unknown>();
-  const write = (key: PropertyKey, value: unknown): boolean => {
-    // Establish an own data property before Store assignment: inherited setters
-    // such as __proto__ must not interpret input data as a prototype change.
-    if (!Object.hasOwn(state, key)) {
-      Reflect.defineProperty(state, key, { value: undefined, writable: true, enumerable: true, configurable: true });
-    }
-    return Reflect.set(state, key, value);
+  const localKeys = new Set<PropertyKey>(Reflect.ownKeys(initial));
+  // Input value observed when the template last assigned a non-local key.
+  const overridden = new Map<PropertyKey, unknown>();
+  const useLocal = (key: PropertyKey, inputValue: unknown): boolean => {
+    if (!overridden.has(key)) return false;
+    if (Object.is(overridden.get(key), inputValue)) return true;
+    overridden.delete(key);
+    return false;
   };
   return new Proxy(
     {},
     {
       get(_target, key, receiver) {
-        if (!localKeys.has(key)) {
-          const value = readScopeProperty(scope, key, receiver);
-          if (!sourceValues.has(key) || !Object.is(sourceValues.get(key), value)) {
-            sourceValues.set(key, value);
-            write(key, value);
-          }
-        }
-        return Reflect.get(state, key, receiver);
+        const localValue = Reflect.get(state, key, receiver);
+        if (localKeys.has(key)) return localValue;
+        const inputValue = readScopeProperty(scope, key, receiver);
+        return useLocal(key, inputValue) ? localValue : inputValue;
       },
       set(_target, key, value) {
-        if (!localKeys.has(key)) sourceValues.set(key, readScopeProperty(scope, key, state));
-        return write(key, value);
+        if (!localKeys.has(key))
+          overridden.set(
+            key,
+            untrack(() => readScopeProperty(scope, key, state)),
+          );
+        // Establish an own data property before Store assignment: inherited setters
+        // such as __proto__ must not interpret input data as a prototype change.
+        if (!Object.hasOwn(state, key)) {
+          Reflect.defineProperty(state, key, {
+            value: undefined,
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          });
+        }
+        return Reflect.set(state, key, value);
       },
       has: (_target, key) => Object.hasOwn(state, key) || Object.hasOwn(scope, key),
       ownKeys: () => [...new Set([...scopeKeys(scope), ...Reflect.ownKeys(state)])],
       getOwnPropertyDescriptor(_target, key) {
-        const descriptor = Reflect.getOwnPropertyDescriptor(state, key) ?? Reflect.getOwnPropertyDescriptor(scope, key);
+        const local =
+          localKeys.has(key) ||
+          useLocal(
+            key,
+            untrack(() => readScopeProperty(scope, key, state)),
+          );
+        const descriptor = local
+          ? Reflect.getOwnPropertyDescriptor(state, key)
+          : (Reflect.getOwnPropertyDescriptor(scope, key) ?? Reflect.getOwnPropertyDescriptor(state, key));
         return descriptor ? { ...descriptor, configurable: true } : undefined;
       },
     },

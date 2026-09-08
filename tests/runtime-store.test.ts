@@ -105,3 +105,80 @@ it("does not expose non-enumerable input properties or invoke their getters", as
   expect(mergeScopes(hidden, {}).secret).toBeUndefined();
   expect(mergeScopes({ secret: "public" }, hidden).secret).toBe("public");
 });
+
+it("reads fresh getter values from multiple effects without re-evaluation loops", async () => {
+  const { mergeScopes } = await import("../src/runtime/store");
+  let reads = 0;
+  const scope = mergeScopes(
+    {
+      get rows() {
+        reads++;
+        return ["A"];
+      },
+    },
+    {},
+  );
+  const seen: number[][] = [[], []];
+  let runs = 0;
+  const stops = [0, 1].map((index) =>
+    effect(() => {
+      if (++runs > 20) throw new Error("Scope read caused an effect loop");
+      seen[index]!.push((scope.rows as string[]).length);
+    }),
+  );
+  expect(reads).toBe(2);
+  expect(seen).toEqual([[1], [1]]);
+  for (const stop of stops) stop();
+});
+
+it("does not add keys or notify when reading absent scope properties", async () => {
+  const { mergeScopes } = await import("../src/runtime/store");
+  const scope = mergeScopes({ value: 1 }, {});
+  const runs: unknown[] = [];
+  const stop = effect(() => {
+    runs.push(scope.missing);
+  });
+  void scope.missing;
+  void scope.value;
+  expect(Object.keys(scope)).toEqual(["value"]);
+  expect("missing" in scope).toBe(false);
+  expect(Object.getOwnPropertyDescriptor(scope, "missing")).toBeUndefined();
+  expect(runs).toEqual([undefined]);
+  scope.missing = "set";
+  expect(runs).toEqual([undefined, "set"]);
+  expect("missing" in scope).toBe(true);
+  stop();
+});
+
+it("drops template assignments when the input changes and reports live descriptors", async () => {
+  const { createScopeStore } = await import("../src/runtime/store");
+  const input = createStore<Record<string, unknown>>({ label: "before" });
+  const scope = createScopeStore(input, { local: 0 });
+  scope.label = "local";
+  expect(Object.getOwnPropertyDescriptor(scope, "label")?.value).toBe("local");
+  input.label = "after";
+  expect(Object.getOwnPropertyDescriptor(scope, "label")?.value).toBe("after");
+  expect(scope.label).toBe("after");
+  input.label = "before";
+  expect(scope.label).toBe("before");
+  scope.local = 5;
+  expect(Object.getOwnPropertyDescriptor(scope, "local")?.value).toBe(5);
+});
+
+it("lets initial local keys shadow same-named input getters without invoking them", async () => {
+  const { createScopeStore } = await import("../src/runtime/store");
+  const input = {
+    get count() {
+      throw new Error("Input getter read for a local key");
+    },
+  };
+  const scope = createScopeStore(input, { count: 1 });
+  const values: unknown[] = [];
+  const stop = effect(() => {
+    values.push(scope.count);
+  });
+  scope.count = 2;
+  expect(values).toEqual([1, 2]);
+  expect(Object.getOwnPropertyDescriptor(scope, "count")?.value).toBe(2);
+  stop();
+});

@@ -8,6 +8,7 @@ declare global {
       propsAdopted(): boolean;
       updateProps(label: string): void;
       disposeProps(): void;
+      updateGetter(label: string): void;
       oldPropsText(): string;
       events: { a: number; b: number; lazy: number; ssr: number };
       ssrAdopted: boolean;
@@ -146,6 +147,21 @@ test("updates component props before and after deferred hydration while retainin
     window.multiModule.updateProps("disposed");
   });
   expect(await page.evaluate(() => window.multiModule.oldPropsText())).toBe("updated!");
+  await page.evaluate(() => window.multiModule.dispose());
+  expect(errors).toEqual([]);
+});
+
+test("binds default scope getters that return fresh values without re-evaluation loops", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(fixture);
+  await expect.poll(() => page.evaluate(() => typeof window.multiModule?.updateGetter)).toBe("function");
+  await expect(page.locator("#getter [data-count]")).toHaveText("2");
+  await expect(page.locator("#getter [data-first]")).toHaveText("A");
+  await expect(page.locator("#getter [data-count-again]")).toHaveText("2");
+  await page.evaluate(() => window.multiModule.updateGetter("B"));
+  await expect(page.locator("#getter [data-first]")).toHaveText("B");
+  await expect(page.locator("#getter [data-count]")).toHaveText("2");
   await page.evaluate(() => window.multiModule.dispose());
   expect(errors).toEqual([]);
 });

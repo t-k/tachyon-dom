@@ -3,6 +3,7 @@ import * as PropsPanel from "./PropsPanel.td";
 import { hydrate, mount, type MountHandle } from "tachyon-dom/runtime/mount";
 import * as CounterA from "./CounterA.td";
 import * as CounterB from "./CounterB.td";
+import * as GetterPanel from "./GetterPanel.td";
 import * as ScopedPanel from "./ScopedPanel.td";
 import * as SsrPanel from "./SsrPanel.td";
 import { events, setShared } from "./shared";
@@ -45,6 +46,9 @@ const otherProps = propsComponent.mount(container("props-other"), { label: "othe
 handles.set("props", propsHandle);
 handles.set("props-other", otherProps);
 const oldProps = container("props").querySelector("main")!;
+const getterComponent = createTemplateComponent<{ label: string }>({ client: GetterPanel });
+const getterHandle = getterComponent.mount(container("getter"), { label: "A" });
+handles.set("getter", getterHandle);
 
 const api = {
   events,
@@ -52,6 +56,7 @@ const api = {
   propsAdopted: () => propsNode === container("props").querySelector("main"),
   updateProps: (label: string) => propsHandle.update({ label, started }),
   disposeProps: () => propsHandle.dispose(),
+  updateGetter: (label: string) => getterHandle.update({ label }),
   oldPropsText: () => oldProps.querySelector("[data-label]")!.textContent,
   ssrAdopted: container("ssr").querySelector("section") === ssrNode,
   setShared,

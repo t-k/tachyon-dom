@@ -52,6 +52,7 @@ export const evaluateGeneratedClientModule = (
   const executable = code
     .replace(/^import .*$/gm, "")
     .replace(/^export default /m, "return ")
+    .replace(/^export \{[^}]*\};$/gm, "")
     .replace(/^export const /gm, "const ");
   return new Function(
     ...names,
