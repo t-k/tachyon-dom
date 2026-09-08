@@ -14,6 +14,8 @@ export default defineConfig({
       "tests/compiler.test.ts",
       "tests/runtime-conditional.test.ts",
       "tests/example-syntax-gallery.test.ts",
+      "tests/runtime-list.test.ts",
+      "tests/dx.test.ts",
     ],
   },
 });
