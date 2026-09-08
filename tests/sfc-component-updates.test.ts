@@ -155,3 +155,65 @@ it.each(["preserve", "condense"] as const)(
     }
   },
 );
+
+it("does not turn literal brace fragments around a store into an expression", async () => {
+  const { compileTemplate } = await import("../src/compiler");
+  const compiled = compileTemplate("<main>{<store x={0}/>x}</main>");
+  if (!compiled.ok) throw new Error(compiled.error.message);
+  expect(compiled.value.client.templateHtml).toBe("<main>{x}</main>");
+  expect(compiled.value.client.bindings).toHaveLength(0);
+});
+
+it.each([false, true])(
+  "retains generated hydration state and releases repeated instances with setup=%s",
+  async (setup) => {
+    const { renderServerTemplate } = await import("../src/compiler");
+    const { createRuntimeDiagnostics } = await import("../src/runtime/diagnostics");
+    const compiled = compileTachyonSfc(
+      `${setup ? '<script setup>inputScope.started(); const local = "ready";</script>' : ""}<main><store count={0}/><p>{label}</p><input bind:value={count}/><output>{count}</output></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const script = transformSfcScript(compiled.value.descriptor.script);
+    if (!script.ok) throw new Error(script.error.message);
+    const client = evaluateGeneratedClientModule(
+      script.value.code +
+        generateClientModule(compiled.value.template, {
+          reactive: true,
+          hydrateOnly: true,
+          ...(script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {}),
+        }),
+    );
+    let starts = 0;
+    const started = () => {
+      starts++;
+    };
+    const component = createTemplateComponent<{ label: string; started: () => void }>({ client });
+    const diagnostics = createRuntimeDiagnostics();
+    const baseline = diagnostics.snapshot();
+    try {
+      for (let index = 0; index < 30; index++) {
+        const root = document.createElement("div");
+        root.innerHTML = renderServerTemplate(compiled.value.template, { label: "before" });
+        const original = root.querySelector("p");
+        const result = component.hydrate(root, { label: "before", started });
+        if (!result.ok) throw new Error(result.error.message);
+        try {
+          const input = root.querySelector("input")!;
+          input.value = "7";
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          await Promise.resolve();
+          result.value.update({ label: "after", started });
+          expect(original?.textContent).toBe("after");
+          expect(root.querySelector("p")).toBe(original);
+          expect(root.querySelector("output")?.textContent).toBe("7");
+        } finally {
+          result.value.dispose();
+        }
+        expect(diagnostics.snapshot()).toEqual(baseline);
+      }
+      expect(starts).toBe(setup ? 30 : 0);
+    } finally {
+      diagnostics.dispose();
+    }
+  },
+);

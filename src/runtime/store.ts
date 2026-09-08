@@ -1,14 +1,18 @@
 import { createStore } from "./signal.js";
 export { createStore };
 
+const scopeDescriptor = (scope: Record<PropertyKey, unknown>, key: PropertyKey): PropertyDescriptor | undefined => {
+  const descriptor = Reflect.getOwnPropertyDescriptor(scope, key);
+  return descriptor?.enumerable ? descriptor : undefined;
+};
+
 const readScopeProperty = (scope: Record<PropertyKey, unknown>, key: PropertyKey, receiver: unknown): unknown => {
-  // Reading an absent Store key subscribes to later additions, but inherited
-  // getters are not input props and must never be invoked during composition.
-  return Object.hasOwn(scope, key) || !(key in scope) ? Reflect.get(scope, key, receiver) : undefined;
+  // Read absent Store keys to subscribe, but never evaluate hidden or inherited getters.
+  return scopeDescriptor(scope, key) || !(key in scope) ? Reflect.get(scope, key, receiver) : undefined;
 };
 
 const scopeKeys = (scope: Record<PropertyKey, unknown>): Array<string | symbol> =>
-  Reflect.ownKeys(scope).filter((key) => Object.getOwnPropertyDescriptor(scope, key)?.enumerable);
+  Reflect.ownKeys(scope).filter((key) => scopeDescriptor(scope, key));
 
 /** Compose instance scopes without snapshotting reactive values. The overlay wins. */
 export const mergeScopes = (
@@ -21,13 +25,13 @@ export const mergeScopes = (
       {
         get(_target, key, receiver) {
           const value = readScopeProperty(overlay, key, receiver);
-          return Object.hasOwn(overlay, key) ? value : readScopeProperty(base, key, receiver);
+          return scopeDescriptor(overlay, key) ? value : readScopeProperty(base, key, receiver);
         },
-        has: (_target, key) => Object.hasOwn(overlay, key) || Object.hasOwn(base, key),
+        has: (_target, key) => Boolean(scopeDescriptor(overlay, key) || scopeDescriptor(base, key)),
         ownKeys: () => [...new Set([...scopeKeys(base), ...scopeKeys(overlay)])],
         getOwnPropertyDescriptor(_target, key) {
-          const source = Object.hasOwn(overlay, key) ? overlay : base;
-          const descriptor = Reflect.getOwnPropertyDescriptor(source, key);
+          const source = scopeDescriptor(overlay, key) ? overlay : base;
+          const descriptor = scopeDescriptor(source, key);
           return descriptor ? { ...descriptor, configurable: true } : undefined;
         },
       },

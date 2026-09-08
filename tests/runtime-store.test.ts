@@ -94,3 +94,14 @@ it("isolates shared default scope assignments while allowing later prop changes"
   expect(values).toEqual(["before", "local", "after"]);
   stop();
 });
+
+it("does not expose non-enumerable input properties or invoke their getters", async () => {
+  const { mergeScopes } = await import("../src/runtime/store");
+  const hidden = Object.defineProperty({}, "secret", {
+    get() {
+      throw new Error("Hidden getter read");
+    },
+  });
+  expect(mergeScopes(hidden, {}).secret).toBeUndefined();
+  expect(mergeScopes({ secret: "public" }, hidden).secret).toBe("public");
+});

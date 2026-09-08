@@ -104,7 +104,16 @@ export const coalesceStaticStoreText = (node: ElementNode): ElementNode => {
         children.push(child);
       } else if (previousText !== undefined) {
         const previous = children[previousText];
-        if (previous?.type === "text") children[previousText] = { ...previous, value: previous.value + child.value };
+        if (
+          previous?.type === "text" &&
+          !textExpressionSegments(previous.value + child.value).some((segment) => segment.kind === "expression")
+        ) {
+          children[previousText] = { ...previous, value: previous.value + child.value };
+        } else {
+          // Joining separate literal brace fragments must not invent an expression.
+          previousText = children.length;
+          children.push(child);
+        }
       } else {
         previousText = children.length;
         children.push(child);
