@@ -4,7 +4,12 @@ import path from "node:path";
 import { expect, it } from "vitest";
 import { compileFile } from "../src/cli";
 import { createSignal } from "../src/index";
-import { sfcSetupScopeName, templateScopeIdentifiers, transformSfcScript } from "../src/compiler/sfc";
+import {
+  sfcScriptTransformCacheLimit,
+  sfcSetupScopeName,
+  templateScopeIdentifiers,
+  transformSfcScript,
+} from "../src/compiler/sfc";
 import { tachyonDom } from "../src/vite";
 
 // The generated entry always supplies an input scope, so the factory it calls
@@ -219,3 +224,55 @@ it.each(["'use strict';\n\"other directive\";", "\"other directive\";\n'use stri
     expect(setupFactory("setup", content)({})).toEqual({});
   },
 );
+
+it("reuses the transformed script for repeated identical inputs", () => {
+  // The Vite plugin transforms the same script for the server module, the client
+  // module, and every hydration chunk; only the source revision should cost a transpile.
+  const script = { attrs: 'setup lang="ts"', offset: 0, content: "const value: number = 1;" };
+  const first = transformSfcScript(script);
+  const second = transformSfcScript({ ...script });
+  const identifiers = new Set(["value"]);
+  const narrowed = transformSfcScript(script, { templateIdentifiers: identifiers });
+  const narrowedAgain = transformSfcScript(script, { templateIdentifiers: new Set(["value"]) });
+  const other = transformSfcScript({ ...script, content: "const value: number = 2;" });
+  if (!first.ok || !second.ok || !narrowed.ok || !narrowedAgain.ok || !other.ok) throw new Error("Expected ok");
+  expect(second.value).toBe(first.value);
+  expect(narrowedAgain.value).toBe(narrowed.value);
+  expect(narrowed.value).not.toBe(first.value);
+  expect(other.value).not.toBe(first.value);
+  expect(Object.isFrozen(first.value)).toBe(true);
+  expect(Object.isFrozen(first.value.setupBindings)).toBe(true);
+  expect(Object.isFrozen(narrowed.value.setupBindings)).toBe(true);
+  expect(Object.isFrozen(narrowed.value.exposedBindings)).toBe(true);
+});
+
+it("keeps the cached script result independent of the script offset", () => {
+  const base = transformSfcScript({ attrs: "setup", offset: 0, content: "export const value = 1;" });
+  const shifted = transformSfcScript({ attrs: "setup", offset: 7, content: "export const value = 1;" });
+  expect(base.ok).toBe(false);
+  expect(shifted.ok).toBe(false);
+  if (base.ok || shifted.ok) return;
+  expect(base.error.offset).toBe(0);
+  expect(shifted.error.offset).toBe(7);
+});
+
+it("shifts nothing for a cached success and keys the cache on sorted template identifiers", () => {
+  const script = { attrs: "setup", offset: 0, content: "const a = 1; const b = 2;" };
+  const base = transformSfcScript(script, { templateIdentifiers: new Set(["a", "b"]) });
+  const shifted = transformSfcScript({ ...script, offset: 9 }, { templateIdentifiers: new Set(["b", "a"]) });
+  if (!base.ok || !shifted.ok) throw new Error("Expected ok");
+  expect(shifted.value).toBe(base.value);
+  expect(Object.isFrozen(base.value.exposedBindings)).toBe(true);
+});
+
+it("evicts the least recently used transformed script once the cache is full", () => {
+  const scriptFor = (index: number) => ({ attrs: "setup", offset: 0, content: `const value = ${index};` });
+  const first = transformSfcScript(scriptFor(0));
+  const second = transformSfcScript(scriptFor(1));
+  for (let index = 2; index < sfcScriptTransformCacheLimit; index++) transformSfcScript(scriptFor(index));
+  // Touching the oldest entry keeps it alive; the next insertion evicts entry 1 instead.
+  expect(transformSfcScript(scriptFor(0))).toBe(first);
+  transformSfcScript(scriptFor(sfcScriptTransformCacheLimit));
+  expect(transformSfcScript(scriptFor(0))).toBe(first);
+  expect(transformSfcScript(scriptFor(1))).not.toBe(second);
+});

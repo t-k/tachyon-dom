@@ -12,17 +12,11 @@
   "mutate": [
     "src/compiler/sfc.ts:74:0-149:0",
     "src/compiler/sfc.ts:598:0-669:0",
-    "src/compiler/sfc.ts:757:0-801:0",
-    "src/compiler/sfc.ts:812:0-824:0"
+    "src/compiler/sfc.ts:757:0-848:0",
+    "src/compiler/sfc.ts:856:0-868:0"
   ],
-  "plugins": [
-    "./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"
-  ],
-  "reporters": [
-    "clear-text",
-    "html",
-    "json"
-  ],
+  "plugins": ["./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"],
+  "reporters": ["clear-text", "html", "json"],
   "testRunner": "vitest",
   "thresholds": {
     "high": 80,
@@ -33,11 +27,5 @@
     "configFile": "vitest.sfc-mutation.config.ts",
     "related": false
   },
-  "ignorePatterns": [
-    "docs.local",
-    "tests/browser/generated",
-    "test-results",
-    "benchmark",
-    ".worktree"
-  ]
+  "ignorePatterns": ["docs.local", "tests/browser/generated", "test-results", "benchmark", ".worktree"]
 }

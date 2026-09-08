@@ -798,6 +798,34 @@ const canNarrowSetupScope = (script: TachyonSfcScript, exposed: ReadonlySet<stri
   return [...exposed].every((name) => known.has(name));
 };
 
+export const sfcScriptTransformCacheLimit = 128;
+const transformCache = new Map<string, Result<TransformedSfcScript, CompilerError>>();
+
+const freezeTransformedScript = (result: Result<TransformedSfcScript, CompilerError>) => {
+  if (result.ok) {
+    Object.freeze(result.value.setupBindings);
+    Object.freeze(result.value.exposedBindings);
+    Object.freeze(result.value);
+  }
+  return Object.freeze(result);
+};
+
+const rememberTransformedScript = (
+  cacheKey: string,
+  result: Result<TransformedSfcScript, CompilerError>,
+): Result<TransformedSfcScript, CompilerError> => {
+  const frozen = freezeTransformedScript(result);
+  transformCache.set(cacheKey, frozen);
+  for (const oldest of transformCache.keys()) {
+    if (transformCache.size <= sfcScriptTransformCacheLimit) break;
+    transformCache.delete(oldest);
+  }
+  return frozen;
+};
+
+// The Vite plugin asks for the same script once per target and once per hydration
+// chunk, and only the source revision changes the answer. The transform is pure
+// apart from the script offset, so it runs at offset 0 and errors are shifted back.
 export const transformSfcScript = (
   script: TachyonSfcScript | undefined,
   options: TransformSfcScriptOptions = {},
@@ -805,6 +833,22 @@ export const transformSfcScript = (
   if (!script || script.content.trim().length === 0) {
     return ok({ code: "", setupBindings: [], exposedBindings: [], scopeEmission: "full" });
   }
+  const identifiers = options.templateIdentifiers ? [...options.templateIdentifiers].sort() : undefined;
+  const cacheKey = JSON.stringify([script.attrs, script.content, identifiers]);
+  const cached = transformCache.get(cacheKey);
+  const result =
+    cached ?? rememberTransformedScript(cacheKey, transformSfcScriptUncached({ ...script, offset: 0 }, options));
+  if (cached) {
+    transformCache.delete(cacheKey);
+    transformCache.set(cacheKey, cached);
+  }
+  return result.ok ? result : err({ ...result.error, offset: result.error.offset + script.offset });
+};
+
+const transformSfcScriptUncached = (
+  script: TachyonSfcScript,
+  options: TransformSfcScriptOptions,
+): Result<TransformedSfcScript, CompilerError> => {
   const transpiled = transpileScriptContent(script);
   if (!transpiled.ok) {
     return err(transpiled.error);
