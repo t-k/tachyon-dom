@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("benchmark GitHub Actions workflow", () => {
-  it("手動Dispatchで2スイートとallを選択できる", async () => {
+  it("offers both suites and all from a manual dispatch", async () => {
     const workflow = await readFile(".github/workflows/benchmarks.yml", "utf8");
 
     expect(workflow).toContain("workflow_dispatch:");
@@ -13,7 +13,7 @@ describe("benchmark GitHub Actions workflow", () => {
     expect(workflow).not.toContain("schedule:");
   });
 
-  it("選択したベンチマークを実行してSummaryへ追記する", async () => {
+  it("runs the chosen benchmark and appends its summary to the run", async () => {
     const workflow = await readFile(".github/workflows/benchmarks.yml", "utf8");
 
     expect(workflow).toContain("pnpm bench:web-framework --output");
@@ -24,7 +24,7 @@ describe("benchmark GitHub Actions workflow", () => {
     expect(workflow).toContain("playwright install --with-deps chromium");
   });
 
-  it("失敗時も成果物を回収し、リポジトリへ書き込まない", async () => {
+  it("collects the artifacts even on failure and writes nothing into the repository", async () => {
     const workflow = await readFile(".github/workflows/benchmarks.yml", "utf8");
     const actionReferences = Array.from(workflow.matchAll(/uses:\s+([^\s#]+)/g), (match) => match[1]);
 

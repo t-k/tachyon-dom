@@ -70,7 +70,7 @@ const localFixture = {
 };
 
 describe("benchmark Summary ranking", () => {
-  it("小さい値を優位として競技順位と最速比を計算する", () => {
+  it("ranks a lower value first and reports the ratio to the best", () => {
     expect(
       rankMetric(
         [
@@ -89,7 +89,7 @@ describe("benchmark Summary ranking", () => {
     ]);
   });
 
-  it("大きい値を優位として最速比を1以上に正規化する", () => {
+  it("ranks a higher value first and keeps the ratio to the best at or above one", () => {
     expect(
       rankMetric(
         [
@@ -104,7 +104,7 @@ describe("benchmark Summary ranking", () => {
     ]);
   });
 
-  it("空、非有限値、負値、ゼロ値を拒否する", () => {
+  it("rejects an empty set and any non-finite, negative, or zero value", () => {
     expect(() => rankMetric([], "lower")).toThrow("at least one metric value");
     expect(() => rankMetric([{ name: "a", value: Number.NaN }], "lower")).toThrow("finite");
     expect(() => rankMetric([{ name: "a", value: -1 }], "lower")).toThrow("non-negative");
@@ -114,33 +114,33 @@ describe("benchmark Summary ranking", () => {
 });
 
 describe("benchmark Summary markdown", () => {
-  it("Web Frameworkの総合ランキングと8つの項目別ランキングを表示する", () => {
+  it("renders the web framework overall ranking and one table per metric", () => {
     const markdown = formatBenchmarkSummary({ suite: "web-framework", webFramework: webFixture });
 
     expect(markdown).toContain("# Benchmark Results");
-    expect(markdown).toContain("参考ランキング");
-    expect(markdown).toContain("## Web Framework総合ランキング");
-    expect(markdown).toContain("## Web Framework項目別ランキング");
-    expect(markdown).toContain("### 静的リクエスト数/秒");
+    expect(markdown).toContain("for reference only");
+    expect(markdown).toContain("## Web framework overall ranking");
+    expect(markdown).toContain("## Web framework ranking per metric");
+    expect(markdown).toContain("### Static requests per second");
     expect(markdown).toContain("| 1 | fast\\|framework | 100 req/s | 1.000x |");
-    expect(markdown).toContain("### 静的p95レイテンシ");
+    expect(markdown).toContain("### Static p95 latency");
     expect(markdown).toContain("| 1 | fast\\|framework | 2.00 ms | 1.000x |");
     expect(markdown.match(/^### /gm)).toHaveLength(8);
   });
 
-  it("js-framework準拠比較の総合、操作別、補助指標ランキングを表示する", () => {
+  it("renders the js-framework-style overall, per-operation, and auxiliary rankings", () => {
     const markdown = formatBenchmarkSummary({ suite: "js-framework", localCompare: localFixture });
 
-    expect(markdown).toContain("## js-framework-benchmark準拠比較 総合ランキング");
+    expect(markdown).toContain("## js-framework-benchmark-style comparison: overall ranking");
     expect(markdown).toContain("### create rows");
     expect(markdown).toContain("### partial update");
     expect(markdown).toContain("### ready JS heap");
     expect(markdown).toContain("### benchmark entry source size");
-    expect(markdown).toContain("tachyon-domリポジトリ内の比較");
+    expect(markdown).toContain("A comparison run inside this repository");
     expect(markdown).toContain("| 1 | tachyon-dom | 10.00 ms | 1.000x |");
   });
 
-  it("不完全な結果を拒否する", () => {
+  it("rejects an incomplete result", () => {
     expect(() => formatBenchmarkSummary({ suite: "web-framework", webFramework: {} })).toThrow(
       "Invalid web-framework benchmark result",
     );
@@ -152,7 +152,7 @@ describe("benchmark Summary markdown", () => {
     );
   });
 
-  it("実行環境とcommitを表示する", () => {
+  it("reports the run environment and the commit", () => {
     const markdown = formatBenchmarkSummary({ suite: "web-framework", webFramework: webFixture });
 
     expect(markdown).toContain("`abc123`");
@@ -161,7 +161,7 @@ describe("benchmark Summary markdown", () => {
     expect(markdown).toContain("Example CPU");
   });
 
-  it("Web Framework総合スコアの完全同値を同順位にする", () => {
+  it("gives exactly tied web framework scores the same rank", () => {
     const tied = structuredClone(webFixture);
     tied.measurements.ranking[1]!.score = tied.measurements.ranking[0]!.score;
 
@@ -171,7 +171,7 @@ describe("benchmark Summary markdown", () => {
     expect(markdown).toContain("| 1 | slow | 1.000x |");
   });
 
-  it("Web Framework総合ランキングの重複と欠落を拒否する", () => {
+  it("rejects a web framework ranking with a duplicate or a missing framework", () => {
     const malformed = structuredClone(webFixture);
     malformed.measurements.ranking[1]!.framework = malformed.measurements.ranking[0]!.framework;
 
@@ -180,7 +180,7 @@ describe("benchmark Summary markdown", () => {
     );
   });
 
-  it("ローカル比較の未宣言実装と指標メタデータ不一致を拒否する", () => {
+  it("rejects a local comparison with an undeclared implementation or mismatched metric metadata", () => {
     const extraImplementation = structuredClone(localFixture);
     extraImplementation.measurements.summaries.push(summary("createRows", "create rows", "extra", 1));
     expect(() => formatBenchmarkSummary({ suite: "js-framework", localCompare: extraImplementation })).toThrow(
@@ -196,7 +196,7 @@ describe("benchmark Summary markdown", () => {
 });
 
 describe("benchmark Summary CLI", () => {
-  it("allスイートの入力パスを解析する", () => {
+  it("parses the input paths for the all suite", () => {
     expect(
       parseSummaryArgs(["--suite", "all", "--web", "web.json", "--local", "local.json", "--output", "summary.md"]),
     ).toEqual({
@@ -207,7 +207,7 @@ describe("benchmark Summary CLI", () => {
     });
   });
 
-  it("不明なスイートと必須パスの欠落を拒否する", () => {
+  it("rejects an unknown suite and a missing required path", () => {
     expect(() => parseSummaryArgs(["--suite", "unknown"])).toThrow("Unknown suite");
     expect(() => parseSummaryArgs(["--suite", "all", "--web", "web.json", "--output", "summary.md"])).toThrow(
       "--local is required",
@@ -215,7 +215,7 @@ describe("benchmark Summary CLI", () => {
     expect(() => parseSummaryArgs(["--suite", "web-framework", "--web", "web.json"])).toThrow("--output is required");
   });
 
-  it("JSONを読み込んでSummaryファイルを作成する", async () => {
+  it("reads the JSON and writes the summary file", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tachyon-summary-"));
     const webPath = join(directory, "web.json");
     const outputPath = join(directory, "nested", "summary.md");
@@ -223,6 +223,6 @@ describe("benchmark Summary CLI", () => {
 
     await runSummaryCli(["--suite", "web-framework", "--web", webPath, "--output", outputPath]);
 
-    expect(await readFile(outputPath, "utf8")).toContain("## Web Framework総合ランキング");
+    expect(await readFile(outputPath, "utf8")).toContain("## Web framework overall ranking");
   });
 });

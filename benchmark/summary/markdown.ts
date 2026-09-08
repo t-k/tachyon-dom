@@ -213,7 +213,7 @@ const formatEnvironment = (provenance: Provenance): string =>
   ].join("\n");
 
 const formatRankedTable = (rows: readonly RankedMetric[], formatValue: (value: number) => string): string => {
-  const lines = ["| 順位 | 対象 | 実測値 | 最速比 |", "|---:|---|---:|---:|"];
+  const lines = ["| Rank | Subject | Measured | vs. best |", "|---:|---|---:|---:|"];
   for (const row of rows) {
     lines.push(
       `| ${row.rank} | ${escapeMarkdownCell(row.name)} | ${formatValue(row.value)} | ${row.ratioToBest.toFixed(3)}x |`,
@@ -230,44 +230,44 @@ const webDefinitions: readonly {
 }[] = [
   {
     key: "staticRequestsPerSecond",
-    label: "静的リクエスト数/秒",
+    label: "Static requests per second",
     direction: "higher",
     format: (value) => `${value.toFixed(0)} req/s`,
   },
   {
     key: "staticLatencyP95Ms",
-    label: "静的p95レイテンシ",
+    label: "Static p95 latency",
     direction: "lower",
     format: (value) => `${value.toFixed(2)} ms`,
   },
   {
     key: "dynamicRequestsPerSecond",
-    label: "動的リクエスト数/秒",
+    label: "Dynamic requests per second",
     direction: "higher",
     format: (value) => `${value.toFixed(0)} req/s`,
   },
   {
     key: "dynamicLatencyP95Ms",
-    label: "動的p95レイテンシ",
+    label: "Dynamic p95 latency",
     direction: "lower",
     format: (value) => `${value.toFixed(2)} ms`,
   },
-  { key: "streamTtfbMs", label: "ストリーミングTTFB", direction: "lower", format: (value) => `${value.toFixed(2)} ms` },
+  { key: "streamTtfbMs", label: "Streaming TTFB", direction: "lower", format: (value) => `${value.toFixed(2)} ms` },
   {
     key: "streamCompleteMs",
-    label: "ストリーミング完了時間",
+    label: "Streaming completion",
     direction: "lower",
     format: (value) => `${value.toFixed(2)} ms`,
   },
   {
     key: "clientNavigationMs",
-    label: "クライアント遷移時間",
+    label: "Client navigation",
     direction: "lower",
     format: (value) => `${value.toFixed(2)} ms`,
   },
   {
     key: "clientBundleBytes",
-    label: "クライアントバンドルサイズ",
+    label: "Client bundle size",
     direction: "lower",
     format: (value) => `${(value / 1024).toFixed(2)} KiB`,
   },
@@ -279,9 +279,9 @@ const formatWebFrameworkSummary = (result: WebResult): string => {
     "lower",
   );
   const overall = [
-    "## Web Framework総合ランキング",
+    "## Web framework overall ranking",
     "",
-    "| 順位 | Framework | Score |",
+    "| Rank | Framework | Score |",
     "|---:|---|---:|",
     ...overallRanking.map((row) => `| ${row.rank} | ${escapeMarkdownCell(row.name)} | ${row.value.toFixed(3)}x |`),
   ].join("\n");
@@ -292,7 +292,7 @@ const formatWebFrameworkSummary = (result: WebResult): string => {
     );
     return `### ${definition.label}\n\n${formatRankedTable(ranked, definition.format)}`;
   });
-  return `${formatEnvironment(result.provenance)}\n\n${overall}\n\n## Web Framework項目別ランキング\n\n${metrics.join("\n\n")}`;
+  return `${formatEnvironment(result.provenance)}\n\n${overall}\n\n## Web framework ranking per metric\n\n${metrics.join("\n\n")}`;
 };
 
 const geomean = (values: readonly number[]): number =>
@@ -339,14 +339,14 @@ const formatLocalCompareSummary = (result: LocalResult): string => {
       formatAuxiliaryValue(definition.unit),
     )}`;
   });
-  return `${formatEnvironment(result.provenance)}\n\n> js-framework-benchmarkの操作モデルに沿ったtachyon-domリポジトリ内の比較です。上流公式ランナーの結果ではありません。\n\n## js-framework-benchmark準拠比較 総合ランキング\n\n${overall}\n\n## 操作別ランキング\n\n${operationTables.join("\n\n")}\n\n## 補助指標ランキング\n\n${auxiliaryTables.join("\n\n")}`;
+  return `${formatEnvironment(result.provenance)}\n\n> A comparison run inside this repository, following the js-framework-benchmark operation model. These are not results from the official upstream runner.\n\n## js-framework-benchmark-style comparison: overall ranking\n\n${overall}\n\n## Ranking per operation\n\n${operationTables.join("\n\n")}\n\n## Ranking per auxiliary metric\n\n${auxiliaryTables.join("\n\n")}`;
 };
 
 export const formatBenchmarkSummary = (input: SummaryInput): string => {
   const sections = [
     "# Benchmark Results",
     `- Suite: \`${input.suite}\``,
-    "> この結果は単一Dispatch内の参考ランキングであり、権威的ランキングではありません。",
+    "> These rankings come from a single dispatch and are for reference only; they are not authoritative.",
   ];
   if (input.suite === "web-framework" || input.suite === "all") {
     sections.push(formatWebFrameworkSummary(parseWebFrameworkResult(input.webFramework)));
