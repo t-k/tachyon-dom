@@ -229,6 +229,7 @@
     "bench:compiler": "tsx benchmark/compiler/compare-expression-backends.ts",
     "bench:raw-text-scan": "tsx benchmark/raw-text-scan/run.ts",
     "bench:sfc": "tsx benchmark/compiler/compare-sfc-transform.ts",
+    "bench:sfc:cache": "tsx benchmark/compiler/sfc-transform-cache.ts",
     "bench:local": "tsx benchmark/local-compare/run-local-compare.ts",
     "bench:local:full": "tsx benchmark/local-compare/run-local-compare.ts --iterations 9 --warmup 3",
     "bench:local:gate": "tsx benchmark/local-compare/run-local-compare.ts --max-geomean-ratio 1.25 --max-memory-ratio 1.5",
