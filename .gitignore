@@ -17,6 +17,7 @@ benchmark/streaming-backpressure-results/
 benchmark/html-minification-results/
 benchmark/template-representative-results/
 benchmark/representation-evaluation-results/
+benchmark/conditional-representative-results/
 benchmark/client-bundle-attribution-results/
 benchmark/raw-text-scan/results/
 benchmark/web-framework/results/
