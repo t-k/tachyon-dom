@@ -34,5 +34,9 @@
   "thirty-template-page": {
     "maxMinifiedBytes": 60300,
     "maxBrotliBytes": 9230
+  },
+  "varied-template-page": {
+    "maxMinifiedBytes": 46800,
+    "maxBrotliBytes": 13400
   }
 }

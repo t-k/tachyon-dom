@@ -161,25 +161,64 @@ const generatedTemplateFixture = (source, options = {}, compileOptions = {}) =>
 const pageTemplateSource = (index) =>
   `<section><h2>Panel ${index}</h2><button on:click={toggle}>Toggle</button><if test={open}><ul><for each={rows} key={row.id}><li class:active={row.active}>{row.label}</li></for></ul></if></section>`;
 
-const manyTemplatesPageFixture = (count) => {
-  const imports = new Set();
+// Templates that differ in their bindings import different helper subsets from the same runtime modules, and the
+// compiler may bind one local alias to different exports per template (the conditional preparation variants).
+// Each template therefore keeps module-scoped aliases, suffixed per template, and the page merges the resulting
+// specifiers per module the way a bundler merges separate template modules.
+const templatesPageFixture = (sources) => {
+  const specifiersByModule = new Map();
   const modules = [];
-  for (let index = 0; index < count; index++) {
-    const generated = generatedTemplateFixture(pageTemplateSource(index), { reactive: true });
-    const body = [];
+  for (const [index, source] of sources.entries()) {
+    const generated = generatedTemplateFixture(source, { reactive: true });
+    const aliases = new Map();
+    const bodyLines = [];
     for (const line of generated.split("\n")) {
-      if (/^import .* from "/.test(line)) imports.add(line);
-      else body.push(line.replace(/^export const /, "const "));
+      const match = /^import \{ (.*) \} from ("[^"]+");$/.exec(line);
+      if (!match) {
+        bodyLines.push(line.replace(/^export const /, "const "));
+        continue;
+      }
+      const specifiers = specifiersByModule.get(match[2]) ?? new Set();
+      for (const specifier of match[1].split(", ")) {
+        const [exported, alias = exported] = specifier.split(" as ");
+        const scoped = `${alias}_t${index}`;
+        aliases.set(alias, scoped);
+        specifiers.add(`${exported} as ${scoped}`);
+      }
+      specifiersByModule.set(match[2], specifiers);
     }
-    modules.push(`const template${index} = (() => {\n${body.join("\n")}\nreturn { templateHtml, bind };\n})();`);
+    const body = bodyLines.join("\n").replace(/\b__tachyon\w+\b/g, (name) => aliases.get(name) ?? name);
+    modules.push(`const template${index} = (() => {\n${body}\nreturn { templateHtml, bind };\n})();`);
   }
-  const names = Array.from({ length: count }, (_, index) => `template${index}`);
-  return `${[...imports].join("\n")}
+  const imports = [...specifiersByModule].map(
+    ([module, specifiers]) => `import { ${[...specifiers].sort().join(", ")} } from ${module};`,
+  );
+  const names = sources.map((_, index) => `template${index}`);
+  return `${imports.join("\n")}
 ${modules.join("\n")}
 export const templates = [${names.join(", ")}];
 export const mount = (root, scope) => templates.map((template) => template.bind(root, scope));
 `;
 };
+
+const manyTemplatesPageFixture = (count) =>
+  templatesPageFixture(Array.from({ length: count }, (_, index) => pageTemplateSource(index)));
+
+// The many-template page repeats one shape, which compresses unusually well. These templates differ in the
+// bindings they use (forms, dynamic attributes, nested control flow, refs, richer expressions) so the per-template
+// cost they measure is closer to what a real application page pays for its generated descriptors.
+export const variedTemplateSources = [
+  `<form on:submit={save}><label for="name">Name</label><input id="name" bind:value={draft.name} placeholder={hint}><input type="checkbox" bind:checked={draft.subscribed}><button type="submit" disabled={saving}>{saving ? "Saving" : "Save"}</button></form>`,
+  `<nav aria-label={label}><a href={home.href} class:active={route === "home"} title={home.title}>Home</a><a href={docs.href} class:active={route === "docs"} style:color={accent}>Docs</a></nav>`,
+  `<ul><for each={groups} key={group.id}><li class:open={group.open}><h3>{group.title} ({group.items.length})</h3><if test={group.open}><ul><for each={group.items} key={item.id}><li class:done={item.done}>{item.label}</li></for></ul></if></li></for></ul>`,
+  `<article><header><h2>{post.title}</h2><time datetime={post.publishedAt}>{formatDate(post.publishedAt)}</time></header><if test={post.tags.length > 0}><ul><for each={post.tags} key={tag}><li>{tag}</li></for></ul></if><p>{post.summary ?? "No summary"}</p></article>`,
+  `<section><input ref={search.input} bind:value={search.query} on:input={onSearch}><p>{search.results.length} results for \`\${search.query}\`</p><if test={search.loading}><span class="spinner">Loading</span></if></section>`,
+  `<table><tbody><for each={rows} key={row.id} index="index"><tr class:odd={index % 2 === 1} on:click={select}><td>{index + 1}</td><td>{row.name}</td><td style:width={row.share + "%"}>{row.share.toFixed(1)}</td></tr></for></tbody></table>`,
+  `<dialog open={modal.open}><h2>{modal.title}</h2><p>{modal.message}</p><button on:click={modal.confirm} disabled={!modal.ready}>OK</button><button on:click={modal.cancel}>Cancel</button></dialog>`,
+  `<footer><if test={user}><span>{user.name} ({user.role})</span><button on:click={signOut}>Sign out</button></if><if test={!user}><a href={loginHref}>Sign in</a></if><small>{year} {company}</small></footer>`,
+];
+
+const variedTemplatesPageFixture = () => templatesPageFixture(variedTemplateSources);
 
 const generatedFixtureOptions = (generateOptions = {}, compileOptions = {}) => ({
   compileOptions,
@@ -206,6 +245,7 @@ export const createClientBundleFixtures = () => {
   );
   const oneTemplatePage = manyTemplatesPageFixture(1);
   const thirtyTemplatePage = manyTemplatesPageFixture(30);
+  const variedTemplatePage = variedTemplatesPageFixture();
   return [
     {
       name: "static",
@@ -277,6 +317,13 @@ export const mount = (root) => bind(root, scope);
       source: `${pageTemplateSource(0)} ... ${pageTemplateSource(29)}`,
       generatedSource: thirtyTemplatePage,
       entrySource: thirtyTemplatePage,
+      ...generatedFixtureOptions({ reactive: true }),
+    },
+    {
+      name: "varied-template-page",
+      source: variedTemplateSources.join(" ... "),
+      generatedSource: variedTemplatePage,
+      entrySource: variedTemplatePage,
       ...generatedFixtureOptions({ reactive: true }),
     },
   ];

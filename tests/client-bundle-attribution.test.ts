@@ -15,6 +15,7 @@ import {
   runClientBundleAttribution,
   summarizeClientBundle,
   validateFixtureBudgets,
+  variedTemplateSources,
 } from "../scripts/client-bundle-attribution.mjs";
 
 const generatedClientEntry = (source: string, options: Record<string, unknown> = {}) => {
@@ -270,7 +271,7 @@ export const unwanted = bindControl;
     }
   });
 
-  it("writes nine attributed fixtures with provenance and unique run artifacts", async () => {
+  it("writes ten attributed fixtures with provenance and unique run artifacts", async () => {
     const artifactRoot = await mkdtemp(join(tmpdir(), "tachyon-client-bundles-"));
     try {
       const first = await runClientBundleAttribution({ cwd: process.cwd(), artifactRoot });
@@ -331,6 +332,7 @@ export const unwanted = bindControl;
         "composite-quick-example",
         "one-template-page",
         "thirty-template-page",
+        "varied-template-page",
       ]);
       // The many-template page shares the runtime with the one-template page, so it costs less than thirty
       // copies of it: the difference is what each additional template adds.
@@ -339,6 +341,14 @@ export const unwanted = bindControl;
       if (!one || !thirty) throw new Error("Missing page fixtures.");
       expect(thirty.minifiedBytes).toBeGreaterThan(one.minifiedBytes);
       expect(thirty.minifiedBytes).toBeLessThan(one.minifiedBytes * 30);
+      // Eight structurally different templates cost more per template than eight copies of one shape, so the
+      // varied page must not be read as "another template costs what the thirty-template page suggests".
+      const varied = report.fixtures.find((fixture) => fixture.name === "varied-template-page");
+      if (!varied) throw new Error("Missing varied page fixture.");
+      const perTemplateRepeated = (thirty.brotliBytes - one.brotliBytes) / 29;
+      const perTemplateVaried = (varied.brotliBytes - one.brotliBytes) / (variedTemplateSources.length - 1);
+      expect(perTemplateVaried).toBeGreaterThan(perTemplateRepeated);
+      expect(varied.minifiedBytes).toBeGreaterThan(one.minifiedBytes);
       for (const fixture of report.fixtures) {
         expect(fixture.sourceSha256).toMatch(/^[a-f0-9]{64}$/);
         expect(fixture.generatedSource.length).toBeGreaterThan(0);

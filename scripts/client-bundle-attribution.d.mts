@@ -39,13 +39,12 @@ export type ClientBundleFixture = {
   compileOptions?: Record<string, unknown>;
   generateOptions?: Record<string, unknown>;
 };
+export const variedTemplateSources: readonly string[];
 export const createClientBundleFixtures: () => ClientBundleFixture[];
 export const validateFixtureBudgets: (
   budgets: Record<string, unknown>,
   fixtures: readonly Pick<ClientBundleFixture, "name">[],
-) =>
-  | { ok: true }
-  | { ok: false; reason: "missing fixture budget" | "invalid fixture budget"; fixtures: string[] };
+) => { ok: true } | { ok: false; reason: "missing fixture budget" | "invalid fixture budget"; fixtures: string[] };
 export const runClientBundleAttribution: (options?: {
   cwd?: string;
   artifactRoot?: string;
@@ -56,10 +55,7 @@ export type ClientBundleBuildResult = {
   metafile: BundleMetafile;
   outputFiles?: Array<{ contents: Uint8Array; text: string }>;
 };
-export const buildClientBundle: (
-  contents: string,
-  options?: { cwd?: string },
-) => Promise<ClientBundleBuildResult>;
+export const buildClientBundle: (contents: string, options?: { cwd?: string }) => Promise<ClientBundleBuildResult>;
 export const summarizeClientBundle: (result: ClientBundleBuildResult) => {
   minifiedBytes: number;
   brotliBytes: number;
