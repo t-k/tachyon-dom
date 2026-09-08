@@ -1089,7 +1089,10 @@ describe("HTML-first compiler", () => {
       const code = generateClientModule(result.value, { reactive: true });
 
       expect(code).toContain(`from "tachyon-dom/runtime/conditional"`);
-      expect(code).not.toContain(`from "tachyon-dom/runtime/conditional-core"`);
+      // The anchor preparation lives beside the lightweight runtime and every branch needs it to adopt SSR
+      // nodes, so only the lightweight mount entry has to stay out.
+      expect(code).not.toContain(`mountGeneratedConditionalCore`);
+      expect(code).toContain(`__tachyonPrepareConditionalCore(root, [`);
       expect(code).toContain(`__tachyonMountGeneratedConditional(`);
     }
   });

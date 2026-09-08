@@ -314,6 +314,7 @@ describe("generated binding readers", () => {
 
     const root = document.createElement("ul");
     mountGeneratedKeyedList(root, [], [{ id: "a", label: "A" }], {
+      signature: "list:test",
       key: "item.id",
       keyReadItem: (item) => (item as { id: string }).id,
       itemName: "item",
@@ -325,10 +326,21 @@ describe("generated binding readers", () => {
     const branch = document.createElement("section");
     branch.innerHTML = `<!---->`;
     mountGeneratedConditional(branch, [0], true, { message: "M" }, {
+      signature: "if:test",
       templateHtml: `<p> </p>`,
       bindings: [{ kind: "text", path: [0], read: (scope) => scope.message }],
     });
     expect(branch.textContent).toBe("M");
+
+    // The generated entries never compute a signature, so a descriptor that leaves it out is a compile error
+    // rather than two descriptors that compare equal at runtime.
+    type ListOptions = Parameters<typeof mountGeneratedKeyedList>[3];
+    type BranchOptions = Parameters<typeof mountGeneratedConditional>[4];
+    // @ts-expect-error a generated list descriptor has to carry its signature
+    const listWithoutSignature: ListOptions = { key: "item.id", itemName: "item", templateHtml: "", bindings: [] };
+    // @ts-expect-error a generated branch descriptor has to carry its signature
+    const branchWithoutSignature: BranchOptions = { templateHtml: "", bindings: [] };
+    expect([listWithoutSignature, branchWithoutSignature]).toHaveLength(2);
 
     // @ts-expect-error a generated descriptor without its reader is a compile error
     const listWithoutReader: ListBinding = { kind: "text", path: [0] };

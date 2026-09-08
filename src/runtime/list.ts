@@ -441,6 +441,17 @@ const nodeAtRecord = (record: RowRecord, path: readonly number[]): Node => {
   return nodeAtIgnoringHydrationMarkers(root, rest);
 };
 
+/** A generated boundary carries a compiled reader; a hand-written one still names a dotted path. */
+const resolveBoundaryId = (boundary: CompiledHydrationBoundary, scope: Record<string, unknown>): unknown =>
+  boundary.idRead
+    ? read(boundary.idRead(scope))
+    : boundary.idKind === "expression"
+      ? readPath(scope, boundary.id)
+      : boundary.id;
+
+const unresolvedBoundaryIdMessage = (key: PropertyKey, boundary: CompiledHydrationBoundary): string =>
+  `Hydration boundary for list row ${String(key)} could not be adopted: hydrate:id={${boundary.id}} resolved to no value.`;
+
 const bindingWithin = (boundaryPath: readonly number[], bindingPath: readonly number[]): boolean =>
   boundaryPath.length <= bindingPath.length && boundaryPath.every((part, index) => bindingPath[index] === part);
 
@@ -814,8 +825,13 @@ const createRecord = (
     const hydration = options.hydration;
     for (const hydrationPlan of state.hydrationPlans) {
       const { boundary, bindings: boundaryPlan } = hydrationPlan;
-      const resolvedId = boundary.idKind === "expression" ? readPath(scope, boundary.id) : boundary.id;
-      if (resolvedId === undefined || resolvedId === null) continue;
+      const resolvedId = resolveBoundaryId(boundary, scope);
+      if (resolvedId === undefined || resolvedId === null) {
+        // A server row is being adopted through its markers, so an id that cannot be resolved must not fall
+        // back to binding everything eagerly; a client-created row has no markers and binds eagerly by design.
+        if (adopted) throw new Error(unresolvedBoundaryIdMessage(key, boundary));
+        continue;
+      }
       const handle = hydration.create(record.element.parentElement ?? record.element, String(resolvedId), () => {
         const cleanups: Array<() => void> = [];
         bindRow(record, options, boundaryPlan, cleanups);
@@ -977,11 +993,23 @@ const mountResolvedKeyedList = (
         entryIndex * state.elementIndices.length,
         (entryIndex + 1) * state.elementIndices.length,
       );
-      const scope = scopedItem(options.itemName, entry.item, options.indexName, entry.index, options.scope);
+      if (state.hydrationPlans.length === 0) continue;
+      // An id can read a row store or a component prop, so the preflight scope carries the row's declarations
+      // the way the record's scope will.
+      const scope = localScopeFor(
+        options.itemName,
+        entry.item,
+        options.indexName,
+        entry.index,
+        parentScope.values,
+        options,
+      );
       for (const hydrationPlan of state.hydrationPlans) {
         const { boundary } = hydrationPlan;
-        const resolvedId = boundary.idKind === "expression" ? readPath(scope, boundary.id) : boundary.id;
-        if (resolvedId === undefined || resolvedId === null) continue;
+        const resolvedId = resolveBoundaryId(boundary, scope);
+        if (resolvedId === undefined || resolvedId === null) {
+          throw new Error(unresolvedBoundaryIdMessage(entry.key, boundary));
+        }
         const rowRoot = adoptable[0]?.parentElement ?? adoptable[0];
         if (!rowRoot) {
           throw new Error(
@@ -1122,7 +1150,12 @@ type GeneratedBinding =
   | GeneratedNestedList
   | GeneratedBranch;
 
-export type GeneratedKeyedListOptions = Omit<KeyedListOptions, keyof GeneratedChildren> & GeneratedChildren;
+/**
+ * The compiler always emits the signature, and the generated entry never computes one, so the type demands it:
+ * two descriptors that both left it out would otherwise compare equal and share a container's state.
+ */
+export type GeneratedKeyedListOptions = Omit<KeyedListOptions, keyof GeneratedChildren | "signature"> &
+  GeneratedChildren & { signature: string };
 
 /**
  * How a generated descriptor is driven: every value, key, and declaration is read through the reader the
@@ -1161,19 +1194,31 @@ const generatedAccessors = {
   ) => (binding.mount as BranchMounter)(node, [], visible, scope, binding),
 } as const;
 
-const resolveGeneratedOptions = (options: KeyedListOptions): ListRuntimeOptions => ({
-  ...options,
-  ...generatedAccessors,
-  descriptor: options,
-  signature: options.signature as string,
-  readKey: (item, index) =>
-    options.keyReadItem
-      ? options.keyReadItem(item)
-      : (options.keyRead as ExpressionReader)(
-          scopedItem(options.itemName, item, options.indexName, index, options.scope),
-        ),
-  hydration: options.hydration as HydrationRuntime,
-});
+// A generated descriptor is built once per bind and handed back on every update, so its resolved form is kept
+// with it rather than rebuilt each time. A nested region's descriptor is spread anew per mount and misses here;
+// its entry is dropped with it.
+const resolvedGeneratedOptions = new WeakMap<GeneratedKeyedListOptions, ListRuntimeOptions>();
+
+const resolveGeneratedOptions = (options: GeneratedKeyedListOptions): ListRuntimeOptions => {
+  const cached = resolvedGeneratedOptions.get(options);
+  if (cached) return cached;
+  const descriptor = options as KeyedListOptions;
+  const resolved: ListRuntimeOptions = {
+    ...descriptor,
+    ...generatedAccessors,
+    descriptor,
+    signature: options.signature,
+    readKey: (item, index) =>
+      descriptor.keyReadItem
+        ? descriptor.keyReadItem(item)
+        : (descriptor.keyRead as ExpressionReader)(
+            scopedItem(descriptor.itemName, item, descriptor.indexName, index, descriptor.scope),
+          ),
+    hydration: descriptor.hydration as HydrationRuntime,
+  };
+  resolvedGeneratedOptions.set(options, resolved);
+  return resolved;
+};
 
 /**
  * How a hand-written descriptor is driven: expression strings are interpreted here, and the setters, the form
@@ -1226,11 +1271,11 @@ const legacyAccessors = {
   hydration: { create: createHydrationBoundary, schedule: scheduleHydration },
 } as const;
 
-const resolveLegacyOptions = (options: KeyedListOptions): ListRuntimeOptions => ({
+const resolveLegacyOptions = (options: KeyedListOptions, signature: string): ListRuntimeOptions => ({
   ...options,
   ...legacyAccessors,
   descriptor: options,
-  signature: legacySignature(options),
+  signature,
   readKey: (item, index) =>
     options.keyReadItem
       ? options.keyReadItem(item)
@@ -1245,7 +1290,14 @@ export const mountKeyedList = (
   path: readonly number[],
   items: readonly unknown[] | undefined,
   options: KeyedListOptions,
-): void => mountResolvedKeyedList(root, path, items, resolveLegacyOptions(options));
+): void => {
+  // The signature only decides whether the container keeps its state, and the same descriptor object keeps it
+  // outright, so serializing the descriptor again on every update of an unchanged list would be wasted work.
+  const container = nodeAt(root, path);
+  const current = container instanceof Element ? listStates.get(container) : undefined;
+  const signature = current && current.descriptor === options ? current.signature : legacySignature(options);
+  mountResolvedKeyedList(root, path, items, resolveLegacyOptions(options, signature));
+};
 
 /**
  * The entry a generated module uses. It shares the reconciliation and the row lifecycle with `mountKeyedList`
@@ -1257,4 +1309,4 @@ export const mountGeneratedKeyedList = (
   path: readonly number[],
   items: readonly unknown[] | undefined,
   options: GeneratedKeyedListOptions,
-): void => mountResolvedKeyedList(root, path, items, resolveGeneratedOptions(options as KeyedListOptions));
+): void => mountResolvedKeyedList(root, path, items, resolveGeneratedOptions(options));

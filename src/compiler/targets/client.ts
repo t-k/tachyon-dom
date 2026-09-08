@@ -570,6 +570,8 @@ const lowerElement = (
   if (hydrateBoundary) {
     context.hydrationBoundaries.push(hydrateBoundary);
     hydrationBoundaryNodes.set(hydrateBoundary, node);
+    // The id reader is evaluated against the same scope as the bindings beside it.
+    declarationScopes.set(hydrateBoundary, context.lexicalScope);
   }
 
   for (const attr of node.attrs) {
@@ -1309,6 +1311,12 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsNestedConditional = generatedRowBindings.some((binding) => binding.kind === "if");
   const needsConditional = bindings.some((binding) => binding.kind === "if") || needsNestedConditional;
   const needsConditionalCore = bindings.some((binding) => binding.kind === "if" && usesConditionalCore(binding));
+  // Every top-level branch needs its anchor reserved before it mounts against server output: SSR omits the
+  // anchor comment, so a generic branch that looked for one on its own found the server element instead and
+  // silently never bound. A mount-only module renders its own template, anchors included, so only the
+  // lightweight branches keep paying for the preparation there.
+  const needsConditionalPrepare =
+    needsConditionalCore || (!mountOnly && bindings.some((binding) => binding.kind === "if"));
   const needsGenericConditional =
     bindings.some((binding) => binding.kind === "if" && !usesConditionalCore(binding)) || needsNestedConditional;
   // Boundaries are adopted through the runtime the region's descriptor carries, for the same reason.
@@ -1366,7 +1374,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsSignal = reactive && bindings.some((binding) => binding.kind !== "event");
   const needsElementAt =
     needsElementClass || needsElementAttr || needsModel || needsTextList || (reactive && needsList);
-  const needsNodeAt = reactive && needsGenericConditional;
+  const needsNodeAt = reactive && needsGenericConditional && !needsConditionalPrepare;
   // Manual cleanup only pays for itself when something actually registers a disposer. A reactive template with
   // no reactive binding, store, or component boundary registers nothing, so it keeps the bare root disposer.
   // Reactive list, conditional, component, and value bindings wrap their work in an effect and register its
@@ -1439,9 +1447,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`import { ${textListImports.join(", ")} } from "tachyon-dom/runtime/list-text";`);
   }
   if (needsConditional) {
-    if (needsConditionalCore) {
+    if (needsConditionalPrepare) {
       const conditionalCoreImports = [
-        `mountGeneratedConditionalCore as ${runtimeNames.mountGeneratedConditionalCore}`,
+        ...(needsConditionalCore
+          ? [`mountGeneratedConditionalCore as ${runtimeNames.mountGeneratedConditionalCore}`]
+          : []),
         `${
           mountOnly
             ? "prepareConditionalCoreForMount"
@@ -1468,7 +1478,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   {
     const signalImports = [
       `createRoot as ${runtimeNames.createRoot}`,
-      ...(needsConditionalCore && reactive ? [`createMemo as ${runtimeNames.createMemo}`] : []),
+      ...(needsConditionalPrepare && reactive ? [`createMemo as ${runtimeNames.createMemo}`] : []),
       ...(needsSignal ? [`effect as ${runtimeNames.effect}`, `read as ${runtimeNames.read}`] : []),
     ];
     lines.push(`import { ${signalImports.join(", ")} } from "tachyon-dom/runtime/signal";`);
@@ -1626,7 +1636,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (instrumentBindings) lines.push(`  __tachyonRegisterTemplate();`);
   const conditionalVisibilityNames = new Map<ConditionalBinding, string>();
-  if (needsConditionalCore) {
+  if (needsConditionalPrepare) {
     let visibilityIndex = 0;
     for (const binding of bindings) {
       if (binding.kind !== "if") continue;
@@ -1705,18 +1715,18 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   };
   const bindingNodeExpression = (path: readonly number[]): string => {
     const listPath = listPathExpression(path);
-    if (listPath && !needsConditionalCore) return listPath;
-    return needsConditionalCore && path.length > 0 ? preparedPathExpression(path) : nodeExpression(path);
+    if (listPath && !needsConditionalPrepare) return listPath;
+    return needsConditionalPrepare && path.length > 0 ? preparedPathExpression(path) : nodeExpression(path);
   };
   const bindingElementExpression = (path: readonly number[]): string => {
     const listPath = listPathExpression(path);
-    if (listPath && !needsConditionalCore) return listPath;
-    return needsConditionalCore && path.length > 0 ? preparedPathExpression(path) : elementExpression(path);
+    if (listPath && !needsConditionalPrepare) return listPath;
+    return needsConditionalPrepare && path.length > 0 ? preparedPathExpression(path) : elementExpression(path);
   };
   const bindingTextExpression = (path: readonly number[]): string => {
     const listPath = listPathExpression(path);
-    if (listPath && !needsConditionalCore) return `${runtimeNames.textAt}(${listPath}, [])`;
-    return needsConditionalCore
+    if (listPath && !needsConditionalPrepare) return `${runtimeNames.textAt}(${listPath}, [])`;
+    return needsConditionalPrepare
       ? `${runtimeNames.textAt}(${bindingNodeExpression(path)}, [])`
       : `${runtimeNames.textAt}(root, ${JSON.stringify(path)})`;
   };
@@ -1763,7 +1773,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     } else if (binding.kind === "event") {
       // Conditional anchors shift the live DOM, so the target is resolved through the prepared path first and
       // then delegated with an empty path of its own.
-      const [eventRoot, eventPath] = needsConditionalCore
+      const [eventRoot, eventPath] = needsConditionalPrepare
         ? [bindingNodeExpression(binding.path), "[]"]
         : ["root", JSON.stringify(binding.path)];
       const statement = `${runtimeNames.delegate}(${eventRoot}, ${JSON.stringify(binding.eventName)}, ${eventPath}, ${expressionToScopeAccess(binding.handler, new Set(), scopeName(needsStore), bindingAliases)})`;
@@ -1819,7 +1829,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       }
     } else if (binding.kind === "list") {
       const targetName =
-        needsConditionalCore || reactive || isTextOnlyList(binding) ? `__tachyonTarget${targetIndex++}` : undefined;
+        needsConditionalPrepare || reactive || isTextOnlyList(binding) ? `__tachyonTarget${targetIndex++}` : undefined;
       lines.push(
         emitListBinding(
           binding,
@@ -1834,7 +1844,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       );
     } else {
       const targetName =
-        (needsConditionalCore || reactive) && !usesConditionalCore(binding)
+        (needsConditionalPrepare || reactive) && !usesConditionalCore(binding)
           ? `__tachyonTarget${targetIndex++}`
           : undefined;
       lines.push(
@@ -2091,6 +2101,19 @@ const serializeStoreDefinitions = (stores: readonly StoreDefinition[]): string =
 const serializeComponentBoundaries = (components: readonly NonNullable<ListBinding["components"]>[number][]): string =>
   `[${components.map(serializeComponentBoundary).join(", ")}]`;
 
+/**
+ * A boundary id written as an expression is compiled into a reader like every other value, so a concatenated
+ * or aliased id resolves the way its author read it. The runtime keeps the string for diagnostics only.
+ */
+const serializeHydrationBoundaries = (boundaries: readonly HydrationBoundary[]): string =>
+  `[${boundaries
+    .map((boundary) =>
+      boundary.idKind === "expression"
+        ? `{ ...${JSON.stringify(boundary)}, idRead: (scope) => ${bindingReadExpression(boundary.id, aliasesForDeclaration(boundary))} }`
+        : JSON.stringify(boundary),
+    )
+    .join(", ")}]`;
+
 /** The hydration runtime a generated region adopts its boundaries through, when it declares any. */
 const nestedHydrationRuntimeField = (binding: { hydrationBoundaries?: HydrationBoundary[] }): string[] =>
   (binding.hydrationBoundaries?.length ?? 0) > 0
@@ -2168,7 +2191,7 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number], detai
     if (binding.updatePolicy) fields.push(`updatePolicy: ${JSON.stringify(binding.updatePolicy)}`);
     if (binding.region) fields.push(`region: ${JSON.stringify(binding.region)}`);
     fields.push(`stores: ${serializeStoreDefinitions(binding.stores ?? [])}`);
-    fields.push(`hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])}`);
+    fields.push(`hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries ?? [])}`);
     fields.push(...nestedHydrationRuntimeField(binding));
     fields.push(`components: ${serializeComponentBoundaries(binding.components ?? [])}`);
     fields.push(
@@ -2185,7 +2208,7 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number], detai
     fields.push(`mount: ${runtimeNames.mountGeneratedConditional}`);
     fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
     fields.push(`stores: ${serializeStoreDefinitions(binding.stores ?? [])}`);
-    fields.push(`hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])}`);
+    fields.push(`hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries ?? [])}`);
     fields.push(...nestedHydrationRuntimeField(binding));
     fields.push(`components: ${serializeComponentBoundaries(binding.components ?? [])}`);
     fields.push(`bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}]`);
@@ -2230,8 +2253,7 @@ const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> | undef
     }
   };
 
-  // A boundary id is read back with a raw dotted path rather than a compiled reader, so the key it needs is the
-  // name the path starts with, before any alias mapping.
+  // A boundary id is read back through the reader compiled for it, so it is analyzed like any other expression.
   const addBoundaryIds = (
     boundaries: readonly HydrationBoundary[] | undefined,
     provided: ReadonlySet<string>,
@@ -2239,8 +2261,7 @@ const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> | undef
     for (const boundary of boundaries ?? []) {
       // The same condition the runtime resolves an id under: anything else is a literal it already holds.
       if (boundary.idKind !== "expression") continue;
-      const root = boundary.id.split(".")[0];
-      if (root && !provided.has(root)) names.add(root);
+      add(boundary.id, aliasesForDeclaration(boundary), provided);
     }
   };
 
@@ -2396,7 +2417,7 @@ const emitListBinding = (
     ...(binding.updatePolicy ? [`    updatePolicy: ${JSON.stringify(binding.updatePolicy)},`] : []),
     ...(binding.region ? [`    region: ${JSON.stringify(binding.region)},`] : []),
     `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
-    `    hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])},`,
+    `    hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries ?? [])},`,
     ...(isTextOnlyList(binding) ? [] : nestedHydrationRuntimeField(binding).map((field) => `    ${field},`)),
     `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
     `    scope: ${sourceName},`,
@@ -2443,7 +2464,7 @@ const emitConditionalBinding = (
       ? generatedBranchBindingFields(binding)
       : [
           `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
-          `    hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])},`,
+          `    hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries ?? [])},`,
           ...nestedHydrationRuntimeField(binding).map((field) => `    ${field},`),
           `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
           `    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}],`,

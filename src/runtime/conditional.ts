@@ -5,7 +5,7 @@ import { bindControl, setControlValue, writeModelValue } from "./form.js";
 import { mountKeyedList } from "./list.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { setText } from "./text.js";
-import { createStore, onOwnerCleanup, read } from "./signal.js";
+import { createSignal, createStore, onOwnerCleanup, read, type Signal } from "./signal.js";
 import { setPreparedConditionalNodeCount, takePreparedConditionalNodes } from "./conditional-prepared.js";
 import {
   createHydrationBoundary,
@@ -228,6 +228,10 @@ type ConditionalState = {
   hydrationBoundaries: HydrationBoundaryHandle[];
   hydrationCleanups: Array<() => void>;
   hydrationDeferredBindings: Set<ConditionalBinding>;
+  /** Deferred bindings whose boundary has hydrated: the branch updates them again on every later run. */
+  hydratedBindings: Set<ConditionalBinding>;
+  /** Bumped when a boundary hydrates, so the effect driving the branch runs again and subscribes to what it bound. */
+  hydrationRevision: Signal<number>;
 };
 
 const states = new WeakMap<Comment, ConditionalState>();
@@ -267,6 +271,14 @@ const readPath = (scope: Record<string, unknown>, expression: string): unknown =
   }
   return current;
 };
+
+/** A generated boundary carries a compiled reader; a hand-written one still names a dotted path. */
+const resolveBoundaryId = (boundary: CompiledHydrationBoundary, scope: Record<string, unknown>): unknown =>
+  boundary.idRead
+    ? read(boundary.idRead(scope))
+    : boundary.idKind === "expression"
+      ? readPath(scope, boundary.id)
+      : boundary.id;
 
 const readLiteralExpression = (scope: Record<string, unknown>, expression: string): unknown => {
   const value = expression.trim();
@@ -403,6 +415,7 @@ const cleanup = (state: ConditionalState): void => {
   }
   state.hydrationBoundaries.splice(0);
   state.hydrationDeferredBindings.clear();
+  state.hydratedBindings.clear();
   try {
     runCleanups(state.cleanups);
   } catch (error) {
@@ -544,6 +557,7 @@ const setupHydration = (
   anchor: Comment,
   state: ConditionalState,
   options: ConditionalRuntimeOptions,
+  adopted: boolean,
 ): Set<ConditionalBinding> => {
   const deferredBindings = new Set<ConditionalBinding>();
   const root: ParentNode =
@@ -557,15 +571,32 @@ const setupHydration = (
     entries: Array<{ binding: ConditionalBinding; index: number }>;
   }> = [];
   for (const boundary of options.hydrationBoundaries ?? []) {
-    const resolvedId = boundary.idKind === "expression" ? readPath(state.scope, boundary.id) : boundary.id;
-    if (resolvedId === undefined || resolvedId === null) continue;
+    const resolvedId = resolveBoundaryId(boundary, state.scope);
+    if (resolvedId === undefined || resolvedId === null) {
+      // Server nodes are being adopted through their markers, so an id that cannot be resolved must not fall
+      // back to binding everything eagerly; a client-created branch has no markers and binds eagerly by design.
+      if (adopted) {
+        throw new Error(
+          `Conditional hydration boundary could not be adopted: hydrate:id={${boundary.id}} resolved to no value.`,
+        );
+      }
+      continue;
+    }
     const boundaryEntries = options.bindings.flatMap((binding, index) =>
       bindingWithin(boundary.path ?? [], binding.path) ? [{ binding, index }] : [],
     );
     const handle = hydration.create(root, String(resolvedId), () => {
       const cleanups: Array<() => void> = [];
       bindNodes(anchor, state, options, boundaryEntries, cleanups, true);
-      return () => runCleanups(cleanups);
+      // This ran from the scheduler, outside the effect that drives the branch, so nothing subscribed to the
+      // values it read. Marking the bindings hydrated hands them back to that effect, and the revision bump
+      // runs it again so it reads them under tracking.
+      for (const { binding } of boundaryEntries) state.hydratedBindings.add(binding);
+      state.hydrationRevision.update((value) => value + 1);
+      return () => {
+        for (const { binding } of boundaryEntries) state.hydratedBindings.delete(binding);
+        runCleanups(cleanups);
+      };
     });
     if (!handle.ok) {
       // Missing markers mean the branch was created on the client and binds
@@ -640,6 +671,8 @@ const mountResolvedConditional = (
           hydrationBoundaries: [],
           hydrationCleanups: [],
           hydrationDeferredBindings: new Set<ConditionalBinding>(),
+          hydratedBindings: new Set<ConditionalBinding>(),
+          hydrationRevision: createSignal(0),
         };
   states.set(anchor, state);
   if (state !== current) {
@@ -659,22 +692,24 @@ const mountResolvedConditional = (
   }
   if (state !== current) {
     if (!adoptedNodes) anchor.after(...state.nodes);
-    state.hydrationDeferredBindings = setupHydration(anchor, state, options);
+    state.hydrationDeferredBindings = setupHydration(anchor, state, options, adoptedNodes !== undefined);
   } else {
     updateScope(state, scope, options);
   }
   setPreparedConditionalNodeCount(anchor, state.nodes.length);
+  // Read after the boundaries are set up: a "load" boundary hydrates synchronously above, and a later one must
+  // run this effect again once it has bound its part.
+  if (state.hydrationDeferredBindings.size > 0) state.hydrationRevision();
   const entries = options.bindings.flatMap((binding, index) =>
     state.hydrationDeferredBindings.has(binding) ? [] : [{ binding, index }],
   );
-  if (
-    !state.interactiveBindingsBound ||
-    entries.some(({ binding }) => binding.kind !== "event" && binding.kind !== "model")
-  ) {
-    bindNodes(anchor, state, options, entries, state.cleanups, !state.interactiveBindingsBound);
-  } else {
-    bindNodes(anchor, state, options, entries, state.cleanups, false);
-  }
+  bindNodes(anchor, state, options, entries, state.cleanups, !state.interactiveBindingsBound);
+  if (state.hydratedBindings.size === 0) return;
+  // A hydrated boundary already registered its listeners and controls; only its values are refreshed here.
+  const hydratedEntries = options.bindings.flatMap((binding, index) =>
+    state.hydratedBindings.has(binding) ? [{ binding, index }] : [],
+  );
+  bindNodes(anchor, state, options, hydratedEntries, state.cleanups, false);
 };
 
 /**
@@ -729,7 +764,9 @@ type GeneratedConditionalBinding =
   | GeneratedNestedList
   | GeneratedNestedBranch;
 
-export type GeneratedConditionalOptions = Omit<ConditionalOptions, keyof GeneratedChildren> & GeneratedChildren;
+/** The compiler always emits the signature and the generated entry never computes one, so the type demands it. */
+export type GeneratedConditionalOptions = Omit<ConditionalOptions, keyof GeneratedChildren | "signature"> &
+  GeneratedChildren & { signature: string };
 
 /**
  * How a generated descriptor is driven: every value and declaration is read through the reader the compiler
@@ -777,13 +814,24 @@ const generatedAccessors = {
   ) => (binding.mount as BranchMounter)(node, [], visible, scope, binding),
 } as const;
 
-const resolveGeneratedOptions = (options: ConditionalOptions): ConditionalRuntimeOptions => ({
-  ...options,
-  ...generatedAccessors,
-  descriptor: options,
-  signature: options.signature as string,
-  hydration: options.hydration as HydrationRuntime,
-});
+// A generated descriptor is built once per bind and handed back on every update, so its resolved form is kept
+// with it rather than rebuilt each time. A nested branch's descriptor is the same object across mounts too.
+const resolvedGeneratedOptions = new WeakMap<GeneratedConditionalOptions, ConditionalRuntimeOptions>();
+
+const resolveGeneratedOptions = (options: GeneratedConditionalOptions): ConditionalRuntimeOptions => {
+  const cached = resolvedGeneratedOptions.get(options);
+  if (cached) return cached;
+  const descriptor = options as ConditionalOptions;
+  const resolved: ConditionalRuntimeOptions = {
+    ...descriptor,
+    ...generatedAccessors,
+    descriptor,
+    signature: options.signature,
+    hydration: descriptor.hydration as HydrationRuntime,
+  };
+  resolvedGeneratedOptions.set(options, resolved);
+  return resolved;
+};
 
 /**
  * How a hand-written descriptor is driven: expression strings are interpreted here, and the setters, the form
@@ -832,11 +880,11 @@ const legacyAccessors = {
   hydration: { create: createHydrationBoundary, schedule: scheduleHydration },
 } as const;
 
-const resolveLegacyOptions = (options: ConditionalOptions): ConditionalRuntimeOptions => ({
+const resolveLegacyOptions = (options: ConditionalOptions, signature: string): ConditionalRuntimeOptions => ({
   ...options,
   ...legacyAccessors,
   descriptor: options,
-  signature: legacySignature(options),
+  signature,
 });
 
 /** Mounts a hand-written descriptor, whose expression strings this module still interprets. */
@@ -846,7 +894,13 @@ export const mountConditional = (
   visible: unknown,
   scope: Record<string, unknown>,
   options: ConditionalOptions,
-): void => mountResolvedConditional(root, path, visible, scope, resolveLegacyOptions(options));
+): void => {
+  // The same descriptor object keeps the branch state outright, so it is not serialized again on every update.
+  const anchor = nodeAt(root, path);
+  const current = anchor instanceof Comment ? states.get(anchor) : undefined;
+  const signature = current && current.descriptor === options ? current.signature : legacySignature(options);
+  mountResolvedConditional(root, path, visible, scope, resolveLegacyOptions(options, signature));
+};
 
 /**
  * The entry a generated module uses. It shares the branch lifecycle with `mountConditional` and nothing else:
@@ -859,4 +913,4 @@ export const mountGeneratedConditional = (
   visible: unknown,
   scope: Record<string, unknown>,
   options: GeneratedConditionalOptions,
-): void => mountResolvedConditional(root, path, visible, scope, resolveGeneratedOptions(options as ConditionalOptions));
+): void => mountResolvedConditional(root, path, visible, scope, resolveGeneratedOptions(options));

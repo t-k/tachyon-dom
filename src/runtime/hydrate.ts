@@ -59,6 +59,8 @@ export type HydrationBoundaryChunk =
 export type CompiledHydrationBoundary = {
   id: string;
   idKind?: "expression" | "static";
+  /** Reads an expression id from the scope; generated descriptors carry it, hand-written ones fall back to a path. */
+  idRead?: (scope: Record<string, unknown>) => unknown;
   path?: readonly number[];
   strategy?: HydrationStrategy;
   media?: string;
