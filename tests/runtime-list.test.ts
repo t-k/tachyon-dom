@@ -1682,6 +1682,84 @@ describe("mountKeyedList", () => {
     expect(calls).toEqual(["a", "a"]);
   });
 
+  it("assigns three nested row boundaries exclusively across several adopted rows", () => {
+    const row = (id: string, label: string) =>
+      `<!--tachyon-hydrate:${id}:start--><li><p>${label}</p><!--tachyon-hydrate:${id}-mid:start--><div><button>Mid</button><!--tachyon-hydrate:${id}-inner:start--><span><button>Inner</button></span><!--tachyon-hydrate:${id}-inner:end--></div><!--tachyon-hydrate:${id}-mid:end--></li><!--tachyon-hydrate:${id}:end-->`;
+    document.body.innerHTML = `<ul id="items">${row("a", "Server A")}${row("b", "Server B")}</ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const calls: string[] = [];
+    const handler = (name: string) => ({
+      kind: "event" as const,
+      eventName: "click",
+      handler: `item.${name}`,
+      read: (scope: Record<string, unknown>) => (scope.item as Record<string, () => void>)[name],
+    });
+    const options = {
+      signature: "row-three-level-hydration",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><p> </p><div><button>Mid</button><span><button>Inner</button></span></div></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "item.label" },
+        { ...handler("onMid"), path: [1, 0] },
+        { ...handler("onInner"), path: [1, 1, 0] },
+      ],
+      hydrationBoundaries: [
+        {
+          path: [1, 1],
+          id: "item.innerId",
+          idKind: "expression" as const,
+          strategy: "interaction" as const,
+          interaction: "focusin",
+        },
+        { id: "item.id", idKind: "expression" as const, strategy: "load" as const },
+        {
+          path: [1],
+          id: "item.midId",
+          idKind: "expression" as const,
+          strategy: "interaction" as const,
+          interaction: "mouseover",
+        },
+      ],
+    };
+    const item = (id: string) => ({
+      id,
+      midId: `${id}-mid`,
+      innerId: `${id}-inner`,
+      label: id.toUpperCase(),
+      onMid: () => calls.push(`${id}-mid`),
+      onInner: () => calls.push(`${id}-inner`),
+    });
+
+    mountKeyedList(root, [], [item("a"), item("b")], options);
+    const buttons = Array.from(root.querySelectorAll("button"));
+    expect(buttons).toHaveLength(4);
+    expect(Array.from(root.querySelectorAll("p"), (p) => p.textContent)).toEqual(["A", "B"]);
+    for (const button of buttons) button.click();
+    expect(calls).toEqual([]);
+
+    // Hydrating the middle boundary of the second row binds only its own button.
+    buttons[2]!.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    buttons[2]!.click();
+    buttons[3]!.click();
+    expect(calls).toEqual(["b-mid"]);
+
+    // Hydrating the innermost boundary binds the inner button exactly once, even after the middle one hydrated.
+    buttons[3]!.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    buttons[3]!.click();
+    expect(calls).toEqual(["b-mid", "b-inner"]);
+
+    buttons[1]!.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    buttons[1]!.click();
+    buttons[0]!.click();
+    expect(calls).toEqual(["b-mid", "b-inner", "a-inner"]);
+
+    mountKeyedList(root, [], [], options);
+    for (const button of buttons) button.click();
+    expect(calls).toEqual(["b-mid", "b-inner", "a-inner"]);
+  });
+
   it("binds hydration-marked rows eagerly when the row is created on the client without SSR markers", () => {
     document.body.innerHTML = `<ul id="items"></ul>`;
     const root = document.querySelector("#items");

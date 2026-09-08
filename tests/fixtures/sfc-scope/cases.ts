@@ -14,6 +14,12 @@ export const sfcScopeCases = [
     narrows: false,
   },
   {
+    name: "this-method",
+    script: 'const secret = "READY"; function label() { return this.secret; }',
+    expression: "label()",
+    narrows: false,
+  },
+  {
     name: "this-dynamic",
     script: 'const secret = "READY"; const key = "secret"; function label() { return this[key]; }',
     expression: "label()",
