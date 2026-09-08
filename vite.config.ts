@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Plugin, UserConfig } from "vite";
-import { tachyonDom } from "./src/vite";
+import { tachyonDom } from "./src/vite.ts";
 
 type ExamplePage = {
   title: string;

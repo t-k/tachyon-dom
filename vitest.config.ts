@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
-import { tachyonDom } from "./src/vite";
+import { tachyonDom } from "./src/vite.ts";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = resolve(root, "src");

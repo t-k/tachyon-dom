@@ -242,7 +242,7 @@ describe("benchmark provenance", () => {
     ]);
 
     expect(dependencies.vite?.version).toMatch(/^8\./);
-    expect(dependencies["@marko/run"]?.version).toMatch(/^0\.10\./);
+    expect(dependencies["@marko/run"]?.version).toMatch(/^0\.11\./);
     expect(dependencies["missing-benchmark-package"]).toMatchObject({ version: null });
     expect(dependencies["missing-benchmark-package"]?.reason).toBeTruthy();
   });

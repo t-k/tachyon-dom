@@ -6,11 +6,11 @@
     "start": "../../../../node_modules/.bin/mreact-router start .mreact"
   },
   "dependencies": {
-    "@reckona/mreact": "^0.0.181",
-    "@reckona/mreact-reactive-core": "^0.0.181",
-    "@reckona/mreact-router": "^0.0.181"
+    "@reckona/mreact": "^0.0.213",
+    "@reckona/mreact-reactive-core": "^0.0.213",
+    "@reckona/mreact-router": "^0.0.213"
   },
   "devDependencies": {
-    "vite": "^8.0.16"
+    "vite": "^8.2.2"
   }
 }
