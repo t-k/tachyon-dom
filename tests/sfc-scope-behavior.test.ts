@@ -54,3 +54,53 @@ it.each(sfcScopeCases)("preserves rendering, events, and cleanup for $name", asy
     }
   }
 });
+
+it.each([false, true])("preserves external method scope when overriding=%s", (override) => {
+  const compiled = compileTachyonSfc(`<script setup>
+const secret = "READY";
+${override ? 'const label = () => "LOCAL";' : ""}
+</script><p>{label()}</p>`);
+  if (!compiled.ok) throw new Error(compiled.error.message);
+  for (const narrow of [false, true]) {
+    const script = transformSfcScript(
+      compiled.value.descriptor.script,
+      narrow
+        ? {
+            templateIdentifiers: templateScopeIdentifiers(compiled.value.template),
+          }
+        : {},
+    );
+    if (!script.ok) throw new Error(script.error.message);
+    const module = evaluateGeneratedClientModule(
+      script.value.code +
+        generateClientModule(compiled.value.template, {
+          reactive: true,
+          instrumentBindings: false,
+          defaultScopeName: script.value.defaultScopeName!,
+        }),
+    );
+    const root = document.createElement("div");
+    const view = mount(root, module, {
+      label() {
+        return this.secret;
+      },
+    } as Record<string, unknown>);
+    try {
+      expect(root.textContent).toBe("READY");
+    } finally {
+      view.dispose();
+    }
+  }
+});
+
+it("keeps full bindings for empty external input and preserves setup input defaults", () => {
+  for (const body of ['const secret = "READY";', 'const secret = inputScope.secret ?? "READY";']) {
+    const compiled = compileTachyonSfc(`<script setup>${body}</script><p>static</p>`);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const script = transformSfcScript(compiled.value.descriptor.script, { templateIdentifiers: new Set() });
+    if (!script.ok) throw new Error(script.error.message);
+    const factory = new Function(`${script.value.code}; return ${sfcSetupScopeName};`)();
+    expect(factory({}).secret).toBe("READY");
+    expect(factory()).toEqual(body.includes("inputScope") ? { secret: "READY" } : {});
+  }
+});

@@ -2,6 +2,12 @@ const internalHelpers = Array.from({ length: 24 }, (_, index) => `const internal
 
 export const sfcScopeCases = [
   {
+    name: "direct-signal",
+    script: 'const count = createSignal("READY"); const unused = 7;',
+    expression: "count",
+    narrows: false,
+  },
+  {
     name: "closure-helpers",
     script: `${internalHelpers}\nconst secret = "READY"; const label = () => secret;`,
     expression: "label()",

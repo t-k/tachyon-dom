@@ -82,9 +82,9 @@ const internalCache = new Map();
   expect(transformed.value.code).toContain(
     "return { count: count, format: format, increment: increment, rows: rows, title: title };",
   );
-  expect(transformed.value.code).not.toContain("step: step");
-  expect(transformed.value.code).not.toContain("internalCache: internalCache");
-  expect(transformed.value.code).not.toContain("createSignal: createSignal");
+  expect(transformed.value.code).toContain("step: step");
+  expect(transformed.value.code).toContain("internalCache: internalCache");
+  expect(transformed.value.code).toContain("createSignal: createSignal");
   // The setup body itself is untouched: narrowing changes what the scope exposes, not what setup runs.
   expect(transformed.value.code).toContain("const step = 2;");
   expect(transformed.value.code).toContain("const internalCache = new Map();");

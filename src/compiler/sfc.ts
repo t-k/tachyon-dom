@@ -51,7 +51,7 @@ export type TransformedSfcScript = {
   defaultScopeName?: string;
   /** Every top-level `<script setup>` declaration and runtime import. */
   setupBindings: string[];
-  /** The setup bindings the generated scope factory returns; equals `setupBindings` without template identifiers. */
+  /** Bindings returned without external input; supplied input keeps every `setupBindings` entry. */
   exposedBindings: string[];
 };
 
@@ -580,6 +580,7 @@ const setupFactoryCode = (
   content: string,
   script: TachyonSfcScript,
   setupBindings: readonly string[],
+  fullBindings: readonly string[] = setupBindings,
 ): Result<string, CompilerError> => {
   const sourceFile = sourceFileFor(content, script);
   const topLevelAwait = topLevelAwaitNode(sourceFile);
@@ -611,9 +612,14 @@ const setupFactoryCode = (
     body.push(statementText);
   }
   const scopeEntries = setupBindings.map((name) => `${name}: ${name}`).join(", ");
+  const narrowed = setupBindings.length < fullBindings.length;
+  const fullEntries = fullBindings.map((name) => `${name}: ${name}`).join(", ");
+  // Any supplied scope can replace local values with methods that observe all bindings.
+  const fallback = narrowed ? `  if (inputScope !== undefined) return { ${fullEntries} };\n` : "";
+  const parameter = narrowed ? "inputScope" : "inputScope = {}";
   const indentedBody = body.flatMap((statement) => statement.split("\n").map((line) => `  ${line}`));
   return ok(
-    `${imports.length > 0 ? `${imports.join("\n")}\n` : ""}const ${sfcSetupScopeName} = (inputScope = {}) => {\n${indentedBody.join("\n")}\n  return { ${scopeEntries} };\n};\n`,
+    `${imports.length > 0 ? `${imports.join("\n")}\n` : ""}const ${sfcSetupScopeName} = (${parameter}) => {\n${indentedBody.join("\n")}\n${fallback}  return { ${scopeEntries} };\n};\n`,
   );
 };
 
@@ -711,7 +717,7 @@ const canNarrowSetupScope = (script: TachyonSfcScript, exposed: ReadonlySet<stri
     if (
       node.kind === ts.SyntaxKind.ThisKeyword ||
       (ts.isVariableDeclarationList(node) && !(node.flags & ts.NodeFlags.Const)) ||
-      (ts.isIdentifier(node) && node.text === "eval") ||
+      (ts.isIdentifier(node) && (node.text === "eval" || node.text === "inputScope")) ||
       (ts.isBinaryExpression(node) &&
         node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
         node.operatorToken.kind <= ts.SyntaxKind.LastAssignment)
@@ -768,7 +774,7 @@ export const transformSfcScript = (
       : setupBindings;
   const content = autoImportScriptHelpers(transpiled.value, script);
   if (isSfcSetupScript(script)) {
-    const factory = setupFactoryCode(content, script, exposedBindings);
+    const factory = setupFactoryCode(content, script, exposedBindings, setupBindings);
     if (!factory.ok) return factory;
     return ok({
       code: factory.value,

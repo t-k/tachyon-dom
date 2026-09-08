@@ -22,6 +22,7 @@ for (const fixture of sfcScopeCases) {
       script.value.code +
       generateClientModule(compiled.value.template, {
         reactive: true,
+        instrumentBindings: false,
         defaultScopeName: script.value.defaultScopeName,
       });
     const bundle = await build({
@@ -39,6 +40,8 @@ for (const fixture of sfcScopeCases) {
       fixture: fixture.name,
       mode: narrow ? "narrow" : "full",
       exposed: script.value.exposedBindings.length,
+      externalScopeExposed: script.value.setupBindings.length,
+      narrowed: script.value.exposedBindings.length < script.value.setupBindings.length,
       minified: bytes.length,
       brotli: brotliCompressSync(bytes).length,
     });
