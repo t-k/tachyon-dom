@@ -525,6 +525,49 @@ describe("DX helpers", () => {
     expect(runsIn("sizes", "pnpm test")).toBe(false);
   });
 
+  // Splitting the jobs moved each browser install next to the tests that obviously needed one, and left
+  // `verify:starters` - which drives the generated starter through Chromium - in a job with none.
+  it("installs a browser in every CI job that launches one", async () => {
+    const workflow = await readFile(".github/workflows/ci.yml", "utf8");
+    const packageJson = JSON.parse(await readFile("package.json", "utf8")) as { scripts: Record<string, string> };
+    const launchers = async (directory: string, extension: string) => {
+      const names = (await readdir(directory)).filter((name) => name.endsWith(extension));
+      const sources = await Promise.all(
+        names.map(async (name) => [name, await readFile(path.join(directory, name), "utf8")] as const),
+      );
+      return sources.filter(([, source]) => source.includes(`from "playwright"`)).map(([name]) => name);
+    };
+    const browserScripts = await launchers("scripts", ".mjs");
+    const browserTests = await launchers("tests", ".test.ts");
+    expect(browserScripts.length).toBeGreaterThan(0);
+    expect(browserTests.length).toBeGreaterThan(0);
+
+    const browserCommands = [
+      ...Object.entries(packageJson.scripts)
+        .filter(([, command]) => browserScripts.some((file) => command.includes(file)))
+        .map(([name]) => `pnpm ${name}`),
+      // The suites that drive a browser from a test file, and the local comparison run.
+      "pnpm test",
+      "pnpm test:browser",
+      "pnpm bench:local:smoke",
+    ];
+
+    const jobs = workflow.slice(workflow.indexOf("\njobs:\n"));
+    const jobNames = Array.from(jobs.matchAll(/^ {2}([a-z][a-z-]*):$/gm), (match) => match[1] as string);
+    const jobBody = (name: string) => {
+      const start = jobs.indexOf(`\n  ${name}:\n`);
+      const next = jobNames.map((other) => jobs.indexOf(`\n  ${other}:\n`)).filter((index) => index > start);
+      return jobs.slice(start, next.length > 0 ? Math.min(...next) : jobs.length);
+    };
+
+    for (const name of jobNames) {
+      const body = `${jobBody(name)}\n`;
+      const launched = browserCommands.filter((command) => body.includes(`\n      - run: ${command}\n`));
+      if (launched.length === 0) continue;
+      expect([name, launched, body.includes("playwright install")]).toEqual([name, launched, true]);
+    }
+  });
+
   it("pins release actions and keeps verification read-only", async () => {
     const workflow = await readFile(".github/workflows/release.yml", "utf8");
     const actionReferences = Array.from(workflow.matchAll(/uses:\s+([^\s#]+)/g), (match) => match[1]);

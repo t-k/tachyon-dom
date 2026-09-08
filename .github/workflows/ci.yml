@@ -32,6 +32,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # `verify:starters` drives the generated starter through Chromium.
+      - run: pnpm exec playwright install --with-deps chromium
+
       - run: pnpm lint
 
       - run: pnpm build
