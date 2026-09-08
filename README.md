@@ -178,9 +178,12 @@ pnpm check:quick-example-size
 pnpm test:property
 pnpm test:mutation
 pnpm test:mutation:full
+pnpm test:mutation:hydration
 ```
 
 Property tests use a stable fast-check seed; use `FAST_CHECK_SEED`, `FAST_CHECK_PATH`, and `FAST_CHECK_NUM_RUNS` to replay or resize a campaign. Mutation testing remains a local check: the normal command reuses incremental results, the full command retests every in-scope mutant, and the detailed report is written to `reports/mutation/index.html`.
+
+The focused hydration campaign reruns the compiler and conditional-runtime ranges from the hydration review without incremental reuse. See [its coverage and survivor ledger](docs/hydration-mutation-testing.md) for scope, remaining equivalent mutations, and GC test requirements.
 
 Useful examples:
 

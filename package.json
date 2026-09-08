@@ -258,6 +258,7 @@
     "test:browser": "playwright test",
     "test:mutation": "stryker run",
     "test:mutation:full": "stryker run --force",
+    "test:mutation:hydration": "stryker run stryker.hydration.config.json",
     "build:create-package": "pnpm --dir packages/create-tachyon-dom build",
     "check:exports": "publint --strict && attw --pack --no-emoji --profile esm-only",
     "check:size": "size-limit",
