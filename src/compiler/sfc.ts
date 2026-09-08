@@ -812,6 +812,12 @@ const freezeTransformedScript = (result: Result<TransformedSfcScript, CompilerEr
   return Object.freeze(result);
 };
 
+// Every empty or missing script maps to the same frozen result, so the shared
+// instance is safe to hand out without allocating per call.
+const emptyTransformedScript = freezeTransformedScript(
+  ok({ code: "", setupBindings: [], exposedBindings: [], scopeEmission: "full" }),
+);
+
 const rememberTransformedScript = (
   cacheKey: string,
   result: Result<TransformedSfcScript, CompilerError>,
@@ -833,7 +839,7 @@ export const transformSfcScript = (
   options: TransformSfcScriptOptions = {},
 ): Result<TransformedSfcScript, CompilerError> => {
   if (!script || script.content.trim().length === 0) {
-    return freezeTransformedScript(ok({ code: "", setupBindings: [], exposedBindings: [], scopeEmission: "full" }));
+    return emptyTransformedScript;
   }
   const identifiers = options.templateIdentifiers ? [...options.templateIdentifiers].sort() : undefined;
   const cacheKey = JSON.stringify([script.attrs, script.content, identifiers]);

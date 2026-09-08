@@ -12,8 +12,8 @@
   "mutate": [
     "src/compiler/sfc.ts:74:0-149:0",
     "src/compiler/sfc.ts:598:0-669:0",
-    "src/compiler/sfc.ts:757:0-848:0",
-    "src/compiler/sfc.ts:856:0-868:0"
+    "src/compiler/sfc.ts:757:0-854:0",
+    "src/compiler/sfc.ts:862:0-874:0"
   ],
   "plugins": ["./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"],
   "reporters": ["clear-text", "html", "json"],

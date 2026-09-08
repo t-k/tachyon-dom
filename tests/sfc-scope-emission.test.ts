@@ -301,6 +301,16 @@ it.each([undefined, { attrs: "setup", offset: 0, content: "" }, { attrs: "setup"
   },
 );
 
+it("shares one frozen result across every empty script input", () => {
+  const missing = transformSfcScript(undefined);
+  const blank = transformSfcScript({ attrs: "setup", offset: 3, content: " \n\t" });
+  const empty = transformSfcScript({ attrs: "", offset: 0, content: "" });
+  if (!missing.ok || !blank.ok || !empty.ok) throw new Error("Expected ok");
+  expect(blank).toBe(missing);
+  expect(empty).toBe(missing);
+  expect(missing.value).toEqual({ code: "", setupBindings: [], exposedBindings: [], scopeEmission: "full" });
+});
+
 it("preserves statement boundaries when setup omits semicolons", () => {
   expect(setupFactory("setup", "const first = 1\nconst second = first + 1")({})).toEqual({ first: 1, second: 2 });
 });
