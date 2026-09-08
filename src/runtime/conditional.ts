@@ -4,7 +4,7 @@ import { delegate } from "./event.js";
 import { bindControl, setControlValue, writeModelValue } from "./form.js";
 import { mountKeyedList } from "./list.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
-import { setText } from "./text.js";
+import { setText, textAt } from "./text.js";
 import { createSignal, createStore, onOwnerCleanup, read, type Signal } from "./signal.js";
 import { setPreparedConditionalNodeCount, takePreparedConditionalNodes } from "./conditional-prepared.js";
 import {
@@ -510,7 +510,13 @@ const bindNodes = (
 ): void => {
   for (const { binding, index: bindingIndex } of bindings) {
     if (binding.kind === "text") {
-      setText(nodeAtState(state, binding.path) as Text, options.readValue(state.scope, binding));
+      const node = nodeAtState(state, binding.path);
+      const target = textAt(node, []);
+      if (target !== node) {
+        const rootIndex = state.nodes.indexOf(node);
+        if (rootIndex !== -1) state.nodes[rootIndex] = target;
+      }
+      setText(target, options.readValue(state.scope, binding));
     } else if (
       binding.kind === "class" ||
       binding.kind === "attr" ||
@@ -525,14 +531,15 @@ const bindNodes = (
       state.refCleanups.set(bindingIndex, refCleanup);
       if (cleanups !== state.cleanups) {
         cleanups.push(() => {
-          if (state.refCleanups.get(bindingIndex) !== refCleanup) return;
+          const currentCleanup = state.refCleanups.get(bindingIndex);
           state.refCleanups.delete(bindingIndex);
-          refCleanup();
+          currentCleanup?.();
         });
       }
     } else if (binding.kind === "list") {
       const container = nodeAtState(state, binding.path);
       if (!(container instanceof Element)) continue;
+      if (cleanups !== state.cleanups) cleanups.push(() => cleanupOwnedSubtree(container));
       options.mountList(
         binding,
         container,
@@ -540,9 +547,11 @@ const bindNodes = (
         state.scope,
       );
     } else if (binding.kind === "if") {
+      const target = nodeAtState(state, binding.path);
+      if (cleanups !== state.cleanups) cleanups.push(() => cleanupOwnedSubtree(target));
       options.mountBranch(
         binding,
-        nodeAtState(state, binding.path),
+        target,
         options.readDeclaration(state.scope, binding.test, binding.read),
         state.scope,
       );
@@ -588,16 +597,29 @@ const setupHydration = (
     );
     const handle = hydration.create(root, String(resolvedId), () => {
       const cleanups: Array<() => void> = [];
-      bindNodes(anchor, state, options, boundaryEntries, cleanups, true);
-      // This ran from the scheduler, outside the effect that drives the branch, so nothing subscribed to the
-      // values it read. Marking the bindings hydrated hands them back to that effect, and the revision bump
-      // runs it again so it reads them under tracking.
-      for (const { binding } of boundaryEntries) state.hydratedBindings.add(binding);
-      state.hydrationRevision.update((value) => value + 1);
-      return () => {
-        for (const { binding } of boundaryEntries) state.hydratedBindings.delete(binding);
+      const newlyHydrated: ConditionalBinding[] = [];
+      const dispose = () => {
+        for (const binding of newlyHydrated) state.hydratedBindings.delete(binding);
         runCleanups(cleanups);
       };
+      try {
+        bindNodes(anchor, state, options, boundaryEntries, cleanups, true);
+        // The scheduler runs outside the branch effect. Hand these bindings back to it so their reads track.
+        for (const { binding } of boundaryEntries) {
+          if (state.hydratedBindings.has(binding)) continue;
+          state.hydratedBindings.add(binding);
+          newlyHydrated.push(binding);
+        }
+        state.hydrationRevision.update((value) => value + 1);
+        return dispose;
+      } catch (error) {
+        try {
+          dispose();
+        } catch {
+          // All disposers run; preserve the initialization failure if a disposer also throws.
+        }
+        throw error;
+      }
     });
     if (!handle.ok) {
       // Missing markers mean the branch was created on the client and binds
@@ -793,12 +815,7 @@ const generatedAccessors = {
   applyValue: (binding: ConditionalBinding, node: Node, value: unknown) =>
     (binding as { apply: ValueApplier }).apply(node, value),
   bindRefTarget: (scope: Record<string, unknown>, binding: RefBinding, element: Element) =>
-    bindRef(
-      scope,
-      binding.owner as (scope: Record<string, unknown>) => unknown,
-      binding.property as string,
-      element,
-    ),
+    bindRef(scope, binding.owner as (scope: Record<string, unknown>) => unknown, binding.property as string, element),
   bindControlTarget: (scope: Record<string, unknown>, binding: ModelBinding, element: Element) =>
     (binding as { bind: TargetBinder }).bind(scope, element),
   mountList: (
@@ -807,12 +824,8 @@ const generatedAccessors = {
     items: readonly unknown[] | undefined,
     scope: Record<string, unknown>,
   ) => (binding.mount as ListMounter)(container, [], items, binding, scope),
-  mountBranch: (
-    binding: NestedConditionalBinding,
-    node: Node,
-    visible: unknown,
-    scope: Record<string, unknown>,
-  ) => (binding.mount as BranchMounter)(node, [], visible, scope, binding),
+  mountBranch: (binding: NestedConditionalBinding, node: Node, visible: unknown, scope: Record<string, unknown>) =>
+    (binding.mount as BranchMounter)(node, [], visible, scope, binding),
 } as const;
 
 // A generated descriptor is built once per bind and handed back on every update, so its resolved form is kept
@@ -872,12 +885,8 @@ const legacyAccessors = {
     items: readonly unknown[] | undefined,
     scope: Record<string, unknown>,
   ) => mountKeyedList(container, [], items, { ...binding, scope }),
-  mountBranch: (
-    binding: NestedConditionalBinding,
-    node: Node,
-    visible: unknown,
-    scope: Record<string, unknown>,
-  ) => mountConditional(node, [], visible, scope, binding),
+  mountBranch: (binding: NestedConditionalBinding, node: Node, visible: unknown, scope: Record<string, unknown>) =>
+    mountConditional(node, [], visible, scope, binding),
   hydration: { create: createHydrationBoundary, schedule: scheduleHydration },
 } as const;
 

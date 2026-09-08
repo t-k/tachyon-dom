@@ -848,7 +848,57 @@ window.__conditionalReady = true;
   );
 };
 
+const buildMultiModuleFixture = async () => {
+  const { tachyonDom } = await import(`${distRoot}/vite.js`);
+  const { compileTachyonSfc, renderServerTemplate } = await import(`${distRoot}/compiler.js`);
+  const root = resolve(here, "multi-module");
+  const target = resolve(outDir, "multi-module");
+  const output = await build({
+    configFile: false,
+    logLevel: "silent",
+    root,
+    mode: "production",
+    plugins: [tachyonDom({ reactive: true })],
+    resolve: {
+      alias: [
+        { find: /^tachyon-dom\/(.+)$/, replacement: `${distRoot}/$1.js` },
+        { find: "tachyon-dom", replacement: `${distRoot}/index.js` },
+      ],
+    },
+    build: {
+      outDir: target,
+      emptyOutDir: true,
+      minify: true,
+      rollupOptions: {
+        input: resolve(root, "main.ts"),
+        output: { entryFileNames: "entry.js", chunkFileNames: "[name]-[hash].js", format: "es" },
+      },
+    },
+  });
+  const chunks = (Array.isArray(output) ? output : [output]).flatMap((result) =>
+    "output" in result ? result.output.filter((item) => item.type === "chunk") : [],
+  );
+  const lazy = chunks.find((chunk) => Object.keys(chunk.modules).some((id) => id.endsWith("/LazyPanel.td")));
+  if (!lazy || !lazy.isDynamicEntry) throw new Error("Missing real dynamic LazyPanel module chunk.");
+  const compiled = compileTachyonSfc(await readFile(resolve(root, "SsrPanel.td"), "utf8"));
+  if (!compiled.ok) throw new Error(compiled.error.message);
+  const markup = renderServerTemplate(compiled.value.template, {
+    shown: true,
+    boundaryId: "ssr-panel",
+    shared: 0,
+    sharedText: "",
+    count: 0,
+    draft: "",
+  });
+  await writeFile(
+    resolve(target, "index.html"),
+    `<!doctype html><html><body><div id="a1"></div><div id="a2"></div><div id="b"></div><div id="lazy"></div><div id="ssr">${markup}</div><script type="module" src="./entry.js"></script></body></html>`,
+  );
+  await writeFile(resolve(target, "manifest.json"), JSON.stringify({ lazyChunk: lazy.fileName, ssrMarkup: markup }));
+};
+
 export default async function globalSetup() {
   await buildLazyFixture();
   await buildConditionalFixture();
+  await buildMultiModuleFixture();
 }

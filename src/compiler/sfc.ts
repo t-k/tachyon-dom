@@ -361,7 +361,18 @@ const topLevelBindings = (script: TachyonSfcScript | undefined): string[] => {
   const names = new Set<string>();
   const sourceFile = sourceFileFor(script.content, script);
   for (const statement of sourceFile.statements) {
-    if (ts.isVariableStatement(statement)) {
+    if (ts.isImportDeclaration(statement)) {
+      const clause = statement.importClause;
+      if (!clause || clause.isTypeOnly) continue;
+      if (clause.name) names.add(clause.name.text);
+      if (clause.namedBindings) {
+        if (ts.isNamespaceImport(clause.namedBindings)) names.add(clause.namedBindings.name.text);
+        else
+          for (const specifier of clause.namedBindings.elements) {
+            if (!specifier.isTypeOnly) names.add(specifier.name.text);
+          }
+      }
+    } else if (ts.isVariableStatement(statement)) {
       for (const declaration of statement.declarationList.declarations) {
         addBindingNames(declaration.name, names);
       }
