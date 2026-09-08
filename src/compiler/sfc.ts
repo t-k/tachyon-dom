@@ -1,4 +1,15 @@
-import type { BindingName, Diagnostic, Expression, Identifier, Node, PropertyName, SourceFile } from "typescript";
+import type {
+  BindingName,
+  Diagnostic,
+  Expression,
+  ExpressionStatement,
+  Identifier,
+  Node,
+  PropertyName,
+  SourceFile,
+  Statement,
+  StringLiteral,
+} from "typescript";
 import { requireOptionalPeer } from "../optional-peer.js";
 import { err, ok, type Result } from "../result.js";
 import { compileTemplate } from "./index.js";
@@ -434,10 +445,7 @@ const transpileScriptContent = (script: TachyonSfcScript): Result<string, Compil
   if (diagnostic) {
     return err(compilerErrorFromDiagnostic(diagnostic, script));
   }
-  // TypeScript treats an import-free file as a script and prepends a "use strict"
-  // prologue, which is illegal inside the default-parameter setup factory. The
-  // emitted module is strict already, so the directive carries no meaning.
-  return ok(result.outputText.replace(/^\s*"use strict";/, "").trim());
+  return ok(result.outputText.trim());
 };
 
 const addBindingNames = (name: BindingName, names: Set<string>): void => {
@@ -587,41 +595,67 @@ const topLevelAwaitNode = (sourceFile: SourceFile): Node | undefined => {
   return found;
 };
 
+const isUserExport = (statement: Statement): boolean =>
+  ts.isExportDeclaration(statement) ||
+  ts.isExportAssignment(statement) ||
+  (ts.canHaveModifiers(statement) &&
+    (ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false));
+
+// Validate the script as the user wrote it, before TypeScript rewrites it. The
+// transpiled output gains compiler-added syntax (an `export {}` module marker,
+// a "use strict" prologue) that must not be reported as user errors.
+const setupScriptDiagnostic = (script: TachyonSfcScript): CompilerError | undefined => {
+  const sourceFile = sourceFileFor(script.content, script);
+  const topLevelAwait = topLevelAwaitNode(sourceFile);
+  if (topLevelAwait) {
+    return {
+      message: "<script setup> does not support top-level await; move it into an async function.",
+      offset: script.offset + topLevelAwait.getStart(sourceFile),
+    };
+  }
+  const exported = sourceFile.statements.find(isUserExport);
+  return exported
+    ? {
+        message: "<script setup> cannot contain exports; expose values through top-level declarations.",
+        offset: script.offset + exported.getStart(sourceFile),
+      }
+    : undefined;
+};
+
+// TypeScript leaves `export {};` behind when every import was type-only, so the
+// output stays a module. User exports were already rejected against the original
+// script, so any export declaration left here is that compiler-added marker.
+const isEmptyExportMarker = (statement: Statement): boolean => ts.isExportDeclaration(statement);
+
+const isDirective = (statement: Statement): statement is ExpressionStatement & { expression: StringLiteral } =>
+  ts.isExpressionStatement(statement) && ts.isStringLiteral(statement.expression);
+
+const isStrictDirective = (statement: Statement): boolean =>
+  isDirective(statement) && statement.expression.text === "use strict";
+
+// A "use strict" directive is illegal in the prologue of a function with a
+// default parameter, and the surrounding module is strict already. Only the
+// factory prologue is touched; directives inside nested functions and string
+// statements after the prologue are left as written.
+const withoutStrictPrologue = (statements: readonly Statement[]): Statement[] => {
+  const prologueLength = statements.findIndex((statement) => !isDirective(statement));
+  const prologue = statements.slice(0, prologueLength === -1 ? statements.length : prologueLength);
+  return [...prologue.filter((statement) => !isStrictDirective(statement)), ...statements.slice(prologue.length)];
+};
+
 const setupFactoryCode = (
   content: string,
   script: TachyonSfcScript,
   setupBindings: readonly string[],
   fullBindings: readonly string[] = setupBindings,
-): Result<string, CompilerError> => {
+): string => {
   const sourceFile = sourceFileFor(content, script);
-  const topLevelAwait = topLevelAwaitNode(sourceFile);
-  if (topLevelAwait) {
-    return err({
-      message: "<script setup> does not support top-level await; move it into an async function.",
-      offset: script.offset + topLevelAwait.getStart(sourceFile),
-    });
-  }
-  const imports: string[] = [];
-  const body: string[] = [];
-  for (const statement of sourceFile.statements) {
-    const statementText = content.slice(statement.getStart(sourceFile), statement.end).trim();
-    if (ts.isImportDeclaration(statement)) {
-      imports.push(statementText);
-      continue;
-    }
-    if (
-      ts.isExportDeclaration(statement) ||
-      ts.isExportAssignment(statement) ||
-      (ts.canHaveModifiers(statement) &&
-        ts.getModifiers(statement)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword))
-    ) {
-      return err({
-        message: "<script setup> cannot contain exports; expose values through top-level declarations.",
-        offset: script.offset + statement.getStart(sourceFile),
-      });
-    }
-    body.push(statementText);
-  }
+  const statementText = (statement: Statement): string => content.slice(statement.getStart(sourceFile), statement.end);
+  const imports = sourceFile.statements.filter(ts.isImportDeclaration).map(statementText);
+  const bodyStatements = sourceFile.statements.filter(
+    (statement) => !ts.isImportDeclaration(statement) && !isEmptyExportMarker(statement),
+  );
+  const body = withoutStrictPrologue(bodyStatements).map(statementText);
   const scopeEntries = setupBindings.map((name) => `${name}: ${name}`).join(", ");
   const narrowed = setupBindings.length < fullBindings.length;
   const fullEntries = fullBindings.map((name) => `${name}: ${name}`).join(", ");
@@ -629,9 +663,8 @@ const setupFactoryCode = (
   const fallback = narrowed ? `  if (inputScope !== undefined) return { ${fullEntries} };\n` : "";
   const parameter = narrowed ? "inputScope" : "inputScope = {}";
   const indentedBody = body.flatMap((statement) => statement.split("\n").map((line) => `  ${line}`));
-  return ok(
-    `${imports.length > 0 ? `${imports.join("\n")}\n` : ""}const ${sfcSetupScopeName} = (${parameter}) => {\n${indentedBody.join("\n")}\n${fallback}  return { ${scopeEntries} };\n};\n`,
-  );
+  const factory = `const ${sfcSetupScopeName} = (${parameter}) => {\n${indentedBody.join("\n")}\n${fallback}  return { ${scopeEntries} };\n};\n`;
+  return [...imports, factory].join("\n");
 };
 
 export const parseTachyonSfc = (source: string): Result<TachyonSfcDescriptor, CompilerError> => {
@@ -776,6 +809,10 @@ export const transformSfcScript = (
   if (!transpiled.ok) {
     return err(transpiled.error);
   }
+  const setupDiagnostic = isSfcSetupScript(script) ? setupScriptDiagnostic(script) : undefined;
+  if (setupDiagnostic) {
+    return err(setupDiagnostic);
+  }
   const setupBindings = isSfcSetupScript(script) ? topLevelBindings(script) : [];
   const { templateIdentifiers } = options;
   const referencedBindings = setupBindings.filter((name) => templateIdentifiers?.has(name));
@@ -786,10 +823,8 @@ export const transformSfcScript = (
   const scopeEmission: SfcScopeEmission = exposedBindings.length < setupBindings.length ? "dual" : "full";
   const content = autoImportScriptHelpers(transpiled.value, script);
   if (isSfcSetupScript(script)) {
-    const factory = setupFactoryCode(content, script, exposedBindings, setupBindings);
-    if (!factory.ok) return factory;
     return ok({
-      code: factory.value,
+      code: setupFactoryCode(content, script, exposedBindings, setupBindings),
       defaultScopeName: sfcSetupScopeName,
       setupBindings,
       exposedBindings,
