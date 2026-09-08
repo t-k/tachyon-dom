@@ -1130,26 +1130,48 @@ export type GeneratedKeyedListOptions = Omit<KeyedListOptions, keyof GeneratedCh
  * reaches a binding runtime, so a page whose lists are all generated leaves the branch runtime, the form
  * runtime, the class setter, the attribute policy, and the URL sanitizer out of its bundle.
  */
+// Only the key reader closes over the descriptor, so the rest are built once for the module rather than once
+// per mount. A keyed list is mounted again on every update, and a nested one once per row on top of that.
+const generatedAccessors = {
+  readValue: (scope: Record<string, unknown>, source: { read?: ExpressionReader | undefined }) =>
+    read((source.read as ExpressionReader)(scope)),
+  readHandler: (scope: Record<string, unknown>, binding: EventBinding) => (binding.read as ExpressionReader)(scope),
+  readDeclaration: (
+    scope: Record<string, unknown>,
+    _expression: string | undefined,
+    reader: ExpressionReader | undefined,
+  ) => read((reader as ExpressionReader)(scope)),
+  applyValue: (binding: Binding, node: Node, value: unknown) =>
+    (binding as { apply: ValueApplier }).apply(node, value),
+  mountList: (
+    binding: NestedListBinding,
+    container: Element,
+    items: readonly unknown[] | undefined,
+    scope: Record<string, unknown>,
+  ) => (binding.mount as ListMounter)(container, [], items, { ...binding, scope }),
+  bindRefTarget: (scope: Record<string, unknown>, binding: RefBinding, element: Element) =>
+    bindRef(scope, binding.owner as ExpressionReader, binding.property as string, element),
+  bindControlTarget: (scope: Record<string, unknown>, binding: ModelBinding, element: Element) =>
+    (binding as { bind: TargetBinder }).bind(scope, element),
+  mountBranch: (
+    binding: NestedConditionalBinding,
+    node: Node,
+    visible: unknown,
+    scope: Record<string, unknown>,
+  ) => (binding.mount as BranchMounter)(node, [], visible, scope, binding),
+} as const;
+
 const resolveGeneratedOptions = (options: KeyedListOptions): ListRuntimeOptions => ({
   ...options,
+  ...generatedAccessors,
   descriptor: options,
   signature: options.signature as string,
-  readValue: (scope, source) => read((source.read as ExpressionReader)(scope)),
-  readHandler: (scope, binding) => (binding.read as ExpressionReader)(scope),
-  readDeclaration: (scope, _expression, reader) => read((reader as ExpressionReader)(scope)),
   readKey: (item, index) =>
     options.keyReadItem
       ? options.keyReadItem(item)
       : (options.keyRead as ExpressionReader)(
           scopedItem(options.itemName, item, options.indexName, index, options.scope),
         ),
-  applyValue: (binding, node, value) => (binding as { apply: ValueApplier }).apply(node, value),
-  mountList: (binding, container, items, scope) =>
-    (binding.mount as ListMounter)(container, [], items, { ...binding, scope }),
-  bindRefTarget: (scope, binding, element) =>
-    bindRef(scope, binding.owner as ExpressionReader, binding.property as string, element),
-  bindControlTarget: (scope, binding, element) => (binding as { bind: TargetBinder }).bind(scope, element),
-  mountBranch: (binding, node, visible, scope) => (binding.mount as BranchMounter)(node, [], visible, scope, binding),
   hydration: options.hydration as HydrationRuntime,
 });
 
@@ -1158,20 +1180,11 @@ const resolveGeneratedOptions = (options: KeyedListOptions): ListRuntimeOptions 
  * runtime, and the branch runtime this module imports apply them. Only `mountKeyedList` reaches this, so a
  * bundle that never calls it drops all of them.
  */
-const resolveLegacyOptions = (options: KeyedListOptions): ListRuntimeOptions => ({
-  ...options,
-  descriptor: options,
-  signature: legacySignature(options),
+const legacyAccessors = {
   readValue: readBinding,
   readHandler,
   readDeclaration: readExpression,
-  readKey: (item, index) =>
-    options.keyReadItem
-      ? options.keyReadItem(item)
-      : options.keyRead
-        ? options.keyRead(scopedItem(options.itemName, item, options.indexName, index, options.scope))
-        : readItemPath(item, options.key, options.itemName),
-  applyValue: (binding, node, value) => {
+  applyValue: (binding: Binding, node: Node, value: unknown) => {
     if (binding.kind === "class") setClassPresence(node as Element, binding.className, value);
     else if (binding.kind === "attr") setAttributeValue(node as Element, binding.name, value);
     else if (binding.kind === "style") setStyleValue(node as Element, binding.name, value);
@@ -1179,13 +1192,18 @@ const resolveLegacyOptions = (options: KeyedListOptions): ListRuntimeOptions => 
       setControlValue(node as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, binding.property, value);
     }
   },
-  mountList: (binding, container, items, scope) => mountKeyedList(container, [], items, { ...binding, scope }),
+  mountList: (
+    binding: NestedListBinding,
+    container: Element,
+    items: readonly unknown[] | undefined,
+    scope: Record<string, unknown>,
+  ) => mountKeyedList(container, [], items, { ...binding, scope }),
   // A hand-written ref may still carry the compiler's container reader, so the path string is the fallback.
-  bindRefTarget: (scope, binding, element) =>
+  bindRefTarget: (scope: Record<string, unknown>, binding: RefBinding, element: Element) =>
     binding.owner && binding.property !== undefined
       ? bindRef(scope, binding.owner, binding.property, element)
       : setRef(scope, binding.expression ?? "", element),
-  bindControlTarget: (scope, binding, element) =>
+  bindControlTarget: (scope: Record<string, unknown>, binding: ModelBinding, element: Element) =>
     bindControl(
       element as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
       binding.property,
@@ -1199,8 +1217,26 @@ const resolveLegacyOptions = (options: KeyedListOptions): ListRuntimeOptions => 
         writeModelValue(target, value, () => writePath(scope, binding.expression ?? "", value));
       },
     ),
-  mountBranch: (binding, node, visible, scope) => mountConditional(node, [], visible, scope, binding),
+  mountBranch: (
+    binding: NestedConditionalBinding,
+    node: Node,
+    visible: unknown,
+    scope: Record<string, unknown>,
+  ) => mountConditional(node, [], visible, scope, binding),
   hydration: { create: createHydrationBoundary, schedule: scheduleHydration },
+} as const;
+
+const resolveLegacyOptions = (options: KeyedListOptions): ListRuntimeOptions => ({
+  ...options,
+  ...legacyAccessors,
+  descriptor: options,
+  signature: legacySignature(options),
+  readKey: (item, index) =>
+    options.keyReadItem
+      ? options.keyReadItem(item)
+      : options.keyRead
+        ? options.keyRead(scopedItem(options.itemName, item, options.indexName, index, options.scope))
+        : readItemPath(item, options.key, options.itemName),
 });
 
 /** Mounts a hand-written descriptor, whose expression strings this module still interprets. */
