@@ -1046,8 +1046,8 @@ describe("HTML-first compiler", () => {
 
     const code = generateClientModule(result.value, { reactive: true });
 
-    expect(code).toContain(`import { createStore as __tachyonCreateStore } from "tachyon-dom/runtime/store";`);
-    expect(code).toContain(`const state = __tachyonCreateStore({ ...scope, count: scope.initialCount });`);
+    expect(code).toContain(`import { createScopeStore as __tachyonCreateStore } from "tachyon-dom/runtime/store";`);
+    expect(code).toContain(`const state = __tachyonCreateStore(scope, { count: scope.initialCount });`);
     expect(code).toContain(`const __tachyonTarget0 = __tachyonTextAt(root, [0,0]);`);
     expect(code).toContain(`__tachyonSetText(__tachyonTarget0, __tachyonRead(state.count))`);
 

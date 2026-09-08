@@ -853,7 +853,8 @@ export const transformSfcScript = (
   return result.ok ? result : err({ ...result.error, offset: result.error.offset + script.offset });
 };
 
-const transformSfcScriptUncached = (
+/** @internal Result-cache bypass for the compiler benchmark; not a public compiler export. */
+export const transformSfcScriptUncached = (
   script: TachyonSfcScript,
   options: TransformSfcScriptOptions,
 ): Result<TransformedSfcScript, CompilerError> => {
@@ -883,27 +884,62 @@ const transformSfcScriptUncached = (
       scopeEmission,
     });
   }
-  const namedScopeExport = /\bexport\s+const\s+scope\s*=/;
-  const defaultExport = /\bexport\s+default\b/;
-  if (namedScopeExport.test(content) && defaultExport.test(content)) {
+  const source = ts.createSourceFile("component.js", content, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const namedScopeExport = source.statements.find(
+    (statement) =>
+      ts.isVariableStatement(statement) &&
+      statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) &&
+      statement.declarationList.declarations.some(
+        (declaration) => ts.isIdentifier(declaration.name) && declaration.name.text === "scope",
+      ),
+  );
+  const defaultExport = source.statements.find(
+    (
+      statement,
+    ): statement is
+      | import("typescript").ExportAssignment
+      | import("typescript").FunctionDeclaration
+      | import("typescript").ClassDeclaration =>
+      Boolean(
+        (ts.isExportAssignment(statement) && !statement.isExportEquals) ||
+        ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) &&
+          statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.DefaultKeyword)),
+      ),
+  );
+  if (namedScopeExport && defaultExport) {
     return err({ message: "Use either export const scope or export default, not both.", offset: script.offset });
   }
-  if (namedScopeExport.test(content)) {
-    const code = content.replace(namedScopeExport, `const ${sfcNamedScopeName} =`).trim();
+  if (namedScopeExport) {
     return ok({
-      code: `${code}\nexport { ${sfcNamedScopeName} as scope };\n`,
+      code: `${content.trim()}\nconst ${sfcNamedScopeName} = scope;\n`,
       defaultScopeName: sfcNamedScopeName,
       setupBindings,
       exposedBindings,
       scopeEmission,
     });
   }
-  if (!defaultExport.test(content)) {
+  if (!defaultExport) {
     return ok({ code: `${content.trim()}\n`, setupBindings, exposedBindings, scopeEmission });
   }
-  const code = content.replace(defaultExport, `const ${sfcDefaultScopeName} =`).trim();
+  // Named declarations keep their module binding (including hoisting). Only an
+  // anonymous declaration or expression needs a generated local declaration.
+  const namedDeclaration =
+    (ts.isFunctionDeclaration(defaultExport) || ts.isClassDeclaration(defaultExport)) && defaultExport.name;
+  let code: string;
+  if (namedDeclaration) {
+    code = `${content.trim()}\nconst ${sfcDefaultScopeName} = ${namedDeclaration.text};`;
+  } else {
+    const tokens = ts.isExportAssignment(defaultExport)
+      ? defaultExport.getChildren(source)
+      : ts.getModifiers(defaultExport)!;
+    const exportToken = tokens.find((token) => token.kind === ts.SyntaxKind.ExportKeyword)!;
+    const defaultToken = tokens.find((token) => token.kind === ts.SyntaxKind.DefaultKeyword)!;
+    code =
+      `${content.slice(0, exportToken.getStart(source))}${content.slice(exportToken.end, defaultToken.getStart(source))}const ${sfcDefaultScopeName} =${content.slice(defaultToken.end, defaultExport.end)};${content.slice(defaultExport.end)}`.trim();
+    code += `\nexport { ${sfcDefaultScopeName} as default };`;
+  }
   return ok({
-    code: `${code}\nexport { ${sfcDefaultScopeName} as default };\n`,
+    code: `${code}\n`,
     defaultScopeName: sfcDefaultScopeName,
     setupBindings,
     exposedBindings,

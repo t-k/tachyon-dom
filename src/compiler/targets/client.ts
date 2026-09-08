@@ -1524,7 +1524,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     }
   }
   if (needsStore) {
-    lines.push(`import { createStore as ${runtimeNames.createStore} } from "tachyon-dom/runtime/store";`);
+    lines.push(`import { createScopeStore as ${runtimeNames.createStore} } from "tachyon-dom/runtime/store";`);
   }
   const hydrateImports = [
     ...(hasHydrationChunks
@@ -1576,12 +1576,15 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`export const hydrationChunks = { ${loaders} };`);
   }
   if (hasDefaultScope) {
+    lines.push(`import { mergeScopes as __tachyonMergeScopes } from "tachyon-dom/runtime/store";`);
+  }
+  if (hasDefaultScope) {
     lines.push(`const __tachyonCreateScope = (inputScope = {}) => {`);
     lines.push(
       `  const localScope = typeof ${options.defaultScopeName} === "function" ? ${options.defaultScopeName}(inputScope) : ${options.defaultScopeName};`,
     );
     lines.push(
-      `  return localScope && typeof localScope === "object" ? { ...localScope, ...inputScope } : inputScope;`,
+      `  return localScope && typeof localScope === "object" ? __tachyonMergeScopes(localScope, inputScope) : inputScope;`,
     );
     lines.push(`};`);
   }
@@ -1650,7 +1653,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     return emitted;
   };
   if (needsStore) {
-    const createState = `${runtimeNames.createStore}({ ...scope, ${instanceStoreFields()} })`;
+    const createState = `${runtimeNames.createStore}(scope, { ${instanceStoreFields()} })`;
     lines.push(
       acceptsContext
         ? `  const state = __tachyonContext && __tachyonContext.state ? __tachyonContext.state : ${createState};`
@@ -1962,7 +1965,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       lines.push(`  const scope = inputScope;`);
     }
     if (needsStore) {
-      lines.push(`  const state = ${runtimeNames.createStore}({ ...scope, ${instanceStoreFields()} });`);
+      lines.push(`  const state = ${runtimeNames.createStore}(scope, { ${instanceStoreFields()} });`);
     }
     lines.push(`  const cleanups = [];`);
     if (needsStore) lines.push(...emitComponentScope("  ", reactive));

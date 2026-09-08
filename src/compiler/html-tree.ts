@@ -1,6 +1,6 @@
 import { err, ok, type Result } from "../result.js";
 import type { CompilerError, ElementNode, TemplateNode } from "./types.js";
-import { renderableChildren } from "./utils.js";
+import { renderableChildren, isStoreNode, textExpressionSegments } from "./utils.js";
 
 type ImpliedContainer = "tbody" | "colgroup";
 
@@ -91,3 +91,28 @@ const normalizeElement = (node: ElementNode): Result<ElementNode, CompilerError>
 };
 
 export const normalizeHtmlTree = (root: ElementNode): Result<ElementNode, CompilerError> => normalizeElement(root);
+
+/** HTML parsing joins static text on either side of an erased store declaration. */
+export const coalesceStaticStoreText = (node: ElementNode): ElementNode => {
+  const children: TemplateNode[] = [];
+  let previousText: number | undefined;
+  for (const child of node.children) {
+    if (child.type === "text") {
+      // Dynamic text keeps its original source span for expression diagnostics.
+      if (textExpressionSegments(child.value).some((segment) => segment.kind === "expression")) {
+        previousText = undefined;
+        children.push(child);
+      } else if (previousText !== undefined) {
+        const previous = children[previousText];
+        if (previous?.type === "text") children[previousText] = { ...previous, value: previous.value + child.value };
+      } else {
+        previousText = children.length;
+        children.push(child);
+      }
+    } else {
+      children.push(coalesceStaticStoreText(child));
+      if (!isStoreNode(child)) previousText = undefined;
+    }
+  }
+  return { ...node, children };
+};

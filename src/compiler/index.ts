@@ -6,7 +6,7 @@ import { lowerClientTemplate } from "./targets/client.js";
 import type { CompiledTemplate, CompilerError } from "./types.js";
 import type { CompileTemplateOptions, TemplateWhitespacePolicy } from "./types.js";
 import { applyTemplateWhitespace } from "./whitespace.js";
-import { normalizeHtmlTree } from "./html-tree.js";
+import { normalizeHtmlTree, coalesceStaticStoreText } from "./html-tree.js";
 
 const compileCacheLimit = 128;
 const compileCache = new Map<string, Result<CompiledTemplate, CompilerError>>();
@@ -59,17 +59,22 @@ export const compileTemplate = (
   }
   // Static optimization runs on the normalized tree so template HTML, SSR output, binding paths, and hydration
   // regions are all derived from the same reduced structure.
-  const { root } = removeConstantFalseConditionals(normalized.value);
+  const root = coalesceStaticStoreText(removeConstantFalseConditionals(normalized.value).root);
   const irResult = createTemplateIr(root);
   if (!irResult.ok) {
     return rememberCompiledTemplate(cacheKey, err(irResult.error));
   }
-  return rememberCompiledTemplate(cacheKey, ok(deepFreeze({
-    source,
-    ir: irResult.value,
-    root: irResult.value.root,
-    client: lowerClientTemplate(irResult.value.root),
-  })));
+  return rememberCompiledTemplate(
+    cacheKey,
+    ok(
+      deepFreeze({
+        source,
+        ir: irResult.value,
+        root: irResult.value.root,
+        client: lowerClientTemplate(irResult.value.root),
+      }),
+    ),
+  );
 };
 
 export * from "./types.js";
