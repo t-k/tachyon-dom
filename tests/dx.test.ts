@@ -943,7 +943,7 @@ const increment = (): void => {
     }
   });
 
-  it("compiles a setup factory that exposes only template-referenced bindings", async () => {
+  it("keeps the complete setup scope for opaque imported template functions", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-scope-"));
     try {
       const input = path.join(dir, "panel.td");
@@ -967,9 +967,9 @@ const cache = new Map<string, string>();
       expect(server.ok).toBe(true);
       if (!client.ok || !server.ok) throw new Error("Compile failed.");
       for (const code of [client.value, server.value]) {
-        expect(code).toContain(`return { count: count, format: format, increment: increment };`);
-        expect(code).not.toContain("step: step");
-        expect(code).not.toContain("cache: cache");
+        expect(code).toContain(
+          `return { cache: cache, count: count, format: format, increment: increment, step: step };`,
+        );
         expect(code).toContain("const step = 2;");
       }
     } finally {
@@ -1794,14 +1794,14 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(chunkCode).not.toContain(`export const hydrationChunks =`);
   });
 
-  it("runs the SFC setup once when a Vite-built boundary chunk binds with the entry scope", async () => {
+  it.each(["closure", "this"])("runs SFC setup once when a Vite boundary chunk uses a %s reference", async (kind) => {
     await mkdir(path.join(process.cwd(), "node_modules", ".cache"), { recursive: true });
     const dir = await mkdtemp(path.join(process.cwd(), "node_modules", ".cache", "tachyon-lazy-setup-"));
     try {
       await mkdir(path.join(dir, "src"), { recursive: true });
       await writeFile(
         path.join(dir, "src", "lazy.td"),
-        `<script setup>globalThis.__tachyonSetupRuns = (globalThis.__tachyonSetupRuns ?? 0) + 1; const label = "ready";</script><main><section hydrate><button>{label}</button></section></main>`,
+        `<script setup>globalThis.__tachyonSetupRuns.push(1); const secret = "ready"; ${kind === "closure" ? "const label = () => secret;" : "function label() { return this.secret; }"}</script><main><section hydrate><button>{label()}</button></section></main>`,
       );
       await writeFile(path.join(dir, "src", "main.js"), `export { hydrate } from "./lazy.td";\n`);
       const sourceRoot = path.resolve(process.cwd(), "src");
@@ -1836,7 +1836,7 @@ export const bindRows = (root, rows, options) => effect(() => {
       expect(chunkCode).not.toContain("__tachyonSetupRuns");
       expect(chunkCode).not.toContain("__tachyonCreateScope");
 
-      (globalThis as { __tachyonSetupRuns?: number }).__tachyonSetupRuns = 0;
+      (globalThis as { __tachyonSetupRuns?: number[] }).__tachyonSetupRuns = [];
       document.body.innerHTML = `<main><!--tachyon-hydrate:td-h-0:start--><section><button>ready</button></section><!--tachyon-hydrate:td-h-0:end--></main>`;
       const entry = (await import(/* @vite-ignore */ pathToFileURL(entryPath).href)) as {
         hydrate: (bindRoot: Element, hydrationRoot: Element) => () => void;
@@ -1845,13 +1845,13 @@ export const bindRows = (root, rows, options) => effect(() => {
       if (!root) throw new Error("Missing hydration root.");
       const stop = entry.hydrate(root, root);
       try {
-        expect((globalThis as { __tachyonSetupRuns?: number }).__tachyonSetupRuns).toBe(1);
+        expect((globalThis as { __tachyonSetupRuns?: number[] }).__tachyonSetupRuns).toEqual([1]);
         await new Promise((resolveTimer) => setTimeout(resolveTimer, 50));
-        expect((globalThis as { __tachyonSetupRuns?: number }).__tachyonSetupRuns).toBe(1);
+        expect((globalThis as { __tachyonSetupRuns?: number[] }).__tachyonSetupRuns).toEqual([1]);
         expect(root.querySelector("button")?.textContent).toBe("ready");
       } finally {
         stop();
-        delete (globalThis as { __tachyonSetupRuns?: number }).__tachyonSetupRuns;
+        delete (globalThis as { __tachyonSetupRuns?: number[] }).__tachyonSetupRuns;
       }
     } finally {
       await rm(dir, { recursive: true, force: true });

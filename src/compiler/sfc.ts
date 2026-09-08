@@ -2,7 +2,10 @@ import type { BindingName, Diagnostic, Expression, Identifier, Node, PropertyNam
 import { requireOptionalPeer } from "../optional-peer.js";
 import { err, ok, type Result } from "../result.js";
 import { compileTemplate } from "./index.js";
-import type { CompiledTemplate, CompilerError, CompileTemplateOptions } from "./types.js";
+import { parseExpression, type ExpressionNode } from "./expression.js";
+import { parseTemplate } from "./parser.js";
+import { readExpressionAttribute, textExpressionSegments } from "./utils.js";
+import type { CompiledTemplate, CompilerError, CompileTemplateOptions, TemplateNode } from "./types.js";
 
 type TypeScriptModule = typeof import("typescript");
 
@@ -53,19 +56,85 @@ export type TransformedSfcScript = {
 };
 
 export type TransformSfcScriptOptions = {
-  /**
-   * Identifiers that appear anywhere in the template text. When given, the setup factory exposes only the setup
-   * bindings among them: an expression can only reach a scope value by naming it literally, so a name absent
-   * from the template can never be read by a binding, handler, ref, hydration id, or store initializer.
-   */
-  templateIdentifiers?: ReadonlySet<string>;
+  /** Direct template references. Unknown or indirect scope access keeps all setup bindings exposed. */
+  templateIdentifiers?: ReadonlySet<string> | undefined;
 };
 
-const templateIdentifierPattern = /[A-Za-z_$][\w$]*/g;
-
-/** Every identifier-shaped token in a template, over-approximating the names its expressions can reference. */
-export const templateScopeIdentifiers = (template: string): Set<string> =>
-  new Set(template.match(templateIdentifierPattern) ?? []);
+/** Collect normalized expression names using the same AST as code generation; failure disables narrowing. */
+export const templateScopeIdentifiers = (template: string | CompiledTemplate): Set<string> | undefined => {
+  if (typeof template === "string" && template.trim().length === 0) return new Set();
+  const parsed = typeof template === "string" ? parseTemplate(template) : ok(template.root);
+  if (!parsed.ok) return undefined;
+  const names = new Set<string>();
+  let valid = true;
+  const expression = (source: string): void => {
+    const parsed = parseExpression(source);
+    if (!parsed.ok) {
+      valid = false;
+      return;
+    }
+    const visit = (node: ExpressionNode): void => {
+      switch (node.type) {
+        case "identifier":
+          names.add(node.path[0] as string);
+          break;
+        case "array":
+          node.items.forEach(visit);
+          break;
+        case "object":
+          node.entries.forEach((entry) => visit(entry.value));
+          break;
+        case "unary":
+          visit(node.argument);
+          break;
+        case "binary":
+          visit(node.left);
+          visit(node.right);
+          break;
+        case "conditional":
+          visit(node.test);
+          visit(node.consequent);
+          visit(node.alternate);
+          break;
+        case "call":
+          visit(node.callee);
+          node.args.forEach(visit);
+          break;
+        case "member":
+          visit(node.object);
+          visit(node.property);
+          break;
+        case "template":
+          node.parts.forEach((part) => {
+            if (typeof part !== "string") visit(part);
+          });
+          break;
+      }
+    };
+    visit(parsed.value);
+  };
+  const visit = (node: TemplateNode): void => {
+    if (node.type === "text") {
+      for (const segment of textExpressionSegments(node.value)) {
+        if (segment.kind === "expression") expression(segment.value);
+      }
+      return;
+    }
+    if (node.tagName === "outlet") names.add("outlet");
+    if (node.tagName === "slot") names.add("slots");
+    for (const attr of node.attrs) {
+      const source = readExpressionAttribute(attr.value);
+      if (source) expression(source);
+      // Component names are scope references even though their attribute is static.
+      if (node.tagName === "component" && attr.name === "name" && typeof attr.value === "string") {
+        expression(attr.value);
+      }
+    }
+    node.children.forEach(visit);
+  };
+  visit(parsed.value);
+  return valid ? names : undefined;
+};
 
 const autoImports: Record<string, string> = {
   batch: "tachyon-dom",
@@ -634,6 +703,51 @@ export const generateScriptOnlyModule = (target: "client" | "server" | "stream")
   ].join("\n");
 };
 
+/** Unknown callable values may observe the complete scope when invoked as scope.name(). */
+const canNarrowSetupScope = (script: TachyonSfcScript, exposed: ReadonlySet<string>): boolean => {
+  const source = sourceFileFor(script.content, script);
+  let safe = true;
+  const inspect = (node: Node): void => {
+    if (
+      node.kind === ts.SyntaxKind.ThisKeyword ||
+      (ts.isVariableDeclarationList(node) && !(node.flags & ts.NodeFlags.Const)) ||
+      (ts.isIdentifier(node) && node.text === "eval") ||
+      (ts.isBinaryExpression(node) &&
+        node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment)
+    )
+      safe = false;
+    ts.forEachChild(node, inspect);
+  };
+  inspect(source);
+  if (!safe) return false;
+  const known = new Set<string>();
+  for (const statement of source.statements) {
+    if (ts.isFunctionDeclaration(statement) && statement.name) known.add(statement.name.text);
+    if (!ts.isVariableStatement(statement)) continue;
+    for (const declaration of statement.declarationList.declarations) {
+      const declared = new Set<string>();
+      addBindingNames(declaration.name, declared);
+      for (const name of declared) known.delete(name);
+      if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue;
+      const value = unwrapStaticExpression(declaration.initializer);
+      if (
+        ts.isArrowFunction(value) ||
+        ts.isFunctionExpression(value) ||
+        ts.isLiteralExpression(value) ||
+        value.kind === ts.SyntaxKind.TrueKeyword ||
+        value.kind === ts.SyntaxKind.FalseKeyword ||
+        value.kind === ts.SyntaxKind.NullKeyword ||
+        ts.isArrayLiteralExpression(value) ||
+        ts.isObjectLiteralExpression(value)
+      ) {
+        known.add(declaration.name.text);
+      }
+    }
+  }
+  return [...exposed].every((name) => known.has(name));
+};
+
 export const transformSfcScript = (
   script: TachyonSfcScript | undefined,
   options: TransformSfcScriptOptions = {},
@@ -647,9 +761,11 @@ export const transformSfcScript = (
   }
   const setupBindings = isSfcSetupScript(script) ? topLevelBindings(script) : [];
   const { templateIdentifiers } = options;
-  const exposedBindings = templateIdentifiers
-    ? setupBindings.filter((name) => templateIdentifiers.has(name))
-    : setupBindings;
+  const referencedBindings = setupBindings.filter((name) => templateIdentifiers?.has(name));
+  const exposedBindings =
+    templateIdentifiers && canNarrowSetupScope(script, new Set(referencedBindings))
+      ? setupBindings.filter((name) => templateIdentifiers.has(name))
+      : setupBindings;
   const content = autoImportScriptHelpers(transpiled.value, script);
   if (isSfcSetupScript(script)) {
     const factory = setupFactoryCode(content, script, exposedBindings);

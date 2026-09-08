@@ -499,9 +499,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       }
       const script = transformSfcScript(
         result.value.descriptor.script,
-        result.value.scriptOnly
-          ? {}
-          : { templateIdentifiers: templateScopeIdentifiers(result.value.descriptor.template) },
+        result.value.scriptOnly ? {} : { templateIdentifiers: templateScopeIdentifiers(result.value.template) },
       );
       if (!script.ok) {
         this.error(formatDiagnostic(diagnosticFromCompilerError(source, script.error), id));

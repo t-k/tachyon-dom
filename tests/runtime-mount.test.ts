@@ -30,7 +30,8 @@ describe("client mount entrypoints", () => {
       "<p>{user?.[key()](arg())}</p>",
       "/src/optional-computed.td?client",
     );
-    if (!result || typeof result !== "object" || typeof result.code !== "string") throw new Error("Missing generated module");
+    if (!result || typeof result !== "object" || typeof result.code !== "string")
+      throw new Error("Missing generated module");
     const module = evaluateGeneratedClientModule(result.code);
     const root = document.createElement("main");
     const handle = mount(root, module, {
@@ -2340,4 +2341,27 @@ describe("client mount entrypoints", () => {
     expect(result.ok).toBe(false);
     expect(runs).toBe(1);
   });
+});
+
+it("preserves this and normalized identifier references through the Vite SFC transform", async () => {
+  const plugin = tachyonDom({ reactive: true });
+  if (typeof plugin.transform !== "function") throw new Error("Missing transform hook");
+  const result = await plugin.transform.call(
+    {
+      error(message: string): never {
+        throw new Error(message);
+      },
+    } as never,
+    String.raw`<script setup>const secret = "READY"; function label() { return this.secret; } const 件数 = 7; const count = 8;</script><p>{label()}:{件数}:{\u0063ount}</p>`,
+    "/src/sfc-scope-regression.td?client",
+  );
+  if (!result || typeof result !== "object" || typeof result.code !== "string") throw new Error("Missing module");
+  const module = evaluateGeneratedClientModule(result.code.replace(/^export \{[^}]*\};?$/gm, ""));
+  const root = document.createElement("div");
+  const handle = mount(root, module);
+  try {
+    expect(root.textContent).toBe("READY:7:8");
+  } finally {
+    handle.dispose();
+  }
 });

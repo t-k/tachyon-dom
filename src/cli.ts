@@ -348,7 +348,7 @@ export const compileFile = async (options: Omit<CliCompileOptions, "command">): 
   }
   const script = transformSfcScript(
     result.value.descriptor.script,
-    result.value.scriptOnly ? {} : { templateIdentifiers: templateScopeIdentifiers(result.value.descriptor.template) },
+    result.value.scriptOnly ? {} : { templateIdentifiers: templateScopeIdentifiers(result.value.template) },
   );
   if (!script.ok) {
     return err(formatDiagnostic(diagnosticFromCompilerError(source, script.error), options.input));

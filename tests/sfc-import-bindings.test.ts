@@ -1,5 +1,7 @@
 import { expect, it } from "vitest";
 import { templateScopeIdentifiers, transformSfcScript } from "../src/compiler/sfc";
+import { compileTachyonSfc, sfcSetupScopeName } from "../src/compiler/sfc";
+import { expressionToJs } from "../src/compiler/expression";
 
 it("exposes runtime setup imports while excluding TypeScript-only imports", () => {
   const transformed = transformSfcScript({
@@ -49,11 +51,12 @@ it("exposes only the setup bindings the template can reference when template ide
       attrs: 'setup lang="ts"',
       offset: 0,
       content: `
-import { format } from "./format";
+const format = (value) => String(value);
 import { createSignal } from "tachyon-dom";
-const count = createSignal(0);
+const state = createSignal(0);
+const count = () => state();
 const step = 2;
-const increment = () => count.set(count() + step);
+const increment = () => state.set(count() + step);
 const title = "Counter";
 const rows = [1];
 const internalCache = new Map();
@@ -71,6 +74,7 @@ const internalCache = new Map();
     "increment",
     "internalCache",
     "rows",
+    "state",
     "step",
     "title",
   ]);
@@ -94,14 +98,14 @@ it("keeps every setup binding exposed when no template identifiers are known", (
   expect(transformed.value.code).toContain("return { a: a, b: b };");
 });
 
-it("collects template identifiers from expressions, attributes, and text alike", () => {
+it("collects expression identifiers without retaining static markup or literal strings", () => {
   const identifiers = templateScopeIdentifiers(
     `<section hydrate:id={panelId}><input bind:value={draft.text} style:color={active ? "red" : \`\${tone}\`}><p>{t("greeting")}</p></section>`,
   );
-  for (const name of ["panelId", "draft", "active", "tone", "t", "section", "hydrate", "red"]) {
-    expect(identifiers.has(name)).toBe(true);
+  for (const name of ["panelId", "draft", "active", "tone", "t"]) {
+    expect(identifiers?.has(name)).toBe(true);
   }
-  expect(identifiers.has("missing")).toBe(false);
+  for (const name of ["missing", "section", "hydrate", "red"]) expect(identifiers?.has(name)).toBe(false);
 });
 
 it.each([undefined, { attrs: "setup", offset: 0, content: "  \n\t" }])(
@@ -115,6 +119,108 @@ it.each([undefined, { attrs: "setup", offset: 0, content: "  \n\t" }])(
 );
 
 it("collects no identifiers from a template without identifier tokens", () => {
-  expect(templateScopeIdentifiers("").size).toBe(0);
-  expect(templateScopeIdentifiers("1 + 2 <> ...").size).toBe(0);
+  expect(templateScopeIdentifiers("")?.size).toBe(0);
+  expect(templateScopeIdentifiers("<p>1 + 2 ...</p>")?.size).toBe(0);
+});
+
+it.each([
+  ['const secret = "READY"; function label() { return this.secret; }', "label()", "READY"],
+  ['const secret = "READY"; const key = "secret"; function label() { return this[key]; }', "label()", "READY"],
+  [
+    'const secret = "READY"; function label() { return Object.keys(this).sort().join(","); }',
+    "label()",
+    "label,secret",
+  ],
+  ["const 件数 = 7;", "件数", 7],
+  ["const count = 7;", String.raw`\u0063ount`, 7],
+  ["const count = 7;", String.raw`\u{63}ount`, 7],
+])("preserves generated SFC expression behavior: %s", (content, expression, expected) => {
+  const compiled = compileTachyonSfc(`<script setup>${content}</script><p>{${expression}}</p>`);
+  expect(compiled.ok).toBe(true);
+  if (!compiled.ok) throw new Error(compiled.error.message);
+  const script = compiled.value.descriptor.script;
+  const full = transformSfcScript(script);
+  const narrowed = transformSfcScript(script, {
+    templateIdentifiers: templateScopeIdentifiers(compiled.value.descriptor.template),
+  });
+  if (!full.ok || !narrowed.ok) throw new Error("SFC transformation failed");
+  const run = (code: string) => {
+    const scope = new Function(code.replace(/export \{[^}]*\};?/g, "") + `; return ${sfcSetupScopeName}();`)();
+    return new Function("scope", `return ${expressionToJs(expression)};`)(scope);
+  };
+  expect(run(full.value.code)).toBe(expected);
+  expect(run(narrowed.value.code)).toBe(expected);
+});
+
+it("retains the implicit server outlet reference", () => {
+  expect(templateScopeIdentifiers("<main><outlet/></main>")?.has("outlet")).toBe(true);
+});
+
+it("falls back when a repeated variable declaration replaces a known function", () => {
+  const result = transformSfcScript(
+    {
+      attrs: "setup",
+      offset: 0,
+      content: 'var label = () => "OLD"; var label = Function("return this.secret"); const secret = "READY";',
+    },
+    { templateIdentifiers: new Set(["label"]) },
+  );
+  if (!result.ok) throw new Error(result.error.message);
+  expect(result.value.exposedBindings).toEqual(["label", "secret"]);
+});
+
+it.each([
+  'import { label } from "./shared"; const secret = "READY";',
+  'const label = Function("return this.secret"); const secret = "READY";',
+  'const label = globalThis.external; const secret = "READY";',
+  'const label = () => eval("this.secret"); const secret = "READY";',
+  'let label = () => "OLD"; label = external; const secret = "READY";',
+])("keeps opaque or dynamically replaced callable scopes intact: %s", (content) => {
+  const result = transformSfcScript(
+    { attrs: "setup", offset: 0, content },
+    { templateIdentifiers: new Set(["label"]) },
+  );
+  if (!result.ok) throw new Error(result.error.message);
+  expect(result.value.exposedBindings).toEqual(result.value.setupBindings);
+});
+
+it.each([
+  'var label = Function("return this.secret"); function label() { return "OLD"; } const secret = "READY";',
+  'function label() { return "OLD"; } if (true) { var label = Function("return this.secret"); } const secret = "READY";',
+])("keeps scopes intact across hoisted or block-scoped var replacements: %s", (content) => {
+  const result = transformSfcScript(
+    { attrs: "setup", offset: 0, content },
+    { templateIdentifiers: new Set(["label"]) },
+  );
+  if (!result.ok) throw new Error(result.error.message);
+  expect(result.value.exposedBindings).toContain("secret");
+});
+
+it("retains the implicit server slots reference", () => {
+  expect(templateScopeIdentifiers('<main><slot/><slot name="named"/></main>')?.has("slots")).toBe(true);
+});
+
+it.each([
+  ["[first, second]", ["first", "second"]],
+  ["({value: first})", ["first"]],
+  ["!enabled", ["enabled"]],
+  ["left + right", ["left", "right"]],
+  ["test ? yes : no", ["test", "yes", "no"]],
+  ["fn(argument)", ["fn", "argument"]],
+  ["object[key]", ["object", "key"]],
+  ["`prefix ${value} suffix`", ["value"]],
+] as const)("collects every operand in %s", (expression, names) => {
+  expect(templateScopeIdentifiers(`<p>{${expression}}</p>`)).toEqual(new Set(names));
+});
+
+it("collects component, store, list, and awaited references conservatively", () => {
+  const names = templateScopeIdentifiers(
+    '<main><component name="Card" title={heading}/><store data={initial}/><for each={rows} key={row.id}><p>{row.name}:{suffix}</p></for><await value={promise}><p>{resolved}</p></await></main>',
+  );
+  for (const name of ["Card", "heading", "initial", "rows", "row", "suffix", "promise", "resolved"])
+    expect(names?.has(name)).toBe(true);
+});
+
+it.each(["<p>{a +}</p>", "<p"])("disables narrowing when parsing fails: %s", (source) => {
+  expect(templateScopeIdentifiers(source)).toBeUndefined();
 });
