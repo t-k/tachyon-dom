@@ -890,9 +890,13 @@ const buildMultiModuleFixture = async () => {
     count: 0,
     draft: "",
   });
+  const propsSource = await readFile(resolve(root, "PropsPanel.td"), "utf8");
+  const propsCompiled = compileTachyonSfc(propsSource);
+  if (!propsCompiled.ok) throw new Error(propsCompiled.error.message);
+  const propsMarkup = renderServerTemplate(propsCompiled.value.template, { label: "before", suffix: "!" });
   await writeFile(
     resolve(target, "index.html"),
-    `<!doctype html><html><body><div id="a1"></div><div id="a2"></div><div id="b"></div><div id="scoped"></div><div id="lazy"></div><div id="ssr">${markup}</div><script type="module" src="./entry.js"></script></body></html>`,
+    `<!doctype html><html><body><div id="a1"></div><div id="a2"></div><div id="b"></div><div id="scoped"></div><div id="lazy"></div><div id="ssr">${markup}</div><div id="props">${propsMarkup}</div><div id="props-other"></div><script type="module" src="./entry.js"></script></body></html>`,
   );
   await writeFile(resolve(target, "manifest.json"), JSON.stringify({ lazyChunk: lazy.fileName, ssrMarkup: markup }));
 };

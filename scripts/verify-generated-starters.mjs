@@ -43,7 +43,12 @@ export const scope = () => ({
 </section>
 `;
 
-const interactiveClient = `import { bind } from "../routes/index/page.td?client";
+const interactiveClient = `import * as Page from "../routes/index/page.td?client";
+import * as CardView from "./card.td";
+import * as StoreView from "./store.td";
+import * as ExampleView from "./example.td";
+import { createTemplateComponent } from "tachyon-dom";
+import { mount } from "tachyon-dom/runtime/mount";
 import { createSignal } from "tachyon-dom/runtime/signal";
 
 const element = document.querySelector("section");
@@ -51,15 +56,52 @@ if (!(element instanceof HTMLElement)) throw new Error("Missing SSR root.");
 const before = element;
 const count = createSignal(0);
 const rows = createSignal(["A"]);
-const cleanup = bind(element, {
+const host = document.createElement("div");
+const markerStart = element.previousSibling;
+const markerEnd = element.nextSibling;
+if (!markerStart || !markerEnd) throw new Error("Missing SSR boundary markers.");
+markerStart.before(host);
+host.append(markerStart, element, markerEnd);
+const pageComponent = createTemplateComponent({ client: Page });
+const pageInstance = pageComponent.hydrate(host, {
   id: "counter",
   count,
   rows,
   increment: () => count.update((value) => value + 1),
   add: () => rows.update((values) => [...values, "B"]),
 });
+if (!pageInstance.ok) throw new Error(pageInstance.error.message);
+const examples = document.createElement("div");
+document.body.append(examples);
+const exampleHandle = mount(examples, ExampleView);
+if (examples.querySelector("button")?.textContent !== "7") throw new Error("Packaged existing sample failed.");
+exampleHandle.dispose();
 Object.assign(window, {
-  __tachyonCleanup: cleanup,
+  __tachyonCheckProps: async () => {
+    for (const client of [CardView, StoreView]) {
+      const component = createTemplateComponent<{ label: string }>({ client });
+      const root = document.createElement("div");
+      const other = document.createElement("div");
+      document.body.append(root, other);
+      const first = component.mount(root, { label: "before" });
+      const second = component.mount(other, { label: "other" });
+      const paragraph = root.querySelector("p");
+      const input = root.querySelector("input");
+      try {
+        if (input) { input.value = "7"; input.dispatchEvent(new Event("input", { bubbles: true })); }
+        await Promise.resolve();
+        first.update({ label: "after" });
+        if (paragraph?.textContent !== "after!" || root.querySelector("p") !== paragraph) throw new Error("Packaged SFC props did not update in place.");
+        if (other.querySelector("p")?.textContent !== "other!") throw new Error("Packaged SFC instances shared props.");
+        if (input && root.querySelector("output")?.textContent !== "7") throw new Error("Packaged SFC lost local state.");
+        first.dispose();
+        first.update({ label: "disposed" });
+        if (paragraph?.textContent !== "after!") throw new Error("Disposed packaged SFC still updates.");
+      } finally { first.dispose(); second.dispose(); root.remove(); other.remove(); }
+    }
+    return true;
+  },
+  __tachyonCleanup: () => pageInstance.value.dispose(),
   __tachyonHydrated: true,
   __tachyonReusedSsrElement: before === document.querySelector("section"),
 });
@@ -91,12 +133,17 @@ const verifyProductionHydration = async (directory) => {
     if (!address || typeof address === "string") throw new Error("Missing starter verification address.");
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
+    const pageErrors = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
     await page.goto(`http://127.0.0.1:${address.port}`, { waitUntil: "networkidle" });
     if (!(await page.evaluate(() => window.__tachyonHydrated === true))) {
-      throw new Error(`${directory} did not hydrate the packaged starter.`);
+      throw new Error(`${directory} did not hydrate the packaged starter: ${pageErrors.join("; ")}.`);
     }
     if (!(await page.evaluate(() => window.__tachyonReusedSsrElement === true))) {
       throw new Error(`${directory} replaced the packaged starter SSR root.`);
+    }
+    if (!(await page.evaluate(() => window.__tachyonCheckProps()))) {
+      throw new Error(`${directory} failed packaged component prop updates.`);
     }
     await page.locator("#increment").click();
     if ((await page.locator("#count").textContent()) !== "Count 1") {
@@ -134,6 +181,18 @@ const verifyGeneratedProject = async (directory, packageTarball) => {
 
   await writeFile(pageFile, interactivePage);
   await writeFile(path.join(directory, "src", "client", "main.ts"), interactiveClient);
+  await writeFile(
+    path.join(directory, "src", "client", "card.td"),
+    '<script setup>const suffix = "!";</script><main><p>{label + suffix}</p></main>',
+  );
+  await writeFile(
+    path.join(directory, "src", "client", "store.td"),
+    '<script setup>const suffix = "!";</script><main><store count={0}/><p>{label + suffix}</p><input bind:value={count}/><output>{count}</output></main>',
+  );
+  await writeFile(
+    path.join(directory, "src", "client", "example.td"),
+    await readFile(path.join(projectRoot, "examples", "store-hydrate-stream.td"), "utf8"),
+  );
   await run("pnpm", ["typecheck"], directory);
   await run("pnpm", ["build"], directory);
   const interactiveHtml = await readFile(path.join(directory, "dist", "index.html"), "utf8");

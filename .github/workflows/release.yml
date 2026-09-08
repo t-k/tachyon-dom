@@ -12,7 +12,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  required-ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   verify:
+    needs: required-ci
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -32,33 +38,9 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm exec playwright install --with-deps chromium
-
       - run: pnpm build
 
-      - run: pnpm verify:url-policy-codegen
-
       - run: pnpm build:create-package
-
-      - run: pnpm test
-
-      - run: pnpm verify:package
-
-      - run: pnpm check:exports
-
-      - run: pnpm check:size
-
-      - run: pnpm verify:starters
-
-      - run: pnpm check:browser-entry
-
-      - run: pnpm check:browser-feature-budgets
-
-      - run: pnpm check:client-bundle-attribution
-
-      - run: pnpm check:quick-example-size
-
-      - run: pnpm verify:whitespace-types
 
       - run: pnpm prepare:release --tag "$GITHUB_REF_NAME" --output release-artifacts
 

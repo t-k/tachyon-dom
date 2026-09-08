@@ -1,6 +1,6 @@
 {
   "name": "tachyon-dom",
-  "version": "0.1.8",
+  "version": "0.2.0-rc.1",
   "private": false,
   "description": "A small TypeScript UI runtime and HTML-first compiler.",
   "keywords": [
@@ -267,6 +267,7 @@
     "check:browser-feature-budgets": "node scripts/verify-browser-feature-budgets.mjs",
     "check:sfc-scope-sizes": "vitest run tests/sfc-import-bindings.test.ts tests/sfc-scope-behavior.test.ts tests/sfc-scope-emission.test.ts && tsx scripts/sfc-scope-sizes.ts",
     "test:mutation:sfc": "stryker run stryker.sfc.config.json",
+    "test:mutation:release-readiness": "stryker run stryker.release-readiness.config.json",
     "check:client-bundle-attribution": "node scripts/client-bundle-attribution.mjs",
     "check:template-types": "node scripts/verify-template-typecheck.mjs",
     "check:quick-example-size": "node scripts/verify-quick-example-bundle.mjs",

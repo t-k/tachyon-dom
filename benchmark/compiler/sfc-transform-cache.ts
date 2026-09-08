@@ -5,6 +5,7 @@ import {
   parseTachyonSfc,
   sfcScriptTransformCacheLimit,
   transformSfcScript,
+  transformSfcScriptUncached,
   type TachyonSfcScript,
   type TransformSfcScriptOptions,
 } from "../../src/compiler/sfc";
@@ -25,7 +26,9 @@ export type ScenarioResult = {
   calls: number;
   hits: number;
   hitRate: number;
+  /** Transform calls only, including normal cache lookup but excluding benchmark bookkeeping. */
   totalMs: number;
+  elapsedMs: number;
   microsPerCall: number;
   retainedChars: number;
   retainedEntries: number;
@@ -87,17 +90,30 @@ export const editLargeScriptScenario = (script: TachyonSfcScript, edits: number)
 export const offsetOnlyScenario = (script: TachyonSfcScript, moves: number): CacheCall[] =>
   Array.from({ length: moves }, (_, move) => ({ script: { ...script, offset: move * 3 } }));
 
-export const runScenario = (name: string, calls: readonly CacheCall[]): ScenarioResult => {
+export const runScenario = (
+  name: string,
+  calls: readonly CacheCall[],
+  options: { cache?: boolean } = {},
+): ScenarioResult => {
   const seen = new Map<string, unknown>();
   const retained = new Map<string, number>();
   let hits = 0;
+  let totalMs = 0;
+  const cached = options.cache !== false;
   const started = performance.now();
   for (const call of calls) {
-    const result = transformSfcScript(call.script, call.options);
+    const transformStarted = performance.now();
+    const result = cached
+      ? transformSfcScript(call.script, call.options)
+      : transformSfcScriptUncached(call.script, call.options ?? {});
+    totalMs += performance.now() - transformStarted;
+    if (!cached) continue;
     const key = cacheKeyFor(call);
-    const value = result.ok ? result.value : result.error.message;
-    if (seen.get(key) === value) hits++;
-    seen.set(key, value);
+    // Errors are rewrapped with caller offsets; equal messages do not establish a hit.
+    if (result.ok) {
+      if (seen.get(key) === result.value) hits++;
+      seen.set(key, result.value);
+    }
     retained.delete(key);
     retained.set(key, key.length + (result.ok ? result.value.code.length : 0));
     for (const oldest of retained.keys()) {
@@ -105,7 +121,7 @@ export const runScenario = (name: string, calls: readonly CacheCall[]): Scenario
       retained.delete(oldest);
     }
   }
-  const totalMs = performance.now() - started;
+  const elapsedMs = performance.now() - started;
   let retainedChars = 0;
   for (const chars of retained.values()) retainedChars += chars;
   return {
@@ -114,6 +130,7 @@ export const runScenario = (name: string, calls: readonly CacheCall[]): Scenario
     hits,
     hitRate: calls.length === 0 ? 0 : hits / calls.length,
     totalMs,
+    elapsedMs,
     microsPerCall: calls.length === 0 ? 0 : (totalMs * 1_000) / calls.length,
     retainedChars,
     retainedEntries: retained.size,
@@ -129,20 +146,28 @@ const main = (): void => {
   );
   const overLimit = Array.from({ length: sfcScriptTransformCacheLimit + 32 }, (_, index) => syntheticScript(index));
   const underLimit = overLimit.slice(0, Math.floor(sfcScriptTransformCacheLimit / 2));
-  const results = [
-    runScenario("examples: server+client+2 chunks per file", perFileTargetsScenario(exampleScripts)),
-    runScenario(`sweep ${underLimit.length} files, then second target`, sweepThenTargetScenario(underLimit)),
-    runScenario(`sweep ${overLimit.length} files, then second target`, sweepThenTargetScenario(overLimit)),
-    runScenario("edit largest example script 200 times", editLargeScriptScenario(largeScript, 200)),
-    runScenario("same script, offset moves 500 times", offsetOnlyScenario(largeScript, 500)),
+  const scenarios: Array<[string, CacheCall[]]> = [
+    ["examples: server+client+2 chunks per file", perFileTargetsScenario(exampleScripts)],
+    [`sweep ${underLimit.length} files, then second target`, sweepThenTargetScenario(underLimit)],
+    [`sweep ${overLimit.length} files, then second target`, sweepThenTargetScenario(overLimit)],
+    ["edit largest example script 200 times", editLargeScriptScenario(largeScript, 200)],
+    ["same script, offset moves 500 times", offsetOnlyScenario(largeScript, 500)],
   ];
+  // Warm parser/compiler code paths equally. The uncached path bypasses only the
+  // result cache; TypeScript's syntax caches remain enabled in both measurements.
+  for (const [, calls] of scenarios) runScenario("warmup", calls, { cache: false });
+  const results = scenarios.flatMap(([name, calls]) => [
+    runScenario(`${name} (cached)`, calls),
+    runScenario(`${name} (uncached)`, calls, { cache: false }),
+  ]);
   console.log(`Tachyon SFC transform cache benchmark (limit ${sfcScriptTransformCacheLimit} entries)`);
   console.table(
     results.map((result) => ({
       scenario: result.name,
       calls: result.calls,
       "hit rate": `${(result.hitRate * 100).toFixed(1)}%`,
-      "us/call": result.microsPerCall.toFixed(1),
+      "transform us/call": result.microsPerCall.toFixed(1),
+      "total elapsed ms": result.elapsedMs.toFixed(1),
       "retained chars": result.retainedChars,
       "retained entries": result.retainedEntries,
     })),

@@ -1,3 +1,5 @@
+import { createTemplateComponent } from "tachyon-dom";
+import * as PropsPanel from "./PropsPanel.td";
 import { hydrate, mount, type MountHandle } from "tachyon-dom/runtime/mount";
 import * as CounterA from "./CounterA.td";
 import * as CounterB from "./CounterB.td";
@@ -30,8 +32,27 @@ let oldButton: HTMLElement | null = null;
 let oldShared: Element | null = null;
 let oldSsr: Element | null = null;
 
+let propsStarts = 0;
+const started = () => {
+  propsStarts++;
+};
+const propsComponent = createTemplateComponent<{ label: string; started: () => void }>({ client: PropsPanel });
+const propsNode = container("props").querySelector("main");
+const propsResult = propsComponent.hydrate(container("props"), { label: "before", started });
+if (!propsResult.ok) throw new Error(propsResult.error.message);
+const propsHandle = propsResult.value;
+const otherProps = propsComponent.mount(container("props-other"), { label: "other", started });
+handles.set("props", propsHandle);
+handles.set("props-other", otherProps);
+const oldProps = container("props").querySelector("main")!;
+
 const api = {
   events,
+  propsStarts: () => propsStarts,
+  propsAdopted: () => propsNode === container("props").querySelector("main"),
+  updateProps: (label: string) => propsHandle.update({ label, started }),
+  disposeProps: () => propsHandle.dispose(),
+  oldPropsText: () => oldProps.querySelector("[data-label]")!.textContent,
   ssrAdopted: container("ssr").querySelector("section") === ssrNode,
   setShared,
   async loadLazy() {

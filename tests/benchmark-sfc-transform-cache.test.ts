@@ -55,3 +55,20 @@ describe("sfc transform cache benchmark", () => {
     expect(result.microsPerCall).toBeGreaterThan(0);
   });
 });
+
+it("compares the same calls without the result cache and separates transform timing", () => {
+  const calls = perFileTargetsScenario(scripts(6_000, 2));
+  const cached = runScenario("cached", calls);
+  const uncached = runScenario("uncached", calls, { cache: false });
+  expect(cached.hits).toBe(6);
+  expect(uncached.hits).toBe(0);
+  expect(uncached.retainedEntries).toBe(0);
+  expect(uncached.retainedChars).toBe(0);
+  expect(cached.elapsedMs).toBeGreaterThanOrEqual(cached.totalMs);
+  expect(uncached.elapsedMs).toBeGreaterThanOrEqual(uncached.totalMs);
+});
+
+it("does not infer hits from identical diagnostic strings", () => {
+  const calls = offsetOnlyScenario({ attrs: "setup", offset: 0, content: "export default {};" }, 4);
+  expect(runScenario("errors", calls).hits).toBe(0);
+});

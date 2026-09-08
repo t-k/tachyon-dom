@@ -4,6 +4,11 @@ import { expect, test } from "@playwright/test";
 declare global {
   interface Window {
     multiModule: {
+      propsStarts(): number;
+      propsAdopted(): boolean;
+      updateProps(label: string): void;
+      disposeProps(): void;
+      oldPropsText(): string;
       events: { a: number; b: number; lazy: number; ssr: number };
       ssrAdopted: boolean;
       setShared(value: number): void;
@@ -112,6 +117,35 @@ test("updates empty SSR text after deferred hydration and releases subscriptions
   expect(await page.evaluate(() => window.multiModule.events.ssr)).toBe(2);
   await page.evaluate(() => window.multiModule.setShared(13));
   await expect(page.locator("#ssr [data-text]")).toHaveText("shared:13");
+  await page.evaluate(() => window.multiModule.dispose());
+  expect(errors).toEqual([]);
+});
+
+test("updates component props before and after deferred hydration while retaining local state", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto(fixture);
+  await expect.poll(() => page.evaluate(() => window.multiModule?.propsStarts())).toBe(2);
+  expect(await page.evaluate(() => window.multiModule.propsAdopted())).toBe(true);
+  await page.evaluate(() => window.multiModule.updateProps("after"));
+  await expect(page.locator("#props [data-eager]")).toHaveText("after!");
+  await expect(page.locator("#props [data-label]")).toHaveText("before!");
+  await page.locator("#props [data-label]").click();
+  await expect(page.locator("#props [data-label]")).toHaveText("after!");
+  await page.locator("#props input").fill("7");
+  await expect(page.locator("#props output")).toHaveText("7");
+  await page.evaluate(() => window.multiModule.updateProps("updated"));
+  await expect(page.locator("#props [data-label]")).toHaveText("updated!");
+  await expect(page.locator("#props output")).toHaveText("7");
+  await expect(page.locator("#props-other [data-label]")).toHaveText("other!");
+  await expect(page.locator("#props-other output")).toHaveText("0");
+  expect(await page.evaluate(() => window.multiModule.propsStarts())).toBe(2);
+  expect(await page.evaluate(() => window.multiModule.propsAdopted())).toBe(true);
+  await page.evaluate(() => {
+    window.multiModule.disposeProps();
+    window.multiModule.updateProps("disposed");
+  });
+  expect(await page.evaluate(() => window.multiModule.oldPropsText())).toBe("updated!");
   await page.evaluate(() => window.multiModule.dispose());
   expect(errors).toEqual([]);
 });

@@ -462,7 +462,7 @@ describe("DX helpers", () => {
       "pnpm check:quick-example-size",
       "pnpm verify:whitespace-types",
     ]) {
-      expect(release).toContain(command);
+      expect(ci).toContain(command);
     }
     expect(release).toContain("node scripts/publish-release-package.mjs --artifact-dir release-artifacts");
     expect(release).toContain("--package root");
@@ -493,7 +493,11 @@ describe("DX helpers", () => {
     const actionReferences = Array.from(workflow.matchAll(/uses:\s+([^\s#]+)/g), (match) => match[1]);
 
     expect(actionReferences.length).toBeGreaterThan(0);
-    expect(actionReferences.every((reference) => /@[0-9a-f]{40}$/.test(reference ?? ""))).toBe(true);
+    expect(
+      actionReferences.every(
+        (reference) => reference === "./.github/workflows/ci.yml" || /@[0-9a-f]{40}$/.test(reference ?? ""),
+      ),
+    ).toBe(true);
     expect(workflow).toContain("permissions: {}\n");
     expect(workflow).toMatch(/test:\n[\s\S]+?permissions:\n\s+contents: read\n\s+steps:/);
   });
@@ -574,7 +578,11 @@ describe("DX helpers", () => {
     const verifyJob = workflow.slice(workflow.indexOf("  verify:"), workflow.indexOf("  publish:"));
 
     expect(actionReferences.length).toBeGreaterThan(0);
-    expect(actionReferences.every((reference) => /@[0-9a-f]{40}$/.test(reference ?? ""))).toBe(true);
+    expect(
+      actionReferences.every(
+        (reference) => reference === "./.github/workflows/ci.yml" || /@[0-9a-f]{40}$/.test(reference ?? ""),
+      ),
+    ).toBe(true);
     expect(verifyJob).toMatch(/permissions:\n\s+contents: read\n\s+steps:/);
     expect(verifyJob).not.toContain("contents: write");
     expect(verifyJob).not.toContain("id-token: write");
@@ -740,8 +748,8 @@ export const scope = () => ({
 
       expect(result.ok).toBe(true);
       const code = await readFile(output, "utf8");
-      expect(code).toContain(`const __tachyonSfcScope = () => ({`);
-      expect(code).toContain(`export { __tachyonSfcScope as scope };`);
+      expect(code).toContain(`export const scope = () => ({`);
+      expect(code).toContain(`const __tachyonSfcScope = scope;`);
       expect(code).toContain(`typeof __tachyonSfcScope === "function"`);
       expect(code).toContain(`cleanups.push(__tachyonDelegate(root, "click", [], scope.increment));`);
     } finally {
@@ -805,7 +813,7 @@ export const scope = (input: Partial<AppState> = {}) => ({
       expect(compiled.ok).toBe(true);
       const code = await readFile(output, "utf8");
       expect(code).toContain(`export const mount = (root, state) => {`);
-      expect(code).toContain(`const __tachyonSfcScope = (input = {}) => ({`);
+      expect(code).toContain(`export const scope = (input = {}) => ({`);
       expect(code).not.toContain(`AppState`);
 
       expect(generatedTypes.ok).toBe(true);
@@ -837,7 +845,7 @@ export const scope = (input: Partial<AppState> = {}) => ({
       const code = await readFile(output, "utf8");
       expect(code).toContain('type=\\"application/ld+json\\"');
       expect(code).toContain(`[]`);
-      expect(code).toContain(`const __tachyonSfcScope = () => ({ title: "Page" })`);
+      expect(code).toContain(`export const scope = () => ({ title: "Page" })`);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -2744,6 +2752,10 @@ void chunks;
     const createPackage = JSON.parse(
       await readFile(path.join(process.cwd(), "packages", "create-tachyon-dom", "package.json"), "utf8"),
     ) as { version?: string; files?: string[]; dependencies?: Record<string, string> };
+    const ci = await readFile(".github/workflows/ci.yml", "utf8");
+    expect(ci).toContain("workflow_call:");
+    expect(workflow).toContain("uses: ./.github/workflows/ci.yml");
+    expect(workflow).toMatch(/verify:\n\s+needs: required-ci/);
     const preparation = workflow.indexOf("pnpm prepare:release");
     const releaseGates = [
       "pnpm verify:starters",
@@ -2763,9 +2775,8 @@ void chunks;
 
     expect(preparation).toBeGreaterThan(-1);
     for (const command of releaseGates) {
-      expect(workflow.indexOf(command)).toBeGreaterThan(-1);
-      expect(workflow.indexOf(command)).toBeLessThan(preparation);
-      expect(workflow.indexOf(command)).toBe(workflow.lastIndexOf(command));
+      expect(ci).toContain(command);
+      expect(workflow).not.toContain(`- run: ${command}\n`);
     }
     expect(dryRun).toBeGreaterThan(preparation);
     expect(upload).toBeGreaterThan(dryRun);

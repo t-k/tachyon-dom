@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+The next candidate is prepared below and has not been published.
+
+## [0.2.0-rc.1] - Unreleased
+
+Candidate artifacts are for local verification only. Replace Unreleased with the release date when approving publication.
+
+### Fixed
+
+- Preserve reactive props across generated SFC scopes and template-local stores when using `createTemplateComponent().update()`, without remounting or rerunning setup.
+- Transform non-setup exports using syntax nodes, preserving string/comment contents and references to the original local scope identifiers.
+- Preserve nested and deferred hydration ownership, rollback partially bound branches, and clear refs from their original containers on disposal.
+- Preserve setup literals, runtime imports, strict-mode semantics, and indirect external scope references across compiler targets.
+
+### Changed
+
+- Specialize simple keyed lists and conditional branches, share reconciliation logic, and keep unused runtime features out of generated client bundles.
+- Cache SFC script transforms by source revision with bounded retention, and share frozen empty transform results.
+- Compiler script transform results and binding arrays are now readonly and frozen. Copy before editing: `const editable = { ...result.value, setupBindings: [...result.value.setupBindings], exposedBindings: [...result.value.exposedBindings] };`.
+- Separate cache benchmark transform timing from result bookkeeping and compare the same call sequences with the result cache bypassed.
+
+### Validation
+
+- Require the same commit's full CI workflow before preparing release artifacts: unit tests, three browsers, types, package contracts, clean consumers, starters, and bundle sizes.
+- Cover real production SFC modules, component prop updates, deferred hydration, disposal, and packaged starter consumption.
+
+### Security
+
+- The built-in `sanitizeHtml()` remains intended for constrained HTML. Use an external sanitizer adapter for arbitrary untrusted HTML; this release does not expand the built-in sanitizer's guarantees.
+
 ## [0.1.8] - 2026-09-07
 
 ### Fixed
