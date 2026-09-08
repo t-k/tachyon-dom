@@ -8,7 +8,11 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "tachyon-dom": ["./src/index.ts"],
+      "tachyon-dom/*": ["./src/*"]
+    }
   },
   "include": [
     "src",
