@@ -28,6 +28,21 @@ import {
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void;
 
+/** Applies a value to the row node the compiler resolved. A generated descriptor carries its own. */
+type ValueApplier = (node: Node, value: unknown) => void;
+/** Binds a row target and returns its disposer. A generated descriptor carries its own. */
+type TargetBinder = (scope: Record<string, unknown>, element: Element) => () => void;
+/** Mounts a nested branch. A generated descriptor carries the entry that drives it, so this module has none. */
+type BranchMounter = (
+  root: Node,
+  path: readonly number[],
+  visible: unknown,
+  scope: Record<string, unknown>,
+  options: NestedConditionalBinding,
+) => void;
+/** Adopts and schedules a row hydration boundary. A generated descriptor carries its own. */
+type HydrationRuntime = { create: typeof createHydrationBoundary; schedule: typeof scheduleHydration };
+
 type TextBinding = {
   kind: "text";
   path: number[];
@@ -41,6 +56,7 @@ type ClassBinding = {
   className: string;
   expression?: string;
   read?: ExpressionReader;
+  apply?: ValueApplier;
 };
 
 type EventBinding = {
@@ -57,6 +73,7 @@ type AttributeBinding = {
   name: string;
   expression?: string;
   read?: ExpressionReader;
+  apply?: ValueApplier;
 };
 
 type StyleBinding = {
@@ -65,6 +82,7 @@ type StyleBinding = {
   name: string;
   expression?: string;
   read?: ExpressionReader;
+  apply?: ValueApplier;
 };
 
 type RefBinding = {
@@ -83,6 +101,8 @@ type ModelBinding = {
   expression?: string;
   read?: ExpressionReader;
   write?: ExpressionWriter;
+  apply?: ValueApplier;
+  bind?: TargetBinder;
 };
 
 type NestedListBinding = {
@@ -131,6 +151,7 @@ type NestedConditionalBinding = {
   path: number[];
   test: string;
   read?: ExpressionReader;
+  mount?: BranchMounter;
   templateHtml: string;
   bindings: Binding[];
   stores?: StoreDefinition[];
@@ -183,6 +204,7 @@ type KeyedListOptions = {
   stores?: StoreDefinition[];
   hydrationBoundaries?: CompiledHydrationBoundary[];
   components?: ComponentBoundary[];
+  hydration?: HydrationRuntime;
 };
 
 type KeyedListRegion = {
@@ -213,7 +235,8 @@ type RowRecord = {
 
 type ListState = {
   signature: string;
-  options: KeyedListOptions;
+  descriptor: KeyedListOptions;
+  options: ListRuntimeOptions;
   templateHtml: string;
   parentScope: ParentScopeSnapshot;
   records: Map<PropertyKey, RowRecord>;
@@ -227,6 +250,48 @@ type ListState = {
 };
 
 type CleanupOutcome = { failed: false } | { failed: true; error: unknown };
+
+/**
+ * What the row lifecycle drives a descriptor through.
+ *
+ * A generated descriptor carries its own readers, setters, and binders, so the generated entry resolves to
+ * accessors that only call back into it. A hand-written descriptor carries expression strings, so the
+ * compatibility entry resolves to accessors that interpret them and apply them through this module's own
+ * imports. Keeping each set behind its own entry is what makes the split real rather than nominal: a page that
+ * mounts only generated lists never reaches the compatibility half, so the branch runtime, the form runtime,
+ * the class setter, the attribute policy, and the URL sanitizer stay out of its bundle.
+ */
+type ListRuntimeOptions = KeyedListOptions & {
+  /** The descriptor this was resolved from. Identity on it is what tells a re-mount from a new list. */
+  descriptor: KeyedListOptions;
+  signature: string;
+  resolve: (options: KeyedListOptions) => ListRuntimeOptions;
+  readValue: (
+    scope: Record<string, unknown>,
+    source: { expression?: string | undefined; read?: ExpressionReader | undefined },
+  ) => unknown;
+  readHandler: (scope: Record<string, unknown>, binding: EventBinding) => unknown;
+  readDeclaration: (
+    scope: Record<string, unknown>,
+    expression: string | undefined,
+    reader: ExpressionReader | undefined,
+  ) => unknown;
+  readKey: (item: unknown, index: number) => unknown;
+  applyValue: (binding: Binding, node: Node, value: unknown) => void;
+  bindRefTarget: (scope: Record<string, unknown>, binding: RefBinding, element: Element) => () => void;
+  bindControlTarget: (scope: Record<string, unknown>, binding: ModelBinding, element: Element) => () => void;
+  mountBranch: (
+    binding: NestedConditionalBinding,
+    node: Node,
+    visible: unknown,
+    scope: Record<string, unknown>,
+  ) => void;
+  /**
+   * Adopts and schedules the row boundaries. Only the boundary loops reach it, and they run only for a
+   * descriptor that declares boundaries - which is exactly when the compiler emits one.
+   */
+  hydration: HydrationRuntime;
+};
 
 const listStates = new WeakMap<Element, ListState>();
 
@@ -242,9 +307,11 @@ const writePath = (scope: Record<string, unknown>, expression: string, value: un
   }
 };
 
+// The compatibility interpreters. A hand-written descriptor may carry a reader for some values and a path
+// string for the rest, so each one still prefers the reader when it is there.
 const readBinding = (
   scope: Record<string, unknown>,
-  binding: { expression?: string; read?: ExpressionReader },
+  binding: { expression?: string | undefined; read?: ExpressionReader | undefined },
 ): unknown => read(binding.read ? binding.read(scope) : readPath(scope, binding.expression ?? ""));
 
 const readHandler = (scope: Record<string, unknown>, binding: EventBinding): unknown =>
@@ -301,7 +368,7 @@ const localScopeFor = (
   indexName: string | undefined,
   index: number,
   parent: ReadonlyMap<string, unknown>,
-  options: KeyedListOptions,
+  options: ListRuntimeOptions,
 ): Record<string, unknown> => {
   const definitions = [
     ...(options.stores ?? []),
@@ -310,23 +377,23 @@ const localScopeFor = (
   const base = scopedItemFromSnapshot(itemName, item, indexName, index, parent);
   const scope = definitions.length > 0 ? createStore(base) : base;
   for (const store of options.stores ?? []) {
-    scope[store.key ?? store.name] = readExpression(scope, store.initial, store.read);
+    scope[store.key ?? store.name] = options.readDeclaration(scope, store.initial, store.read);
   }
   for (const component of options.components ?? []) {
     for (const prop of component.props) {
-      scope[prop.key ?? prop.name] = readExpression(scope, prop.expression, prop.read);
+      scope[prop.key ?? prop.name] = options.readDeclaration(scope, prop.expression, prop.read);
     }
     for (const store of component.stores) {
-      scope[store.key ?? store.name] = readExpression(scope, store.initial, store.read);
+      scope[store.key ?? store.name] = options.readDeclaration(scope, store.initial, store.read);
     }
   }
   return scope;
 };
 
-const updateComponentProps = (scope: Record<string, unknown>, options: KeyedListOptions): void => {
+const updateComponentProps = (scope: Record<string, unknown>, options: ListRuntimeOptions): void => {
   for (const component of options.components ?? []) {
     for (const prop of component.props) {
-      scope[prop.key ?? prop.name] = readExpression(scope, prop.expression, prop.read);
+      scope[prop.key ?? prop.name] = options.readDeclaration(scope, prop.expression, prop.read);
     }
   }
 };
@@ -404,7 +471,7 @@ const createTemplate = (templateHtml: string): HTMLTemplateElement => {
   return template;
 };
 
-const optionsSignature = (options: KeyedListOptions): string =>
+const legacySignature = (options: KeyedListOptions): string =>
   options.signature ??
   JSON.stringify({
     key: options.key,
@@ -419,8 +486,9 @@ const optionsSignature = (options: KeyedListOptions): string =>
     components: options.components ?? [],
   });
 
-const updateListPlans = (state: ListState, options: KeyedListOptions): void => {
+const updateListPlans = (state: ListState, options: ListRuntimeOptions): void => {
   const plans = listPlansFor(options);
+  state.descriptor = options.descriptor;
   state.options = options;
   state.bindingPlan = plans.bindingPlan;
   state.hydrationPlans = plans.hydrationPlans;
@@ -449,12 +517,12 @@ const cleanupListState = (state: ListState): void => {
   if (failed) throw firstError;
 };
 
-const getListState = (container: Element, options: KeyedListOptions): ListState => {
+const getListState = (container: Element, options: ListRuntimeOptions): ListState => {
   const current = listStates.get(container);
-  if (current && current.options === options) {
+  if (current && current.descriptor === options.descriptor) {
     return current;
   }
-  const signature = optionsSignature(options);
+  const signature = options.signature;
   if (current && current.signature === signature) {
     updateListPlans(current, options);
     return current;
@@ -468,6 +536,7 @@ const getListState = (container: Element, options: KeyedListOptions): ListState 
   );
   const next: ListState = {
     signature,
+    descriptor: options.descriptor,
     options,
     templateHtml: options.templateHtml,
     parentScope: emptyParentScope,
@@ -551,68 +620,48 @@ const shouldApplyValue = (record: RowRecord, index: number, value: unknown): boo
 const applyRowBinding = (
   record: RowRecord,
   scope: Record<string, unknown>,
-  options: KeyedListOptions,
+  options: ListRuntimeOptions,
   binding: Binding,
   index: number,
 ): void => {
   record.revision();
   if (binding.kind === "text") {
-    const value = readBinding(scope, binding);
+    const value = options.readValue(scope, binding);
     if (shouldApplyValue(record, index, value)) {
       setText(textAtRecord(record, binding.path), value);
     }
-  } else if (binding.kind === "class") {
-    const value = readBinding(scope, binding);
+  } else if (
+    binding.kind === "class" ||
+    binding.kind === "attr" ||
+    binding.kind === "style" ||
+    binding.kind === "model"
+  ) {
+    const value = options.readValue(scope, binding);
     if (shouldApplyValue(record, index, value)) {
-      setClassPresence(nodeAtRecord(record, binding.path) as Element, binding.className, value);
-    }
-  } else if (binding.kind === "attr") {
-    const value = readBinding(scope, binding);
-    if (shouldApplyValue(record, index, value)) {
-      setAttributeValue(nodeAtRecord(record, binding.path) as Element, binding.name, value);
-    }
-  } else if (binding.kind === "style") {
-    const value = readBinding(scope, binding);
-    if (shouldApplyValue(record, index, value)) {
-      setStyleValue(nodeAtRecord(record, binding.path) as Element, binding.name, value);
+      options.applyValue(binding, nodeAtRecord(record, binding.path), value);
     }
   } else if (binding.kind === "ref") {
     record.refCleanups?.get(index)?.();
     const refCleanups = record.refCleanups ?? (record.refCleanups = new Map());
     const element = nodeAtRecord(record, binding.path) as Element;
-    // A generated ref carries the reader for its container; a hand-written one still carries the path string.
-    refCleanups.set(
-      index,
-      binding.owner && binding.property !== undefined
-        ? bindRef(scope, binding.owner, binding.property, element)
-        : setRef(scope, binding.expression ?? "", element),
-    );
-  } else if (binding.kind === "model") {
-    const value = readBinding(scope, binding);
-    if (shouldApplyValue(record, index, value)) {
-      setControlValue(
-        nodeAtRecord(record, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
-        binding.property,
-        value,
-      );
-    }
+    refCleanups.set(index, options.bindRefTarget(scope, binding, element));
   } else if (binding.kind === "list") {
-    const eachBinding = binding.read ? { expression: binding.each, read: binding.read } : { expression: binding.each };
-    const value = readBinding(scope, eachBinding) as readonly unknown[] | undefined;
+    const value = options.readValue(scope, { expression: binding.each, read: binding.read }) as
+      | readonly unknown[]
+      | undefined;
     const container = nodeAtRecord(record, binding.path);
     if (container instanceof Element) {
-      mountKeyedList(container, [], value, { ...binding, scope });
+      mountResolvedKeyedList(container, [], value, options.resolve({ ...binding, scope }));
     }
   } else if (binding.kind === "if") {
-    const testBinding = binding.read ? { expression: binding.test, read: binding.read } : { expression: binding.test };
-    const value = readBinding(scope, testBinding);
-    mountConditional(nodeAtRecord(record, binding.path), [], value, scope, binding);
+    const value = options.readValue(scope, { expression: binding.test, read: binding.read });
+    options.mountBranch(binding, nodeAtRecord(record, binding.path), value, scope);
   }
 };
 
 const bindRowBindings = (
   record: RowRecord,
-  options: KeyedListOptions,
+  options: ListRuntimeOptions,
   plan: BindingPlan,
   cleanups: Array<() => void>,
 ): void => {
@@ -630,7 +679,12 @@ const bindRowBindings = (
   );
 };
 
-const bindRowEvents = (record: RowRecord, plan: BindingPlan, cleanups: Array<() => void>): void => {
+const bindRowEvents = (
+  record: RowRecord,
+  options: ListRuntimeOptions,
+  plan: BindingPlan,
+  cleanups: Array<() => void>,
+): void => {
   const delegateKeys = new Set<string>();
   for (const { binding } of plan.events) {
     if (binding.kind !== "event") {
@@ -646,7 +700,7 @@ const bindRowEvents = (record: RowRecord, plan: BindingPlan, cleanups: Array<() 
       continue;
     }
     const listener: EventListener = (event) => {
-      const handler = readHandler(record.scope, binding);
+      const handler = options.readHandler(record.scope, binding);
       if (typeof handler === "function") {
         (handler as EventListener)(event);
       }
@@ -656,53 +710,38 @@ const bindRowEvents = (record: RowRecord, plan: BindingPlan, cleanups: Array<() 
   }
 };
 
-const bindRowControls = (record: RowRecord, plan: BindingPlan, cleanups: Array<() => void>): void => {
+const bindRowControls = (
+  record: RowRecord,
+  options: ListRuntimeOptions,
+  plan: BindingPlan,
+  cleanups: Array<() => void>,
+): void => {
   for (const { binding } of plan.controls) {
     if (binding.kind !== "model") {
       continue;
     }
-    const element = nodeAtRecord(record, binding.path) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
-    cleanups.push(
-      bindControl(
-        element,
-        binding.property,
-        () => readBinding(record.scope, binding),
-        (value) => {
-          if (binding.write) {
-            binding.write(record.scope, value);
-            return;
-          }
-          const target = binding.read ? binding.read(record.scope) : readPath(record.scope, binding.expression ?? "");
-          writeModelValue(target, value, () => writePath(record.scope, binding.expression ?? "", value));
-        },
-      ),
-    );
+    const element = nodeAtRecord(record, binding.path) as Element;
+    cleanups.push(options.bindControlTarget(record.scope, binding, element));
   }
 };
 
 const bindRow = (
   record: RowRecord,
-  options: KeyedListOptions,
+  options: ListRuntimeOptions,
   plan: BindingPlan,
   cleanups: Array<() => void>,
 ): void => {
-  bindRowEvents(record, plan, cleanups);
+  bindRowEvents(record, options, plan, cleanups);
   bindRowBindings(record, options, plan, cleanups);
-  untrack(() => bindRowControls(record, plan, cleanups));
+  untrack(() => bindRowControls(record, options, plan, cleanups));
 };
 
-const keyFor = (item: unknown, index: number, options: KeyedListOptions): PropertyKey => {
-  const key = options.keyReadItem
-    ? options.keyReadItem(item)
-    : options.keyRead
-      ? options.keyRead(scopedItem(options.itemName, item, options.indexName, index, options.scope))
-      : readItemPath(item, options.key, options.itemName);
-  return normalizeListKey(read(key));
-};
+const keyFor = (item: unknown, index: number, options: ListRuntimeOptions): PropertyKey =>
+  normalizeListKey(read(options.readKey(item, index)));
 
 const isProductionEnvironment = (): boolean => typeof process !== "undefined" && process.env.NODE_ENV === "production";
 
-const warnDuplicateKey = (key: PropertyKey, options: KeyedListOptions): void => {
+const warnDuplicateKey = (key: PropertyKey, options: ListRuntimeOptions): void => {
   if (isProductionEnvironment() || typeof console.warn !== "function") {
     return;
   }
@@ -716,7 +755,7 @@ const createRecord = (
   state: ListState,
   key: PropertyKey,
   item: unknown,
-  options: KeyedListOptions,
+  options: ListRuntimeOptions,
   parentScope: ParentScopeSnapshot,
   existingElements?: readonly Element[],
   index = 0,
@@ -759,11 +798,12 @@ const createRecord = (
     // rows created on the client have none and bind eagerly.
     const located: Array<{ boundary: HydrationPlan["boundary"]; handle: HydrationBoundaryHandle; plan: BindingPlan }> =
       [];
+    const hydration = options.hydration;
     for (const hydrationPlan of state.hydrationPlans) {
       const { boundary, bindings: boundaryPlan } = hydrationPlan;
       const resolvedId = boundary.idKind === "expression" ? readPath(scope, boundary.id) : boundary.id;
       if (resolvedId === undefined || resolvedId === null) continue;
-      const handle = createHydrationBoundary(record.element.parentElement ?? record.element, String(resolvedId), () => {
+      const handle = hydration.create(record.element.parentElement ?? record.element, String(resolvedId), () => {
         const cleanups: Array<() => void> = [];
         bindRow(record, options, boundaryPlan, cleanups);
         return () => runCleanups(cleanups);
@@ -780,7 +820,7 @@ const createRecord = (
     for (const { boundary, handle, plan } of located) {
       record.hydrationBoundaries.push(handle);
       record.hydrationCleanups.push(
-        scheduleHydration(handle, {
+        hydration.schedule(handle, {
           strategy: boundary.strategy ?? "load",
           ...(boundary.media ? { media: boundary.media } : {}),
           ...(boundary.interaction ? { interaction: boundary.interaction } : {}),
@@ -815,7 +855,7 @@ const updateRecord = (
   record: RowRecord,
   item: unknown,
   index: number,
-  options: KeyedListOptions,
+  options: ListRuntimeOptions,
   parentScope: ParentScopeSnapshot,
 ): void => {
   const scopeChanged = record.appliedParentScope !== parentScope;
@@ -858,11 +898,11 @@ const staticAfterNode = (container: Element, region: KeyedListRegion): ChildNode
   );
 };
 
-export const mountKeyedList = (
+const mountResolvedKeyedList = (
   root: Element,
   path: readonly number[],
   items: readonly unknown[] | undefined,
-  options: KeyedListOptions,
+  options: ListRuntimeOptions,
 ): void => {
   const container = nodeAt(root, path);
   if (!(container instanceof Element)) {
@@ -935,7 +975,7 @@ export const mountKeyedList = (
             `Hydration boundary for list row ${String(entry.key)} could not be adopted: missing row root.`,
           );
         }
-        const handle = createHydrationBoundary(rowRoot, String(resolvedId), () => undefined);
+        const handle = options.hydration.create(rowRoot, String(resolvedId), () => undefined);
         if (!handle.ok) {
           throw new Error(
             `Hydration boundary for list row ${String(entry.key)} could not be adopted: ${handle.error.message}`,
@@ -1033,6 +1073,16 @@ type GeneratedRef = Omit<RefBinding, "expression" | "owner" | "property"> & {
   property: string;
 };
 
+/** A generated value binding carries the setter that applies it, so this module imports none of them. */
+type GeneratedValue<T> = WithReader<T> & { apply: ValueApplier };
+
+/** A generated control carries both, so the form runtime reaches the bundle only through the row that uses it. */
+type GeneratedControl = Omit<GeneratedTarget<ModelBinding>, "write"> & { apply: ValueApplier; bind: TargetBinder };
+
+/** A generated branch carries the entry that mounts it, so this module never imports a branch runtime. */
+type GeneratedBranch = Omit<WithReader<NestedConditionalBinding>, keyof GeneratedChildren> &
+  GeneratedChildren & { mount: BranchMounter };
+
 type GeneratedStore = WithReader<StoreDefinition>;
 
 type GeneratedComponent = Omit<ComponentBoundary, "props" | "stores"> & {
@@ -1048,25 +1098,111 @@ type GeneratedChildren = {
 
 type GeneratedBinding =
   | WithReader<TextBinding>
-  | WithReader<ClassBinding>
+  | GeneratedValue<ClassBinding>
   | WithReader<EventBinding>
-  | WithReader<AttributeBinding>
-  | WithReader<StyleBinding>
+  | GeneratedValue<AttributeBinding>
+  | GeneratedValue<StyleBinding>
   | GeneratedRef
-  | GeneratedTarget<ModelBinding>
+  | GeneratedControl
   | (Omit<WithReader<NestedListBinding>, keyof GeneratedChildren> & GeneratedChildren)
-  | (Omit<WithReader<NestedConditionalBinding>, keyof GeneratedChildren> & GeneratedChildren);
+  | GeneratedBranch;
 
 export type GeneratedKeyedListOptions = Omit<KeyedListOptions, keyof GeneratedChildren> & GeneratedChildren;
 
 /**
- * The entry a generated module uses. It is the same runtime as `mountKeyedList`, which keeps resolving the
- * expression strings a hand-written descriptor carries; what this entry adds is the contract that generated
- * descriptors never rely on that.
+ * How a generated descriptor is driven: every value, key, and declaration is read through the reader the
+ * compiler emitted, and every setter, binder, and branch entry comes off the descriptor itself. Nothing here
+ * reaches a binding runtime, so a page whose lists are all generated leaves the branch runtime, the form
+ * runtime, the class setter, the attribute policy, and the URL sanitizer out of its bundle.
  */
-export const mountGeneratedKeyedList: (
+const resolveGeneratedOptions = (options: KeyedListOptions): ListRuntimeOptions => ({
+  ...options,
+  descriptor: options,
+  signature: options.signature as string,
+  resolve: resolveGeneratedOptions,
+  readValue: (scope, source) => read((source.read as ExpressionReader)(scope)),
+  readHandler: (scope, binding) => (binding.read as ExpressionReader)(scope),
+  readDeclaration: (scope, _expression, reader) => read((reader as ExpressionReader)(scope)),
+  readKey: (item, index) =>
+    options.keyReadItem
+      ? options.keyReadItem(item)
+      : (options.keyRead as ExpressionReader)(
+          scopedItem(options.itemName, item, options.indexName, index, options.scope),
+        ),
+  applyValue: (binding, node, value) => (binding as { apply: ValueApplier }).apply(node, value),
+  bindRefTarget: (scope, binding, element) =>
+    bindRef(scope, binding.owner as ExpressionReader, binding.property as string, element),
+  bindControlTarget: (scope, binding, element) => (binding as { bind: TargetBinder }).bind(scope, element),
+  mountBranch: (binding, node, visible, scope) => (binding.mount as BranchMounter)(node, [], visible, scope, binding),
+  hydration: options.hydration as HydrationRuntime,
+});
+
+/**
+ * How a hand-written descriptor is driven: expression strings are interpreted here, and the setters, the form
+ * runtime, and the branch runtime this module imports apply them. Only `mountKeyedList` reaches this, so a
+ * bundle that never calls it drops all of them.
+ */
+const resolveLegacyOptions = (options: KeyedListOptions): ListRuntimeOptions => ({
+  ...options,
+  descriptor: options,
+  signature: legacySignature(options),
+  resolve: resolveLegacyOptions,
+  readValue: readBinding,
+  readHandler,
+  readDeclaration: readExpression,
+  readKey: (item, index) =>
+    options.keyReadItem
+      ? options.keyReadItem(item)
+      : options.keyRead
+        ? options.keyRead(scopedItem(options.itemName, item, options.indexName, index, options.scope))
+        : readItemPath(item, options.key, options.itemName),
+  applyValue: (binding, node, value) => {
+    if (binding.kind === "class") setClassPresence(node as Element, binding.className, value);
+    else if (binding.kind === "attr") setAttributeValue(node as Element, binding.name, value);
+    else if (binding.kind === "style") setStyleValue(node as Element, binding.name, value);
+    else if (binding.kind === "model") {
+      setControlValue(node as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, binding.property, value);
+    }
+  },
+  // A hand-written ref may still carry the compiler's container reader, so the path string is the fallback.
+  bindRefTarget: (scope, binding, element) =>
+    binding.owner && binding.property !== undefined
+      ? bindRef(scope, binding.owner, binding.property, element)
+      : setRef(scope, binding.expression ?? "", element),
+  bindControlTarget: (scope, binding, element) =>
+    bindControl(
+      element as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
+      binding.property,
+      () => readBinding(scope, binding),
+      (value) => {
+        if (binding.write) {
+          binding.write(scope, value);
+          return;
+        }
+        const target = binding.read ? binding.read(scope) : readPath(scope, binding.expression ?? "");
+        writeModelValue(target, value, () => writePath(scope, binding.expression ?? "", value));
+      },
+    ),
+  mountBranch: (binding, node, visible, scope) => mountConditional(node, [], visible, scope, binding),
+  hydration: { create: createHydrationBoundary, schedule: scheduleHydration },
+});
+
+/** Mounts a hand-written descriptor, whose expression strings this module still interprets. */
+export const mountKeyedList = (
+  root: Element,
+  path: readonly number[],
+  items: readonly unknown[] | undefined,
+  options: KeyedListOptions,
+): void => mountResolvedKeyedList(root, path, items, resolveLegacyOptions(options));
+
+/**
+ * The entry a generated module uses. It shares the reconciliation and the row lifecycle with `mountKeyedList`
+ * and nothing else: the descriptor it takes has to carry every reader, setter, binder, and branch entry the
+ * rows need, so this entry never reaches the interpreters or the runtimes only they use.
+ */
+export const mountGeneratedKeyedList = (
   root: Element,
   path: readonly number[],
   items: readonly unknown[] | undefined,
   options: GeneratedKeyedListOptions,
-) => void = mountKeyedList;
+): void => mountResolvedKeyedList(root, path, items, resolveGeneratedOptions(options as KeyedListOptions));

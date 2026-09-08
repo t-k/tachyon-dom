@@ -77,6 +77,41 @@ describe("client bundle attribution", () => {
     expect(bytesFor(withSetters, /runtime[/\\]event\.js$/)).toBeGreaterThan(0);
   }, 60_000);
 
+  // A row that a generated list drives has to carry its own setters and binders, the way a generated branch
+  // already does. Otherwise the generic keyed list statically imports every binding runtime, and a list of rows
+  // that only hold a ref and some text drags the branch runtime, the form runtime, the class setter, and the
+  // URL sanitizer behind it.
+  it("keeps a generated keyed list free of the runtimes its rows never use", async () => {
+    const plainRows = await buildClientBundle(
+      generatedClientEntry(`<ul><for each={rows} key={row.id}><li ref={row.node}>{row.label}</li></for></ul>`, {
+        reactive: true,
+      }),
+      { cwd: process.cwd() },
+    );
+    const richRows = await buildClientBundle(
+      generatedClientEntry(
+        `<ul><for each={rows} key={row.id}><li class:on={row.on} title={row.tip}><input bind:value={row.draft}><if test={row.open}><b>{row.label}</b></if></li></for></ul>`,
+        { reactive: true },
+      ),
+      { cwd: process.cwd() },
+    );
+
+    expect(bytesFor(plainRows, /runtime[/\\]list\.js$/)).toBeGreaterThan(0);
+    expect(bytesFor(plainRows, /runtime[/\\]conditional\.js$/)).toBe(0);
+    expect(bytesFor(plainRows, /runtime[/\\]conditional-core\.js$/)).toBe(0);
+    expect(bytesFor(plainRows, /runtime[/\\]form\.js$/)).toBe(0);
+    expect(bytesFor(plainRows, /runtime[/\\]class\.js$/)).toBe(0);
+    expect(bytesFor(plainRows, /url-policy\.js$/)).toBe(0);
+    expect(bytesFor(plainRows, /attribute-policy\.js$/)).toBe(0);
+    // The rows that do use them still get them.
+    expect(bytesFor(richRows, /runtime[/\\]form\.js$/)).toBeGreaterThan(0);
+    expect(bytesFor(richRows, /runtime[/\\]class\.js$/)).toBeGreaterThan(0);
+    expect(bytesFor(richRows, /url-policy\.js$/)).toBeGreaterThan(0);
+    expect(
+      bytesFor(richRows, /runtime[/\\]conditional\.js$/) + bytesFor(richRows, /runtime[/\\]conditional-core\.js$/),
+    ).toBeGreaterThan(0);
+  }, 60_000);
+
   it("records actual bytesInOutput contributions per output", () => {
     expect(
       attributionForMetafile({
