@@ -79,3 +79,25 @@ it.each(['setup lang="ts"', "setup"])("keeps an import-free %s script a valid fa
   const factory = new Function(`${transformed.value.code}; return ${sfcSetupScopeName};`)();
   expect(factory({}).label()).toBe("READY");
 });
+
+it("strips only the leading prologue and keeps a directive inside a function", () => {
+  const transformed = transformSfcScript({
+    attrs: 'setup lang="ts"',
+    offset: 0,
+    content: 'import { createSignal } from "tachyon-dom";\nconst run = function () { "use strict"; return createSignal(1); };',
+  });
+  if (!transformed.ok) throw new Error(transformed.error.message);
+  expect(transformed.value.code.match(/"use strict"/g)).toHaveLength(1);
+  expect(transformed.value.code).toMatch(/const run = function \(\) \{\s*"use strict";/);
+});
+
+it("reports full emission and no setup bindings for a non-setup script", () => {
+  const transformed = transformSfcScript(
+    { attrs: "", offset: 0, content: "export default () => ({ label: 1 });" },
+    { templateIdentifiers: new Set(["label"]) },
+  );
+  if (!transformed.ok) throw new Error(transformed.error.message);
+  expect(transformed.value.setupBindings).toEqual([]);
+  expect(transformed.value.exposedBindings).toEqual([]);
+  expect(transformed.value.scopeEmission).toBe("full");
+});
