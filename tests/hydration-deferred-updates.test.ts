@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
-import { mountConditional } from "../src/runtime/conditional";
+import { mountConditional, mountGeneratedConditional } from "../src/runtime/conditional";
 import { prepareConditionalCore } from "../src/runtime/conditional-core";
+import * as listRuntime from "../src/runtime/list";
 import { mountKeyedList } from "../src/runtime/list";
 import { hydrate, mount } from "../src/runtime/mount";
 import { createSignal } from "../src/runtime/signal";
@@ -389,5 +390,75 @@ describe("a null id is treated like a missing one", () => {
     const result = hydrate(root, module, { rows: [{ id: "a", label: "A", boundary: null }], select });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.message).toContain("resolved to no value");
+  });
+});
+
+describe("nested list descriptors are handed to their entry by identity", () => {
+  it("passes the row binding itself and the parent scope beside it from a list row", () => {
+    const compiled = compileTemplate(
+      `<ul><for each={groups} key={group.id} as="group"><li><ul><for each={group.items} key={item.id} as="item"><li ref={item.node}>{item.label}</li></for></ul></li></for></ul>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const calls: Array<{ options: unknown; scope: unknown }> = [];
+    const original = listRuntime.mountGeneratedKeyedList;
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }), {
+      "tachyon-dom/runtime/list": {
+        mountGeneratedKeyedList: (root: Element, path: number[], items: unknown[], options: never, scope: unknown) => {
+          if (scope !== undefined) calls.push({ options, scope });
+          return original(root, path, items, options, scope as Record<string, unknown>);
+        },
+      },
+    });
+    const root = document.createElement("main");
+    const groups = createSignal([{ id: "g", items: [{ id: "i", label: "I", node: null }] }]);
+    const handle = mount(root, module, { groups });
+    groups.set([{ id: "g", items: [{ id: "i", label: "I2", node: null }] }]);
+    expect(root.textContent).toBe("I2");
+
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    // Every mount of the nested list receives the same descriptor object, never a per-mount copy.
+    expect(new Set(calls.map((call) => call.options)).size).toBe(1);
+    const firstScope = calls[0]?.scope as Record<string, unknown> | undefined;
+    expect(firstScope?.group).toBeDefined();
+    handle.dispose();
+  });
+
+  it("passes the branch binding itself and the parent scope beside it from a branch", () => {
+    const calls: Array<{ options: unknown; scope: unknown }> = [];
+    const mountSpy = (root: Element, _path: number[], items: unknown[], options: unknown, scope: unknown) => {
+      calls.push({ options, scope });
+      root.textContent = String((items as Array<{ label: string }>).map((item) => item.label).join(","));
+    };
+    const nested = {
+      kind: "list" as const,
+      signature: "list:nested",
+      mount: mountSpy as never,
+      path: [0] as number[],
+      each: "items",
+      key: "item.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "item",
+      templateHtml: "<li> </li>",
+      bindings: [{ kind: "text" as const, path: [0], read: (scope: Record<string, unknown>) => scope.item }],
+      read: (scope: Record<string, unknown>) => scope.items,
+    };
+    const branch = document.createElement("section");
+    branch.innerHTML = "<!---->";
+    const scope = { items: [{ id: "a", label: "A" }] };
+    mountGeneratedConditional(branch, [0], true, scope, {
+      signature: "if:nested",
+      templateHtml: "<div><ul></ul></div>",
+      bindings: [nested],
+    });
+    mountGeneratedConditional(branch, [0], true, scope, {
+      signature: "if:nested",
+      templateHtml: "<div><ul></ul></div>",
+      bindings: [nested],
+    });
+
+    expect(branch.textContent).toBe("A");
+    expect(calls).toHaveLength(2);
+    expect(calls.every((call) => call.options === nested)).toBe(true);
+    expect(calls.every((call) => call.scope === scope)).toBe(true);
   });
 });

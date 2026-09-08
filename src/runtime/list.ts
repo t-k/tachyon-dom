@@ -37,7 +37,8 @@ type ListMounter = (
   root: Element,
   path: readonly number[],
   items: readonly unknown[] | undefined,
-  options: NestedListBinding & { scope: Record<string, unknown> },
+  options: NestedListBinding,
+  scope: Record<string, unknown>,
 ) => void;
 /** Mounts a nested branch. A generated descriptor carries the entry that drives it, so this module has none. */
 type BranchMounter = (
@@ -283,7 +284,7 @@ type ListRuntimeOptions = KeyedListOptions & {
     expression: string | undefined,
     reader: ExpressionReader | undefined,
   ) => unknown;
-  readKey: (item: unknown, index: number) => unknown;
+  readKey: (item: unknown, index: number, scope: Record<string, unknown> | undefined) => unknown;
   applyValue: (binding: Binding, node: Node, value: unknown) => void;
   mountList: (
     binding: NestedListBinding,
@@ -760,8 +761,12 @@ const bindRow = (
   untrack(() => bindRowControls(record, options, plan, cleanups));
 };
 
-const keyFor = (item: unknown, index: number, options: ListRuntimeOptions): PropertyKey =>
-  normalizeListKey(read(options.readKey(item, index)));
+const keyFor = (
+  item: unknown,
+  index: number,
+  options: ListRuntimeOptions,
+  scope: Record<string, unknown> | undefined,
+): PropertyKey => normalizeListKey(read(options.readKey(item, index, scope)));
 
 const isProductionEnvironment = (): boolean => typeof process !== "undefined" && process.env.NODE_ENV === "production";
 
@@ -927,11 +932,14 @@ const staticAfterNode = (container: Element, region: KeyedListRegion): ChildNode
   );
 };
 
+// The parent scope travels beside the descriptor rather than inside it, so a nested list's descriptor stays
+// the same object across rows and updates and its resolved form can be reused.
 const mountResolvedKeyedList = (
   root: Element,
   path: readonly number[],
   items: readonly unknown[] | undefined,
   options: ListRuntimeOptions,
+  scope: Record<string, unknown> | undefined,
 ): void => {
   const container = nodeAt(root, path);
   if (!(container instanceof Element)) {
@@ -966,7 +974,7 @@ const mountResolvedKeyedList = (
   const entries: Array<{ item: unknown; index: number; key: PropertyKey }> = [];
   const seenKeys = new Set<PropertyKey>();
   for (const [index, item] of items.entries()) {
-    const key = keyFor(item, index, options);
+    const key = keyFor(item, index, options, scope);
     if (seenKeys.has(key)) {
       warnDuplicateKey(key, options);
       continue;
@@ -974,7 +982,7 @@ const mountResolvedKeyedList = (
     seenKeys.add(key);
     entries.push({ item, index, key });
   }
-  const parentScope = syncParentScope(state, options.scope, options.parentScopeKeys);
+  const parentScope = syncParentScope(state, scope, options.parentScopeKeys);
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];
   const createdRecords: RowRecord[] = [];
@@ -1181,7 +1189,7 @@ const generatedAccessors = {
     container: Element,
     items: readonly unknown[] | undefined,
     scope: Record<string, unknown>,
-  ) => (binding.mount as ListMounter)(container, [], items, { ...binding, scope }),
+  ) => (binding.mount as ListMounter)(container, [], items, binding, scope),
   bindRefTarget: (scope: Record<string, unknown>, binding: RefBinding, element: Element) =>
     bindRef(scope, binding.owner as ExpressionReader, binding.property as string, element),
   bindControlTarget: (scope: Record<string, unknown>, binding: ModelBinding, element: Element) =>
@@ -1194,9 +1202,8 @@ const generatedAccessors = {
   ) => (binding.mount as BranchMounter)(node, [], visible, scope, binding),
 } as const;
 
-// A generated descriptor is built once per bind and handed back on every update, so its resolved form is kept
-// with it rather than rebuilt each time. A nested region's descriptor is spread anew per mount and misses here;
-// its entry is dropped with it.
+// A generated descriptor is built once per bind and handed back on every update, and a nested list's descriptor
+// is the row binding itself, so the resolved form is kept with it rather than rebuilt on every mount.
 const resolvedGeneratedOptions = new WeakMap<GeneratedKeyedListOptions, ListRuntimeOptions>();
 
 const resolveGeneratedOptions = (options: GeneratedKeyedListOptions): ListRuntimeOptions => {
@@ -1208,11 +1215,11 @@ const resolveGeneratedOptions = (options: GeneratedKeyedListOptions): ListRuntim
     ...generatedAccessors,
     descriptor,
     signature: options.signature,
-    readKey: (item, index) =>
+    readKey: (item, index, scope) =>
       descriptor.keyReadItem
         ? descriptor.keyReadItem(item)
         : (descriptor.keyRead as ExpressionReader)(
-            scopedItem(descriptor.itemName, item, descriptor.indexName, index, descriptor.scope),
+            scopedItem(descriptor.itemName, item, descriptor.indexName, index, scope),
           ),
     hydration: descriptor.hydration as HydrationRuntime,
   };
@@ -1276,11 +1283,11 @@ const resolveLegacyOptions = (options: KeyedListOptions, signature: string): Lis
   ...legacyAccessors,
   descriptor: options,
   signature,
-  readKey: (item, index) =>
+  readKey: (item, index, scope) =>
     options.keyReadItem
       ? options.keyReadItem(item)
       : options.keyRead
-        ? options.keyRead(scopedItem(options.itemName, item, options.indexName, index, options.scope))
+        ? options.keyRead(scopedItem(options.itemName, item, options.indexName, index, scope))
         : readItemPath(item, options.key, options.itemName),
 });
 
@@ -1296,7 +1303,7 @@ export const mountKeyedList = (
   const container = nodeAt(root, path);
   const current = container instanceof Element ? listStates.get(container) : undefined;
   const signature = current && current.descriptor === options ? current.signature : legacySignature(options);
-  mountResolvedKeyedList(root, path, items, resolveLegacyOptions(options, signature));
+  mountResolvedKeyedList(root, path, items, resolveLegacyOptions(options, signature), options.scope);
 };
 
 /**
@@ -1309,4 +1316,5 @@ export const mountGeneratedKeyedList = (
   path: readonly number[],
   items: readonly unknown[] | undefined,
   options: GeneratedKeyedListOptions,
-): void => mountResolvedKeyedList(root, path, items, resolveGeneratedOptions(options));
+  scope: Record<string, unknown> | undefined = options.scope,
+): void => mountResolvedKeyedList(root, path, items, resolveGeneratedOptions(options), scope);

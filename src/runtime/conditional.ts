@@ -85,7 +85,8 @@ type ListMounter = (
   root: Element,
   path: readonly number[],
   items: readonly unknown[] | undefined,
-  options: NestedListBinding & { scope: Record<string, unknown> },
+  options: NestedListBinding,
+  scope: Record<string, unknown>,
 ) => void;
 /** Mounts a nested branch. A generated descriptor carries the entry that drives it. */
 type BranchMounter = (
@@ -805,7 +806,7 @@ const generatedAccessors = {
     container: Element,
     items: readonly unknown[] | undefined,
     scope: Record<string, unknown>,
-  ) => (binding.mount as ListMounter)(container, [], items, { ...binding, scope }),
+  ) => (binding.mount as ListMounter)(container, [], items, binding, scope),
   mountBranch: (
     binding: NestedConditionalBinding,
     node: Node,
