@@ -23,3 +23,21 @@ const local = 1;
   expect(transformed.value.code).not.toContain("Row: Row");
   expect(transformed.value.code).not.toContain("TypeOnly: TypeOnly");
 });
+
+it("collects setup functions and classes while excluding type declarations", () => {
+  const result = transformSfcScript({
+    attrs: 'setup lang="ts"',
+    offset: 0,
+    content: "function helper() {} class Model {} ; interface Shape {}",
+  });
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error(result.error.message);
+  expect(result.value.setupBindings).toEqual(["Model", "helper"]);
+});
+
+it.each(["function() {}", "class {}"])("reports anonymous default %s as a setup export error", (declaration) => {
+  const result = transformSfcScript({ attrs: 'setup lang="ts"', offset: 0, content: `export default ${declaration}` });
+  expect(result.ok).toBe(false);
+  if (result.ok) throw new Error("Expected a setup export error");
+  expect(result.error.message).toMatch(/export/i);
+});
