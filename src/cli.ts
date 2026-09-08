@@ -4,7 +4,7 @@ import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateTachyonModuleTypes, generateTemplateTypes, pagesFromRouteFiles } from "./app.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
-import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
+import { generateScriptOnlyModule, templateScopeIdentifiers, transformSfcScript } from "./compiler/sfc.js";
 import { diagnoseTachyonSfc, diagnosticFromCompilerError, formatDiagnostic } from "./diagnostics.js";
 import { scanFileRoutes } from "./router-node.js";
 import { appendInlineSourceMap, createSourceMap } from "./source-map.js";
@@ -346,7 +346,10 @@ export const compileFile = async (options: Omit<CliCompileOptions, "command">): 
   if (!result.ok) {
     return err(formatDiagnostic(result.error, options.input));
   }
-  const script = transformSfcScript(result.value.descriptor.script);
+  const script = transformSfcScript(
+    result.value.descriptor.script,
+    result.value.scriptOnly ? {} : { templateIdentifiers: templateScopeIdentifiers(result.value.descriptor.template) },
+  );
   if (!script.ok) {
     return err(formatDiagnostic(diagnosticFromCompilerError(source, script.error), options.input));
   }

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { transformSfcScript } from "../src/compiler/sfc";
+import { templateScopeIdentifiers, transformSfcScript } from "../src/compiler/sfc";
 
 it("exposes runtime setup imports while excluding TypeScript-only imports", () => {
   const transformed = transformSfcScript({
@@ -40,4 +40,66 @@ it.each(["function() {}", "class {}"])("reports anonymous default %s as a setup 
   expect(result.ok).toBe(false);
   if (result.ok) throw new Error("Expected a setup export error");
   expect(result.error.message).toMatch(/export/i);
+});
+
+it("exposes only the setup bindings the template can reference when template identifiers are given", () => {
+  const template = `<main><h1 class="helper">{title}</h1><button on:click={increment}>{count()}</button><if test={rows.length > 0}><p>{format(rows[0])}</p></if></main>`;
+  const transformed = transformSfcScript(
+    {
+      attrs: 'setup lang="ts"',
+      offset: 0,
+      content: `
+import { format } from "./format";
+import { createSignal } from "tachyon-dom";
+const count = createSignal(0);
+const step = 2;
+const increment = () => count.set(count() + step);
+const title = "Counter";
+const rows = [1];
+const internalCache = new Map();
+`,
+    },
+    { templateIdentifiers: templateScopeIdentifiers(template) },
+  );
+  expect(transformed.ok).toBe(true);
+  if (!transformed.ok) throw new Error(transformed.error.message);
+  // Every declaration stays a setup binding; only the names the template text can reach are returned.
+  expect(transformed.value.setupBindings).toEqual([
+    "count",
+    "createSignal",
+    "format",
+    "increment",
+    "internalCache",
+    "rows",
+    "step",
+    "title",
+  ]);
+  expect(transformed.value.exposedBindings).toEqual(["count", "format", "increment", "rows", "title"]);
+  expect(transformed.value.code).toContain(
+    "return { count: count, format: format, increment: increment, rows: rows, title: title };",
+  );
+  expect(transformed.value.code).not.toContain("step: step");
+  expect(transformed.value.code).not.toContain("internalCache: internalCache");
+  expect(transformed.value.code).not.toContain("createSignal: createSignal");
+  // The setup body itself is untouched: narrowing changes what the scope exposes, not what setup runs.
+  expect(transformed.value.code).toContain("const step = 2;");
+  expect(transformed.value.code).toContain("const internalCache = new Map();");
+});
+
+it("keeps every setup binding exposed when no template identifiers are known", () => {
+  const transformed = transformSfcScript({ attrs: "setup", offset: 0, content: "const a = 1; const b = 2;" });
+  expect(transformed.ok).toBe(true);
+  if (!transformed.ok) throw new Error(transformed.error.message);
+  expect(transformed.value.exposedBindings).toEqual(["a", "b"]);
+  expect(transformed.value.code).toContain("return { a: a, b: b };");
+});
+
+it("collects template identifiers from expressions, attributes, and text alike", () => {
+  const identifiers = templateScopeIdentifiers(
+    `<section hydrate:id={panelId}><input bind:value={draft.text} style:color={active ? "red" : \`\${tone}\`}><p>{t("greeting")}</p></section>`,
+  );
+  for (const name of ["panelId", "draft", "active", "tone", "t", "section", "hydrate", "red"]) {
+    expect(identifiers.has(name)).toBe(true);
+  }
+  expect(identifiers.has("missing")).toBe(false);
 });

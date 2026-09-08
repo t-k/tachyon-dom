@@ -46,8 +46,26 @@ export type CompiledTachyonSfc = {
 export type TransformedSfcScript = {
   code: string;
   defaultScopeName?: string;
+  /** Every top-level `<script setup>` declaration and runtime import. */
   setupBindings: string[];
+  /** The setup bindings the generated scope factory returns; equals `setupBindings` without template identifiers. */
+  exposedBindings: string[];
 };
+
+export type TransformSfcScriptOptions = {
+  /**
+   * Identifiers that appear anywhere in the template text. When given, the setup factory exposes only the setup
+   * bindings among them: an expression can only reach a scope value by naming it literally, so a name absent
+   * from the template can never be read by a binding, handler, ref, hydration id, or store initializer.
+   */
+  templateIdentifiers?: ReadonlySet<string>;
+};
+
+const templateIdentifierPattern = /[A-Za-z_$][\w$]*/g;
+
+/** Every identifier-shaped token in a template, over-approximating the names its expressions can reference. */
+export const templateScopeIdentifiers = (template: string): Set<string> =>
+  new Set(template.match(templateIdentifierPattern) ?? []);
 
 const autoImports: Record<string, string> = {
   batch: "tachyon-dom",
@@ -618,23 +636,29 @@ export const generateScriptOnlyModule = (target: "client" | "server" | "stream")
 
 export const transformSfcScript = (
   script: TachyonSfcScript | undefined,
+  options: TransformSfcScriptOptions = {},
 ): Result<TransformedSfcScript, CompilerError> => {
   if (!script || script.content.trim().length === 0) {
-    return ok({ code: "", setupBindings: [] });
+    return ok({ code: "", setupBindings: [], exposedBindings: [] });
   }
   const transpiled = transpileScriptContent(script);
   if (!transpiled.ok) {
     return err(transpiled.error);
   }
   const setupBindings = isSfcSetupScript(script) ? topLevelBindings(script) : [];
+  const { templateIdentifiers } = options;
+  const exposedBindings = templateIdentifiers
+    ? setupBindings.filter((name) => templateIdentifiers.has(name))
+    : setupBindings;
   const content = autoImportScriptHelpers(transpiled.value, script);
   if (isSfcSetupScript(script)) {
-    const factory = setupFactoryCode(content, script, setupBindings);
+    const factory = setupFactoryCode(content, script, exposedBindings);
     if (!factory.ok) return factory;
     return ok({
       code: factory.value,
       defaultScopeName: sfcSetupScopeName,
       setupBindings,
+      exposedBindings,
     });
   }
   const namedScopeExport = /\bexport\s+const\s+scope\s*=/;
@@ -648,16 +672,18 @@ export const transformSfcScript = (
       code: `${code}\nexport { ${sfcNamedScopeName} as scope };\n`,
       defaultScopeName: sfcNamedScopeName,
       setupBindings,
+      exposedBindings,
     });
   }
   if (!defaultExport.test(content)) {
-    return ok({ code: `${content.trim()}\n`, setupBindings });
+    return ok({ code: `${content.trim()}\n`, setupBindings, exposedBindings });
   }
   const code = content.replace(defaultExport, `const ${sfcDefaultScopeName} =`).trim();
   return ok({
     code: `${code}\nexport { ${sfcDefaultScopeName} as default };\n`,
     defaultScopeName: sfcDefaultScopeName,
     setupBindings,
+    exposedBindings,
   });
 };
 

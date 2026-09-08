@@ -943,6 +943,40 @@ const increment = (): void => {
     }
   });
 
+  it("compiles a setup factory that exposes only template-referenced bindings", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-sfc-scope-"));
+    try {
+      const input = path.join(dir, "panel.td");
+      await writeFile(
+        input,
+        `<script setup lang="ts">
+import { format } from "./format";
+const count = createSignal(1);
+const step = 2;
+const increment = (): void => {
+  count.set(count() + step);
+};
+const cache = new Map<string, string>();
+</script>
+<button on:click={increment}>{format(count())}</button>`,
+      );
+
+      const client = await compileFile({ input, target: "client", reactive: true, sourcemap: false });
+      const server = await compileFile({ input, target: "server", reactive: false, sourcemap: false });
+      expect(client.ok).toBe(true);
+      expect(server.ok).toBe(true);
+      if (!client.ok || !server.ok) throw new Error("Compile failed.");
+      for (const code of [client.value, server.value]) {
+        expect(code).toContain(`return { count: count, format: format, increment: increment };`);
+        expect(code).not.toContain("step: step");
+        expect(code).not.toContain("cache: cache");
+        expect(code).toContain("const step = 2;");
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("rejects top-level await in script setup but accepts nested async await", () => {
     const content = `const value = await loadValue();`;
     const topLevel = transformSfcScript({ attrs: "setup", content, offset: 0 });
@@ -1624,11 +1658,7 @@ export default { selected: false };
       { define: { EXISTING_DEFINE: "value" } },
       { command: "build", mode: "production" },
     );
-    const development = await plugin.config.call(
-      {} as never,
-      {},
-      { command: "serve", mode: "development" },
-    );
+    const development = await plugin.config.call({} as never, {}, { command: "serve", mode: "development" });
 
     expect(production).toEqual({
       define: { EXISTING_DEFINE: "value", __TACHYON_PRODUCTION__: "true" },
@@ -1869,8 +1899,7 @@ export const bindRows = (root, rows, options) => effect(() => {
       expect(chunkCode).not.toContain("__tachyonStoreInits");
 
       (globalThis as { __tachyonStoreInits?: number }).__tachyonStoreInits = 0;
-      document.body.innerHTML =
-        `<main><input><!--tachyon-hydrate:td-h-1:start--><section><output>Ada</output><input class="inner"></section><!--tachyon-hydrate:td-h-1:end--></main>`;
+      document.body.innerHTML = `<main><input><!--tachyon-hydrate:td-h-1:start--><section><output>Ada</output><input class="inner"></section><!--tachyon-hydrate:td-h-1:end--></main>`;
       const entry = (await import(/* @vite-ignore */ pathToFileURL(entryPath).href)) as {
         hydrate: (bindRoot: Element, hydrationRoot: Element) => () => void;
       };
@@ -1917,7 +1946,9 @@ export const bindRows = (root, rows, options) => effect(() => {
     const entry = await plugin.transform.call(context, source, "/src/preflight.td");
     const code = typeof entry === "object" ? String(entry?.code ?? "") : "";
     expect(code).toContain("__tachyonDiagnoseHydrationBoundaries(hydrationRoot");
-    expect(code.indexOf("__tachyonDiagnoseHydrationBoundaries(hydrationRoot")).toBeLessThan(code.indexOf("bind(bindRoot"));
+    expect(code.indexOf("__tachyonDiagnoseHydrationBoundaries(hydrationRoot")).toBeLessThan(
+      code.indexOf("bind(bindRoot"),
+    );
   });
 
   it("generates a hydrate-only module without boundary bindings, boundary runtime imports, or bind", async () => {
@@ -1999,9 +2030,9 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(regular).toContain("export const hydrationDynamicRegions");
     expect(regular).not.toContain("mountOnly");
 
-    await expect(
-      transformHook.call(context, source, "/src/panel.td?client&mount-only&hydrate-only"),
-    ).rejects.toThrow("cannot be both hydrate-only and mount-only");
+    await expect(transformHook.call(context, source, "/src/panel.td?client&mount-only&hydrate-only")).rejects.toThrow(
+      "cannot be both hydrate-only and mount-only",
+    );
     await expect(
       transformHook.call(context, source, "/src/panel.td?client&mount-only&tachyon-hydration=td-h-1"),
     ).rejects.toThrow("cannot also request a hydration chunk");
@@ -2012,9 +2043,9 @@ export const bindRows = (root, rows, options) => effect(() => {
     // A template that declares a hydration boundary cannot be requested as mount-only at all, so the hydrate
     // entry, the chunk loaders, and the hydration runtime never reach a mount-only module.
     const boundarySource = `<main><section hydrate:interaction="click"><button on:click={save}>Save</button></section></main>`;
-    await expect(
-      transformHook.call(context, boundarySource, "/src/island.td?client&mount-only"),
-    ).rejects.toThrow("cannot contain hydration boundaries");
+    await expect(transformHook.call(context, boundarySource, "/src/island.td?client&mount-only")).rejects.toThrow(
+      "cannot contain hydration boundaries",
+    );
     const boundaryNormal = await transform2(boundarySource, "/src/island.td?client");
     expect(boundaryNormal).toContain("export const hydrate");
     expect(boundaryNormal).toContain("hydrationChunks");
@@ -2055,7 +2086,9 @@ export const bindRows = (root, rows, options) => effect(() => {
       });
       const outputs = Array.isArray(output) ? output : [output];
       const chunks = outputs.flatMap((result) =>
-        "output" in result ? result.output.filter((item): item is typeof item & { type: "chunk" } => item.type === "chunk") : [],
+        "output" in result
+          ? result.output.filter((item): item is typeof item & { type: "chunk" } => item.type === "chunk")
+          : [],
       );
       const byName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]));
       const closure = (fileName: string, dynamic: boolean): Set<string> => {
@@ -2239,7 +2272,9 @@ export const bindRows = (root, rows, options) => effect(() => {
     const noRoot = tachyonDom({ reactive: true, declarationOutput: false });
     if (typeof noRoot.transform !== "function") throw new Error("Missing transform hook.");
     const withoutRoot = await noRoot.transform.call(context, source, "/absolute/app/src/page.td");
-    expect(typeof withoutRoot === "object" ? String(withoutRoot?.code ?? "") : "").not.toContain("__tachyonRegisterBindings");
+    expect(typeof withoutRoot === "object" ? String(withoutRoot?.code ?? "") : "").not.toContain(
+      "__tachyonRegisterBindings",
+    );
 
     const staging = tachyonDom({ reactive: true, declarationOutput: false });
     if (typeof staging.configResolved !== "function" || typeof staging.transform !== "function") {
@@ -2251,9 +2286,16 @@ export const bindRows = (root, rows, options) => effect(() => {
       root: "/absolute/app",
     });
     const stagingCode = await staging.transform.call(context, source, "/absolute/app/src/page.td");
-    expect(typeof stagingCode === "object" ? String(stagingCode?.code ?? "") : "").not.toContain("__tachyonRegisterBindings");
-    const configHook = staging.config as (config: unknown, env: { command: string; mode: string }) => { define?: Record<string, string> } | undefined;
-    expect(configHook.call({} as never, {}, { command: "build", mode: "staging" })?.define?.__TACHYON_PRODUCTION__).toBe("true");
+    expect(typeof stagingCode === "object" ? String(stagingCode?.code ?? "") : "").not.toContain(
+      "__tachyonRegisterBindings",
+    );
+    const configHook = staging.config as (
+      config: unknown,
+      env: { command: string; mode: string },
+    ) => { define?: Record<string, string> } | undefined;
+    expect(
+      configHook.call({} as never, {}, { command: "build", mode: "staging" })?.define?.__TACHYON_PRODUCTION__,
+    ).toBe("true");
     expect(configHook.call({} as never, {}, { command: "build", mode: "development" })).toBeUndefined();
   });
 
@@ -2325,11 +2367,7 @@ export const bindRows = (root, rows, options) => effect(() => {
     expect(entryCode).toContain(`import("/src/multiple.td?client&tachyon-hydration=td-h-0")`);
     expect(entryCode).toContain(`import("/src/multiple.td?client&tachyon-hydration=td-h-1")`);
 
-    const firstChunk = await plugin.transform.call(
-      context,
-      source,
-      "/src/multiple.td?client&tachyon-hydration=td-h-0",
-    );
+    const firstChunk = await plugin.transform.call(context, source, "/src/multiple.td?client&tachyon-hydration=td-h-0");
     const firstChunkCode = typeof firstChunk === "object" ? String(firstChunk?.code ?? "") : "";
     expect(firstChunkCode).toContain(`export const templateHtml = "<section>First</section>"`);
     expect(firstChunkCode).not.toContain("Second");

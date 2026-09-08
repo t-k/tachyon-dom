@@ -15,7 +15,7 @@ import {
   type TachyonAppDefinition,
 } from "./app.js";
 import { resolveHtmlWhitespacePolicy, type HtmlWhitespacePolicy } from "./html-whitespace.js";
-import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
+import { generateScriptOnlyModule, templateScopeIdentifiers, transformSfcScript } from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import type { TemplateWhitespacePolicy } from "./compiler/types.js";
 import { diagnoseTachyonSfc, diagnosticFromCompilerError, formatDiagnostic } from "./diagnostics.js";
@@ -429,12 +429,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       });
     },
     async transform(source, id) {
-      if (
-        include.test(cleanId(id)) &&
-        !queryForId(id).has("url") &&
-        !isEntryRequest(id) &&
-        isPrimaryRequest(id)
-      ) {
+      if (include.test(cleanId(id)) && !queryForId(id).has("url") && !isEntryRequest(id) && isPrimaryRequest(id)) {
         const declarationOutput =
           options.declarationOutput === false
             ? undefined
@@ -502,7 +497,12 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
           );
         }
       }
-      const script = transformSfcScript(result.value.descriptor.script);
+      const script = transformSfcScript(
+        result.value.descriptor.script,
+        result.value.scriptOnly
+          ? {}
+          : { templateIdentifiers: templateScopeIdentifiers(result.value.descriptor.template) },
+      );
       if (!script.ok) {
         this.error(formatDiagnostic(diagnosticFromCompilerError(source, script.error), id));
       }
@@ -800,7 +800,10 @@ export const tachyonApp = (app: TachyonApp, options: TachyonAppViteOptions = {})
       }
       // Nothing loads a chunk every page left out, so it does not need to be shipped.
       if (entry && !loadedByAPage) {
-        for (const fileName of chunksOnlyReachableFrom(bundle as unknown as Record<string, BundleChunk>, entry.fileName)) {
+        for (const fileName of chunksOnlyReachableFrom(
+          bundle as unknown as Record<string, BundleChunk>,
+          entry.fileName,
+        )) {
           delete bundle[fileName];
           delete bundle[`${fileName}.map`];
         }
