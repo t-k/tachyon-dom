@@ -97,6 +97,62 @@ describe("generated binding readers", () => {
     }
   });
 
+  // Rows the generic keyed list drives take everything from the descriptor: the setter for each value, the
+  // binder for each control, and the entry that mounts each nested region. Nothing else reaches those
+  // accessors, so every kind a row can hold is exercised through the generated entry here.
+  it("drives every row binding kind through the generated keyed list entry", () => {
+    const module = evaluateGeneratedClientModule(
+      generated(
+        `<ul><for each={rows} key={row.id}><li class:on={row.on} title={row.tip} style:color={row.hue} ref={refs.node} on:click={pick}><input bind:value={row.draft}><ul><for each={row.tags} key={tag.id}><li>{tag.label}</li></for></ul><if test={row.open}><em>{row.label}</em></if></li></for></ul>`,
+        { reactive: true },
+      ),
+    );
+    const root = document.createElement("div");
+    const picks: string[] = [];
+    const row = {
+      id: "a",
+      on: true,
+      tip: "Tip",
+      hue: "red",
+      draft: "typed",
+      label: "A",
+      open: true,
+      tags: [{ id: "t", label: "T" }],
+    };
+    const rows = createSignal([row]);
+    const scope = { rows, refs: {} as { node?: Element }, pick: () => picks.push("pick") };
+
+    const handle = mount(root, module, scope);
+    const item = root.querySelector("li");
+    const input = root.querySelector("input");
+    if (!(item instanceof HTMLElement) || !(input instanceof HTMLInputElement)) throw new Error("Missing nodes.");
+
+    expect(item.classList.contains("on")).toBe(true);
+    expect(item.getAttribute("title")).toBe("Tip");
+    expect(item.style.color).toBe("red");
+    expect(scope.refs.node).toBe(item);
+    expect(input.value).toBe("typed");
+    expect(item.querySelector("li")?.textContent).toBe("T");
+    expect(item.querySelector("em")?.textContent).toBe("A");
+
+    item.click();
+    expect(picks).toEqual(["pick"]);
+
+    input.value = "edited";
+    input.dispatchEvent(new Event("input"));
+    expect(row.draft).toBe("edited");
+
+    rows.set([{ ...row, on: false, tip: "Other", hue: "blue", open: false, tags: [{ id: "u", label: "U" }] }]);
+    expect(item.classList.contains("on")).toBe(false);
+    expect(item.getAttribute("title")).toBe("Other");
+    expect(item.style.color).toBe("blue");
+    expect(item.querySelector("li")?.textContent).toBe("U");
+    expect(item.querySelector("em")).toBeNull();
+
+    handle.dispose();
+    expect(scope.refs.node).toBeUndefined();
+  });
+
   // A region's signature only has to change when its shape changes. A build that ships no development
   // instrumentation identifies it by a digest of that shape rather than by a second copy of the template HTML
   // and of every expression string the readers already replaced.

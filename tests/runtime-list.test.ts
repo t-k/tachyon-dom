@@ -15,6 +15,141 @@ afterEach(() => {
 });
 
 describe("mountKeyedList", () => {
+  // The compatibility entry is the one that still interprets expression strings and applies them through the
+  // setters this runtime imports. Splitting the generated entry off left that half reachable only from here, so
+  // every kind it has to drive is exercised through a hand-written descriptor.
+  it("drives every row binding kind from a hand-written descriptor", () => {
+    const root = document.createElement("ul");
+    const clicks: string[] = [];
+    const scope = { pick: (event: Event) => clicks.push((event.currentTarget as Element).tagName), open: true };
+    const options = {
+      signature: "every-row-kind",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><input><b><!----></b></li>`,
+      bindings: [
+        { kind: "class" as const, path: [], className: "on", expression: "item.on" },
+        { kind: "attr" as const, path: [], name: "title", expression: "item.title" },
+        { kind: "style" as const, path: [], name: "width", expression: "item.width" },
+        { kind: "ref" as const, path: [], expression: "item.node" },
+        { kind: "event" as const, path: [], eventName: "click", handler: "pick" },
+        { kind: "model" as const, path: [0], property: "value" as const, expression: "item.draft" },
+        {
+          kind: "if" as const,
+          path: [1, 0],
+          test: "open",
+          templateHtml: `<em> </em>`,
+          bindings: [{ kind: "text" as const, path: [0], expression: "item.title" }],
+        },
+      ],
+      scope,
+    };
+    const item = { id: "a", on: true, title: "Row", width: "8px", draft: "typed", node: undefined as unknown };
+
+    mountKeyedList(root, [], [item], options);
+    const row = root.querySelector("li");
+    const input = root.querySelector("input");
+    if (!(row instanceof HTMLElement) || !(input instanceof HTMLInputElement)) throw new Error("Missing nodes.");
+
+    expect(row.classList.contains("on")).toBe(true);
+    expect(row.getAttribute("title")).toBe("Row");
+    expect(row.style.width).toBe("8px");
+    expect(item.node).toBe(row);
+    expect(input.value).toBe("typed");
+    expect(root.querySelector("em")?.textContent).toBe("Row");
+
+    row.click();
+    expect(clicks).toEqual(["LI"]);
+
+    // The control writes back through the same path string it reads, and a later update pushes a value
+    // changed elsewhere back onto it.
+    input.value = "edited";
+    input.dispatchEvent(new Event("input"));
+    expect(item.draft).toBe("edited");
+    item.draft = "reset";
+    mountKeyedList(root, [], [item], { ...options });
+    expect(input.value).toBe("reset");
+
+    mountKeyedList(root, [], [], { ...options });
+    expect(item.node).toBeUndefined();
+  });
+
+  // A hand-written control may carry a reader, a writer, both, or neither. Each combination decides a different
+  // branch of the compatibility writer, so each one writes back through what it actually carries.
+  it("writes a hand-written row control back through whatever it carries", () => {
+    const written: string[] = [];
+    const rowFor = (model: Record<string, unknown>) => ({
+      signature: `row-model-${Object.keys(model).sort().join("-")}`,
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><input></li>`,
+      bindings: [
+        { kind: "model" as const, path: [0], property: "value" as const, expression: "item.draft", ...model },
+      ],
+    });
+    const drive = (model: Record<string, unknown>, item: { id: string; draft: string }) => {
+      const root = document.createElement("ul");
+      mountKeyedList(root, [], [item], rowFor(model));
+      const input = root.querySelector("input");
+      if (!(input instanceof HTMLInputElement)) throw new Error("Missing control.");
+      expect(input.value).toBe(item.draft);
+      input.value = "edited";
+      input.dispatchEvent(new Event("input"));
+      return item.draft;
+    };
+
+    expect(drive({}, { id: "a", draft: "typed" })).toBe("edited");
+    expect(
+      drive({ read: (scope: Record<string, unknown>) => (scope.item as { draft: string }).draft }, { id: "a", draft: "typed" }),
+    ).toBe("edited");
+    // An explicit writer owns the write outright, so the path string is never walked.
+    const item = { id: "a", draft: "typed" };
+    expect(
+      drive(
+        {
+          write: (_scope: Record<string, unknown>, value: unknown) => {
+            written.push(String(value));
+          },
+        },
+        item,
+      ),
+    ).toBe("typed");
+    expect(written).toEqual(["edited"]);
+  });
+
+  // A hand-written descriptor may carry the compiler's container reader instead of a path string, and this
+  // entry has to prefer it the way the generated one does - but only when it carries both halves.
+  it("writes a hand-written row ref through a container reader when it carries one", () => {
+    const root = document.createElement("ul");
+    const refs: { node?: Element } = {};
+    const item = { id: "a", node: undefined as unknown };
+    const descriptorFor = (ref: Record<string, unknown>) => ({
+      signature: `row-ref-${Object.keys(ref).join("-")}`,
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li></li>`,
+      bindings: [{ kind: "ref" as const, path: [], expression: "item.node", ...ref }],
+      scope: { refs },
+    });
+
+    const both = descriptorFor({ owner: (rowScope: Record<string, unknown>) => rowScope.refs, property: "node" });
+    mountKeyedList(root, [], [item], both);
+    expect(refs.node).toBe(root.querySelector("li"));
+    expect(item.node).toBeUndefined();
+    mountKeyedList(root, [], [], both);
+    expect(refs.node).toBeUndefined();
+
+    // Half a reader is not a reader.
+    for (const half of [{ owner: (rowScope: Record<string, unknown>) => rowScope.refs }, { property: "node" }]) {
+      const partial = descriptorFor(half);
+      mountKeyedList(root, [], [item], partial);
+      expect(item.node).toBe(root.querySelector("li"));
+      expect(refs.node).toBeUndefined();
+      mountKeyedList(root, [], [], partial);
+      expect(item.node).toBeUndefined();
+    }
+  });
+
   it("owns row component props and stores across reorder and removal", () => {
     const root = document.createElement("ul");
     const options = {

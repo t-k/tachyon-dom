@@ -16,6 +16,59 @@ const generated = (source: string, options: Parameters<typeof generateClientModu
 };
 
 describe("generated conditional bindings", () => {
+  // A branch the core cannot take - one that declares a store - is driven by the generic branch runtime's
+  // generated entry, which reads and applies everything through the descriptor. Every kind it can hold is
+  // exercised here, because nothing else reaches that entry's accessors.
+  it("drives every binding kind through the generic branch entry", () => {
+    const module = evaluateGeneratedClientModule(
+      generated(
+        `<main><if test={open}><store draft={seed}/><section class:on={flag} title={tip} style:color={hue} ref={refs.panel} on:click={pick}><input bind:value={draft}><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul><if test={deep}><store note={draft}/><em>{note}</em></if></section></if></main>`,
+      ),
+    );
+    const root = document.createElement("div");
+    const picks: string[] = [];
+    const scope = {
+      open: createSignal(true),
+      seed: "typed",
+      flag: createSignal(true),
+      tip: createSignal("Tip"),
+      hue: createSignal("red"),
+      refs: {} as { panel?: Element },
+      pick: () => picks.push("pick"),
+      rows: createSignal([{ id: "a", label: "A" }]),
+      deep: createSignal(true),
+    };
+
+    const handle = mount(root, module, scope);
+    const section = root.querySelector("section");
+    const input = root.querySelector("input");
+    if (!(section instanceof HTMLElement) || !(input instanceof HTMLInputElement)) throw new Error("Missing nodes.");
+
+    expect(section.classList.contains("on")).toBe(true);
+    expect(section.getAttribute("title")).toBe("Tip");
+    expect(section.style.color).toBe("red");
+    expect(scope.refs.panel).toBe(section);
+    expect(input.value).toBe("typed");
+    expect(root.querySelector("li")?.textContent).toBe("A");
+    expect(root.querySelector("em")?.textContent).toBe("typed");
+
+    section.click();
+    expect(picks).toEqual(["pick"]);
+
+    scope.flag.set(false);
+    scope.tip.set("Other");
+    scope.hue.set("blue");
+    scope.rows.set([{ id: "b", label: "B" }]);
+    expect(section.classList.contains("on")).toBe(false);
+    expect(section.getAttribute("title")).toBe("Other");
+    expect(section.style.color).toBe("blue");
+    expect(root.querySelector("li")?.textContent).toBe("B");
+    scope.deep.set(false);
+    expect(root.querySelector("em")).toBeNull();
+
+    handle.dispose();
+  });
+
   it("compiles branch values into injected setters instead of tagged descriptors", () => {
     const code = generated(
       `<main><if test={open}><b class={theme} class:on={flag} title={tip} style:color={hue} on:click={save}>{label}</b></if></main>`,

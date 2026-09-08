@@ -27,6 +27,114 @@ describe("mountConditional", () => {
     expect(scope.refs.panel).not.toBe(first);
   });
 
+  // The compatibility entry is the one that still interprets expression strings and applies them through the
+  // setters this runtime imports. Splitting the generated entry off left that half reachable only from here, so
+  // every kind it has to drive is exercised through a hand-written descriptor.
+  it("drives every binding kind from a hand-written descriptor", () => {
+    document.body.innerHTML = `<section><!----></section>`;
+    const root = document.querySelector("section");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const scope = {
+      on: true,
+      title: "Panel",
+      width: "12px",
+      draft: "typed",
+      panel: {} as { node?: Element },
+      rows: [{ id: "a", label: "A" }],
+    };
+
+    const descriptor = {
+      signature: "every-kind",
+      templateHtml: `<div><input><ul><!--tachyon-list--></ul></div>`,
+      bindings: [
+        { kind: "class" as const, path: [], className: "on", expression: "on" },
+        { kind: "attr" as const, path: [], name: "title", expression: "title" },
+        { kind: "style" as const, path: [], name: "width", expression: "width" },
+        { kind: "ref" as const, path: [], expression: "panel.node" },
+        { kind: "model" as const, path: [0], property: "value" as const, expression: "draft" },
+        {
+          kind: "list" as const,
+          path: [1],
+          each: "rows",
+          key: "row.id",
+          itemName: "row",
+          templateHtml: `<li> </li>`,
+          bindings: [{ kind: "text" as const, path: [0], expression: "row.label" }],
+        },
+      ],
+    };
+    mountConditional(root, [0], true, scope, descriptor);
+
+    const panel = root.querySelector("div");
+    const input = root.querySelector("input");
+    if (!(panel instanceof HTMLElement) || !(input instanceof HTMLInputElement)) throw new Error("Missing nodes.");
+    expect(panel.classList.contains("on")).toBe(true);
+    expect(panel.getAttribute("title")).toBe("Panel");
+    expect(panel.style.width).toBe("12px");
+    expect(scope.panel.node).toBe(panel);
+    expect(input.value).toBe("typed");
+    expect(root.querySelector("li")?.textContent).toBe("A");
+
+    // The control writes back through the same path string it reads.
+    input.value = "edited";
+    input.dispatchEvent(new Event("input"));
+    expect(scope.draft).toBe("edited");
+
+    // And a re-mount pushes a value changed elsewhere back onto the control.
+    scope.draft = "reset";
+    mountConditional(root, [0], true, scope, descriptor);
+    expect(input.value).toBe("reset");
+
+    mountConditional(root, [0], false, scope, { signature: "every-kind", templateHtml: `<div></div>`, bindings: [] });
+    expect(scope.panel.node).toBeUndefined();
+  });
+
+  // A hand-written descriptor may carry the compiler's container reader instead of a path string, and the
+  // compatibility entry has to prefer it exactly the way the generated one does.
+  it("writes a hand-written ref through a container reader when it carries one", () => {
+    document.body.innerHTML = `<section><!----></section>`;
+    const root = document.querySelector("section");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing root.");
+    const scope = { refs: {} as { panel?: Element }, other: {} as { panel?: Element } };
+    const options = {
+      signature: "reader-ref",
+      templateHtml: `<div></div>`,
+      bindings: [
+        {
+          kind: "ref" as const,
+          path: [],
+          expression: "other.panel",
+          owner: (current: Record<string, unknown>) => current.refs,
+          property: "panel",
+        },
+      ],
+    };
+
+    mountConditional(root, [0], true, scope, options);
+    expect(scope.refs.panel).toBe(root.querySelector("div"));
+    expect(scope.other.panel).toBeUndefined();
+
+    mountConditional(root, [0], false, scope, options);
+    expect(scope.refs.panel).toBeUndefined();
+
+    // Half a reader is not a reader: only a descriptor carrying both falls out of the path string.
+    for (const half of [
+      { owner: (current: Record<string, unknown>) => current.refs },
+      { property: "panel" },
+    ]) {
+      const partial = {
+        signature: `half-${Object.keys(half)[0]}`,
+        templateHtml: `<div></div>`,
+        bindings: [{ kind: "ref" as const, path: [], expression: "other.panel", ...half }],
+      };
+      mountConditional(root, [0], true, scope, partial);
+      expect(scope.other.panel).toBe(root.querySelector("div"));
+      expect(scope.refs.panel).toBeUndefined();
+      mountConditional(root, [0], false, scope, partial);
+      expect(scope.other.panel).toBeUndefined();
+    }
+  });
+
   it("mounts, updates, and unmounts conditional content at a comment anchor", () => {
     document.body.innerHTML = `<section><!----></section>`;
     const root = document.querySelector("section");
