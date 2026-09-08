@@ -2,7 +2,14 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const featureNames = ["runtime/list", "runtime/form", "runtime/conditional", "runtime/router"];
+export const featureNames = [
+  "runtime/list",
+  "runtime/generic-list",
+  "runtime/form",
+  "runtime/conditional",
+  "runtime/generic-conditional",
+  "runtime/router",
+];
 const start = "<!-- browser-feature-sizes:start -->";
 const end = "<!-- browser-feature-sizes:end -->";
 

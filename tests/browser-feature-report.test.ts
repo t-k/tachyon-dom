@@ -13,7 +13,14 @@ import {
 import { runBrowserFeatureBudgets } from "../scripts/verify-browser-feature-budgets.mjs";
 import { checkBundleBudget } from "../scripts/client-bundle-attribution.mjs";
 
-const names = ["runtime/list", "runtime/form", "runtime/conditional", "runtime/router"];
+const names = [
+  "runtime/list",
+  "runtime/generic-list",
+  "runtime/form",
+  "runtime/conditional",
+  "runtime/generic-conditional",
+  "runtime/router",
+];
 const report = () => ({
   schemaVersion: 1,
   provenance: {

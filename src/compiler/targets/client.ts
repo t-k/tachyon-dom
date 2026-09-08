@@ -832,15 +832,16 @@ const isTextOnlyList = (binding: ListBinding): boolean =>
   (binding.components?.length ?? 0) === 0;
 
 /**
- * The bindings inside every keyed list a module mounts, at any depth.
+ * The bindings inside every nested region a module mounts, at any depth.
  *
- * Rows are driven by setters the generated module injects, so their kinds decide its imports the same way a
- * generated branch's do. A nested branch inside a row is handed the branch runtime instead, and that runtime
- * brings its own setters, so the walk stops at one.
+ * Rows and branches are both driven by setters the generated module injects, so the kinds inside them decide
+ * its imports exactly like a top-level binding does.
  */
-const generatedListRowBindings = (children: readonly ClientBinding[]): ClientBinding[] =>
+const generatedNestedBindings = (children: readonly ClientBinding[]): ClientBinding[] =>
   children.flatMap((binding) =>
-    binding.kind === "list" ? [...binding.bindings, ...generatedListRowBindings(binding.bindings)] : [],
+    binding.kind === "list" || binding.kind === "if"
+      ? [...binding.bindings, ...generatedNestedBindings(binding.bindings)]
+      : [],
   );
 
 const isConditionalCoreBinding = (binding: ClientBinding): boolean =>
@@ -1282,10 +1283,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     binding.kind === "attr" && binding.name.toLowerCase() === "class";
   // Generated rows and generated branches are driven by setters this module injects, so their kinds decide its
   // imports too.
-  const generatedRowBindings = generatedListRowBindings(bindings);
-  const generatedBranchBindings = bindings.flatMap((binding) =>
-    binding.kind === "if" && usesConditionalCore(binding) ? binding.bindings : [],
-  );
+  const generatedRowBindings = generatedNestedBindings(bindings);
   const needsElementClass = bindings.some((binding) => binding.kind === "class" || isKnownClassAttribute(binding));
   const needsElementAttr = bindings.some(
     (binding) =>
@@ -1293,30 +1291,31 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       binding.kind === "style" ||
       binding.kind === "ref",
   );
-  const bindingsNeedingRuntime = [...bindings, ...generatedRowBindings, ...generatedBranchBindings];
+  const bindingsNeedingRuntime = [...bindings, ...generatedRowBindings];
   const needsClassPresence = bindingsNeedingRuntime.some((binding) => binding.kind === "class");
   const needsClassValue = bindingsNeedingRuntime.some(isKnownClassAttribute);
-  const needsInjectedDelegate = [...generatedRowBindings, ...generatedBranchBindings].some(
-    (binding) => binding.kind === "event",
-  );
+  const needsInjectedDelegate = generatedRowBindings.some((binding) => binding.kind === "event");
   const needsModel = bindings.some(hasModelBinding);
   const needsEvent = bindings.some((binding) => binding.kind === "event") || needsInjectedDelegate;
   const needsRef = bindings.some((binding) => binding.kind === "ref");
-  const needsList = bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding));
+  // Every nested region carries the entry that mounts it, so the module that emits the descriptor imports it.
+  const needsList =
+    bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding)) ||
+    generatedRowBindings.some((binding) => binding.kind === "list");
   const needsTextList = bindings.some((binding) => binding.kind === "list" && isTextOnlyList(binding));
   const needsTextListBoundary = bindings.some(
     (binding) => binding.kind === "list" && isTextOnlyList(binding) && binding.region?.logicalAfter !== undefined,
   );
-  // A branch nested in a generated row is mounted through the entry the row descriptor carries, so the module
-  // that emits that descriptor is the one that has to import it.
-  const needsRowConditional = generatedRowBindings.some((binding) => binding.kind === "if");
-  const needsConditional = bindings.some((binding) => binding.kind === "if") || needsRowConditional;
+  const needsNestedConditional = generatedRowBindings.some((binding) => binding.kind === "if");
+  const needsConditional = bindings.some((binding) => binding.kind === "if") || needsNestedConditional;
   const needsConditionalCore = bindings.some((binding) => binding.kind === "if" && usesConditionalCore(binding));
   const needsGenericConditional =
-    bindings.some((binding) => binding.kind === "if" && !usesConditionalCore(binding)) || needsRowConditional;
-  // Row boundaries are adopted through the runtime the list descriptor carries, for the same reason.
+    bindings.some((binding) => binding.kind === "if" && !usesConditionalCore(binding)) || needsNestedConditional;
+  // Boundaries are adopted through the runtime the region's descriptor carries, for the same reason.
   const needsRowHydration = [...bindings, ...generatedRowBindings].some(
-    (binding) => binding.kind === "list" && (binding.hydrationBoundaries?.length ?? 0) > 0,
+    (binding) =>
+      (binding.kind === "list" || (binding.kind === "if" && !usesConditionalCore(binding))) &&
+      (binding.hydrationBoundaries?.length ?? 0) > 0,
   );
   const listPathsForBinding = (
     path: readonly number[],
@@ -2092,12 +2091,10 @@ const serializeStoreDefinitions = (stores: readonly StoreDefinition[]): string =
 const serializeComponentBoundaries = (components: readonly NonNullable<ListBinding["components"]>[number][]): string =>
   `[${components.map(serializeComponentBoundary).join(", ")}]`;
 
-/** The hydration runtime a generated list adopts its row boundaries through, when it declares any. */
-const rowHydrationRuntimeField = (binding: ListBinding, injected: boolean): string[] =>
-  injected && (binding.hydrationBoundaries?.length ?? 0) > 0
-    ? [
-        `hydration: { create: ${runtimeNames.createHydrationBoundary}, schedule: ${runtimeNames.scheduleHydration} }`,
-      ]
+/** The hydration runtime a generated region adopts its boundaries through, when it declares any. */
+const nestedHydrationRuntimeField = (binding: { hydrationBoundaries?: HydrationBoundary[] }): string[] =>
+  (binding.hydrationBoundaries?.length ?? 0) > 0
+    ? [`hydration: { create: ${runtimeNames.createHydrationBoundary}, schedule: ${runtimeNames.scheduleHydration} }`]
     : [];
 
 /** The setter a generated row applies this value with. Rows and branches emit the same expressions. */
@@ -2119,16 +2116,12 @@ const rowValueSetter = (binding: ClassBinding | AttributeBinding | StyleBinding)
  * Generated bindings carry compiled readers, so the expression strings they were parsed from never ship. A ref
  * is the exception: the runtime writes back through the container reader and property name it carries.
  *
- * `injected` says whether the runtime that will drive this descriptor takes its setters from it. A generated
- * keyed list does, so its rows carry the setter, the control binder, and the branch entry they need, and the
- * list runtime imports none of them. A branch nested in such a row is driven by the generic branch runtime,
- * which brings its own, so everything under it is serialized without them.
+ * Everything here is driven by a generated runtime - the generated keyed list, or the generic branch runtime's
+ * generated entry - and both take their setters from the descriptor. So each value binding carries the setter
+ * that applies it, each control its binder, and each nested region the entry that mounts it. Neither runtime
+ * imports one of its own.
  */
-const serializeListRowBinding = (
-  binding: ListBinding["bindings"][number],
-  detailed: boolean,
-  injected: boolean,
-): string => {
+const serializeListRowBinding = (binding: ListBinding["bindings"][number], detailed: boolean): string => {
   const fields: string[] = [`kind: ${JSON.stringify(binding.kind)}`, `path: ${JSON.stringify(binding.path)}`];
   const aliases = aliasesForBinding(binding);
   if (binding.kind === "text") {
@@ -2136,18 +2129,18 @@ const serializeListRowBinding = (
   } else if (binding.kind === "class") {
     fields.push(`className: ${JSON.stringify(binding.className)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
-    if (injected) fields.push(`apply: (node, value) => ${rowValueSetter(binding)}`);
+    fields.push(`apply: (node, value) => ${rowValueSetter(binding)}`);
   } else if (binding.kind === "event") {
     fields.push(`eventName: ${JSON.stringify(binding.eventName)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.handler, aliases)}`);
   } else if (binding.kind === "attr") {
     fields.push(`name: ${JSON.stringify(binding.name)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
-    if (injected) fields.push(`apply: (node, value) => ${rowValueSetter(binding)}`);
+    fields.push(`apply: (node, value) => ${rowValueSetter(binding)}`);
   } else if (binding.kind === "style") {
     fields.push(`name: ${JSON.stringify(binding.name)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
-    if (injected) fields.push(`apply: (node, value) => ${rowValueSetter(binding)}`);
+    fields.push(`apply: (node, value) => ${rowValueSetter(binding)}`);
   } else if (binding.kind === "ref") {
     const ref = refTargetExpressions(binding.expression, aliases);
     fields.push(`owner: ${ref.owner}`);
@@ -2157,19 +2150,16 @@ const serializeListRowBinding = (
     const write = `${runtimeNames.writeModelValue}(${target}, value, () => { ${target} = value; })`;
     fields.push(`property: ${JSON.stringify(binding.property)}`);
     fields.push(`read: (scope) => ${target}`);
-    if (injected) {
-      fields.push(
-        `apply: (node, value) => ${runtimeNames.setControlValue}(node, ${JSON.stringify(binding.property)}, value)`,
-      );
-      fields.push(
-        `bind: (scope, element) => ${runtimeNames.bindControl}(element, ${JSON.stringify(binding.property)}, () => ${runtimeValueExpression(binding.expression, true, "scope", aliases)}, (value) => ${write})`,
-      );
-    } else {
-      fields.push(`write: (scope, value) => ${write}`);
-    }
+    fields.push(
+      `apply: (node, value) => ${runtimeNames.setControlValue}(node, ${JSON.stringify(binding.property)}, value)`,
+    );
+    fields.push(
+      `bind: (scope, element) => ${runtimeNames.bindControl}(element, ${JSON.stringify(binding.property)}, () => ${runtimeValueExpression(binding.expression, true, "scope", aliases)}, (value) => ${write})`,
+    );
   } else if (binding.kind === "list") {
     const itemKeyExpression = simpleItemKeyExpression(binding.key, binding.itemName);
     fields.push(`signature: ${JSON.stringify(listSignature(binding, detailed))}`);
+    fields.push(`mount: ${runtimeNames.mountGeneratedKeyedList}`);
     fields.push(`each: ${JSON.stringify(binding.each)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.each, aliases)}`);
     fields.push(`itemName: ${JSON.stringify(binding.itemName)}`);
@@ -2179,7 +2169,7 @@ const serializeListRowBinding = (
     if (binding.region) fields.push(`region: ${JSON.stringify(binding.region)}`);
     fields.push(`stores: ${serializeStoreDefinitions(binding.stores ?? [])}`);
     fields.push(`hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])}`);
-    fields.push(...rowHydrationRuntimeField(binding, injected));
+    fields.push(...nestedHydrationRuntimeField(binding));
     fields.push(`components: ${serializeComponentBoundaries(binding.components ?? [])}`);
     fields.push(
       itemKeyExpression
@@ -2187,20 +2177,18 @@ const serializeListRowBinding = (
         : `keyRead: (scope) => ${bindingReadExpression(binding.key, aliases)}`,
     );
     fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
-    fields.push(
-      `bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed, injected)).join(", ")}]`,
-    );
+    fields.push(`bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}]`);
   } else if (binding.kind === "if") {
     fields.push(`signature: ${JSON.stringify(conditionalSignature(binding, detailed))}`);
     fields.push(`test: ${JSON.stringify(binding.test)}`);
     fields.push(`read: (scope) => ${bindingReadExpression(binding.test, aliases)}`);
-    if (injected) fields.push(`mount: ${runtimeNames.mountGeneratedConditional}`);
+    fields.push(`mount: ${runtimeNames.mountGeneratedConditional}`);
     fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
     fields.push(`stores: ${serializeStoreDefinitions(binding.stores ?? [])}`);
     fields.push(`hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])}`);
+    fields.push(...nestedHydrationRuntimeField(binding));
     fields.push(`components: ${serializeComponentBoundaries(binding.components ?? [])}`);
-    // The branch runtime drives everything under it with the setters it imports itself.
-    fields.push(`bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed, false)).join(", ")}]`);
+    fields.push(`bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}]`);
   }
   return `{ ${fields.join(", ")} }`;
 };
@@ -2409,15 +2397,13 @@ const emitListBinding = (
     ...(binding.region ? [`    region: ${JSON.stringify(binding.region)},`] : []),
     `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
     `    hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])},`,
-    ...rowHydrationRuntimeField(binding, !isTextOnlyList(binding)).map((field) => `    ${field},`),
+    ...(isTextOnlyList(binding) ? [] : nestedHydrationRuntimeField(binding).map((field) => `    ${field},`)),
     `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
     `    scope: ${sourceName},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     ...(isTextOnlyList(binding)
       ? generatedRowBindingFields(binding)
-      : [
-          `    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed, true)).join(", ")}],`,
-        ]),
+      : [`    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}],`]),
     `  };`,
   ].join("\n");
   const target = targetName ?? "root";
@@ -2458,8 +2444,9 @@ const emitConditionalBinding = (
       : [
           `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
           `    hydrationBoundaries: ${JSON.stringify(binding.hydrationBoundaries ?? [])},`,
+          ...nestedHydrationRuntimeField(binding).map((field) => `    ${field},`),
           `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
-          `    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed, false)).join(", ")}],`,
+          `    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}],`,
         ]),
     `  };`,
   ].join("\n");

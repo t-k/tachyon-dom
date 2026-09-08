@@ -32,6 +32,13 @@ type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void
 type ValueApplier = (node: Node, value: unknown) => void;
 /** Binds a row target and returns its disposer. A generated descriptor carries its own. */
 type TargetBinder = (scope: Record<string, unknown>, element: Element) => () => void;
+/** Mounts a nested keyed list. A generated descriptor carries the entry that drives it. */
+type ListMounter = (
+  root: Element,
+  path: readonly number[],
+  items: readonly unknown[] | undefined,
+  options: NestedListBinding & { scope: Record<string, unknown> },
+) => void;
 /** Mounts a nested branch. A generated descriptor carries the entry that drives it, so this module has none. */
 type BranchMounter = (
   root: Node,
@@ -108,6 +115,7 @@ type ModelBinding = {
 type NestedListBinding = {
   kind: "list";
   signature?: string;
+  mount?: ListMounter;
   path: number[];
   each: string;
   read?: ExpressionReader;
@@ -265,7 +273,6 @@ type ListRuntimeOptions = KeyedListOptions & {
   /** The descriptor this was resolved from. Identity on it is what tells a re-mount from a new list. */
   descriptor: KeyedListOptions;
   signature: string;
-  resolve: (options: KeyedListOptions) => ListRuntimeOptions;
   readValue: (
     scope: Record<string, unknown>,
     source: { expression?: string | undefined; read?: ExpressionReader | undefined },
@@ -278,6 +285,12 @@ type ListRuntimeOptions = KeyedListOptions & {
   ) => unknown;
   readKey: (item: unknown, index: number) => unknown;
   applyValue: (binding: Binding, node: Node, value: unknown) => void;
+  mountList: (
+    binding: NestedListBinding,
+    container: Element,
+    items: readonly unknown[] | undefined,
+    scope: Record<string, unknown>,
+  ) => void;
   bindRefTarget: (scope: Record<string, unknown>, binding: RefBinding, element: Element) => () => void;
   bindControlTarget: (scope: Record<string, unknown>, binding: ModelBinding, element: Element) => () => void;
   mountBranch: (
@@ -651,7 +664,7 @@ const applyRowBinding = (
       | undefined;
     const container = nodeAtRecord(record, binding.path);
     if (container instanceof Element) {
-      mountResolvedKeyedList(container, [], value, options.resolve({ ...binding, scope }));
+      options.mountList(binding, container, value, scope);
     }
   } else if (binding.kind === "if") {
     const value = options.readValue(scope, { expression: binding.test, read: binding.read });
@@ -1065,8 +1078,6 @@ const mountResolvedKeyedList = (
  */
 type WithReader<T> = Omit<T, "read" | "expression" | "handler" | "initial"> & { read: ExpressionReader };
 
-type GeneratedTarget<T> = WithReader<T> & { write: ExpressionWriter };
-
 /** A generated ref names the object it writes into and the property on it, never a path to re-walk. */
 type GeneratedRef = Omit<RefBinding, "expression" | "owner" | "property"> & {
   owner: ExpressionReader;
@@ -1077,7 +1088,11 @@ type GeneratedRef = Omit<RefBinding, "expression" | "owner" | "property"> & {
 type GeneratedValue<T> = WithReader<T> & { apply: ValueApplier };
 
 /** A generated control carries both, so the form runtime reaches the bundle only through the row that uses it. */
-type GeneratedControl = Omit<GeneratedTarget<ModelBinding>, "write"> & { apply: ValueApplier; bind: TargetBinder };
+type GeneratedControl = Omit<WithReader<ModelBinding>, "write"> & { apply: ValueApplier; bind: TargetBinder };
+
+/** A generated nested region carries the entry that mounts it, so this module imports neither. */
+type GeneratedNestedList = Omit<WithReader<NestedListBinding>, keyof GeneratedChildren> &
+  GeneratedChildren & { mount: ListMounter };
 
 /** A generated branch carries the entry that mounts it, so this module never imports a branch runtime. */
 type GeneratedBranch = Omit<WithReader<NestedConditionalBinding>, keyof GeneratedChildren> &
@@ -1104,7 +1119,7 @@ type GeneratedBinding =
   | GeneratedValue<StyleBinding>
   | GeneratedRef
   | GeneratedControl
-  | (Omit<WithReader<NestedListBinding>, keyof GeneratedChildren> & GeneratedChildren)
+  | GeneratedNestedList
   | GeneratedBranch;
 
 export type GeneratedKeyedListOptions = Omit<KeyedListOptions, keyof GeneratedChildren> & GeneratedChildren;
@@ -1119,7 +1134,6 @@ const resolveGeneratedOptions = (options: KeyedListOptions): ListRuntimeOptions 
   ...options,
   descriptor: options,
   signature: options.signature as string,
-  resolve: resolveGeneratedOptions,
   readValue: (scope, source) => read((source.read as ExpressionReader)(scope)),
   readHandler: (scope, binding) => (binding.read as ExpressionReader)(scope),
   readDeclaration: (scope, _expression, reader) => read((reader as ExpressionReader)(scope)),
@@ -1130,6 +1144,8 @@ const resolveGeneratedOptions = (options: KeyedListOptions): ListRuntimeOptions 
           scopedItem(options.itemName, item, options.indexName, index, options.scope),
         ),
   applyValue: (binding, node, value) => (binding as { apply: ValueApplier }).apply(node, value),
+  mountList: (binding, container, items, scope) =>
+    (binding.mount as ListMounter)(container, [], items, { ...binding, scope }),
   bindRefTarget: (scope, binding, element) =>
     bindRef(scope, binding.owner as ExpressionReader, binding.property as string, element),
   bindControlTarget: (scope, binding, element) => (binding as { bind: TargetBinder }).bind(scope, element),
@@ -1146,7 +1162,6 @@ const resolveLegacyOptions = (options: KeyedListOptions): ListRuntimeOptions => 
   ...options,
   descriptor: options,
   signature: legacySignature(options),
-  resolve: resolveLegacyOptions,
   readValue: readBinding,
   readHandler,
   readDeclaration: readExpression,
@@ -1164,6 +1179,7 @@ const resolveLegacyOptions = (options: KeyedListOptions): ListRuntimeOptions => 
       setControlValue(node as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, binding.property, value);
     }
   },
+  mountList: (binding, container, items, scope) => mountKeyedList(container, [], items, { ...binding, scope }),
   // A hand-written ref may still carry the compiler's container reader, so the path string is the fallback.
   bindRefTarget: (scope, binding, element) =>
     binding.owner && binding.property !== undefined

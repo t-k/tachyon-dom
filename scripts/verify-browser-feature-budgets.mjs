@@ -34,6 +34,14 @@ export const createFeatureFixtures = () => ({
   "runtime/conditional": generatedClientSource(
     `<main><if test={visible}><button on:click={save}>Save</button></if></main>`,
   ),
+  // The rows and branches the generic runtimes drive. A ref keeps the row off the text adapter, and a row store
+  // keeps the branch off the core, so these two measure exactly the paths the generated entries own.
+  "runtime/generic-list": generatedClientSource(
+    `<ul><for each={rows} key={row.id}><li ref={row.node}>{row.label}</li></for></ul>`,
+  ),
+  "runtime/generic-conditional": generatedClientSource(
+    `<main><if test={visible}><store draft={seed}/><b>{draft}</b></if></main>`,
+  ),
   "runtime/router": `import { createClientRouter, rawHtml } from "./dist/runtime/router.js"; export { createClientRouter, rawHtml };`,
 });
 

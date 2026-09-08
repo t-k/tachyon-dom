@@ -112,6 +112,36 @@ describe("client bundle attribution", () => {
     ).toBeGreaterThan(0);
   }, 60_000);
 
+  // The branch runtime had the same alias in place of a split, so a branch the generic entry drives - one with
+  // a store, a ref, or a nested region - pulled every setter, the form runtime, and the whole keyed list in
+  // behind it, whatever the branch actually held.
+  it("keeps a generated branch free of the runtimes its bindings never use", async () => {
+    const storeBranch = await buildClientBundle(
+      generatedClientEntry(`<main><if test={open}><store draft={seed}/><b>{draft}</b></if></main>`, {
+        reactive: true,
+      }),
+      { cwd: process.cwd() },
+    );
+    const listBranch = await buildClientBundle(
+      generatedClientEntry(
+        `<main><if test={open}><ul><for each={rows} key={row.id}><li ref={row.node}>{row.label}</li></for></ul></if></main>`,
+        { reactive: true },
+      ),
+      { cwd: process.cwd() },
+    );
+
+    expect(bytesFor(storeBranch, /runtime[/\\]conditional\.js$/)).toBeGreaterThan(0);
+    expect(bytesFor(storeBranch, /runtime[/\\]list\.js$/)).toBe(0);
+    expect(bytesFor(storeBranch, /runtime[/\\]form\.js$/)).toBe(0);
+    expect(bytesFor(storeBranch, /runtime[/\\]class\.js$/)).toBe(0);
+    expect(bytesFor(storeBranch, /url-policy\.js$/)).toBe(0);
+    expect(bytesFor(storeBranch, /runtime[/\\]hydrate\.js$/)).toBe(0);
+    // A branch that does hold a list gets the list, and still nothing else.
+    expect(bytesFor(listBranch, /runtime[/\\]list\.js$/)).toBeGreaterThan(0);
+    expect(bytesFor(listBranch, /runtime[/\\]form\.js$/)).toBe(0);
+    expect(bytesFor(listBranch, /url-policy\.js$/)).toBe(0);
+  }, 60_000);
+
   it("records actual bytesInOutput contributions per output", () => {
     expect(
       attributionForMetafile({

@@ -24,7 +24,9 @@ describe("generated binding readers", () => {
     expect(code).not.toContain(`expression:`);
     expect(code).not.toContain(`handler:`);
     expect(code).toContain(`read: (scope) =>`);
-    expect(code).toContain(`write: (scope, value) =>`);
+    // A control in a generated region carries the binder that drives it, not a writer the runtime interprets.
+    expect(code).toContain(`bind: (scope, element) =>`);
+    expect(code).not.toContain(`write: (scope, value) =>`);
     expect(code).toContain(`keyReadItem:`);
   });
 
