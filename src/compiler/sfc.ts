@@ -57,20 +57,21 @@ export type CompiledTachyonSfc = {
   template: CompiledTemplate;
 };
 
-export type TransformedSfcScript = {
+/** Frozen shared transform output. Copy the object and binding arrays before editing. */
+export type TransformedSfcScript = Readonly<{
   code: string;
   defaultScopeName?: string;
   /** Every top-level `<script setup>` declaration and runtime import. */
-  setupBindings: string[];
+  setupBindings: readonly string[];
   /** Bindings returned without external input; supplied input keeps every `setupBindings` entry. */
-  exposedBindings: string[];
+  exposedBindings: readonly string[];
   /**
    * `full` returns every setup binding on every call. `dual` also keeps the
    * no-input narrowed return, which generated entries never reach because they
    * normalize an omitted scope to `{}`.
    */
   scopeEmission: SfcScopeEmission;
-};
+}>;
 
 export type SfcScopeEmission = "full" | "dual";
 
@@ -662,8 +663,9 @@ const setupFactoryCode = (
   // Any supplied scope can replace local values with methods that observe all bindings.
   const fallback = narrowed ? `  if (inputScope !== undefined) return { ${fullEntries} };\n` : "";
   const parameter = narrowed ? "inputScope" : "inputScope = {}";
-  const indentedBody = body.flatMap((statement) => statement.split("\n").map((line) => `  ${line}`));
-  const factory = `const ${sfcSetupScopeName} = (${parameter}) => {\n${indentedBody.join("\n")}\n${fallback}  return { ${scopeEntries} };\n};\n`;
+  // Preserve whitespace inside multiline literals and escaped line continuations.
+  const bodyCode = body.join("\n");
+  const factory = `const ${sfcSetupScopeName} = (${parameter}) => {\n${bodyCode}\n${fallback}  return { ${scopeEntries} };\n};\n`;
   return [...imports, factory].join("\n");
 };
 
@@ -831,7 +833,7 @@ export const transformSfcScript = (
   options: TransformSfcScriptOptions = {},
 ): Result<TransformedSfcScript, CompilerError> => {
   if (!script || script.content.trim().length === 0) {
-    return ok({ code: "", setupBindings: [], exposedBindings: [], scopeEmission: "full" });
+    return freezeTransformedScript(ok({ code: "", setupBindings: [], exposedBindings: [], scopeEmission: "full" }));
   }
   const identifiers = options.templateIdentifiers ? [...options.templateIdentifiers].sort() : undefined;
   const cacheKey = JSON.stringify([script.attrs, script.content, identifiers]);

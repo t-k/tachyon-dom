@@ -276,3 +276,31 @@ it("evicts the least recently used transformed script once the cache is full", (
   expect(transformSfcScript(scriptFor(0))).toBe(first);
   expect(transformSfcScript(scriptFor(1))).not.toBe(second);
 });
+
+it.each(["setup", 'setup lang="ts"'])("preserves multiline literal values in %s", (attrs) => {
+  for (const literal of [
+    "`first\nsecond`",
+    "String.raw`first\nsecond`",
+    "`first\n  second\n\tthird`",
+    "'first\\\nsecond'",
+  ]) {
+    const content = `const value = ${literal};`;
+    const expected = new Function(`${content}; return value;`)();
+    expect(setupFactory(attrs, content)({}).value).toBe(expected);
+  }
+});
+
+it.each([undefined, { attrs: "setup", offset: 0, content: "" }, { attrs: "setup", offset: 0, content: " \n\t" }])(
+  "freezes empty transform results: %j",
+  (script) => {
+    const result = transformSfcScript(script);
+    if (!result.ok) throw new Error(result.error.message);
+    expect(Object.isFrozen(result.value)).toBe(true);
+    expect(Object.isFrozen(result.value.setupBindings)).toBe(true);
+    expect(Object.isFrozen(result.value.exposedBindings)).toBe(true);
+  },
+);
+
+it("preserves statement boundaries when setup omits semicolons", () => {
+  expect(setupFactory("setup", "const first = 1\nconst second = first + 1")({})).toEqual({ first: 1, second: 2 });
+});
