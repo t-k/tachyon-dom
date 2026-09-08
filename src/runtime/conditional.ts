@@ -480,6 +480,21 @@ const nodeAtState = (state: ConditionalState, path: readonly number[]): Node => 
 const bindingWithin = (boundaryPath: readonly number[], bindingPath: readonly number[]): boolean =>
   boundaryPath.length <= bindingPath.length && boundaryPath.every((part, index) => bindingPath[index] === part);
 
+/** The located boundary with the longest path containing the binding; a binding outside every boundary has none. */
+const innermostOwner = <T extends { boundary: { path?: readonly number[] } }>(
+  located: readonly T[],
+  bindingPath: readonly number[],
+): T | undefined => {
+  let owner: T | undefined;
+  for (const candidate of located) {
+    const path = candidate.boundary.path ?? [];
+    if (bindingWithin(path, bindingPath) && (!owner || path.length > (owner.boundary.path ?? []).length)) {
+      owner = candidate;
+    }
+  }
+  return owner;
+};
+
 const bindInteractive = (
   state: ConditionalState,
   options: ConditionalRuntimeOptions,
@@ -585,6 +600,9 @@ const setupHydration = (
     entries: Array<{ binding: ConditionalBinding; index: number }>;
   }> = [];
   for (const boundary of options.hydrationBoundaries ?? []) {
+    // Filled once every boundary is located: the innermost adopted boundary owns a binding, so a nested
+    // boundary never registers the same listener, control, or ref as the boundary around it.
+    const boundaryEntries: Array<{ binding: ConditionalBinding; index: number }> = [];
     const resolvedId = resolveBoundaryId(boundary, state.scope);
     if (resolvedId === undefined || resolvedId === null) {
       // Server nodes are being adopted through their markers, so an id that cannot be resolved must not fall
@@ -596,9 +614,6 @@ const setupHydration = (
       }
       continue;
     }
-    const boundaryEntries = options.bindings.flatMap((binding, index) =>
-      bindingWithin(boundary.path ?? [], binding.path) ? [{ binding, index }] : [],
-    );
     const handle = hydration.create(root, String(resolvedId), () => {
       const hydrationState = state.hydrationState!;
       const cleanups: Array<() => void> = [];
@@ -622,7 +637,6 @@ const setupHydration = (
         bindNodes(anchor, state, options, boundaryEntries, cleanups, true);
         // The scheduler runs outside the branch effect. Hand these bindings back to it so their reads track.
         for (const { binding } of boundaryEntries) {
-          if (hydrationState.bindings.has(binding)) continue;
           hydrationState.bindings.add(binding);
           newlyHydrated.push(binding);
         }
@@ -650,6 +664,9 @@ const setupHydration = (
     located.push({ boundary, handle: handle.value, entries: boundaryEntries });
   }
   if (located.length > 0) {
+    options.bindings.forEach((binding, index) => {
+      innermostOwner(located, binding.path)?.entries.push({ binding, index });
+    });
     state.hydrationState = { bindings: new Set(), revision: createStore({ value: 0 }), pending: new Set() };
   }
   // Phase 2: schedule.

@@ -339,35 +339,117 @@ it("releases a disposed boundary ref without consulting it again on branch dispo
   expect(gets).toBe(before);
 });
 
-it("preserves outer boundary subscriptions when a nested boundary is disposed", () => {
-  const value = createSignal("ready");
+const nestedHtml = `<!----><section><!--tachyon-hydrate:a:start--><article><p>outer</p><!--tachyon-hydrate:b:start--><aside><button>B</button><p>inner</p></aside><!--tachyon-hydrate:b:end--></article><!--tachyon-hydrate:a:end--></section>`;
+const nestedBoundaries = [
+  { ...boundaries[0]!, path: [0] },
+  { ...boundaries[1]!, path: [0, 1] },
+];
+const nestedFixture = () => {
+  const outerValue = createSignal("outer ready");
+  const innerValue = createSignal("inner ready");
   const refs: { current?: Element } = {};
+  let clicks = 0;
   const f = fixture(
     [
-      { kind: "text", path: [0, 0, 0, 0], read: () => value },
-      { kind: "ref", path: [0, 0], owner: () => refs, property: "current" },
+      { kind: "text", path: [0, 0, 0], read: () => outerValue },
+      { kind: "event", path: [0, 1, 0], eventName: "click", read: () => () => clicks++ },
+      { kind: "text", path: [0, 1, 1, 0], read: () => innerValue },
+      { kind: "ref", path: [0, 1], owner: () => refs, property: "current" },
     ],
-    [
-      { ...boundaries[0]!, path: [0] },
-      { ...boundaries[1]!, path: [0, 0] },
-    ],
+    nestedBoundaries,
     undefined,
-    `<!----><section><!--tachyon-hydrate:a:start--><article><!--tachyon-hydrate:b:start--><aside><p>initial</p></aside><!--tachyon-hydrate:b:end--></article><!--tachyon-hydrate:a:end--></section>`,
+    nestedHtml,
   );
-  try {
-    f.handles.get("a")!.hydrate();
-    f.handles.get("b")!.hydrate();
-    expect(f.panel.querySelector("p")!.textContent).toBe("ready");
-    f.handles.get("b")!.dispose();
-    value.set("outer still active");
-    expect(f.panel.querySelector("p")!.textContent).toBe("outer still active");
-    f.handles.get("b")!.hydrate();
-    f.handles.get("a")!.dispose();
-    expect(() => f.handles.get("b")!.dispose()).not.toThrow();
-  } finally {
-    f.dispose();
-  }
-  expect(refs.current).toBeUndefined();
+  const button = f.panel.querySelector("button") as HTMLButtonElement;
+  const texts = () => Array.from(f.panel.querySelectorAll("p"), (p) => p.textContent);
+  return { ...f, outerValue, innerValue, refs, button, texts, clicks: () => clicks };
+};
+
+describe("nested hydration boundaries own their bindings exclusively", () => {
+  it.each([
+    ["outer then inner", ["a", "b"]],
+    ["inner then outer", ["b", "a"]],
+  ] as const)("fires a nested event binding once per click when hydrated %s", (_, order) => {
+    const f = nestedFixture();
+    try {
+      for (const id of order) f.handles.get(id)!.hydrate();
+      expect(f.texts()).toEqual(["outer ready", "inner ready"]);
+      f.button.click();
+      expect(f.clicks()).toBe(1);
+      expect(f.refs.current).toBe(f.panel.querySelector("aside"));
+      for (const id of order) f.handles.get(id)!.dispose();
+      f.button.click();
+      expect(f.clicks()).toBe(1);
+      expect(f.refs.current).toBeUndefined();
+    } finally {
+      f.dispose();
+    }
+  });
+
+  it("leaves the inner boundary inert until it hydrates on its own", () => {
+    const f = nestedFixture();
+    try {
+      f.handles.get("a")!.hydrate();
+      f.button.click();
+      expect(f.clicks()).toBe(0);
+      expect(f.texts()).toEqual(["outer ready", "inner"]);
+      expect(f.refs.current).toBeUndefined();
+      f.handles.get("b")!.hydrate();
+      f.button.click();
+      expect(f.clicks()).toBe(1);
+      expect(f.texts()).toEqual(["outer ready", "inner ready"]);
+    } finally {
+      f.dispose();
+    }
+  });
+
+  it("preserves outer boundary subscriptions when the nested boundary is disposed first", () => {
+    const f = nestedFixture();
+    try {
+      f.handles.get("a")!.hydrate();
+      f.handles.get("b")!.hydrate();
+      f.handles.get("b")!.dispose();
+      expect(f.handles.get("a")!.hydrated()).toBe(true);
+      expect(f.handles.get("b")!.hydrated()).toBe(false);
+      f.button.click();
+      expect(f.clicks()).toBe(0);
+      f.outerValue.set("outer still active");
+      f.innerValue.set("inner detached");
+      expect(f.texts()).toEqual(["outer still active", "inner ready"]);
+      f.handles.get("b")!.hydrate();
+      expect(f.texts()).toEqual(["outer still active", "inner detached"]);
+      f.button.click();
+      expect(f.clicks()).toBe(1);
+      f.handles.get("a")!.dispose();
+      expect(() => f.handles.get("b")!.dispose()).not.toThrow();
+    } finally {
+      f.dispose();
+    }
+    expect(f.refs.current).toBeUndefined();
+  });
+
+  it("preserves inner boundary subscriptions when the outer boundary is disposed first", () => {
+    const f = nestedFixture();
+    try {
+      f.handles.get("b")!.hydrate();
+      f.handles.get("a")!.hydrate();
+      f.handles.get("a")!.dispose();
+      expect(f.handles.get("a")!.hydrated()).toBe(false);
+      expect(f.handles.get("b")!.hydrated()).toBe(true);
+      f.outerValue.set("outer detached");
+      f.innerValue.set("inner still active");
+      expect(f.texts()).toEqual(["outer ready", "inner still active"]);
+      f.button.click();
+      expect(f.clicks()).toBe(1);
+      expect(f.refs.current).toBe(f.panel.querySelector("aside"));
+      f.handles.get("b")!.dispose();
+      f.button.click();
+      expect(f.clicks()).toBe(1);
+      expect(f.refs.current).toBeUndefined();
+    } finally {
+      f.dispose();
+    }
+  });
 });
 
 it("releases hydrated refs before eager refs regardless of eager updates", () => {

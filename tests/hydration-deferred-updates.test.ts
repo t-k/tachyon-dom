@@ -407,6 +407,71 @@ describe("a null id is treated like a missing one", () => {
   });
 });
 
+describe("nested hydration boundaries in generated templates", () => {
+  it("fires a click handler inside a nested branch boundary once after both boundaries hydrate", async () => {
+    const compiled = compileTemplate(
+      `<main><if test={shown}><section hydrate:interaction="click"><p>{outerCount}</p><div hydrate:interaction="click"><button on:click={go}>Go</button><span>{innerCount}</span></div></section></if></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, { shown: true, outerCount: 1, innerCount: 1, go: () => {} });
+    const shown = createSignal(true);
+    const outerCount = createSignal(1);
+    const innerCount = createSignal(1);
+    let calls = 0;
+    const result = hydrate(root, module, { shown, outerCount, innerCount, go: () => calls++ });
+    expect(result.ok).toBe(true);
+    const button = root.querySelector("button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Missing button.");
+
+    // The click bubbles through both boundaries and hydrates both; the replayed click reaches one handler.
+    button.click();
+    await Promise.resolve();
+    expect(calls).toBe(1);
+    button.click();
+    expect(calls).toBe(2);
+    outerCount.set(2);
+    innerCount.set(3);
+    expect(root.querySelector("p")?.textContent).toBe("2");
+    expect(root.querySelector("span")?.textContent).toBe("3");
+
+    shown.set(false);
+    button.click();
+    expect(calls).toBe(2);
+    if (result.ok) result.value.dispose();
+  });
+
+  it("fires a click handler inside a nested row boundary once after both boundaries hydrate", async () => {
+    const compiled = compileTemplate(
+      `<main><ul><for each={rows} key={row.id}><li><section hydrate:id={row.id} hydrate:interaction="click"><p>{row.label}:{suffix}</p><div hydrate:id={row.id + "-inner"} hydrate:interaction="click"><button on:click={select}>Go</button></div></section></li></for></ul></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const rows = [{ id: "a", label: "A" }];
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, { rows, suffix: "one", select: () => {} });
+    expect(root.innerHTML).toContain("tachyon-hydrate:a-inner:start");
+    const suffix = createSignal("one");
+    let calls = 0;
+    const result = hydrate(root, module, { rows, suffix, select: () => calls++ });
+    expect(result.ok).toBe(true);
+    const button = root.querySelector("button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Missing button.");
+
+    button.click();
+    await Promise.resolve();
+    expect(calls).toBe(1);
+    button.click();
+    expect(calls).toBe(2);
+    suffix.set("two");
+    expect(root.querySelector("p")?.textContent).toBe("A:two");
+    if (result.ok) result.value.dispose();
+    button.click();
+    expect(calls).toBe(2);
+  });
+});
+
 describe("nested list descriptors are handed to their entry by identity", () => {
   it("passes the row binding itself and the parent scope beside it from a list row", () => {
     const compiled = compileTemplate(

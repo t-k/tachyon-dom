@@ -83,9 +83,7 @@ describe("mountKeyedList", () => {
       key: "item.id",
       itemName: "item",
       templateHtml: `<li><input></li>`,
-      bindings: [
-        { kind: "model" as const, path: [0], property: "value" as const, expression: "item.draft", ...model },
-      ],
+      bindings: [{ kind: "model" as const, path: [0], property: "value" as const, expression: "item.draft", ...model }],
     });
     const drive = (model: Record<string, unknown>, item: { id: string; draft: string }) => {
       const root = document.createElement("ul");
@@ -100,7 +98,10 @@ describe("mountKeyedList", () => {
 
     expect(drive({}, { id: "a", draft: "typed" })).toBe("edited");
     expect(
-      drive({ read: (scope: Record<string, unknown>) => (scope.item as { draft: string }).draft }, { id: "a", draft: "typed" }),
+      drive(
+        { read: (scope: Record<string, unknown>) => (scope.item as { draft: string }).draft },
+        { id: "a", draft: "typed" },
+      ),
     ).toBe("edited");
     // An explicit writer owns the write outright, so the path string is never walked.
     const item = { id: "a", draft: "typed" };
@@ -342,9 +343,7 @@ describe("mountKeyedList", () => {
       itemName: "item",
       templateHtml: `<li> </li>`,
       bindings: [{ kind: "text" as const, path: [0], expression: "label" }],
-      components: [
-        { path: [], name: "Row", props: [{ name: "label", expression: "item.label" }], stores: [] },
-      ],
+      components: [{ path: [], name: "Row", props: [{ name: "label", expression: "item.label" }], stores: [] }],
     };
 
     mountKeyedList(root, [], [item], options);
@@ -1627,6 +1626,56 @@ describe("mountKeyedList", () => {
 
     mountKeyedList(root, [], [second], options);
     reorderedButton.click();
+    expect(calls).toEqual(["a", "a"]);
+  });
+
+  it("lets the innermost row boundary own a nested event binding so it fires once", () => {
+    document.body.innerHTML = `<ul id="items"><!--tachyon-hydrate:a:start--><li><p>Server A</p><!--tachyon-hydrate:a-inner:start--><span><button>Go</button></span><!--tachyon-hydrate:a-inner:end--></li><!--tachyon-hydrate:a:end--></ul>`;
+    const root = document.querySelector("#items");
+    if (!(root instanceof HTMLElement)) throw new Error("Missing test root.");
+    const calls: string[] = [];
+    const options = {
+      signature: "row-nested-hydration",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><p> </p><span><button>Go</button></span></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "item.label" },
+        {
+          kind: "event" as const,
+          path: [1, 0],
+          eventName: "click",
+          handler: "item.onClick",
+          read: (scope: Record<string, unknown>) => (scope.item as { onClick: () => void }).onClick,
+        },
+      ],
+      hydrationBoundaries: [
+        { path: [], id: "item.id", idKind: "expression" as const, strategy: "load" as const },
+        {
+          path: [1],
+          id: "item.innerId",
+          idKind: "expression" as const,
+          strategy: "interaction" as const,
+          interaction: "click",
+        },
+      ],
+    };
+    const item = { id: "a", innerId: "a-inner", label: "A", onClick: () => calls.push("a") };
+
+    mountKeyedList(root, [], [item], options);
+    const button = root.querySelector("button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Missing button.");
+    // The outer boundary hydrated on load and owns the text, not the button inside the inner boundary.
+    expect(root.querySelector("p")?.textContent).toBe("A");
+    expect(calls).toEqual([]);
+
+    button.click();
+    expect(calls).toEqual(["a"]);
+    button.click();
+    expect(calls).toEqual(["a", "a"]);
+
+    mountKeyedList(root, [], [], options);
+    button.click();
     expect(calls).toEqual(["a", "a"]);
   });
 

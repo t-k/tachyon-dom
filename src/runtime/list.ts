@@ -331,8 +331,11 @@ const readBinding = (
 const readHandler = (scope: Record<string, unknown>, binding: EventBinding): unknown =>
   binding.read ? binding.read(scope) : readPath(scope, binding.handler ?? "");
 
-const readExpression = (scope: Record<string, unknown>, expression: string | undefined, reader?: ExpressionReader): unknown =>
-  read(reader ? reader(scope) : readLiteralExpression(scope, expression ?? ""));
+const readExpression = (
+  scope: Record<string, unknown>,
+  expression: string | undefined,
+  reader?: ExpressionReader,
+): unknown => read(reader ? reader(scope) : readLiteralExpression(scope, expression ?? ""));
 
 const readLiteralExpression = (scope: Record<string, unknown>, expression: string): unknown => {
   const value = expression.trim();
@@ -825,11 +828,17 @@ const createRecord = (
     // Phase 1: locate every boundary of this row before starting any
     // listener or effect. Adopted SSR rows must have well-formed markers;
     // rows created on the client have none and bind eagerly.
-    const located: Array<{ boundary: HydrationPlan["boundary"]; handle: HydrationBoundaryHandle; plan: BindingPlan }> =
-      [];
+    const located: Array<{
+      boundary: HydrationPlan["boundary"];
+      handle: HydrationBoundaryHandle;
+      owned: { plan: BindingPlan };
+    }> = [];
     const hydration = options.hydration;
     for (const hydrationPlan of state.hydrationPlans) {
-      const { boundary, bindings: boundaryPlan } = hydrationPlan;
+      const { boundary } = hydrationPlan;
+      // Narrowed once every boundary is located: the innermost adopted boundary owns a binding, so a nested
+      // boundary never registers the same listener or control as the boundary around it.
+      const owned = { plan: hydrationPlan.bindings };
       const resolvedId = resolveBoundaryId(boundary, scope);
       if (resolvedId === undefined || resolvedId === null) {
         // A server row is being adopted through its markers, so an id that cannot be resolved must not fall
@@ -839,19 +848,33 @@ const createRecord = (
       }
       const handle = hydration.create(record.element.parentElement ?? record.element, String(resolvedId), () => {
         const cleanups: Array<() => void> = [];
-        bindRow(record, options, boundaryPlan, cleanups);
+        bindRow(record, options, owned.plan, cleanups);
         return () => runCleanups(cleanups);
       });
       if (handle.ok) {
-        located.push({ boundary, handle: handle.value, plan: boundaryPlan });
+        located.push({ boundary, handle: handle.value, owned });
         continue;
       }
       if (adopted || handle.error.kind !== "missing") {
         throw new Error(`Hydration boundary for list row ${String(key)} could not be adopted: ${handle.error.message}`);
       }
     }
+    if (located.length > 1) {
+      for (const entry of located) {
+        const depth = (entry.boundary.path ?? []).length;
+        entry.owned.plan = bindingPlanFromEntries(
+          entry.owned.plan.all.filter(
+            ({ binding }) =>
+              !located.some((other) => {
+                const path = other.boundary.path ?? [];
+                return path.length > depth && bindingWithin(path, binding.path);
+              }),
+          ),
+        );
+      }
+    }
     // Phase 2: schedule the located boundaries.
-    for (const { boundary, handle, plan } of located) {
+    for (const { boundary, handle, owned } of located) {
       record.hydrationBoundaries.push(handle);
       record.hydrationCleanups.push(
         hydration.schedule(handle, {
@@ -863,7 +886,7 @@ const createRecord = (
         }),
       );
       record.hydrationCleanups.push(() => handle.dispose());
-      for (const { binding } of plan.all) deferredBindings.add(binding);
+      for (const { binding } of owned.plan.all) deferredBindings.add(binding);
     }
     // Rows created on the client have no SSR hydration markers, so every
     // binding whose boundary could not be adopted is bound eagerly. Only
@@ -1182,8 +1205,7 @@ const generatedAccessors = {
     _expression: string | undefined,
     reader: ExpressionReader | undefined,
   ) => read((reader as ExpressionReader)(scope)),
-  applyValue: (binding: Binding, node: Node, value: unknown) =>
-    (binding as { apply: ValueApplier }).apply(node, value),
+  applyValue: (binding: Binding, node: Node, value: unknown) => (binding as { apply: ValueApplier }).apply(node, value),
   mountList: (
     binding: NestedListBinding,
     container: Element,
@@ -1194,12 +1216,8 @@ const generatedAccessors = {
     bindRef(scope, binding.owner as ExpressionReader, binding.property as string, element),
   bindControlTarget: (scope: Record<string, unknown>, binding: ModelBinding, element: Element) =>
     (binding as { bind: TargetBinder }).bind(scope, element),
-  mountBranch: (
-    binding: NestedConditionalBinding,
-    node: Node,
-    visible: unknown,
-    scope: Record<string, unknown>,
-  ) => (binding.mount as BranchMounter)(node, [], visible, scope, binding),
+  mountBranch: (binding: NestedConditionalBinding, node: Node, visible: unknown, scope: Record<string, unknown>) =>
+    (binding.mount as BranchMounter)(node, [], visible, scope, binding),
 } as const;
 
 // A generated descriptor is built once per bind and handed back on every update, and a nested list's descriptor
@@ -1269,12 +1287,8 @@ const legacyAccessors = {
         writeModelValue(target, value, () => writePath(scope, binding.expression ?? "", value));
       },
     ),
-  mountBranch: (
-    binding: NestedConditionalBinding,
-    node: Node,
-    visible: unknown,
-    scope: Record<string, unknown>,
-  ) => mountConditional(node, [], visible, scope, binding),
+  mountBranch: (binding: NestedConditionalBinding, node: Node, visible: unknown, scope: Record<string, unknown>) =>
+    mountConditional(node, [], visible, scope, binding),
   hydration: { create: createHydrationBoundary, schedule: scheduleHydration },
 } as const;
 

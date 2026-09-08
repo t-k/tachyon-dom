@@ -1268,9 +1268,19 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     template.client.hydrationBoundaries.some((boundary) =>
       boundary.path.every((part, index) => binding.path[index] === part),
     );
+  // A boundary nested inside this chunk's root loads through its own chunk, so the innermost boundary owns the
+  // bindings inside it and this chunk never registers them a second time.
+  const withinNestedHydrationBoundary = (binding: ClientBinding): boolean =>
+    template.client.hydrationBoundaries.some(
+      (boundary) => boundary.path.length > 0 && boundary.path.every((part, index) => binding.path[index] === part),
+    );
   // A hydrate-only module removes boundary bindings at generation time, so the
   // runtime imports below are computed from the eager bindings alone.
-  const bindings = hydrateOnly ? allBindings.filter((binding) => !withinHydrationBoundary(binding)) : allBindings;
+  const bindings = hydrateOnly
+    ? allBindings.filter((binding) => !withinHydrationBoundary(binding))
+    : options.hydrationChunk === true
+      ? allBindings.filter((binding) => !withinNestedHydrationBoundary(binding))
+      : allBindings;
   const hydrationDynamicAttributes = allBindings.flatMap((binding) => {
     if (binding.kind === "attr") {
       return [{ path: binding.path, name: binding.name }];

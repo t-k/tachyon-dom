@@ -1405,6 +1405,26 @@ describe("HTML-first compiler", () => {
     expect(chunk).toContain("__tachyonContext");
   });
 
+  it("leaves bindings inside a nested boundary to that boundary's own chunk", () => {
+    const result = compileTemplate(
+      `<main><section hydrate:id="outer" hydrate:visible><p>{a}</p><div hydrate:id="inner" hydrate:interaction="click"><button on:click={go}>Go</button><span>{b}</span></div></section></main>`,
+    );
+    if (!result.ok) throw new Error(result.error.message);
+    const [outer, inner] = result.value.client.hydrationBoundaries;
+    if (!outer || !inner) throw new Error("Missing boundaries.");
+    expect(inner.path).toEqual([...outer.path, 1]);
+
+    const outerChunk = generateClientHydrationChunkModule(result.value, outer.id, { reactive: true });
+    expect(outerChunk).toContain("scope.a");
+    expect(outerChunk).not.toContain("scope.go");
+    expect(outerChunk).not.toContain("scope.b");
+
+    const innerChunk = generateClientHydrationChunkModule(result.value, inner.id, { reactive: true });
+    expect(innerChunk).toContain("scope.go");
+    expect(innerChunk).toContain("scope.b");
+    expect(innerChunk).not.toContain("scope.a");
+  });
+
   it("records template source spans for client bindings and allows instrumentation to be disabled", () => {
     const source = `<main><h1 class:on={active}>{ title }</h1><if test={show}><p>{note}</p></if><ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul></main>`;
     const result = compileTemplate(source);
