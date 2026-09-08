@@ -13,20 +13,15 @@
     "src/runtime/conditional.ts:484:0-498:0",
     "src/runtime/conditional.ts:585:0-798:0",
     "src/runtime/list.ts:826:0-905:0",
-    "src/compiler/sfc.ts:60:0-70:0",
-    "src/compiler/sfc.ts:390:0-406:0",
-    "src/compiler/sfc.ts:640:0-662:0",
     "src/compiler/targets/client.ts:731:0-744:0",
-    "src/compiler/targets/client.ts:1270:0-1285:0"
+    "src/compiler/targets/client.ts:1270:0-1285:0",
+    "src/compiler/sfc.ts:451:0-467:0",
+    "src/compiler/sfc.ts:64:0-139:0",
+    "src/compiler/sfc.ts:707:0-751:0",
+    "src/compiler/sfc.ts:762:0-769:0"
   ],
-  "plugins": [
-    "./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"
-  ],
-  "reporters": [
-    "clear-text",
-    "html",
-    "json"
-  ],
+  "plugins": ["./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"],
+  "reporters": ["clear-text", "html", "json"],
   "testRunner": "vitest",
   "thresholds": {
     "high": 80,
@@ -37,11 +32,5 @@
     "configFile": "vitest.hydration-mutation.config.ts",
     "related": true
   },
-  "ignorePatterns": [
-    "docs.local",
-    "tests/browser/generated",
-    "test-results",
-    "benchmark",
-    ".worktree"
-  ]
+  "ignorePatterns": ["docs.local", "tests/browser/generated", "test-results", "benchmark", ".worktree"]
 }
