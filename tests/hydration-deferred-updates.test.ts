@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { compileTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
 import { mountConditional } from "../src/runtime/conditional";
+import { prepareConditionalCore } from "../src/runtime/conditional-core";
 import { mountKeyedList } from "../src/runtime/list";
 import { hydrate, mount } from "../src/runtime/mount";
 import { createSignal } from "../src/runtime/signal";
@@ -300,5 +301,93 @@ describe("an id that resolves to nothing while adopting server nodes is an error
     count.set(2);
     expect(root.querySelector("p")?.textContent).toBe("2");
     handle.dispose();
+  });
+});
+
+describe("hand-written descriptors still resolve an expression id as a path", () => {
+  it("defers a hand-written row boundary whose id is a dotted path", async () => {
+    const root = document.createElement("ul");
+    root.innerHTML = `<li><!--tachyon-hydrate:row-a:start--><button>A</button><!--tachyon-hydrate:row-a:end--></li>`;
+    const button = root.querySelector("button");
+    if (!(button instanceof HTMLButtonElement)) throw new Error("Missing SSR button.");
+    const select = vi.fn();
+    let labelReads = 0;
+    const row = {
+      id: "a",
+      marker: { id: "row-a" },
+      get label() {
+        labelReads++;
+        return "A";
+      },
+    };
+    mountKeyedList(root, [], [row], {
+      key: "row.id",
+      itemName: "row",
+      templateHtml: `<li><button> </button></li>`,
+      bindings: [
+        { kind: "text", path: [0, 0], expression: "row.label" },
+        { kind: "event", path: [0], eventName: "click", handler: "select" },
+      ],
+      hydrationBoundaries: [{ path: [0], id: "row.marker.id", idKind: "expression", strategy: "interaction" }],
+      scope: { select },
+    });
+    expect(labelReads).toBe(0);
+
+    button.click();
+    await Promise.resolve();
+    expect(select).toHaveBeenCalledTimes(1);
+    expect(labelReads).toBeGreaterThan(0);
+  });
+
+  it("defers a hand-written branch boundary whose id is a dotted path", async () => {
+    const root = document.createElement("main");
+    root.innerHTML = `<!--tachyon-hydrate:panel:start--><section><p>1</p></section><!--tachyon-hydrate:panel:end-->`;
+    const paragraph = root.querySelector("p");
+    if (!(paragraph instanceof HTMLParagraphElement)) throw new Error("Missing SSR paragraph.");
+    // The branch snapshots its scope on mount, so the read count cannot tell deferral apart; the DOM can.
+    const scope = { marker: { id: "panel" }, count: 2 };
+    prepareConditionalCore(root, [{ path: [0], visible: true, templateHtml: `<section><p> </p></section>` }]);
+    mountConditional(root, [0], true, scope, {
+      templateHtml: `<section><p> </p></section>`,
+      bindings: [{ kind: "text", path: [0, 0], expression: "count" }],
+      hydrationBoundaries: [{ path: [], id: "marker.id", idKind: "expression", strategy: "interaction" }],
+    });
+    expect(root.querySelector("p")).toBe(paragraph);
+    expect(paragraph.textContent).toBe("1");
+
+    paragraph.click();
+    await Promise.resolve();
+    expect(paragraph.textContent).toBe("2");
+  });
+});
+
+describe("a null id is treated like a missing one", () => {
+  it("rejects a branch whose id resolves to null while adopting server nodes", () => {
+    const compiled = compileTemplate(
+      `<main><if test={shown}><section hydrate:id={boundaryId} hydrate:interaction="click"><p>{count}</p><input bind:value={draft}></section></if></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, { shown: true, boundaryId: "panel", count: 1, draft: "" });
+
+    const result = hydrate(root, module, { shown: true, boundaryId: null, count: 1, draft: "" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain("resolved to no value");
+  });
+
+  it("rejects a row whose id resolves to null while adopting server rows", () => {
+    const compiled = compileTemplate(
+      `<main><ul><for each={rows} key={row.id}><li><button hydrate:id={row.boundary} hydrate:interaction="click" on:click={select}>{row.label}</button></li></for></ul></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    const select = vi.fn();
+    root.innerHTML = renderServerTemplate(compiled.value, { rows: [{ id: "a", label: "A", boundary: "row-a" }], select });
+
+    const result = hydrate(root, module, { rows: [{ id: "a", label: "A", boundary: null }], select });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain("resolved to no value");
   });
 });
