@@ -18,55 +18,58 @@ afterEach(() => {
 // signal after hydration and reads the DOM again.
 
 describe("deferred hydration boundaries keep following their signals", () => {
-  it("updates a text binding inside an interaction-hydrated branch when only its signal changes", async () => {
-    const compiled = compileTemplate(
-      `<main><if test={shown}><section hydrate:id={boundaryId} hydrate:interaction="click"><p>{count}</p><input bind:value={draft}></section></if></main>`,
-    );
-    if (!compiled.ok) throw new Error(compiled.error.message);
-    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
-    const root = document.createElement("div");
-    root.innerHTML = renderServerTemplate(compiled.value, {
-      shown: true,
-      boundaryId: "panel",
-      count: 1,
-      draft: "hello",
-    });
-    const paragraph = root.querySelector("p");
-    const input = root.querySelector("input");
-    if (!(paragraph instanceof HTMLParagraphElement) || !(input instanceof HTMLInputElement)) {
-      throw new Error("Missing SSR nodes.");
-    }
-    const shown = createSignal(true);
-    const count = createSignal(1);
-    const draft = createSignal("hello");
+  it.each(["hydrate:id={boundaryId}", ""])(
+    "updates a text binding inside an interaction-hydrated branch when only its signal changes (%s)",
+    async (idAttribute) => {
+      const compiled = compileTemplate(
+        `<main><if test={shown}><section ${idAttribute} hydrate:interaction="click"><p>{count}</p><input bind:value={draft}></section></if></main>`,
+      );
+      if (!compiled.ok) throw new Error(compiled.error.message);
+      const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+      const root = document.createElement("div");
+      root.innerHTML = renderServerTemplate(compiled.value, {
+        shown: true,
+        boundaryId: "panel",
+        count: 1,
+        draft: "hello",
+      });
+      const paragraph = root.querySelector("p");
+      const input = root.querySelector("input");
+      if (!(paragraph instanceof HTMLParagraphElement) || !(input instanceof HTMLInputElement)) {
+        throw new Error("Missing SSR nodes.");
+      }
+      const shown = createSignal(true);
+      const count = createSignal(1);
+      const draft = createSignal("hello");
 
-    const result = hydrate(root, module, { shown, boundaryId: "panel", count, draft });
-    expect(result.ok).toBe(true);
-    // Deferred: the branch adopted the SSR nodes without reading count.
-    count.set(2);
-    expect(paragraph.textContent).toBe("1");
+      const result = hydrate(root, module, { shown, boundaryId: "panel", count, draft });
+      expect(result.ok).toBe(true);
+      // Deferred: the branch adopted the SSR nodes without reading count.
+      count.set(2);
+      expect(paragraph.textContent).toBe("1");
 
-    paragraph.click();
-    await Promise.resolve();
-    expect(paragraph.textContent).toBe("2");
-    expect(input.value).toBe("hello");
+      paragraph.click();
+      await Promise.resolve();
+      expect(paragraph.textContent).toBe("2");
+      expect(input.value).toBe("hello");
 
-    // Only the signal changes: neither the branch test nor the parent scope moves.
-    count.set(3);
-    expect(paragraph.textContent).toBe("3");
-    draft.set("edited");
-    expect(input.value).toBe("edited");
+      // Only the signal changes: neither the branch test nor the parent scope moves.
+      count.set(3);
+      expect(paragraph.textContent).toBe("3");
+      draft.set("edited");
+      expect(input.value).toBe("edited");
 
-    // The form binding was registered once: one user edit writes once.
-    input.value = "typed";
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    expect(draft()).toBe("typed");
+      // The form binding was registered once: one user edit writes once.
+      input.value = "typed";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(draft()).toBe("typed");
 
-    shown.set(false);
-    expect(root.querySelector("section")).toBeNull();
-    count.set(4);
-    if (result.ok) result.value.dispose();
-  });
+      shown.set(false);
+      expect(root.querySelector("section")).toBeNull();
+      count.set(4);
+      if (result.ok) result.value.dispose();
+    },
+  );
 
   it("updates a text binding inside an interaction-hydrated row when only its signal changes", async () => {
     const compiled = compileTemplate(
@@ -225,7 +228,15 @@ describe("hand-written descriptors are serialized once per container", () => {
     expect(root.textContent).toBe("A");
 
     const stringify = vi.spyOn(JSON, "stringify");
-    mountKeyedList(root, [], [{ id: "a", label: "A2" }, { id: "b", label: "B" }], options);
+    mountKeyedList(
+      root,
+      [],
+      [
+        { id: "a", label: "A2" },
+        { id: "b", label: "B" },
+      ],
+      options,
+    );
     expect(root.textContent).toBe("A2B");
     expect(stringify).not.toHaveBeenCalled();
 
@@ -385,7 +396,10 @@ describe("a null id is treated like a missing one", () => {
     const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
     const root = document.createElement("div");
     const select = vi.fn();
-    root.innerHTML = renderServerTemplate(compiled.value, { rows: [{ id: "a", label: "A", boundary: "row-a" }], select });
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      rows: [{ id: "a", label: "A", boundary: "row-a" }],
+      select,
+    });
 
     const result = hydrate(root, module, { rows: [{ id: "a", label: "A", boundary: null }], select });
     expect(result.ok).toBe(false);

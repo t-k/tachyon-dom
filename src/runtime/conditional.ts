@@ -5,7 +5,7 @@ import { bindControl, setControlValue, writeModelValue } from "./form.js";
 import { mountKeyedList } from "./list.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { setText, textAt } from "./text.js";
-import { createSignal, createStore, onOwnerCleanup, read, type Signal } from "./signal.js";
+import { createStore, onOwnerCleanup, read } from "./signal.js";
 import { setPreparedConditionalNodeCount, takePreparedConditionalNodes } from "./conditional-prepared.js";
 import {
   createHydrationBoundary,
@@ -229,10 +229,14 @@ type ConditionalState = {
   hydrationBoundaries: HydrationBoundaryHandle[];
   hydrationCleanups: Array<() => void>;
   hydrationDeferredBindings: Set<ConditionalBinding>;
-  /** Deferred bindings whose boundary has hydrated: the branch updates them again on every later run. */
-  hydratedBindings: Set<ConditionalBinding>;
-  /** Bumped when a boundary hydrates, so the effect driving the branch runs again and subscribes to what it bound. */
-  hydrationRevision: Signal<number>;
+  /** Allocated only when this branch adopts a hydration boundary. */
+  hydrationState:
+    | {
+        bindings: Set<ConditionalBinding>;
+        revision: { value: number };
+        pending: Set<(error: unknown) => void>;
+      }
+    | undefined;
 };
 
 const states = new WeakMap<Comment, ConditionalState>();
@@ -416,7 +420,7 @@ const cleanup = (state: ConditionalState): void => {
   }
   state.hydrationBoundaries.splice(0);
   state.hydrationDeferredBindings.clear();
-  state.hydratedBindings.clear();
+  state.hydrationState?.bindings.clear();
   try {
     runCleanups(state.cleanups);
   } catch (error) {
@@ -596,25 +600,40 @@ const setupHydration = (
       bindingWithin(boundary.path ?? [], binding.path) ? [{ binding, index }] : [],
     );
     const handle = hydration.create(root, String(resolvedId), () => {
+      const hydrationState = state.hydrationState!;
       const cleanups: Array<() => void> = [];
       const newlyHydrated: ConditionalBinding[] = [];
+      let failure: { error: unknown } | undefined;
       const dispose = () => {
-        for (const binding of newlyHydrated) state.hydratedBindings.delete(binding);
+        hydrationState.pending.delete(rollback);
+        for (const binding of newlyHydrated) hydrationState.bindings.delete(binding);
         runCleanups(cleanups);
+      };
+      const rollback = (error: unknown) => {
+        if (failure) return;
+        failure = { error };
+        try {
+          dispose();
+        } finally {
+          if (handle.ok) handle.value.dispose();
+        }
       };
       try {
         bindNodes(anchor, state, options, boundaryEntries, cleanups, true);
         // The scheduler runs outside the branch effect. Hand these bindings back to it so their reads track.
         for (const { binding } of boundaryEntries) {
-          if (state.hydratedBindings.has(binding)) continue;
-          state.hydratedBindings.add(binding);
+          if (hydrationState.bindings.has(binding)) continue;
+          hydrationState.bindings.add(binding);
           newlyHydrated.push(binding);
         }
-        state.hydrationRevision.update((value) => value + 1);
+        hydrationState.pending.add(rollback);
+        hydrationState.revision.value++;
+        // An error owner may consume a synchronous effect error after the re-tracking path rolls us back.
+        if (failure) throw failure.error;
         return dispose;
       } catch (error) {
         try {
-          dispose();
+          rollback(error);
         } catch {
           // All disposers run; preserve the initialization failure if a disposer also throws.
         }
@@ -629,6 +648,9 @@ const setupHydration = (
       throw new Error(`Conditional hydration boundary could not be adopted: ${handle.error.message}`);
     }
     located.push({ boundary, handle: handle.value, entries: boundaryEntries });
+  }
+  if (located.length > 0) {
+    state.hydrationState = { bindings: new Set(), revision: createStore({ value: 0 }), pending: new Set() };
   }
   // Phase 2: schedule.
   for (const { boundary, handle, entries } of located) {
@@ -654,6 +676,7 @@ const mountResolvedConditional = (
   visible: unknown,
   scope: Record<string, unknown>,
   options: ConditionalRuntimeOptions,
+  setup: typeof setupHydration | undefined,
 ): void => {
   const anchor = nodeAt(root, path);
   if (!(anchor instanceof Comment)) {
@@ -694,8 +717,7 @@ const mountResolvedConditional = (
           hydrationBoundaries: [],
           hydrationCleanups: [],
           hydrationDeferredBindings: new Set<ConditionalBinding>(),
-          hydratedBindings: new Set<ConditionalBinding>(),
-          hydrationRevision: createSignal(0),
+          hydrationState: undefined,
         };
   states.set(anchor, state);
   if (state !== current) {
@@ -713,26 +735,42 @@ const mountResolvedConditional = (
     });
     if (disposer) ownerCleanupDisposers.set(anchor, disposer);
   }
-  if (state !== current) {
-    if (!adoptedNodes) anchor.after(...state.nodes);
-    state.hydrationDeferredBindings = setupHydration(anchor, state, options, adoptedNodes !== undefined);
-  } else {
-    updateScope(state, scope, options);
+  try {
+    if (state !== current) {
+      if (!adoptedNodes) anchor.after(...state.nodes);
+      state.hydrationDeferredBindings = setup?.(anchor, state, options, adoptedNodes !== undefined) ?? new Set();
+    } else {
+      updateScope(state, scope, options);
+    }
+    setPreparedConditionalNodeCount(anchor, state.nodes.length);
+    // Read after the boundaries are set up: a "load" boundary hydrates synchronously above, and a later one must
+    // run this effect again once it has bound its part.
+    const hydrationState = state.hydrationState;
+    if (hydrationState) void hydrationState.revision.value;
+    const entries = options.bindings.flatMap((binding, index) =>
+      state.hydrationDeferredBindings.has(binding) ? [] : [{ binding, index }],
+    );
+    bindNodes(anchor, state, options, entries, state.cleanups, !state.interactiveBindingsBound);
+    if (!hydrationState || hydrationState.bindings.size === 0) {
+      hydrationState?.pending.clear();
+      return;
+    }
+    // A hydrated boundary already registered its listeners and controls; only its values are refreshed here.
+    const hydratedEntries = options.bindings.flatMap((binding, index) =>
+      hydrationState.bindings.has(binding) ? [{ binding, index }] : [],
+    );
+    bindNodes(anchor, state, options, hydratedEntries, state.cleanups, false);
+    hydrationState.pending.clear();
+  } catch (error) {
+    for (const rollback of state.hydrationState?.pending ?? []) {
+      try {
+        rollback(error);
+      } catch {
+        // Roll back every pending boundary, retaining the update failure over cleanup failures.
+      }
+    }
+    throw error;
   }
-  setPreparedConditionalNodeCount(anchor, state.nodes.length);
-  // Read after the boundaries are set up: a "load" boundary hydrates synchronously above, and a later one must
-  // run this effect again once it has bound its part.
-  if (state.hydrationDeferredBindings.size > 0) state.hydrationRevision();
-  const entries = options.bindings.flatMap((binding, index) =>
-    state.hydrationDeferredBindings.has(binding) ? [] : [{ binding, index }],
-  );
-  bindNodes(anchor, state, options, entries, state.cleanups, !state.interactiveBindingsBound);
-  if (state.hydratedBindings.size === 0) return;
-  // A hydrated boundary already registered its listeners and controls; only its values are refreshed here.
-  const hydratedEntries = options.bindings.flatMap((binding, index) =>
-    state.hydratedBindings.has(binding) ? [{ binding, index }] : [],
-  );
-  bindNodes(anchor, state, options, hydratedEntries, state.cleanups, false);
 };
 
 /**
@@ -909,7 +947,7 @@ export const mountConditional = (
   const anchor = nodeAt(root, path);
   const current = anchor instanceof Comment ? states.get(anchor) : undefined;
   const signature = current && current.descriptor === options ? current.signature : legacySignature(options);
-  mountResolvedConditional(root, path, visible, scope, resolveLegacyOptions(options, signature));
+  mountResolvedConditional(root, path, visible, scope, resolveLegacyOptions(options, signature), setupHydration);
 };
 
 /**
@@ -923,4 +961,13 @@ export const mountGeneratedConditional = (
   visible: unknown,
   scope: Record<string, unknown>,
   options: GeneratedConditionalOptions,
-): void => mountResolvedConditional(root, path, visible, scope, resolveGeneratedOptions(options));
+): void => mountResolvedConditional(root, path, visible, scope, resolveGeneratedOptions(options), setupHydration);
+
+/** Compiler-selected entry for a module whose generated regions declare no hydration boundaries. */
+export const mountGeneratedConditionalWithoutHydration = (
+  root: Node,
+  path: readonly number[],
+  visible: unknown,
+  scope: Record<string, unknown>,
+  options: GeneratedConditionalOptions,
+): void => mountResolvedConditional(root, path, visible, scope, resolveGeneratedOptions(options), undefined);

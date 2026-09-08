@@ -24,6 +24,8 @@ import { storeDefinitionsFor } from "../ir.js";
 import type { ExpressionSourceLocation } from "../utils.js";
 import {
   attrExpression,
+  automaticHydrationId,
+  childPathEntries,
   emitsElementRoot,
   expressionToScopeAccess,
   jsOptionalPropertyAccess,
@@ -187,6 +189,7 @@ type DeclarationState = {
 type ClientLoweringContext = LoweringContext & {
   lexicalScope: LexicalScope;
   declarations: DeclarationState;
+  hydrationIds: WeakMap<ElementNode, string>;
 };
 
 /** Template source spans of client bindings, kept beside the compiled objects. */
@@ -451,6 +454,7 @@ const lowerIf = (node: ElementNode, path: number[], context: ClientLoweringConte
     components: [],
     lexicalScope: createChildScope(context.lexicalScope),
     declarations: context.declarations,
+    hydrationIds: context.hydrationIds,
   };
   const children = renderableChildren(node);
   const renderedChildren = children.filter(
@@ -505,6 +509,7 @@ const lowerList = (
     components: [],
     lexicalScope: childScope,
     declarations: context.declarations,
+    hydrationIds: context.hydrationIds,
   };
   const children = renderableChildren(node);
   let templateHtml = "";
@@ -568,6 +573,8 @@ const lowerElement = (
   const staticClassNames: string[] = [];
   const hydrateBoundary = hydrationBoundaryFor(node, path);
   if (hydrateBoundary) {
+    // IDs follow source paths like SSR, while binding paths remain local to the branch or row.
+    if (hydrateBoundary.idKind === "static") hydrateBoundary.id = context.hydrationIds.get(node)!;
     context.hydrationBoundaries.push(hydrateBoundary);
     hydrationBoundaryNodes.set(hydrateBoundary, node);
     // The id reader is evaluated against the same scope as the bindings beside it.
@@ -720,6 +727,20 @@ const lowerNode = (
 };
 
 export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client"] => {
+  const hydrationIds = new WeakMap<ElementNode, string>();
+  const recordHydrationIds = (node: ElementNode, path: readonly number[]): void => {
+    hydrationIds.set(node, automaticHydrationId(path));
+    const children = node.tagName === "component" ? renderableChildren(node) : node.children;
+    if (node.tagName === "component" && children.length === 1) {
+      const child = children[0]!;
+      if (child.type === "element") recordHydrationIds(child, path);
+      return;
+    }
+    for (const entry of childPathEntries(children, path)) {
+      if (entry.child.type === "element") recordHydrationIds(entry.child, entry.path);
+    }
+  };
+  recordHydrationIds(root, []);
   const context: ClientLoweringContext = {
     bindings: [],
     stores: [],
@@ -729,6 +750,7 @@ export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client
     components: [],
     lexicalScope: { bindings: new Map() },
     declarations: { next: 0, stores: new WeakMap(), props: new WeakMap() },
+    hydrationIds,
   };
   const templateHtml = lowerElement(root, [], context);
   recordHydrationDynamicAttributeRegionErrors(root, context.bindings, context.hydrationDynamicRegionErrors);
@@ -1434,7 +1456,9 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     lines.push(`import { delegate as ${runtimeNames.delegate} } from "tachyon-dom/runtime/event";`);
   }
   if (needsList) {
-    lines.push(`import { mountGeneratedKeyedList as ${runtimeNames.mountGeneratedKeyedList} } from "tachyon-dom/runtime/list";`);
+    lines.push(
+      `import { mountGeneratedKeyedList as ${runtimeNames.mountGeneratedKeyedList} } from "tachyon-dom/runtime/list";`,
+    );
   }
   if (needsTextList) {
     const textListImports = [
@@ -1468,10 +1492,11 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       lines.push(`import { ${conditionalCoreImports.join(", ")} } from "tachyon-dom/runtime/conditional-core";`);
     }
     if (needsGenericConditional) {
+      const entry = needsRowHydration ? "mountGeneratedConditional" : "mountGeneratedConditionalWithoutHydration";
       lines.push(
         needsNodeAt
-          ? `import { mountGeneratedConditional as ${runtimeNames.mountGeneratedConditional}, nodeAt as ${runtimeNames.nodeAt} } from "tachyon-dom/runtime/conditional";`
-          : `import { mountGeneratedConditional as ${runtimeNames.mountGeneratedConditional} } from "tachyon-dom/runtime/conditional";`,
+          ? `import { ${entry} as ${runtimeNames.mountGeneratedConditional}, nodeAt as ${runtimeNames.nodeAt} } from "tachyon-dom/runtime/conditional";`
+          : `import { ${entry} as ${runtimeNames.mountGeneratedConditional} } from "tachyon-dom/runtime/conditional";`,
       );
     }
   }
@@ -1657,46 +1682,46 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
           .join(", ")}]);`,
       );
     } else {
-    lines.push(`  ${runtimeNames.prepareConditionalCore}(root, [`);
-    for (const binding of bindings) {
-      if (binding.kind !== "if") continue;
-      const parent = nodeAtElementPath(template.root, binding.path.slice(0, -1));
-      const visibilityName = conditionalVisibilityNames.get(binding) as string;
-      const visibility = reactive ? `${visibilityName}()` : visibilityName;
-      const bindingIndex = binding.path.at(-1);
-      const laterConditionals =
-        bindingIndex === undefined
-          ? []
-          : bindings
-              .filter(
-                (candidate): candidate is ConditionalBinding =>
-                  candidate.kind === "if" &&
-                  candidate.path.length === binding.path.length &&
-                  candidate.path.slice(0, -1).every((part, index) => part === binding.path[index]) &&
-                  (candidate.path.at(-1) ?? -1) > bindingIndex,
-              )
-              .map((candidate) => {
-                const candidateVisibilityName = conditionalVisibilityNames.get(candidate) as string;
-                const candidateVisibility = reactive ? `${candidateVisibilityName}()` : candidateVisibilityName;
-                const dynamicAttributes = conditionalDynamicAttributes(candidate);
-                const dynamicAttributeField =
-                  needsConditionalCoreShapeMatcher && dynamicAttributes.length > 0
-                    ? `, dynamicAttributes: ${JSON.stringify(dynamicAttributes)}`
-                    : "";
-                return `{ visible: ${candidateVisibility}, templateHtml: ${JSON.stringify(candidate.templateHtml)}${dynamicAttributeField} }`;
-              });
-      const laterDescriptor =
-        laterConditionals.length > 0 ? ` laterConditionals: [${laterConditionals.join(", ")}],` : "";
-      const dynamicAttributes = conditionalDynamicAttributes(binding);
-      const dynamicAttributeField =
-        needsConditionalCoreShapeMatcher && dynamicAttributes.length > 0
-          ? ` dynamicAttributes: ${JSON.stringify(dynamicAttributes)},`
-          : "";
-      lines.push(
-        `    { path: ${JSON.stringify(binding.path)}, visible: ${visibility},${parent ? ` parentTagName: ${JSON.stringify(parent.tagName)},` : ""}${laterDescriptor}${dynamicAttributeField} templateHtml: ${JSON.stringify(binding.templateHtml)} },`,
-      );
-    }
-    lines.push(`  ]);`);
+      lines.push(`  ${runtimeNames.prepareConditionalCore}(root, [`);
+      for (const binding of bindings) {
+        if (binding.kind !== "if") continue;
+        const parent = nodeAtElementPath(template.root, binding.path.slice(0, -1));
+        const visibilityName = conditionalVisibilityNames.get(binding) as string;
+        const visibility = reactive ? `${visibilityName}()` : visibilityName;
+        const bindingIndex = binding.path.at(-1);
+        const laterConditionals =
+          bindingIndex === undefined
+            ? []
+            : bindings
+                .filter(
+                  (candidate): candidate is ConditionalBinding =>
+                    candidate.kind === "if" &&
+                    candidate.path.length === binding.path.length &&
+                    candidate.path.slice(0, -1).every((part, index) => part === binding.path[index]) &&
+                    (candidate.path.at(-1) ?? -1) > bindingIndex,
+                )
+                .map((candidate) => {
+                  const candidateVisibilityName = conditionalVisibilityNames.get(candidate) as string;
+                  const candidateVisibility = reactive ? `${candidateVisibilityName}()` : candidateVisibilityName;
+                  const dynamicAttributes = conditionalDynamicAttributes(candidate);
+                  const dynamicAttributeField =
+                    needsConditionalCoreShapeMatcher && dynamicAttributes.length > 0
+                      ? `, dynamicAttributes: ${JSON.stringify(dynamicAttributes)}`
+                      : "";
+                  return `{ visible: ${candidateVisibility}, templateHtml: ${JSON.stringify(candidate.templateHtml)}${dynamicAttributeField} }`;
+                });
+        const laterDescriptor =
+          laterConditionals.length > 0 ? ` laterConditionals: [${laterConditionals.join(", ")}],` : "";
+        const dynamicAttributes = conditionalDynamicAttributes(binding);
+        const dynamicAttributeField =
+          needsConditionalCoreShapeMatcher && dynamicAttributes.length > 0
+            ? ` dynamicAttributes: ${JSON.stringify(dynamicAttributes)},`
+            : "";
+        lines.push(
+          `    { path: ${JSON.stringify(binding.path)}, visible: ${visibility},${parent ? ` parentTagName: ${JSON.stringify(parent.tagName)},` : ""}${laterDescriptor}${dynamicAttributeField} templateHtml: ${JSON.stringify(binding.templateHtml)} },`,
+        );
+      }
+      lines.push(`  ]);`);
     }
   }
   const listPathExpression = (path: readonly number[]): string | undefined => {
@@ -2358,7 +2383,10 @@ const generatedValueBindingField = (binding: GeneratedValueBinding): string => {
   return `{ ${path}, ${read} }`;
 };
 
-const generatedBindingFields = (bindings: readonly ClientBinding[], serializeEvent: (binding: EventBinding) => string): string[] => {
+const generatedBindingFields = (
+  bindings: readonly ClientBinding[],
+  serializeEvent: (binding: EventBinding) => string,
+): string[] => {
   const events = bindings.filter(isGeneratedEventBinding);
   return [
     `    bindings: [${bindings.filter(isGeneratedValueBinding).map(generatedValueBindingField).join(", ")}],`,

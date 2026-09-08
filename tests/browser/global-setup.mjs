@@ -858,7 +858,7 @@ const buildMultiModuleFixture = async () => {
     logLevel: "silent",
     root,
     mode: "production",
-    plugins: [tachyonDom({ reactive: true })],
+    plugins: [tachyonDom({ reactive: true, declarationOutput: false })],
     resolve: {
       alias: [
         { find: /^tachyon-dom\/(.+)$/, replacement: `${distRoot}/$1.js` },

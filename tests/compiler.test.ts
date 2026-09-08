@@ -1072,7 +1072,9 @@ describe("HTML-first compiler", () => {
     expect(code).toContain(
       `cleanups.push(__tachyonEffect(() => __tachyonMountGeneratedConditionalCore(root, [0], __tachyonConditionalVisibility0(), scope, conditionalOptions0)));`,
     );
-    expect(code).not.toContain(`__tachyonMountGeneratedConditional(__tachyonTarget0, [], __tachyonRead(scope.active), scope, {`);
+    expect(code).not.toContain(
+      `__tachyonMountGeneratedConditional(__tachyonTarget0, [], __tachyonRead(scope.active), scope, {`,
+    );
   });
 
   it("falls back to the generic conditional runtime for unsupported branch capabilities", () => {
@@ -1185,6 +1187,31 @@ describe("HTML-first compiler", () => {
 
     expect(code).toContain(`__tachyonPush("<!--tachyon-hydrate:" + escapeMarker(scope.islandId) + ":start-->");`);
     expect(code).toContain(`__tachyonPush("<!--tachyon-hydrate:" + escapeMarker(scope.islandId) + ":end-->");`);
+  });
+
+  it("keeps source hydration IDs distinct across sibling and nested conditional roots", () => {
+    const compiled = compileTemplate(
+      `<main><if test={shown}><section hydrate:interaction="click"><input bind:value={draft}></section><aside hydrate:interaction="click">Aside</aside></if><if test={shown}><article><if test={shown}><footer hydrate:interaction="click"><input bind:value={draft}></footer></if></article></if></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const first = compiled.value.client.bindings[0];
+    const second = compiled.value.client.bindings[1];
+    if (first?.kind !== "if" || second?.kind !== "if") throw new Error("Missing branches");
+    const nested = second.bindings.find((binding) => binding.kind === "if");
+    if (nested?.kind !== "if") throw new Error("Missing nested branch");
+    expect(first.hydrationBoundaries?.map(({ id, path }) => ({ id, path }))).toEqual([
+      { id: "td-h-0-0", path: [0] },
+      { id: "td-h-0-1", path: [1] },
+    ]);
+    expect(nested.hydrationBoundaries?.map(({ id, path }) => ({ id, path }))).toEqual([
+      { id: "td-h-1-0-0-0", path: [] },
+    ]);
+    const html = renderServerTemplate(compiled.value, { shown: true, draft: "" });
+    const stream = generateServerStreamModule(compiled.value);
+    for (const id of ["td-h-0-0", "td-h-0-1", "td-h-1-0-0-0"]) {
+      expect(html.split(`<!--tachyon-hydrate:${id}:start-->`)).toHaveLength(2);
+      expect(stream).toContain(`escapeMarker("${id}")`);
+    }
   });
 
   it("generates stable hydrate ids and records shorthand hydration strategies", () => {
