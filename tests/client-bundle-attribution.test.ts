@@ -32,6 +32,13 @@ const bytesFor = (result: Awaited<ReturnType<typeof buildClientBundle>>, pattern
     .reduce((total, input) => total + input.bytesInOutput, 0);
 
 describe("client bundle attribution", () => {
+  it("measures distribution imports independently of development TypeScript path aliases", async () => {
+    const result = await buildClientBundle(
+      `import { createSignal } from "tachyon-dom/runtime/signal"; export const count = createSignal(0);`,
+    );
+    expect(bytesFor(result, /dist[/\\]runtime[/\\]signal\.js$/)).toBeGreaterThan(0);
+    expect(bytesFor(result, /src[/\\]/)).toBe(0);
+  });
   // A template whose only attribute is class must not pull in the generic attribute setter, and with it the
   // attribute name policy and URL sanitizer, which never applied to class.
   it("keeps a class-only template free of attribute and URL policy bytes", async () => {
@@ -253,7 +260,9 @@ export const unwanted = bindControl;
       };
       expect(failedReport.validation.ok).toBe(false);
       expect(failedReport.validation.failures.join("\n")).toMatch(/minimal-if.*unwanted feature/i);
-      expect(failedReport.fixtures.find((fixture) => fixture.name === "minimal-if")?.minimalFeaturePolicy).toMatchObject({
+      expect(
+        failedReport.fixtures.find((fixture) => fixture.name === "minimal-if")?.minimalFeaturePolicy,
+      ).toMatchObject({
         ok: false,
       });
     } finally {

@@ -60,6 +60,8 @@ export const buildClientBundle = (contents, { cwd = process.cwd() } = {}) =>
     metafile: true,
     minify: true,
     platform: "browser",
+    // Measure the published package, not source aliases used to typecheck the repository before building it.
+    tsconfigRaw: {},
     define: productionDefines,
     stdin: { contents, loader: "js", resolveDir: cwd },
     write: false,
@@ -282,7 +284,9 @@ export const mount = (root) => bind(root, scope);
 
 export const validateFixtureBudgets = (budgets, fixtures) => {
   const expectedNames = fixtures.map((fixture) => fixture.name);
-  const missing = expectedNames.filter((name) => !budgets || typeof budgets[name] !== "object" || budgets[name] === null);
+  const missing = expectedNames.filter(
+    (name) => !budgets || typeof budgets[name] !== "object" || budgets[name] === null,
+  );
   if (missing.length > 0) return { ok: false, reason: "missing fixture budget", fixtures: missing };
   const invalid = expectedNames.filter((name) => {
     const budget = budgets[name];
