@@ -12,6 +12,7 @@ on:
           - all
           - web-framework
           - js-framework
+          - client-bundle
 
 permissions:
   contents: read
@@ -60,6 +61,10 @@ jobs:
         if: ${{ inputs.suite == 'all' || inputs.suite == 'js-framework' }}
         run: pnpm bench:local:stable --output "$RESULT_DIR/js-framework.json"
 
+      - name: Measure client bundle sizes of interactive pages
+        if: ${{ inputs.suite == 'all' || inputs.suite == 'client-bundle' }}
+        run: pnpm bench:client-bundle --output "$RESULT_DIR/client-bundle.json"
+
       - name: Write benchmark summary
         shell: bash
         run: |
@@ -69,6 +74,9 @@ jobs:
           fi
           if [ "${{ inputs.suite }}" = "all" ] || [ "${{ inputs.suite }}" = "js-framework" ]; then
             summary_args+=(--local "$RESULT_DIR/js-framework.json")
+          fi
+          if [ "${{ inputs.suite }}" = "all" ] || [ "${{ inputs.suite }}" = "client-bundle" ]; then
+            summary_args+=(--client "$RESULT_DIR/client-bundle.json")
           fi
           pnpm bench:summary "${summary_args[@]}"
           cat "$RESULT_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"

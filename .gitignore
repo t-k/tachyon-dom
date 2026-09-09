@@ -21,6 +21,7 @@ benchmark/conditional-representative-results/
 benchmark/client-bundle-attribution-results/
 benchmark/raw-text-scan/results/
 benchmark/web-framework/results/
+benchmark/client-bundle/results/
 benchmark/web-framework/fixtures/*/.next/
 benchmark/web-framework/fixtures/*/.mreact/
 benchmark/web-framework/fixtures/*/.output/

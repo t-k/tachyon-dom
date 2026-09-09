@@ -246,6 +246,7 @@
     "bench:summary": "tsx benchmark/summary/cli.ts",
     "bench:web-framework": "tsx benchmark/web-framework/run-web-framework-benchmark.ts",
     "bench:web-framework:smoke": "tsx benchmark/web-framework/run-web-framework-benchmark.ts --smoke",
+    "bench:client-bundle": "tsx benchmark/client-bundle/run-client-bundle.ts",
     "example:router": "tsx examples/router.ts",
     "example:stream": "tsx examples/store-hydrate-stream.ts",
     "example:full-app": "vite --config examples/full-app/vite.config.ts --host 127.0.0.1",

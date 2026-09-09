@@ -9,6 +9,7 @@ export type SummaryCliOptions = {
   suite: SummarySuite;
   webPath?: string;
   localPath?: string;
+  clientPath?: string;
   outputPath: string;
 };
 
@@ -20,17 +21,18 @@ export const parseSummaryArgs = (argv: readonly string[]): SummaryCliOptions => 
     if (!key?.startsWith("--") || value === undefined) {
       throw new Error(`Invalid argument near ${key ?? "end of input"}.`);
     }
-    if (!new Set(["--suite", "--web", "--local", "--output"]).has(key)) {
+    if (!new Set(["--suite", "--web", "--local", "--client", "--output"]).has(key)) {
       throw new Error(`Unknown argument: ${key}`);
     }
     values.set(key, value);
   }
   const suite = values.get("--suite");
-  if (suite !== "all" && suite !== "web-framework" && suite !== "js-framework") {
+  if (suite !== "all" && suite !== "web-framework" && suite !== "js-framework" && suite !== "client-bundle") {
     throw new Error(`Unknown suite: ${suite ?? "missing"}`);
   }
   const webPath = values.get("--web");
   const localPath = values.get("--local");
+  const clientPath = values.get("--client");
   const outputPath = values.get("--output");
   if ((suite === "all" || suite === "web-framework") && !webPath) {
     throw new Error("--web is required for the selected suite.");
@@ -38,10 +40,19 @@ export const parseSummaryArgs = (argv: readonly string[]): SummaryCliOptions => 
   if ((suite === "all" || suite === "js-framework") && !localPath) {
     throw new Error("--local is required for the selected suite.");
   }
+  if ((suite === "all" || suite === "client-bundle") && !clientPath) {
+    throw new Error("--client is required for the selected suite.");
+  }
   if (!outputPath) {
     throw new Error("--output is required.");
   }
-  return { suite, ...(webPath ? { webPath } : {}), ...(localPath ? { localPath } : {}), outputPath };
+  return {
+    suite,
+    ...(webPath ? { webPath } : {}),
+    ...(localPath ? { localPath } : {}),
+    ...(clientPath ? { clientPath } : {}),
+    outputPath,
+  };
 };
 
 const readJson = async (filePath: string): Promise<unknown> => JSON.parse(await readFile(filePath, "utf8"));
@@ -53,10 +64,14 @@ const buildSummaryInput = async (options: SummaryCliOptions): Promise<SummaryInp
   if (options.suite === "js-framework") {
     return { suite: options.suite, localCompare: await readJson(options.localPath as string) };
   }
+  if (options.suite === "client-bundle") {
+    return { suite: options.suite, clientBundle: await readJson(options.clientPath as string) };
+  }
   return {
     suite: options.suite,
     webFramework: await readJson(options.webPath as string),
     localCompare: await readJson(options.localPath as string),
+    clientBundle: await readJson(options.clientPath as string),
   };
 };
 

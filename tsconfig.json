@@ -20,6 +20,7 @@
     "benchmark/js-framework-benchmark/src",
     "benchmark/local-compare",
     "benchmark/web-framework/*.ts",
+    "benchmark/client-bundle",
     "benchmark/compiler",
     "tests"
   ]

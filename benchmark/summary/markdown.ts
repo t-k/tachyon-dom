@@ -49,10 +49,27 @@ type LocalResult = {
   auxiliaryMetrics: AuxiliarySummary[];
 };
 
+type ClientBundleSize = { rawBytes: number; gzipBytes: number; brotliBytes: number };
+
+type ClientBundleFixture = {
+  name: string;
+  description: string;
+  validated: boolean;
+  html: ClientBundleSize;
+  javascript: ClientBundleSize;
+  initial: ClientBundleSize;
+};
+
+type ClientBundleResult = {
+  provenance: Provenance;
+  fixtures: ClientBundleFixture[];
+};
+
 export type SummaryInput =
   | { suite: "web-framework"; webFramework: unknown }
   | { suite: "js-framework"; localCompare: unknown }
-  | { suite: "all"; webFramework: unknown; localCompare: unknown };
+  | { suite: "client-bundle"; clientBundle: unknown }
+  | { suite: "all"; webFramework: unknown; localCompare: unknown; clientBundle: unknown };
 
 const isRecord = (value: unknown): value is RecordValue =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -69,6 +86,11 @@ const requiredString = (value: unknown, message: string): string => {
 
 const requiredNumber = (value: unknown, message: string): number => {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) throw new Error(message);
+  return value;
+};
+
+const requiredNonNegative = (value: unknown, message: string): number => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(message);
   return value;
 };
 
@@ -193,6 +215,38 @@ const parseLocalCompareResult = (value: unknown): LocalResult => {
     throw new Error(message);
   }
   return { provenance: parseProvenance(root.provenance, message), implementations, summaries, auxiliaryMetrics };
+};
+
+const parseClientBundleSize = (value: unknown, message: string): ClientBundleSize => {
+  const size = requiredRecord(value, message);
+  return {
+    rawBytes: requiredNonNegative(size.rawBytes, message),
+    gzipBytes: requiredNonNegative(size.gzipBytes, message),
+    brotliBytes: requiredNonNegative(size.brotliBytes, message),
+  };
+};
+
+const parseClientBundleResult = (value: unknown): ClientBundleResult => {
+  const message = "Invalid client-bundle benchmark result.";
+  const root = requiredRecord(value, message);
+  const benchmark = requiredRecord(root.benchmark, message);
+  if (benchmark.name !== "client-bundle") throw new Error(message);
+  const measurements = requiredRecord(root.measurements, message);
+  if (!Array.isArray(measurements.fixtures) || measurements.fixtures.length === 0) throw new Error(message);
+  const fixtures = measurements.fixtures.map((item): ClientBundleFixture => {
+    const fixture = requiredRecord(item, message);
+    if (typeof fixture.validated !== "boolean") throw new Error(message);
+    return {
+      name: requiredString(fixture.name, message),
+      description: requiredString(fixture.description, message),
+      validated: fixture.validated,
+      html: parseClientBundleSize(fixture.html, message),
+      javascript: parseClientBundleSize(fixture.javascript, message),
+      initial: parseClientBundleSize(fixture.initial, message),
+    };
+  });
+  if (new Set(fixtures.map((fixture) => fixture.name)).size !== fixtures.length) throw new Error(message);
+  return { provenance: parseProvenance(root.provenance, message), fixtures };
 };
 
 export const escapeMarkdownCell = (value: string): string =>
@@ -342,6 +396,31 @@ const formatLocalCompareSummary = (result: LocalResult): string => {
   return `${formatEnvironment(result.provenance)}\n\n> A comparison run inside this repository, following the js-framework-benchmark operation model. These are not results from the official upstream runner.\n\n## js-framework-benchmark-style comparison: overall ranking\n\n${overall}\n\n## Ranking per operation\n\n${operationTables.join("\n\n")}\n\n## Ranking per auxiliary metric\n\n${auxiliaryTables.join("\n\n")}`;
 };
 
+const formatKib = (bytes: number): string => `${(bytes / 1024).toFixed(2)} KiB`;
+
+const formatClientBundleSummary = (result: ClientBundleResult): string => {
+  const rows = result.fixtures.map(
+    (fixture) =>
+      `| ${escapeMarkdownCell(fixture.name)} | ${formatKib(fixture.javascript.rawBytes)} | ${formatKib(fixture.javascript.gzipBytes)} | ${formatKib(fixture.javascript.brotliBytes)} | ${formatKib(fixture.html.gzipBytes)} | ${formatKib(fixture.initial.gzipBytes)} | ${formatKib(fixture.initial.brotliBytes)} | ${fixture.validated ? "yes" : "no"} |`,
+  );
+  const descriptions = result.fixtures.map(
+    (fixture) => `- \`${escapeMarkdownCell(fixture.name)}\`: ${escapeMarkdownCell(fixture.description)}`,
+  );
+  return [
+    formatEnvironment(result.provenance),
+    "",
+    "> Interactive pages built as production Tachyon DOM route apps through the starter's Vite configuration. Sizes are what a cold browser fetches for the initial route; JavaScript covers module scripts and module preloads.",
+    "",
+    "## Client bundle size per interactive page",
+    "",
+    "| Fixture | JS raw | JS gzip | JS brotli | HTML gzip | Initial gzip | Initial brotli | Interaction verified |",
+    "|---|---:|---:|---:|---:|---:|---:|---|",
+    ...rows,
+    "",
+    ...descriptions,
+  ].join("\n");
+};
+
 export const formatBenchmarkSummary = (input: SummaryInput): string => {
   const sections = [
     "# Benchmark Results",
@@ -353,6 +432,9 @@ export const formatBenchmarkSummary = (input: SummaryInput): string => {
   }
   if (input.suite === "js-framework" || input.suite === "all") {
     sections.push(formatLocalCompareSummary(parseLocalCompareResult(input.localCompare)));
+  }
+  if (input.suite === "client-bundle" || input.suite === "all") {
+    sections.push(formatClientBundleSummary(parseClientBundleResult(input.clientBundle)));
   }
   return `${sections.join("\n\n")}\n`;
 };

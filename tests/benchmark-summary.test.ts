@@ -69,6 +69,37 @@ const localFixture = {
   },
 };
 
+const bundleSize = (rawBytes: number) => ({
+  rawBytes,
+  gzipBytes: Math.round(rawBytes / 3),
+  brotliBytes: Math.round(rawBytes / 4),
+});
+
+const clientBundleFixture = {
+  benchmark: { name: "client-bundle" },
+  provenance: webFixture.provenance,
+  measurements: {
+    fixtures: [
+      {
+        name: "counter",
+        description: "A counter",
+        validated: true,
+        html: bundleSize(600),
+        javascript: bundleSize(15_360),
+        initial: bundleSize(15_960),
+      },
+      {
+        name: "keyed|list",
+        description: "A keyed list",
+        validated: false,
+        html: bundleSize(0),
+        javascript: bundleSize(20_480),
+        initial: bundleSize(20_480),
+      },
+    ],
+  },
+};
+
 describe("benchmark Summary ranking", () => {
   it("ranks a lower value first and reports the ratio to the best", () => {
     expect(
@@ -140,6 +171,34 @@ describe("benchmark Summary markdown", () => {
     expect(markdown).toContain("| 1 | tachyon-dom | 10.00 ms | 1.000x |");
   });
 
+  it("renders the client bundle sizes of every interactive page fixture", () => {
+    const markdown = formatBenchmarkSummary({ suite: "client-bundle", clientBundle: clientBundleFixture });
+
+    expect(markdown).toContain("## Client bundle size per interactive page");
+    expect(markdown).toContain(
+      "| Fixture | JS raw | JS gzip | JS brotli | HTML gzip | Initial gzip | Initial brotli | Interaction verified |",
+    );
+    expect(markdown).toContain("| counter | 15.00 KiB | 5.00 KiB | 3.75 KiB | 0.20 KiB | 5.20 KiB | 3.90 KiB | yes |");
+    expect(markdown).toContain(
+      "| keyed\\|list | 20.00 KiB | 6.67 KiB | 5.00 KiB | 0.00 KiB | 6.67 KiB | 5.00 KiB | no |",
+    );
+    expect(markdown).toContain("- `counter`: A counter");
+    expect(markdown).toContain("production Tachyon DOM route apps");
+  });
+
+  it("includes the client bundle section in the all suite", () => {
+    const markdown = formatBenchmarkSummary({
+      suite: "all",
+      webFramework: webFixture,
+      localCompare: localFixture,
+      clientBundle: clientBundleFixture,
+    });
+
+    expect(markdown).toContain("## Web framework overall ranking");
+    expect(markdown).toContain("## js-framework-benchmark-style comparison: overall ranking");
+    expect(markdown).toContain("## Client bundle size per interactive page");
+  });
+
   it("rejects an incomplete result", () => {
     expect(() => formatBenchmarkSummary({ suite: "web-framework", webFramework: {} })).toThrow(
       "Invalid web-framework benchmark result",
@@ -147,8 +206,16 @@ describe("benchmark Summary markdown", () => {
     expect(() => formatBenchmarkSummary({ suite: "js-framework", localCompare: {} })).toThrow(
       "Invalid local-compare benchmark result",
     );
-    expect(() => formatBenchmarkSummary({ suite: "all", webFramework: webFixture, localCompare: {} })).toThrow(
-      "Invalid local-compare benchmark result",
+    expect(() =>
+      formatBenchmarkSummary({ suite: "all", webFramework: webFixture, localCompare: {}, clientBundle: {} }),
+    ).toThrow("Invalid local-compare benchmark result");
+    expect(() => formatBenchmarkSummary({ suite: "client-bundle", clientBundle: {} })).toThrow(
+      "Invalid client-bundle benchmark result",
+    );
+    const duplicate = structuredClone(clientBundleFixture);
+    duplicate.measurements.fixtures[1]!.name = "counter";
+    expect(() => formatBenchmarkSummary({ suite: "client-bundle", clientBundle: duplicate })).toThrow(
+      "Invalid client-bundle benchmark result",
     );
   });
 
@@ -198,13 +265,32 @@ describe("benchmark Summary markdown", () => {
 describe("benchmark Summary CLI", () => {
   it("parses the input paths for the all suite", () => {
     expect(
-      parseSummaryArgs(["--suite", "all", "--web", "web.json", "--local", "local.json", "--output", "summary.md"]),
+      parseSummaryArgs([
+        "--suite",
+        "all",
+        "--web",
+        "web.json",
+        "--local",
+        "local.json",
+        "--client",
+        "client.json",
+        "--output",
+        "summary.md",
+      ]),
     ).toEqual({
       suite: "all",
       webPath: "web.json",
       localPath: "local.json",
+      clientPath: "client.json",
       outputPath: "summary.md",
     });
+    expect(parseSummaryArgs(["--suite", "client-bundle", "--client", "client.json", "--output", "summary.md"])).toEqual(
+      {
+        suite: "client-bundle",
+        clientPath: "client.json",
+        outputPath: "summary.md",
+      },
+    );
   });
 
   it("rejects an unknown suite and a missing required path", () => {
@@ -213,6 +299,9 @@ describe("benchmark Summary CLI", () => {
       "--local is required",
     );
     expect(() => parseSummaryArgs(["--suite", "web-framework", "--web", "web.json"])).toThrow("--output is required");
+    expect(() =>
+      parseSummaryArgs(["--suite", "all", "--web", "web.json", "--local", "local.json", "--output", "summary.md"]),
+    ).toThrow("--client is required");
   });
 
   it("reads the JSON and writes the summary file", async () => {

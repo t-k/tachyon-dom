@@ -22,10 +22,14 @@ Run `pnpm bench:raw-text-scan` to compare the production scalar scanner with the
 
 This benchmark validates a private prototype only. It does not imply that the candidate is safe to move into production, and it does not compare a Wasm SIMD implementation.
 
+## Client bundle size of interactive pages
+
+Run `pnpm bench:client-bundle` to build the fixtures in `benchmark/client-bundle/fixtures.ts` as production route apps and record the raw, gzip, and Brotli sizes of the HTML, module scripts, and stylesheets a cold browser fetches for each initial route. Every fixture must pass a Chromium interaction check before its size is recorded. See `benchmark/client-bundle/README.md` for the fixture list and the measurement rules.
+
 ## Manual GitHub Actions runs
 
-The `Benchmarks` workflow can be started manually from GitHub Actions. Its `suite` input accepts `all`, `web-framework`, or `js-framework`; `all` is the default.
+The `Benchmarks` workflow can be started manually from GitHub Actions. Its `suite` input accepts `all`, `web-framework`, `js-framework`, or `client-bundle`; `all` is the default.
 
-The workflow writes an overall ranking and a separate ranking for every measured metric to the GitHub Actions job summary. Each row includes the measured value and its ratio to the best value in that run. The JSON results, generated Markdown, and available benchmark logs are uploaded as a workflow artifact.
+The workflow writes an overall ranking and a separate ranking for every measured metric to the GitHub Actions job summary, and a table of client bundle sizes per interactive page fixture when that suite is selected. Each row includes the measured value and its ratio to the best value in that run. The JSON results, generated Markdown, and available benchmark logs are uploaded as a workflow artifact.
 
 These are indicative rankings from one workflow dispatch, not authoritative rankings. The `js-framework` suite runs this repository's comparison based on the krausest/js-framework-benchmark operation model; it does not run the upstream official benchmark driver. Use the contract-specific multi-run validation described by each benchmark when making authoritative performance claims.
