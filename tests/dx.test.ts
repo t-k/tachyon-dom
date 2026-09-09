@@ -2846,9 +2846,17 @@ void chunks;
     );
     expect(workflow).not.toContain("finalize-release-tags.mjs");
     expect(workflow).not.toContain("NPM_TOKEN");
-    expect(workflow).toContain("34e114876b0b11c390a56381ad16ebd13914f8d5");
-    expect(workflow).toContain("ea165f8d65b6e75b540449e92b4886f43607fa02");
-    expect(workflow).toContain("d3f86a106a0bac45b974a628896c90dbdf5c8093");
+    expect(workflow).toContain("actions/download-artifact@");
+    // Everything the release path runs must be pinned to a full commit SHA, never a moving tag.
+    // Asserting the shape rather than specific SHAs still fails an unpinned addition, and unlike a
+    // list of literals it does not have to be rewritten for a routine action version bump.
+    const externalUses = [workflow, ci].flatMap((source) =>
+      [...source.matchAll(/uses: (?!\.\/)(\S+)/g)].map((match) => match[1]),
+    );
+    expect(externalUses.length).toBeGreaterThan(0);
+    for (const reference of externalUses) {
+      expect(reference).toMatch(/^[\w.-]+\/[\w.-]+@[0-9a-f]{40}$/);
+    }
     expect(createPackage.files).toContain("LICENSE");
     expect(createPackage.dependencies?.["tachyon-dom"]).toBe(createPackage.version);
   });
