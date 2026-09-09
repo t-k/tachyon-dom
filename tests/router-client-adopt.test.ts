@@ -43,6 +43,8 @@ describe("client router adopting the server-rendered route on start", () => {
     expect(root.querySelector("#server")).toBe(server);
     expect(disposed).toEqual([]);
     expect(location.pathname).toBe("/");
+    // The adopted entry gets the same scroll key a rendered entry would, so a later back navigation restores it.
+    expect(typeof (history.state as { __tachyonScrollKey?: unknown }).__tachyonScrollKey).toBe("number");
 
     await router.navigate("/about/");
 
@@ -83,6 +85,7 @@ describe("client router adopting the server-rendered route on start", () => {
 
     expect(renders).toEqual(["/"]);
     expect(root.innerHTML).toBe(`<h1 id="client">Client home</h1>`);
+    expect(typeof (history.state as { __tachyonScrollKey?: unknown }).__tachyonScrollKey).toBe("number");
     router.dispose();
   });
 
