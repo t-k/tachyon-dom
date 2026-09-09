@@ -76,9 +76,13 @@ export const bindPreview = (preview, scope, options) => {
         element.classList.toggle("active", state.active);
       }),
     );
+    // The list container is looked up rather than addressed by path: the `<if>` before it renders a
+    // different number of sibling nodes depending on its state.
+    const list = element.querySelector("ul");
     cleanups.push(
       effect(() => {
-        mountKeyedList(element, [1], state.rows, {
+        if (!list) return;
+        mountKeyedList(list, [], state.rows, {
           key: options.listBinding.key,
           itemName: options.listBinding.itemName,
           templateHtml: options.listBinding.templateHtml,

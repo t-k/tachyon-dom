@@ -47,6 +47,7 @@ import {
   expressionLocationForText,
 } from "../utils.js";
 import { isAssignableExpression } from "../expression.js";
+import { conditionalEndMarker, conditionalStartMarker } from "../../conditional-marker.js";
 import { expressionAlwaysPlainValue, expressionCallsSomething, expressionScopeNames } from "../optimize.js";
 
 type LoweredNode = {
@@ -485,7 +486,9 @@ const lowerIf = (node: ElementNode, path: number[], context: ClientLoweringConte
       context,
     ),
   );
-  return "<!---->";
+  // The slot and its end marker. A mounted branch lives between them, exactly like a server-rendered one; the
+  // end marker is invisible to logical paths, so the region still occupies one slot.
+  return `${conditionalStartMarker}${conditionalEndMarker}`;
 };
 
 const lowerList = (

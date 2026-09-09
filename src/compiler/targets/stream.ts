@@ -1,6 +1,7 @@
 import { err, ok, type Result } from "../../result.js";
 import type { CompiledTemplate, CompilerError, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
+import { conditionalEndMarker, conditionalStartMarker } from "../../conditional-marker.js";
 import { emptyTextMarker } from "../../text-marker.js";
 import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
 import {
@@ -105,9 +106,12 @@ const renderElementYieldStatements = (
     return renderForYieldStatements(node, locals, indent, path);
   }
   if (node.tagName === "if") {
-    const statements = [`${indent}if (${expressionToScopeAccess(attrExpression(node, "test") ?? "false", locals)}) {`];
+    const statements = [
+      `${indent}yield ${jsString(conditionalStartMarker)};`,
+      `${indent}if (${expressionToScopeAccess(attrExpression(node, "test") ?? "false", locals)}) {`,
+    ];
     statements.push(...renderChildYieldStatements(node.children, locals, `${indent}  `, path));
-    statements.push(`${indent}}`);
+    statements.push(`${indent}}`, `${indent}yield ${jsString(conditionalEndMarker)};`);
     return statements;
   }
   if (node.tagName === "store") {

@@ -7,7 +7,11 @@ export const elementAt = (root: Node, path: readonly number[]): Element => {
     let cursor = 0;
     let next: Node | undefined;
     for (const child of Array.from(current.childNodes)) {
-      if (child.nodeType === 8 && (child.nodeValue ?? "").startsWith("tachyon-hydrate:")) continue;
+      if (
+        child.nodeType === 8 &&
+        ((child.nodeValue ?? "").startsWith("tachyon-hydrate:") || child.nodeValue === "/tachyon-if")
+      )
+        continue;
       if (cursor++ === index) {
         next = child;
         break;

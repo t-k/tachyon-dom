@@ -1,6 +1,7 @@
 import { setAttributeValue, setStyleValue } from "./attr.js";
 import { setClassPresence } from "./class.js";
 import { delegateTarget } from "./event.js";
+import { clearConditionalRegion, conditionalRegionEnd, isPathInvisibleNode } from "../conditional-marker.js";
 import { onOwnerCleanup, read } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { setText, textAt } from "./text.js";
@@ -167,8 +168,8 @@ const preparedPathPlans = new WeakMap<Node, PreparedPathPlan>();
 
 const pathKey = (path: readonly number[]): string => path.join(".");
 
-const isHydrationMarker = (node: Node): boolean =>
-  node.nodeType === Node.COMMENT_NODE && (node.nodeValue ?? "").startsWith("tachyon-hydrate:");
+// Region end markers occupy no logical slot either; region content does, and the region offsets account for it.
+const isHydrationMarker = isPathInvisibleNode;
 
 const logicalChildren = (node: Node): Node[] =>
   Array.from(node.childNodes).filter((child) => !isHydrationMarker(child));
@@ -194,13 +195,25 @@ const registerAnchor = (root: Node, path: readonly number[], anchor: Comment): v
 };
 
 /**
- * Live nodes a prepared conditional region adds beyond the single logical slot its template occupies. The
- * anchor comment itself replaces that slot, so only the branch nodes shift later siblings.
+ * Live nodes a conditional region adds beyond the slots its markers occupy in the template, so the branch
+ * nodes (nested regions included) are what shift later siblings. They are read from the DOM between the
+ * markers; an anchor without an end marker falls back to the count its mounts record, or before the first
+ * mount to the nodes prepare adopted from the server.
  */
-const conditionalRegionNodeCount = (root: Node, key: string, anchor: Comment): number =>
-  // Every mount records its node count against the anchor, so before the first mount the only live nodes are
-  // the ones prepare adopted from the server.
-  preparedConditionalNodeCount(root, key) ?? preparedConditionalAdoptionCount(anchor) ?? 0;
+const conditionalRegionNodeCount = (root: Node, key: string, anchor: Comment): number => {
+  const end = conditionalRegionEnd(anchor);
+  return end
+    ? regionNodeCount(anchor, end)
+    : (preparedConditionalNodeCount(root, key) ?? preparedConditionalAdoptionCount(anchor) ?? 0);
+};
+
+const regionNodeCount = (anchor: Comment, end: Node): number => {
+  let count = 0;
+  for (let node = anchor.nextSibling; node && node !== end; node = node.nextSibling) {
+    if (!isHydrationMarker(node)) count++;
+  }
+  return count;
+};
 
 /**
  * Offset from a template child index to the live child index, given the conditional regions that already
@@ -300,12 +313,35 @@ export const prepareConditionalCoreForMount = (
   }
 };
 
-type ConditionalAdoption = (
-  parent: Node,
-  index: number,
+type NodeListMatcher = (
   expected: readonly Node[],
-  source: ConditionalCoreAnchorDescriptor | undefined,
-) => Node[] | undefined;
+  actual: readonly Node[],
+  dynamicAttributes: readonly ConditionalCoreDynamicAttribute[],
+) => boolean;
+
+/**
+ * Adopts the server branch between a start-marker anchor and its end marker. The content is matched against
+ * the branch template; content that differs is stale server output and is dropped, so the mount renders into
+ * an empty region. A lightweight branch holds no nested region, so its content is the plain sibling run after
+ * the anchor; a generic branch adopts the regions nested inside it when it mounts.
+ */
+const adoptRegion = (
+  anchor: Comment,
+  templateHtml: string,
+  dynamicAttributes: readonly ConditionalCoreDynamicAttribute[],
+  match: NodeListMatcher,
+): void => {
+  const end = conditionalRegionEnd(anchor);
+  if (!end || anchor.nextSibling === end) return;
+  const expected = createNodes(templateHtml);
+  const parent = anchor.parentNode as Node;
+  const nodes =
+    regionNodeCount(anchor, end) === expected.length
+      ? adoptableNodesBy(match, parent, logicalChildren(parent).indexOf(anchor) + 1, expected, dynamicAttributes)
+      : undefined;
+  if (nodes) setPreparedConditionalNodes(anchor, nodes);
+  else clearConditionalRegion(anchor);
+};
 
 type ConditionalAdoptionDefer = (
   parent: Node,
@@ -317,7 +353,7 @@ type ConditionalAdoptionDefer = (
 const prepareConditionalCoreWith = (
   root: Node,
   descriptors: readonly ConditionalCoreAnchorDescriptor[],
-  adopt: ConditionalAdoption,
+  match: NodeListMatcher,
   defer: ConditionalAdoptionDefer | undefined,
 ): void => {
   const plan: PreparedPathPlan = { invalid: new Set() };
@@ -333,15 +369,18 @@ const prepareConditionalCoreWith = (
     }
     const index = descriptor.index + conditionalRegionOffset(root, descriptor.parentKey, descriptor.index);
     const candidate = logicalChildren(parent)[index];
+    const dynamicAttributes = source?.dynamicAttributes ?? [];
     if (candidate instanceof Comment && !isHydrationMarker(candidate)) {
       registerAnchor(root, descriptor.path, candidate);
+      adoptRegion(candidate, source?.templateHtml ?? "", dynamicAttributes, match);
       continue;
     }
+    // Server output without region markers: the branch, when visible, sits at the slot itself.
     const expected = createNodes(source?.templateHtml ?? "");
     // The client condition describes the requested state, not the state that
     // produced the SSR DOM. Inspect the server shape independently so a
     // server-visible branch can be removed when the client starts hidden.
-    const adopted = adopt(parent, index, expected, source);
+    const adopted = adoptableNodesBy(match, parent, index, expected, dynamicAttributes);
     // Both adoption checks must read the server DOM before the anchor shifts it.
     const deferred = adopted !== undefined && (defer?.(parent, index, expected, source) ?? false);
     const anchor = document.createComment("");
@@ -357,7 +396,7 @@ const prepareConditionalCoreWith = (
  * sibling until the active server branches have been accounted for.
  */
 export const prepareConditionalCore = (root: Node, descriptors: readonly ConditionalCoreAnchorDescriptor[]): void =>
-  prepareConditionalCoreWith(root, descriptors, (parent, index, expected) => adoptableNodes(parent, index, expected), undefined);
+  prepareConditionalCoreWith(root, descriptors, matchNodes, undefined);
 
 const pathEquals = (left: readonly number[], right: readonly number[]): boolean =>
   left.length === right.length && left.every((part, index) => part === right[index]);
@@ -413,26 +452,23 @@ const sameNodeShapeWithStaticAttributes = (
   );
 };
 
+const matchNodesWithStaticAttributes: NodeListMatcher = (expected, actual, dynamicAttributes) =>
+  actual.length === expected.length &&
+  expected.every((node, nodeIndex) =>
+    sameNodeShapeWithStaticAttributes(
+      node,
+      actual[nodeIndex] as Node,
+      dynamicAttributes,
+      expected.length === 1 ? [] : [nodeIndex],
+    ),
+  );
+
 const adoptableNodesWithStaticAttributes = (
   parent: Node,
   index: number,
   expected: readonly Node[],
   dynamicAttributes: readonly ConditionalCoreDynamicAttribute[],
-): Node[] | undefined => {
-  if (expected.length === 0) return undefined;
-  const actual = logicalChildren(parent).slice(index, index + expected.length);
-  return actual.length === expected.length &&
-    expected.every((node, nodeIndex) =>
-      sameNodeShapeWithStaticAttributes(
-        node,
-        actual[nodeIndex] as Node,
-        dynamicAttributes,
-        expected.length === 1 ? [] : [nodeIndex],
-      ),
-    )
-    ? actual
-    : undefined;
-};
+): Node[] | undefined => adoptableNodesBy(matchNodesWithStaticAttributes, parent, index, expected, dynamicAttributes);
 
 const deferConditionalAdoptionWithStaticAttributes = (
   parent: Node,
@@ -464,38 +500,22 @@ const deferConditionalAdoptionWithStaticAttributes = (
 export const prepareConditionalCoreWithStaticAttributes = (
   root: Node,
   descriptors: readonly ConditionalCoreAnchorDescriptor[],
-): void =>
-  prepareConditionalCoreWith(
-    root,
-    descriptors,
-    (parent, index, expected, source) =>
-      adoptableNodesWithStaticAttributes(parent, index, expected, source?.dynamicAttributes ?? []),
-    undefined,
-  );
+): void => prepareConditionalCoreWith(root, descriptors, matchNodesWithStaticAttributes, undefined);
 
 export const prepareConditionalCoreWithAdoptionGuard = (
   root: Node,
   descriptors: readonly ConditionalCoreAnchorDescriptor[],
 ): void =>
-  prepareConditionalCoreWith(
-    root,
-    descriptors,
-    (parent, index, expected) => adoptableNodes(parent, index, expected),
-    (parent, index, expected, source) =>
-      deferConditionalAdoption(parent, index, expected, source?.laterConditionals),
+  prepareConditionalCoreWith(root, descriptors, matchNodes, (parent, index, expected, source) =>
+    deferConditionalAdoption(parent, index, expected, source?.laterConditionals),
   );
 
 export const prepareConditionalCoreWithAdoptionGuardAndStaticAttributes = (
   root: Node,
   descriptors: readonly ConditionalCoreAnchorDescriptor[],
 ): void =>
-  prepareConditionalCoreWith(
-    root,
-    descriptors,
-    (parent, index, expected, source) =>
-      adoptableNodesWithStaticAttributes(parent, index, expected, source?.dynamicAttributes ?? []),
-    (parent, index, expected, source) =>
-      deferConditionalAdoptionWithStaticAttributes(parent, index, expected, source?.laterConditionals),
+  prepareConditionalCoreWith(root, descriptors, matchNodesWithStaticAttributes, (parent, index, expected, source) =>
+    deferConditionalAdoptionWithStaticAttributes(parent, index, expected, source?.laterConditionals),
   );
 
 /** Resolves a generated binding path after conditional anchors and SSR branches are prepared. */
@@ -533,14 +553,25 @@ const sameNodeShape: ConditionalCoreNodeMatcher = (expected, actual): boolean =>
   return expected.nodeType === Node.TEXT_NODE || expected.nodeType === Node.COMMENT_NODE;
 };
 
-const adoptableNodes = (parent: Node, index: number, expected: readonly Node[]): Node[] | undefined => {
+const matchNodes: NodeListMatcher = (expected, actual) =>
+  actual.length === expected.length &&
+  expected.every((node, nodeIndex) => sameNodeShape(node, actual[nodeIndex] as Node));
+
+/** Server output without region markers: the branch nodes sit at the slot itself when it is visible. */
+const adoptableNodesBy = (
+  match: NodeListMatcher,
+  parent: Node,
+  index: number,
+  expected: readonly Node[],
+  dynamicAttributes: readonly ConditionalCoreDynamicAttribute[] = [],
+): Node[] | undefined => {
   if (expected.length === 0) return undefined;
   const actual = logicalChildren(parent).slice(index, index + expected.length);
-  return actual.length === expected.length &&
-    expected.every((node, nodeIndex) => sameNodeShape(node, actual[nodeIndex] as Node))
-    ? actual
-    : undefined;
+  return match(expected, actual, dynamicAttributes) ? actual : undefined;
 };
+
+const adoptableNodes = (parent: Node, index: number, expected: readonly Node[]): Node[] | undefined =>
+  adoptableNodesBy(matchNodes, parent, index, expected);
 
 export const deferConditionalAdoption: ConditionalCoreAdoptionGuard = (
   parent,

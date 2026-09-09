@@ -192,7 +192,7 @@ describe("generated conditional bindings", () => {
       generated(`<main><if test={open}><b class:on={flag} title={tip}>{label}</b></if><p>{tail}</p></main>`),
     );
     const root = document.createElement("div");
-    root.innerHTML = `<main><b class="on" title="T">L</b><p>Tail</p></main>`;
+    root.innerHTML = `<main><!--tachyon-if--><b class="on" title="T">L</b><!--/tachyon-if--><p>Tail</p></main>`;
     const server = root.querySelector("b");
     const scope = {
       open: createSignal(true),

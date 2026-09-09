@@ -16,7 +16,9 @@ const logicalChildren = (node: Node): Node[] =>
   Array.from(node.childNodes).filter(
     (child) =>
       child.nodeType !== 8 ||
-      (!(child.nodeValue ?? "").startsWith("tachyon-hydrate:") && (child.nodeValue ?? "") !== "tachyon-list"),
+      (!(child.nodeValue ?? "").startsWith("tachyon-hydrate:") &&
+        (child.nodeValue ?? "") !== "tachyon-list" &&
+        (child.nodeValue ?? "") !== "/tachyon-if"),
   );
 
 const nodeAt = (root: Node, path: readonly number[]): Node | undefined => {

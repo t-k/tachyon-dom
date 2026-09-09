@@ -1,5 +1,6 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
+import { conditionalEndMarker, conditionalStartMarker } from "../../conditional-marker.js";
 import { emptyTextMarker } from "../../text-marker.js";
 import { sanitizeMetaRefreshContent, sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../../url-policy.js";
 import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
@@ -161,7 +162,10 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
     return renderFor(node, scope, path);
   }
   if (node.tagName === "if") {
-    return readPath(scope, attrExpression(node, "test") ?? "false") ? renderChildren(node.children, scope, path) : "";
+    // The region keeps the same markers the client template carries, so whitespace beside it stays separate
+    // and hydration adopts exactly the nodes between them.
+    const branch = readPath(scope, attrExpression(node, "test") ?? "false") ? renderChildren(node.children, scope, path) : "";
+    return `${conditionalStartMarker}${branch}${conditionalEndMarker}`;
   }
   if (node.tagName === "store") {
     return "";
@@ -425,7 +429,7 @@ const renderElementExpression = (
   if (node.tagName === "if") {
     const test = expressionToScopeAccess(attrExpression(node, "test") ?? "false", locals);
     const childExpression = renderChildExpressions(node.children, locals, path);
-    return `(${test} ? ${childExpression || `""`} : "")`;
+    return `(${jsString(conditionalStartMarker)} + (${test} ? ${childExpression || `""`} : "") + ${jsString(conditionalEndMarker)})`;
   }
   if (node.tagName === "store") {
     return `""`;
