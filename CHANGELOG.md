@@ -6,15 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-The next candidate is prepared below and has not been published.
+## [0.2.0] - 2026-09-09
 
-## [0.2.0-rc.1] - Unreleased
+This is the first minor release since 0.1.8. The compiler script transform contract changed; see Changed below before upgrading a build integration.
 
-Candidate artifacts are for local verification only. Replace Unreleased with the release date when approving publication.
+### Added
+
+- Generate mount-only client modules through `./Page.td?client&mount-only`. The hydration metadata, the `hydrate` entry, and the server shape-matching and adoption guards are left out of the bundle. The mode is exclusive with `hydrate-only` and with hydration chunks, and `hydrate()` rejects a mount-only module before reading or replacing server DOM.
+- Omit the client entry from pages the compiler proves need no client work with `tachyonApp(app, { clientEntry: "when-required" })`. Any remaining client binding, hydration boundary, store, component boundary, or `<script setup>` keeps the entry. Add `clientEntryScope: "pages"` to declare an entry that only mounts or hydrates page modules; the default `"always"` keeps the entry because a shared entry may carry initialization a static page depends on.
+- Remove constantly false `<if test={...}>` branches before the template IR is built, so the template HTML, SSR output, binding paths, hydration regions, and the runtime feature set all come from one reduced structure. Only literals and negations of literals are treated as constant; constantly true branches are kept so the DOM shape SSR adoption validates does not change.
+- Give the generic keyed list and conditional runtimes generated-only entries whose descriptors require a reader on every value and a writer on every target: `mountGeneratedKeyedList`, `mountGeneratedConditional`, `mountGeneratedConditionalCore`, and `mountGeneratedTextKeyedList`. The expression-string descriptor form stays exported and unchanged for hand-written consumers.
 
 ### Fixed
 
 - Stop merged SFC scopes from writing to their local store on reads. Getters that return fresh arrays or objects no longer re-run every binding that reads them, and reading an absent key no longer adds it to `Object.keys()` or `in` checks.
+- Keep template assignments to merged scope keys visible and notifying: a write is compared against the value the binding currently sees rather than a stale override, and inspecting a merged scope no longer evaluates input getters.
 - Preserve reactive props across generated SFC scopes and template-local stores when using `createTemplateComponent().update()`, without remounting or rerunning setup.
 - Transform non-setup exports using syntax nodes, preserving string/comment contents and references to the original local scope identifiers.
 - Preserve nested and deferred hydration ownership, rollback partially bound branches, and clear refs from their original containers on disposal.
@@ -24,6 +30,7 @@ Candidate artifacts are for local verification only. Replace Unreleased with the
 
 - Specialize simple keyed lists and conditional branches, share reconciliation logic, and keep unused runtime features out of generated client bundles.
 - Cache SFC script transforms by source revision with bounded retention, and share frozen empty transform results.
+- Emit only the full setup scope from CLI and Vite entries. Those entries normalize an omitted scope to `{}` before calling the setup factory, so the narrowed no-input return never ran there and only added bytes. `transformSfcScript` now reports its policy as `scopeEmission`, and the dual factory stays an explicit opt-in for direct callers that pass `templateIdentifiers`.
 - Compiler script transform results and binding arrays are now readonly and frozen. Copy before editing: `const editable = { ...result.value, setupBindings: [...result.value.setupBindings], exposedBindings: [...result.value.exposedBindings] };`.
 - Separate cache benchmark transform timing from result bookkeeping and compare the same call sequences with the result cache bypassed.
 

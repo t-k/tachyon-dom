@@ -1,6 +1,6 @@
 {
   "name": "tachyon-dom",
-  "version": "0.2.0-rc.1",
+  "version": "0.2.0",
   "private": false,
   "description": "A small TypeScript UI runtime and HTML-first compiler.",
   "keywords": [

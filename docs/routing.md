@@ -374,7 +374,7 @@ If TypeScript imports Tachyon template modules directly, add the ambient module 
 }
 ```
 
-Single files can also use `/// <reference types="tachyon-dom/td-modules" />`. The entry declares `.td`, `.td?client`, `.td?server`, `.td?stream`, and `.td?raw` modules with the Vite plugin output types.
+Single files can also use `/// <reference types="tachyon-dom/td-modules" />`. The entry declares `.td`, `.td?client`, `.td?client&mount-only`, `.td?client&hydrate-only`, `.td?server`, `.td?stream`, `.td?entry`, and `.td?raw` modules with the Vite plugin output types. The `.tachyon` and `.tachyon.html` extensions are declared for every one of those forms except the two `client&` modes; the plugin itself accepts all three extensions for every mode, so a `.tachyon.html` template needing `mount-only` or `hydrate-only` types requires a local declaration.
 
 `tachyonDom()` automatically refreshes adjacent `.td.d.ts` files during dev and build transforms. A named SFC `scope()` export becomes the declaration's concrete `TemplateScope`; required template identifiers constrain that return type, and simple event handlers require an `(event: Event) => unknown` function. Pass `declarationOutput: false` only when another build system owns these artifacts, or provide a callback to choose a custom output path.
 

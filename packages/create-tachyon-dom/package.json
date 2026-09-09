@@ -1,6 +1,6 @@
 {
   "name": "create-tachyon-dom",
-  "version": "0.2.0-rc.1",
+  "version": "0.2.0",
   "private": false,
   "description": "Create a Tachyon DOM starter app.",
   "license": "MIT",
@@ -19,7 +19,7 @@
     "LICENSE"
   ],
   "dependencies": {
-    "tachyon-dom": "0.2.0-rc.1",
+    "tachyon-dom": "0.2.0",
     "typescript": "^5.8.3"
   },
   "devDependencies": {

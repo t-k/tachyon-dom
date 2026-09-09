@@ -146,6 +146,7 @@ TypeScript powers SFC script transformation and OXC parses advanced template exp
 - [Server adapters](docs/adapters.md): Workers, Node, Lambda, static assets, origins, and deployment behavior.
 - [Security](docs/security.md): escaping, trusted HTML, sanitizers, redirects, CSRF, hosts, proxies, and origins.
 - [Whitespace migration](docs/migrations/whitespace.md): compiler versus document policies, legacy mappings, and boundary outcomes.
+- [SFC scope optimization](docs/sfc-scope-optimization.md): setup scope narrowing, emission policies, transform caching, and size comparisons.
 - [Benchmarks](benchmark/README.md): provenance, contracts, reproduction, and interpretation.
 - [Releasing](docs/releasing.md): package verification, Trusted Publishing, and release commands.
 - [Changelog](CHANGELOG.md): release history, breaking changes, fixes, and security notes.
@@ -181,7 +182,7 @@ pnpm test:mutation:full
 pnpm test:mutation:hydration
 ```
 
-Property tests use a stable fast-check seed; use `FAST_CHECK_SEED`, `FAST_CHECK_PATH`, and `FAST_CHECK_NUM_RUNS` to replay or resize a campaign. Mutation testing remains a local check: the normal command reuses incremental results, the full command retests every in-scope mutant, and the detailed report is written to `reports/mutation/index.html`.
+Property tests use a stable fast-check seed; use `FAST_CHECK_SEED`, `FAST_CHECK_PATH`, and `FAST_CHECK_NUM_RUNS` to replay or resize a campaign. Mutation testing remains a local check: the normal command reuses incremental results, the full command retests every in-scope mutant, and the detailed report is written to `reports/mutation/index.html`. `pnpm test:mutation:sfc`, `pnpm test:mutation:store`, and `pnpm test:mutation:release-readiness` narrow the mutated ranges and the tests run against them. The remaining scripts, including `pnpm check:runtime-sizes`, `pnpm check:sfc-scope-sizes`, and `pnpm check:client-bundle-attribution`, are declared in `package.json`.
 
 The focused hydration campaign reruns the compiler and conditional-runtime ranges from the hydration review without incremental reuse. See [its coverage and survivor ledger](docs/hydration-mutation-testing.md) for scope, remaining equivalent mutations, and GC test requirements.
 
