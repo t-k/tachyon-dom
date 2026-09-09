@@ -29,4 +29,3 @@ The `Benchmarks` GitHub Actions workflow runs this suite for `all` and `client-b
 ## Notes
 
 - Sizes depend on the Node and zlib versions recorded in the provenance, so compare runs from the same runner image.
-- The conditional fixture writes its `<if>` region without surrounding whitespace text nodes: an initially empty region with whitespace siblings does not hydrate at the moment, which is a runtime issue rather than a benchmark choice.

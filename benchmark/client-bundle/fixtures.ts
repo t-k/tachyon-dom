@@ -135,14 +135,15 @@ const result = hydrate(root, Page, {
 if (!result.ok) throw new Error(result.error.message);
 `;
 
-// The conditional region is written without surrounding whitespace text nodes on purpose: the initial
-// branch is empty on the server, and whitespace siblings around an empty region are not hydrated yet.
 const conditionalPage = `<script lang="ts">
 export const scope = () => ({ open: false });
 </script>
 <section>
   <h1>Details</h1>
-  <button id="toggle" on:click={toggle}>Toggle details</button><if test={open}><p id="details">Details are open.</p></if>
+  <button id="toggle" on:click={toggle}>Toggle details</button>
+  <if test={open}>
+    <p id="details">Details are open.</p>
+  </if>
 </section>
 `;
 
