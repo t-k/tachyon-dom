@@ -6,8 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Server and stream output delimit every `<if>` region with `<!--tachyon-if-->` and `<!--/tachyon-if-->`, and the client template carries the same pair in place of the bare placeholder comment. A hidden branch renders the two markers, a visible branch renders them around its nodes. The end marker occupies no logical slot, so binding paths, hydration regions, and hand-written runtime paths still count an `<if>` as one node; only code that indexed raw `childNodes` past a server-rendered branch sees a different shape.
+
 ### Fixed
 
+- Hydrate `<if>` regions that whitespace text surrounds. The formatting text on either side of a hidden branch used to land in one text node, and a visible branch's own leading and trailing whitespace merged with its neighbours, so `hydrate()` reported a missing child or bound a later sibling to the wrong node. The region markers keep every text node separate, the structure check walks a region marker to marker (a same-tag static sibling right after the branch no longer trips it), and adoption takes exactly the nodes between the markers, nested regions included.
+- Keep later siblings aligned with a nested `<if>` that shares its parent: the region's live node count is now read from the DOM between its markers rather than from the count its last mount recorded, which left the nested branch out.
 - Declare `?client&mount-only` and `?client&hydrate-only` modules for the `.tachyon` and `.tachyon.html` extensions. The Vite plugin accepts all three template extensions for every target mode, but `tachyon-dom/td-modules` only typed those two modes for `.td`, so a template lost its types when only its extension differed.
 
 ## [0.2.0] - 2026-09-09

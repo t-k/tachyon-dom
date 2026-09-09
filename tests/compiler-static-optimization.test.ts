@@ -67,7 +67,7 @@ describe("static template optimization", () => {
     for (const test of ["true", "visible"]) {
       const template = compiled(`<main><if test={${test}}><form><input bind:value={value}></form></if></main>`);
 
-      expect(template.client.templateHtml).toBe(`<main><!----></main>`);
+      expect(template.client.templateHtml).toBe(`<main><!--tachyon-if--><!--/tachyon-if--></main>`);
       expect(template.client.bindings.map((binding) => binding.kind)).toEqual(["if"]);
       expect(generateClientModule(template, { reactive: true })).toContain("tachyon-dom/runtime/conditional");
     }

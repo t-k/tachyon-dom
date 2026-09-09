@@ -6,6 +6,14 @@ import { mountKeyedList } from "./list.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { setText, textAt } from "./text.js";
 import { createStore, onOwnerCleanup, read } from "./signal.js";
+import {
+  clearConditionalRegion,
+  clientShapedNodes,
+  conditionalRegionEnd,
+  isConditionalEndMarker,
+  isConditionalStartMarker,
+  removeConditionalRegion,
+} from "../conditional-marker.js";
 import { setPreparedConditionalNodeCount, takePreparedConditionalNodes } from "./conditional-prepared.js";
 import {
   createHydrationBoundary,
@@ -254,7 +262,11 @@ export const nodeAt = (root: Node, path: readonly number[]): Node => {
     let cursor = 0;
     let next: Node | undefined;
     for (const child of Array.from(current.childNodes)) {
-      if (child.nodeType === 8 && (child.nodeValue ?? "").startsWith("tachyon-hydrate:")) continue;
+      if (
+        child.nodeType === 8 &&
+        ((child.nodeValue ?? "").startsWith("tachyon-hydrate:") || child.nodeValue === "/tachyon-if")
+      )
+        continue;
       if (cursor++ === index) {
         next = child;
         break;
@@ -442,6 +454,7 @@ const cleanup = (state: ConditionalState): void => {
       if (!failed) firstError = error;
       failed = true;
     } finally {
+      if (isConditionalStartMarker(node)) removeConditionalRegion(node);
       node.parentNode?.removeChild(node);
     }
   }
@@ -459,17 +472,51 @@ const removeAdoptedNodes = (nodes: readonly Node[]): void => {
       if (!failed) firstError = error;
       failed = true;
     } finally {
+      if (isConditionalStartMarker(node)) removeConditionalRegion(node);
       node.parentNode?.removeChild(node);
     }
   }
   if (failed) throw firstError;
 };
 
+/**
+ * The server branch a region's anchor still holds: prepared by the top-level pass, or, for a region nested in
+ * an adopted branch, read from between its markers here. It is only trusted when it follows the branch
+ * template; an empty text marker stands in for the template's text node, as it does at the top level.
+ */
+const adoptableRegionNodes = (anchor: Comment, templateHtml: string): Node[] | undefined => {
+  let nodes = takePreparedConditionalNodes(anchor);
+  if (!nodes && isConditionalStartMarker(anchor)) {
+    const end = conditionalRegionEnd(anchor);
+    if (end && anchor.nextSibling !== end) nodes = clientShapedNodes(anchor.nextSibling, end);
+  }
+  if (!nodes || !isConditionalStartMarker(anchor)) return nodes;
+  if (adoptedShapeMatches(logicalNodes(createNodes(templateHtml)), nodes)) return nodes;
+  clearConditionalRegion(anchor);
+  return undefined;
+};
+
+const adoptedShapeMatches = (expected: readonly Node[], actual: readonly Node[]): boolean =>
+  expected.length === actual.length &&
+  expected.every((node, index) => {
+    const candidate = actual[index] as Node;
+    if (node.nodeType === Node.TEXT_NODE && candidate.nodeType === Node.COMMENT_NODE) {
+      return candidate.nodeValue === "td:text";
+    }
+    return (
+      node.nodeType === candidate.nodeType &&
+      (!(node instanceof Element) || node.localName === (candidate as Element).localName)
+    );
+  });
+
 const createNodes = (templateHtml: string): Node[] => {
   const template = document.createElement("template");
   template.innerHTML = templateHtml;
   return Array.from(template.content.childNodes).map((node) => node.cloneNode(true));
 };
+
+/** The branch nodes a path can address: fresh template nodes minus the region end markers they carry. */
+const logicalNodes = (nodes: readonly Node[]): Node[] => nodes.filter((node) => !isConditionalEndMarker(node));
 
 const nodeAtState = (state: ConditionalState, path: readonly number[]): Node => {
   if (state.nodes.length <= 1) return nodeAt(state.nodes[0] as Node, path);
@@ -701,7 +748,7 @@ const mountResolvedConditional = (
   }
   const signature = options.signature;
   const current = states.get(anchor);
-  const adoptedNodes = current ? undefined : takePreparedConditionalNodes(anchor);
+  const adoptedNodes = current ? undefined : adoptableRegionNodes(anchor, options.templateHtml);
   if (!visible) {
     if (current) {
       try {
@@ -717,13 +764,14 @@ const mountResolvedConditional = (
   if (current && current.signature !== signature) {
     cleanupOwnedSubtree(anchor);
   }
+  const created = current?.signature === signature || adoptedNodes ? undefined : createNodes(options.templateHtml);
   const state =
     current && current.signature === signature
       ? current
       : {
           signature,
           descriptor: options.descriptor,
-          nodes: adoptedNodes ?? createNodes(options.templateHtml),
+          nodes: adoptedNodes ?? logicalNodes(created ?? []),
           cleanups: [],
           refCleanups: new Map<number, () => void>(),
           scope: scopeFor(scope, options),
@@ -754,7 +802,7 @@ const mountResolvedConditional = (
   }
   try {
     if (state !== current) {
-      if (!adoptedNodes) anchor.after(...state.nodes);
+      if (created) anchor.after(...created);
       state.hydrationDeferredBindings = setup?.(anchor, state, options, adoptedNodes !== undefined) ?? new Set();
     } else {
       updateScope(state, scope, options);

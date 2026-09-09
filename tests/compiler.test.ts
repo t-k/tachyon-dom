@@ -418,8 +418,12 @@ describe("HTML-first compiler", () => {
     if (!fragment.ok) throw new Error(fragment.error.message);
 
     expect(renderServerTemplate(inline.value, {})).toBe(`<p><span>Hello</span> world and <strong>friends</strong></p>`);
-    expect(renderServerTemplate(raw.value, { show: true })).toBe(`<pre>\n  <span>x</span>\n</pre>`);
-    expect(renderServerTemplate(fragment.value, { show: true })).toBe(`<p>Hello <strong>world</strong> !</p>`);
+    expect(renderServerTemplate(raw.value, { show: true })).toBe(
+      `<pre><!--tachyon-if-->\n  <span>x</span>\n<!--/tachyon-if--></pre>`,
+    );
+    expect(renderServerTemplate(fragment.value, { show: true })).toBe(
+      `<p>Hello<!--tachyon-if--> <strong>world</strong> <!--/tachyon-if-->!</p>`,
+    );
   });
 
   it("caches generated target modules for repeated compiled template objects", () => {
@@ -1932,7 +1936,9 @@ describe("HTML-first compiler", () => {
       throw new Error(result.error.message);
     }
 
-    expect(result.value.client.templateHtml).toBe(`<main><section><!----></section></main>`);
+    expect(result.value.client.templateHtml).toBe(
+      `<main><section><!--tachyon-if--><!--/tachyon-if--></section></main>`,
+    );
     expect(result.value.client.bindings).toEqual([
       {
         kind: "if",
@@ -1946,9 +1952,11 @@ describe("HTML-first compiler", () => {
       },
     ]);
     expect(renderServerTemplate(result.value, { active: true, count: 3 })).toBe(
-      `<main><section><button>3</button></section></main>`,
+      `<main><section><!--tachyon-if--><button>3</button><!--/tachyon-if--></section></main>`,
     );
-    expect(renderServerTemplate(result.value, { active: false, count: 3 })).toBe(`<main><section></section></main>`);
+    expect(renderServerTemplate(result.value, { active: false, count: 3 })).toBe(
+      `<main><section><!--tachyon-if--><!--/tachyon-if--></section></main>`,
+    );
 
     const code = generateClientModule(result.value, { reactive: true });
     expect(code).toContain(`from "tachyon-dom/runtime/conditional-core"`);

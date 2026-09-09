@@ -425,7 +425,9 @@ const nodeAt = (root: Node, path: readonly number[]): Node => {
 
 const isHydrationBoundaryMarker = (node: Node): boolean =>
   node.nodeType === Node.COMMENT_NODE &&
-  ((node.nodeValue?.startsWith("tachyon-hydrate:") ?? false) || node.nodeValue === "tachyon-list");
+  ((node.nodeValue?.startsWith("tachyon-hydrate:") ?? false) ||
+    node.nodeValue === "tachyon-list" ||
+    node.nodeValue === "/tachyon-if");
 
 const nodeAtIgnoringHydrationMarkers = (root: Node, path: readonly number[]): Node => {
   let current = root;
