@@ -174,15 +174,23 @@ pnpm check:exports
 pnpm check:size
 pnpm check:browser-entry
 pnpm check:browser-feature-budgets
+pnpm check:runtime-sizes
+pnpm check:client-bundle-attribution
 pnpm check:template-types
 pnpm check:quick-example-size
+pnpm check:sfc-scope-sizes
 pnpm test:property
 pnpm test:mutation
 pnpm test:mutation:full
 pnpm test:mutation:hydration
+pnpm test:mutation:sfc
+pnpm test:mutation:store
+pnpm test:mutation:release-readiness
 ```
 
-Property tests use a stable fast-check seed; use `FAST_CHECK_SEED`, `FAST_CHECK_PATH`, and `FAST_CHECK_NUM_RUNS` to replay or resize a campaign. Mutation testing remains a local check: the normal command reuses incremental results, the full command retests every in-scope mutant, and the detailed report is written to `reports/mutation/index.html`. `pnpm test:mutation:sfc`, `pnpm test:mutation:store`, and `pnpm test:mutation:release-readiness` narrow the mutated ranges and the tests run against them. The remaining scripts, including `pnpm check:runtime-sizes`, `pnpm check:sfc-scope-sizes`, and `pnpm check:client-bundle-attribution`, are declared in `package.json`.
+Property tests use a stable fast-check seed; use `FAST_CHECK_SEED`, `FAST_CHECK_PATH`, and `FAST_CHECK_NUM_RUNS` to replay or resize a campaign. Mutation testing remains a local check: the normal command reuses incremental results, the full command retests every in-scope mutant, and the detailed report is written to `reports/mutation/index.html`. The scoped campaigns narrow both the mutated ranges and the tests run against them: the SFC campaign reports to `reports/mutation/sfc/`, the release-readiness campaign covers the reactive store plus the SFC and client-target ranges a release touches and reports to `reports/mutation/release-readiness/`, and the store campaign reports to the terminal.
+
+`pnpm check:runtime-sizes` compares the recorded per-feature runtime measurements and the generated table in the runtime guide. Re-record both with `pnpm update:runtime-sizes` on a clean checkout after a change that moves them.
 
 The focused hydration campaign reruns the compiler and conditional-runtime ranges from the hydration review without incremental reuse. See [its coverage and survivor ledger](docs/hydration-mutation-testing.md) for scope, remaining equivalent mutations, and GC test requirements.
 

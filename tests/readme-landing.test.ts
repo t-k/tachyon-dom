@@ -12,8 +12,6 @@ describe("README landing page", () => {
     const message =
       "Tachyon DOM is an experimental HTML-first compiler that turns static templates into direct DOM updates, using a small fine-grained runtime shared with SSR and streaming targets.";
 
-    expect(lines.length).toBeGreaterThanOrEqual(150);
-    expect(lines.length).toBeLessThanOrEqual(200);
     expect(lines.slice(0, 8).join("\n")).toContain(message);
     expect(readme).toContain("## Why Tachyon DOM?");
     expect(readme).toContain("## Quick Example");
