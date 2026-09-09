@@ -2196,6 +2196,59 @@ export const bindRows = (root, rows, options) => effect(() => {
     }
   });
 
+  // The Vite plugin's include pattern accepts .td, .tachyon, and .tachyon.html for every target mode,
+  // so the ambient declarations have to cover the same three extensions or a template that only differs
+  // by extension loses its types.
+  it("declares mount-only and hydrate-only modules for every template extension", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-extension-mode-types-"));
+    try {
+      const usageFile = path.join(dir, "usage.ts");
+      const extensions = ["td", "tachyon", "tachyon.html"];
+      await writeFile(
+        usageFile,
+        [
+          `import { hydrate, mount } from "tachyon-dom";`,
+          ...extensions.flatMap((extension, index) => [
+            `import * as mountOnly${index} from "./page.${extension}?client&mount-only";`,
+            `import * as hydrateOnly${index} from "./page.${extension}?client&hydrate-only";`,
+          ]),
+          `const root = document.body;`,
+          ...extensions.flatMap((_extension, index) => [
+            `mount(root, mountOnly${index}, {});`,
+            `hydrate(root, hydrateOnly${index}, {});`,
+            `const mountOnlyFlag${index}: true = mountOnly${index}.mountOnly;`,
+            `const hydrateOnlyFlag${index}: true = hydrateOnly${index}.hydrateOnly;`,
+            `void mountOnlyFlag${index};`,
+            `void hydrateOnlyFlag${index};`,
+            `// @ts-expect-error mount-only modules carry no hydrate entry`,
+            `void mountOnly${index}.hydrate;`,
+            `// @ts-expect-error hydrate-only modules have no bind`,
+            `mount(root, hydrateOnly${index}, {});`,
+          ]),
+          ``,
+        ].join("\n"),
+      );
+      const program = ts.createProgram([usageFile, path.resolve("src/tachyon-html.d.ts")], {
+        baseUrl: process.cwd(),
+        lib: ["lib.es2022.d.ts", "lib.dom.d.ts"],
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+        noEmit: true,
+        paths: { "tachyon-dom": ["src/index.ts"] },
+        skipLibCheck: true,
+        strict: true,
+        target: ts.ScriptTarget.ES2022,
+      });
+      const diagnostics = ts
+        .getPreEmitDiagnostics(program)
+        .filter((diagnostic) => diagnostic.file?.fileName === usageFile)
+        .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+      expect(diagnostics).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("instruments binding locations in development transforms but not in production builds", async () => {
     await mkdir(path.join(process.cwd(), "node_modules", ".cache"), { recursive: true });
     const dir = await mkdtemp(path.join(process.cwd(), "node_modules", ".cache", "tachyon-diag-prod-"));

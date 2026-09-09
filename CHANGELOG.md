@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Declare `?client&mount-only` and `?client&hydrate-only` modules for the `.tachyon` and `.tachyon.html` extensions. The Vite plugin accepts all three template extensions for every target mode, but `tachyon-dom/td-modules` only typed those two modes for `.td`, so a template lost its types when only its extension differed.
+
 ## [0.2.0] - 2026-09-09
 
 This is the first minor release since 0.1.8. The compiler script transform contract changed; see Changed below before upgrading a build integration.

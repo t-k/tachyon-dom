@@ -38,7 +38,7 @@ When TypeScript imports `.td` modules directly, add:
 /// <reference types="tachyon-dom/td-modules" />
 ```
 
-For project-wide configuration, add `"tachyon-dom/td-modules"` to `compilerOptions.types` alongside `"vite/client"`. The entry covers `.td`, `.td?client`, `.td?client&mount-only`, `.td?client&hydrate-only`, `.td?server`, `.td?stream`, `.td?entry`, and `.td?raw` imports. The `.tachyon` and `.tachyon.html` extensions are declared for every one of those forms except the two `client&` modes.
+For project-wide configuration, add `"tachyon-dom/td-modules"` to `compilerOptions.types` alongside `"vite/client"`. The entry covers `.td`, `.td?client`, `.td?client&mount-only`, `.td?client&hydrate-only`, `.td?server`, `.td?stream`, `.td?entry`, and `.td?raw` imports, and the same set for the `.tachyon` and `.tachyon.html` extensions.
 
 During Vite development and builds, `tachyonDom()` writes an adjacent `.td.d.ts` for every transformed template. These declarations preserve exported `scope()` types, require referenced template fields, and type event handlers. The starter creates initial declarations so a clean project typechecks before its first Vite run. Use `tachyon-dom typegen` only for tooling that does not run Vite.
 
