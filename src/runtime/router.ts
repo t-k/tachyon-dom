@@ -113,6 +113,12 @@ export type ClientRouterOptions = {
   cache?: boolean | { maxEntries?: number };
   initialCache?: readonly { href: string; data: unknown }[];
   eager?: boolean;
+  /**
+   * Keep the server-rendered current route on `start()` instead of rendering it again. The router records
+   * the current URL as its committed navigation and swaps the adopted content out on the next navigation.
+   * Pass the disposer of the hydrated page so it runs when that content is replaced or the router is disposed.
+   */
+  adopt?: boolean | (() => void);
   liveRegion?: Element;
   title?: (context: { url: URL; data: unknown }) => string;
   viewTransition?: boolean | ((context: { url: URL; params: ClientRouteParams; data: unknown }) => boolean);
@@ -1234,7 +1240,18 @@ export const createClientRouter = (options: ClientRouterOptions): ClientRouter =
       options.root.addEventListener("mousedown", onPointerDown);
       options.root.addEventListener("pointerover", onPointerOver);
       addEventListener("popstate", onPopState);
-      await navigate(location.pathname + location.search + location.hash, { replace: true });
+      const currentHref = location.pathname + location.search + location.hash;
+      if (options.adopt) {
+        // The document already shows this route. Give the history entry a scroll key so a later back
+        // navigation restores it, and keep the adopted content until the next commit replaces it.
+        writeHistory(toUrl(currentHref, location.href || baseUrl), { replace: true });
+        committedView = {
+          target: options.root,
+          dispose: typeof options.adopt === "function" ? options.adopt : () => undefined,
+        };
+        return;
+      }
+      await navigate(currentHref, { replace: true });
     },
     navigate,
     submit,

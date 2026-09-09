@@ -179,29 +179,34 @@ export const scope = () => ({ title: "About" });
 
 const multiRouteEntry = `import * as HomePage from "../routes/index/page.td?client";
 import * as AboutPage from "../routes/about/page.td?client";
-import { mount } from "tachyon-dom/runtime/mount";
+import { hydrate, mount } from "tachyon-dom/runtime/mount";
 import { createClientRouter } from "tachyon-dom/runtime/router";
 import { createSignal } from "tachyon-dom/runtime/signal";
 
-// The router owns the page after the server-rendered document loads: each route mounts its compiled page
-// module into a fresh element, and the router swaps that element into the app root on navigation.
+// The server-rendered page is hydrated first; the router adopts it and mounts the other pages on navigation.
+const root = document.querySelector("#app");
+if (!(root instanceof HTMLElement)) throw new Error("Missing app root.");
 const count = createSignal(0);
 const title = createSignal("About");
-const scopes = {
-  home: () => ({ count, increment: () => count.update((value) => value + 1) }),
-  about: () => ({ title }),
+const pages = {
+  "/": { module: HomePage, scope: () => ({ count, increment: () => count.update((value) => value + 1) }) },
+  "/about/": { module: AboutPage, scope: () => ({ title }) },
 };
-const view = (module: typeof HomePage | typeof AboutPage, scope: Record<string, unknown>) => {
+const current = pages[location.pathname as keyof typeof pages];
+const hydrated = current ? hydrate(root, current.module, current.scope()) : undefined;
+if (hydrated && !hydrated.ok) throw new Error(hydrated.error.message);
+const view = (page: (typeof pages)[keyof typeof pages]) => {
   const container = document.createElement("div");
-  const handle = mount(container, module, scope);
+  const handle = mount(container, page.module, page.scope());
   return { value: container, dispose: () => handle.dispose() };
 };
 const router = createClientRouter({
   root: document.body,
   routes: [
-    { path: "/", target: "#app", render: () => view(HomePage, scopes.home()) },
-    { path: "/about/", target: "#app", render: () => view(AboutPage, scopes.about()) },
+    { path: "/", target: "#app", render: () => view(pages["/"]) },
+    { path: "/about/", target: "#app", render: () => view(pages["/about/"]) },
   ],
+  adopt: () => hydrated?.ok && hydrated.value.dispose(),
   focusSelector: "h1",
 });
 await router.start();
@@ -242,7 +247,7 @@ export const clientBundleFixtures: readonly ClientBundleFixture[] = [
   },
   {
     name: "multi-route",
-    description: "Two compiled pages mounted by a client router that navigates between them without reloads.",
+    description: "A hydrated page adopted by a client router that mounts the other page on navigation.",
     initialPath: "/",
     routes: { index: multiRouteHomePage, about: multiRouteAboutPage },
     clientEntry: multiRouteEntry,

@@ -6,13 +6,13 @@
 
 Every fixture in `fixtures.ts` is a starter-shaped project: a `src/routes` tree of `.td` pages, a `src/client/main.ts` entry, and the starter's `vite.config.ts` with `tachyonDom({ reactive: true })` and `tachyonApp()`. The runner writes the project into a temporary directory, links the checkout as `node_modules/tachyon-dom` so the package resolves through its published `exports` to `dist/`, and runs `vite build` from the project directory with `NODE_ENV=production`.
 
-| Fixture | Page |
-|---|---|
-| `counter` | A server-rendered counter hydrated with one signal and one click handler. |
-| `keyed-list` | A keyed row list with add, clear, and selection class toggling. |
-| `form` | A contact form with two-way input bindings and a submit handler. |
-| `conditional` | A details panel toggled through a conditional region. |
-| `multi-route` | Two compiled pages mounted by a client router that navigates between them. |
+| Fixture       | Page                                                                                           |
+| ------------- | ---------------------------------------------------------------------------------------------- |
+| `counter`     | A server-rendered counter hydrated with one signal and one click handler.                      |
+| `keyed-list`  | A keyed row list with add, clear, and selection class toggling.                                |
+| `form`        | A contact form with two-way input bindings and a submit handler.                               |
+| `conditional` | A details panel toggled through a conditional region.                                          |
+| `multi-route` | A hydrated page adopted by a client router (`adopt`) that mounts the other page on navigation. |
 
 ## What is measured
 

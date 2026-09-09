@@ -233,6 +233,7 @@ export const loginAction = formAction({
 - `router.prefetch(href)` to warm loader data.
 - `router.invalidate(href?)` to clear one cache entry or all cache entries.
 - `eager: true` to navigate cache-hit links on `pointerdown`/`mousedown` before the later `click`.
+- `adopt: true` to keep the server-rendered current route on `start()` instead of rendering it again; pass a function, such as the disposer of the hydrated page, to run it when that content is replaced by the next navigation or by `router.dispose()`.
 - `liveRegion` to announce navigations.
 - `title` to update `document.title` after route render.
 - `restoreScroll` for history-entry scroll restoration on `popstate` navigations with a bounded retained-position map.
