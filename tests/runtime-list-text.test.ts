@@ -2,6 +2,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanupTextKeyedList, mountGeneratedTextKeyedList, mountTextKeyedList } from "../src/runtime/list-text";
 import { createSignal, effect, onCleanup } from "../src/runtime/signal";
 
+// The runtime wraps rows in its region markers; these assertions are about the rows themselves.
+const rowsHtml = (element: Element): string =>
+  element.innerHTML.replaceAll("<!--tachyon-for-->", "").replaceAll("<!--/tachyon-for-->", "");
 const warn = console.warn;
 
 afterEach(() => {
@@ -172,7 +175,7 @@ describe("mountTextKeyedList", () => {
     mountGeneratedTextKeyedList(root, [], [{ id: "new", label: newLabel }], newOptions);
 
     expect(oldRow?.isConnected).toBe(false);
-    expect(root.innerHTML).toBe(`<li><span>static</span><strong>New</strong></li>`);
+    expect(rowsHtml(root)).toBe(`<li><span>static</span><strong>New</strong></li>`);
     oldLabel.set("Ignored");
     expect(oldReads).toBe(readsBeforeSignatureChange);
     newLabel.set("Updated");
@@ -352,7 +355,7 @@ describe("mountTextKeyedList", () => {
     expect(root.children[0]).toBe(third);
     expect(root.children[2]).toBe(first);
     expect(second?.isConnected).toBe(false);
-    expect(root.innerHTML).toBe(
+    expect(rowsHtml(root)).toBe(
       `<li><span>Three updated</span></li><li><span>Four</span></li><li><span>One updated</span></li>`,
     );
   });
@@ -371,7 +374,7 @@ describe("mountTextKeyedList", () => {
     });
 
     expect(root.firstElementChild).toBe(serverRow);
-    expect(root.innerHTML).toBe(`<li><span>Client one</span></li>`);
+    expect(rowsHtml(root)).toBe(`<li><span>Client one</span></li>`);
   });
 
   it("keeps a static sibling outside a hydrated text-row region", () => {
@@ -395,7 +398,7 @@ describe("mountTextKeyedList", () => {
       ],
       options,
     );
-    expect(root.innerHTML).toBe(`<li class="row">One</li><li class="row">Two</li><li class="footer">Footer</li>`);
+    expect(rowsHtml(root)).toBe(`<li class="row">One</li><li class="row">Two</li><li class="footer">Footer</li>`);
     const footer = root.querySelector("li.footer");
     const firstRow = root.querySelectorAll("li.row")[0];
     mountTextKeyedList(
@@ -408,13 +411,13 @@ describe("mountTextKeyedList", () => {
       ],
       options,
     );
-    expect(root.innerHTML).toBe(
+    expect(rowsHtml(root)).toBe(
       `<li class="row">Two updated</li><li class="row">Three</li><li class="row">One updated</li><li class="footer">Footer</li>`,
     );
     expect(root.querySelector("li.footer")).toBe(footer);
     expect(root.querySelectorAll("li.row")[2]).toBe(firstRow);
     mountTextKeyedList(root, [], [], options);
-    expect(root.innerHTML).toBe(`<li class="footer">Footer</li>`);
+    expect(rowsHtml(root)).toBe(`<li class="footer">Footer</li>`);
     expect(root.querySelector("li.footer")).toBe(footer);
   });
 
@@ -440,7 +443,7 @@ describe("mountTextKeyedList", () => {
         },
       ),
     ).not.toThrow();
-    expect(root.innerHTML).toBe(`<li>First</li>`);
+    expect(rowsHtml(root)).toBe(`<li>First</li>`);
   });
 
   it("disposes row effects with their reactive owner", () => {
@@ -517,7 +520,7 @@ describe("mountTextKeyedList", () => {
 
     expect(root.children[0]).toBe(secondParagraph);
     expect(root.children[2]).toBe(firstParagraph);
-    expect(root.innerHTML).toBe(`<p>Two moved</p><hr><p>One moved</p><hr>`);
+    expect(rowsHtml(root)).toBe(`<p>Two moved</p><hr><p>One moved</p><hr>`);
   });
 
   it("rejects an SSR row whose text path resolves to an element", () => {

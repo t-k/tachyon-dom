@@ -1,7 +1,12 @@
 import { setAttributeValue, setStyleValue } from "./attr.js";
 import { setClassPresence } from "./class.js";
 import { delegateTarget } from "./event.js";
-import { clearConditionalRegion, conditionalRegionEnd, isPathInvisibleNode } from "../conditional-marker.js";
+import {
+  clearConditionalRegion,
+  conditionalRegionEnd,
+  isPathInvisibleNode,
+  logicalNodesBetween,
+} from "../conditional-marker.js";
 import { onOwnerCleanup, read } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { setText, textAt } from "./text.js";
@@ -168,11 +173,11 @@ const preparedPathPlans = new WeakMap<Node, PreparedPathPlan>();
 
 const pathKey = (path: readonly number[]): string => path.join(".");
 
-// Region end markers occupy no logical slot either; region content does, and the region offsets account for it.
+// Region end markers occupy no logical slot either; conditional region content does, and the region offsets
+// account for it. List region content never does: rows are addressed by their list, so a path steps over them.
 const isHydrationMarker = isPathInvisibleNode;
 
-const logicalChildren = (node: Node): Node[] =>
-  Array.from(node.childNodes).filter((child) => !isHydrationMarker(child));
+const logicalChildren = (node: Node): Node[] => logicalNodesBetween(node.firstChild, null);
 
 const registeredAnchorFor = (root: Node, path: readonly number[]): Comment | undefined => {
   const anchors = anchorsByRoot.get(root);
@@ -208,11 +213,7 @@ const conditionalRegionNodeCount = (root: Node, key: string, anchor: Comment): n
 };
 
 const regionNodeCount = (anchor: Comment, end: Node): number => {
-  let count = 0;
-  for (let node = anchor.nextSibling; node && node !== end; node = node.nextSibling) {
-    if (!isHydrationMarker(node)) count++;
-  }
-  return count;
+  return logicalNodesBetween(anchor.nextSibling, end).length;
 };
 
 /**

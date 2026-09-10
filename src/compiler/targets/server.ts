@@ -1,6 +1,11 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
-import { conditionalEndMarker, conditionalStartMarker } from "../../conditional-marker.js";
+import {
+  conditionalEndMarker,
+  conditionalStartMarker,
+  listEndMarker,
+  listStartMarker,
+} from "../../conditional-marker.js";
 import { emptyTextMarker } from "../../text-marker.js";
 import { sanitizeMetaRefreshContent, sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../../url-policy.js";
 import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
@@ -9,8 +14,6 @@ import {
   attrString,
   assertSafeIdentifierName,
   childPathEntries,
-  listBoundaryMarker,
-  listNeedsBoundaryMarker,
   escapeHtml,
   escapeMarker,
   expressionToScopeAccess,
@@ -25,7 +28,6 @@ import {
   renderableChildren,
   serializeStaticAttr,
   textExpressionSegments,
-  transparentListRootFor,
 } from "../utils.js";
 
 const componentScope = (node: ElementNode, scope: Record<string, unknown>): Record<string, unknown> => {
@@ -63,12 +65,7 @@ const renderChildren = (
   path: readonly number[],
 ): string =>
   childPathEntries(children, path)
-    .map(
-      (entry, index) =>
-        `${renderNode(entry.child, scope, entry.path)}${
-          transparentListRootFor(entry.child) && listNeedsBoundaryMarker(children, index) ? listBoundaryMarker : ""
-        }`,
-    )
+    .map((entry) => renderNode(entry.child, scope, entry.path))
     .join("");
 
 const renderChildExpressions = (
@@ -77,13 +74,7 @@ const renderChildExpressions = (
   path: readonly number[],
 ): string =>
   childPathEntries(children, path)
-    .map((entry, index) => {
-      const marker =
-        transparentListRootFor(entry.child) && listNeedsBoundaryMarker(children, index)
-          ? ` + ${jsString(listBoundaryMarker)}`
-          : "";
-      return `${renderNodeExpression(entry.child, locals, entry.path)}${marker}`;
-    })
+    .map((entry) => renderNodeExpression(entry.child, locals, entry.path))
     .join(" + ");
 
 const hasStaticMetaRefreshMode = (node: ElementNode): boolean =>
@@ -138,15 +129,17 @@ const renderFor = (node: ElementNode, scope: Record<string, unknown>, path: numb
   const itemName = attrString(node, "as")?.trim() || itemNameFromKey(key);
   const indexName = attrString(node, "index")?.trim();
   const items = each ? readPath(scope, each) : undefined;
-  if (!Array.isArray(items)) {
-    return "";
-  }
-  return items
-    .map((item, index) => {
-      const childScope = { ...scope, [itemName]: item, ...(indexName ? { [indexName]: index } : {}) };
-      return renderChildren(node.children, childScope, path);
-    })
-    .join("");
+  // The region keeps the same markers the client template carries, so hydration adopts exactly the rows
+  // between them and a list can share its parent with other dynamic regions.
+  const rows = Array.isArray(items)
+    ? items
+        .map((item, index) => {
+          const childScope = { ...scope, [itemName]: item, ...(indexName ? { [indexName]: index } : {}) };
+          return renderChildren(node.children, childScope, path);
+        })
+        .join("")
+    : "";
+  return `${listStartMarker}${rows}${listEndMarker}`;
 };
 
 const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: number[] = []): string => {
@@ -433,7 +426,7 @@ const renderForExpression = (node: ElementNode, locals: ReadonlySet<string>, pat
   if (indexName) childLocals.add(indexName);
   const childExpression = renderChildExpressions(node.children, childLocals, path);
   const callbackParameters = indexName ? `(${itemName}, ${indexName})` : `(${itemName})`;
-  return `(Array.isArray(${eachAccess}) ? ${eachAccess}.map(${callbackParameters} => ${childExpression || `""`}).join("") : "")`;
+  return `(${jsString(listStartMarker)} + (Array.isArray(${eachAccess}) ? ${eachAccess}.map(${callbackParameters} => ${childExpression || `""`}).join("") : "") + ${jsString(listEndMarker)})`;
 };
 
 const renderElementExpression = (

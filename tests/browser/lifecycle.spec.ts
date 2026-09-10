@@ -45,13 +45,19 @@ declare global {
         text: string;
       };
       sharedParent: {
-        before: { ok: boolean; unchanged: boolean; message: string };
-        after: { ok: boolean; unchanged: boolean; message: string };
+        before: { ok: boolean; identityPreserved: boolean; updated: boolean; message: string };
+        after: { ok: boolean; identityPreserved: boolean; updated: boolean; message: string };
       };
       conditionalShapes: Array<{ ok: boolean; staticPreserved: boolean; tailUpdated: boolean }>;
-      componentSplit: { ok: boolean; unchanged: boolean; identityPreserved: boolean; message: string };
+      componentSplit: { ok: boolean; identityPreserved: boolean; updated: boolean; message: string };
       listFooter: { mountCorrect: boolean; hydrateCorrect: boolean };
-      dynamicShapes: Array<{ ok: boolean; unchanged: boolean; staticPreserved: boolean; message: string }>;
+      dynamicShapes: Array<{
+        ok: boolean;
+        staticPreserved: boolean;
+        tailUpdated: boolean;
+        branchToggled: boolean;
+        message: string;
+      }>;
       dynamicAttributes: { ok: boolean; identity: boolean; titleUpdated: boolean; classToggled: boolean };
       listHeader: { mountCorrect: boolean; hydrateCorrect: boolean };
       listTextOnly: { mountCorrect: boolean; hydrateCorrect: boolean };
@@ -182,53 +188,23 @@ test("runs generated adjacent conditional mount and SSR hydration regressions in
   expect(result.hydrate.genericFormRecreated).toBe(true);
   expect(result.hydrate.genericFooterUpdated).toBe(true);
   expect(result.hydrate.text).toBe("secondHydrated footer 2");
-  expect(result.sharedParent.before.ok).toBe(false);
-  expect(result.sharedParent.before.unchanged).toBe(true);
-  expect(result.sharedParent.before.message).toContain("multiple direct dynamic regions");
-  expect(result.sharedParent.after.ok).toBe(false);
-  expect(result.sharedParent.after.unchanged).toBe(true);
-  expect(result.sharedParent.after.message).toContain("multiple direct dynamic regions");
+  expect(result.sharedParent.before).toEqual({ ok: true, identityPreserved: true, updated: true, message: "" });
+  expect(result.sharedParent.after).toEqual({ ok: true, identityPreserved: true, updated: true, message: "" });
   expect(result.conditionalShapes).toEqual([
     { ok: true, staticPreserved: true, tailUpdated: true },
     { ok: true, staticPreserved: true, tailUpdated: true },
   ]);
-  expect(result.dynamicShapes).toEqual([
-    {
-      ok: false,
-      unchanged: true,
+  expect(result.dynamicShapes).toEqual(
+    Array.from({ length: 5 }, () => ({
+      ok: true,
       staticPreserved: true,
-      message: expect.stringContaining("dynamic attribute shape overlaps"),
-    },
-    {
-      ok: false,
-      unchanged: true,
-      staticPreserved: true,
-      message: expect.stringContaining("dynamic attribute shape overlaps"),
-    },
-    {
-      ok: false,
-      unchanged: true,
-      staticPreserved: true,
-      message: expect.stringContaining("dynamic attribute shape overlaps"),
-    },
-    {
-      ok: false,
-      unchanged: true,
-      staticPreserved: true,
-      message: expect.stringContaining("dynamic attribute shape overlaps"),
-    },
-    {
-      ok: false,
-      unchanged: true,
-      staticPreserved: true,
-      message: expect.stringContaining("dynamic attribute shape overlaps"),
-    },
-  ]);
+      tailUpdated: true,
+      branchToggled: true,
+      message: "",
+    })),
+  );
   expect(result.dynamicAttributes).toEqual({ ok: true, identity: true, titleUpdated: true, classToggled: true });
-  expect(result.componentSplit.ok).toBe(false);
-  expect(result.componentSplit.unchanged).toBe(true);
-  expect(result.componentSplit.identityPreserved).toBe(true);
-  expect(result.componentSplit.message).toContain("multiple direct dynamic regions");
+  expect(result.componentSplit).toEqual({ ok: true, identityPreserved: true, updated: true, message: "" });
   expect(result.listFooter).toEqual({ mountCorrect: true, hydrateCorrect: true });
   expect(result.listHeader).toEqual({ mountCorrect: true, hydrateCorrect: true });
   expect(result.listTextOnly).toEqual({ mountCorrect: true, hydrateCorrect: true });

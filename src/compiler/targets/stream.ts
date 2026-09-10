@@ -1,7 +1,12 @@
 import { err, ok, type Result } from "../../result.js";
 import type { CompiledTemplate, CompilerError, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
-import { conditionalEndMarker, conditionalStartMarker } from "../../conditional-marker.js";
+import {
+  conditionalEndMarker,
+  conditionalStartMarker,
+  listEndMarker,
+  listStartMarker,
+} from "../../conditional-marker.js";
 import { emptyTextMarker } from "../../text-marker.js";
 import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
 import {
@@ -15,12 +20,9 @@ import {
   itemNameFromKey,
   jsOptionalPropertyAccess,
   jsString,
-  listBoundaryMarker,
-  listNeedsBoundaryMarker,
   readExpressionAttribute,
   renderableChildren,
   textExpressionSegments,
-  transparentListRootFor,
 } from "../utils.js";
 import { hasDynamicUrlAttribute, renderOpenTagExpression } from "./server.js";
 
@@ -56,12 +58,9 @@ const renderChildYieldStatements = (
   indent: string,
   path: number[],
 ): string[] =>
-  childPathEntries(children, path).flatMap((entry, index) => [
-    ...renderNodeYieldStatements(entry.child, locals, indent, entry.path),
-    ...(transparentListRootFor(entry.child) && listNeedsBoundaryMarker(children, index)
-      ? [`${indent}yield ${jsString(listBoundaryMarker)};`]
-      : []),
-  ]);
+  childPathEntries(children, path).flatMap((entry) =>
+    renderNodeYieldStatements(entry.child, locals, indent, entry.path),
+  );
 
 const renderForYieldStatements = (
   node: ElementNode,
@@ -78,13 +77,14 @@ const renderForYieldStatements = (
   childLocals.add(itemName);
   if (indexName) childLocals.add(indexName);
   const statements = [
+    `${indent}yield ${jsString(listStartMarker)};`,
     `${indent}if (Array.isArray(${eachAccess})) {`,
     indexName
       ? `${indent}  for (const [${indexName}, ${itemName}] of ${eachAccess}.entries()) {`
       : `${indent}  for (const ${itemName} of ${eachAccess}) {`,
   ];
   statements.push(...renderChildYieldStatements(node.children, childLocals, `${indent}    `, path));
-  statements.push(`${indent}  }`, `${indent}}`);
+  statements.push(`${indent}  }`, `${indent}}`, `${indent}yield ${jsString(listEndMarker)};`);
   return statements;
 };
 

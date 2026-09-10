@@ -8,16 +8,20 @@ import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtre
 import { normalizeListKey } from "./key.js";
 import {
   canAppendWithoutMoving,
-  dynamicElementsFor,
   emptyParentScope,
+  ensureListRegion,
   positionRecords,
   readItemPath,
   readPath,
-  replaceDynamicRegion,
+  regionElements,
+  replaceRegionContent,
   scopedItemFromSnapshot,
   syncParentScope,
+  type ListCoreRegion,
+  type ListRegionMarkers,
   type ParentScopeSnapshot,
 } from "./list-core.js";
+import { templateNodeAt } from "../conditional-marker.js";
 import {
   createHydrationBoundary,
   scheduleHydration,
@@ -216,12 +220,7 @@ type KeyedListOptions = {
   hydration?: HydrationRuntime;
 };
 
-type KeyedListRegion = {
-  before: number;
-  after: number;
-  logicalBefore?: number;
-  logicalAfter?: number;
-};
+type KeyedListRegion = ListCoreRegion;
 
 type RowRecord = {
   key: PropertyKey;
@@ -246,6 +245,8 @@ type ListState = {
   signature: string;
   descriptor: KeyedListOptions;
   options: ListRuntimeOptions;
+  /** The markers the rows live between. */
+  markers: ListRegionMarkers;
   templateHtml: string;
   parentScope: ParentScopeSnapshot;
   records: Map<PropertyKey, RowRecord>;
@@ -307,7 +308,8 @@ type ListRuntimeOptions = KeyedListOptions & {
   hydration: HydrationRuntime;
 };
 
-const listStates = new WeakMap<Element, ListState>();
+// Keyed by the region start marker rather than the container, so sibling lists in one parent keep their own state.
+const listStates = new WeakMap<Comment, ListState>();
 
 const writePath = (scope: Record<string, unknown>, expression: string, value: unknown): void => {
   const parts = expression.split(".");
@@ -423,20 +425,8 @@ const nodeAt = (root: Node, path: readonly number[]): Node => {
   return current;
 };
 
-const isHydrationBoundaryMarker = (node: Node): boolean =>
-  node.nodeType === Node.COMMENT_NODE &&
-  ((node.nodeValue?.startsWith("tachyon-hydrate:") ?? false) ||
-    node.nodeValue === "tachyon-list" ||
-    node.nodeValue === "/tachyon-if");
-
-const nodeAtIgnoringHydrationMarkers = (root: Node, path: readonly number[]): Node => {
-  let current = root;
-  for (const index of path) {
-    const children = Array.from(current.childNodes).filter((child) => !isHydrationBoundaryMarker(child));
-    current = children[index] as Node;
-  }
-  return current;
-};
+const nodeAtIgnoringHydrationMarkers = (root: Node, path: readonly number[]): Node =>
+  templateNodeAt(root, path) as Node;
 
 const nodeAtRecord = (record: RowRecord, path: readonly number[]): Node => {
   if (record.nodes.length <= 1) {
@@ -548,7 +538,8 @@ const cleanupListState = (state: ListState): void => {
 };
 
 const getListState = (container: Element, options: ListRuntimeOptions): ListState => {
-  const current = listStates.get(container);
+  const markers = ensureListRegion(container, options.region);
+  const current = listStates.get(markers.start);
   if (current && current.descriptor === options.descriptor) {
     return current;
   }
@@ -558,7 +549,7 @@ const getListState = (container: Element, options: ListRuntimeOptions): ListStat
     return current;
   }
   if (current) {
-    cleanupOwnedSubtree(container);
+    cleanupOwnedSubtree(markers.start);
   }
   const template = createTemplate(options.templateHtml);
   const elementIndices = Array.from(template.content.childNodes).flatMap((node, index) =>
@@ -568,6 +559,7 @@ const getListState = (container: Element, options: ListRuntimeOptions): ListStat
     signature,
     descriptor: options.descriptor,
     options,
+    markers,
     templateHtml: options.templateHtml,
     parentScope: emptyParentScope,
     records: new Map<PropertyKey, RowRecord>(),
@@ -584,17 +576,17 @@ const getListState = (container: Element, options: ListRuntimeOptions): ListStat
     cleanups: [] as Array<() => void>,
     ownerCleanupDispose: undefined,
   };
-  listStates.set(container, next);
-  registerOwnedSubtree(container, () => {
-    if (listStates.get(container) !== next) return;
+  listStates.set(markers.start, next);
+  registerOwnedSubtree(markers.start, () => {
+    if (listStates.get(markers.start) !== next) return;
     try {
       cleanupListState(next);
     } finally {
-      listStates.delete(container);
+      listStates.delete(markers.start);
     }
   });
   next.ownerCleanupDispose = onOwnerCleanup(() => {
-    cleanupOwnedSubtree(container);
+    cleanupOwnedSubtree(markers.start);
   });
   return next;
 };
@@ -951,13 +943,6 @@ const updateRecord = (
   record.revision.update((value) => value + 1);
 };
 
-const staticAfterNode = (container: Element, region: KeyedListRegion): ChildNode | undefined => {
-  return (
-    Array.from(container.childNodes).find((child) => child.nodeType === 8 && child.nodeValue === "tachyon-list") ??
-    (region.after > 0 ? Array.from(container.children).at(-region.after) : undefined)
-  );
-};
-
 // The parent scope travels beside the descriptor rather than inside it, so a nested list's descriptor stays
 // the same object across rows and updates and its resolved form can be reused.
 const mountResolvedKeyedList = (
@@ -1014,13 +999,8 @@ const mountResolvedKeyedList = (
   const createdRecords: RowRecord[] = [];
   const previousRecords = state.records;
   const inspectServerRows = !state.initialized && state.records.size === 0 && state.elementIndices.length > 0;
-  const serverElements = inspectServerRows ? Array.from(container.children) : [];
-  const serverDynamicElements = inspectServerRows ? dynamicElementsFor(container, options.region) : [];
-  const canAdoptServerRows =
-    inspectServerRows &&
-    (options.region
-      ? serverDynamicElements.length > 0
-      : serverElements.length >= entries.length * state.elementIndices.length);
+  const serverDynamicElements = inspectServerRows ? regionElements(state.markers) : [];
+  const canAdoptServerRows = inspectServerRows && serverDynamicElements.length > 0;
   if (canAdoptServerRows) {
     for (const [entryIndex, entry] of entries.entries()) {
       const adoptable = serverDynamicElements.slice(
@@ -1081,32 +1061,21 @@ const mountResolvedKeyedList = (
       nextRecords.set(entry.key, record);
       orderedRecords.push(record);
     }
-    if (canAdoptServerRows && options.region) {
-      replaceDynamicRegion(
-        container,
-        options.region,
+    const { end } = state.markers;
+    if (canAdoptServerRows) {
+      replaceRegionContent(
+        state.markers,
         orderedRecords.flatMap((record) => record.nodes),
-        staticAfterNode(container, options.region),
       );
-    } else if (canAdoptServerRows) {
-      container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
     } else if (canAppendWithoutMoving(nextRecords, orderedRecords, previousRecords)) {
       const previousKeys = new Set(previousRecords.keys());
       for (const record of orderedRecords) {
         if (!previousKeys.has(record.key)) {
-          const staticAfter = options.region ? staticAfterNode(container, options.region) : undefined;
-          if (!staticAfter) {
-            container.append(...record.nodes);
-          } else for (const node of record.nodes) container.insertBefore(node, staticAfter);
+          for (const node of record.nodes) container.insertBefore(node, end);
         }
       }
     } else {
-      positionRecords(
-        container,
-        orderedRecords,
-        previousRecords,
-        options.region ? (staticAfterNode(container, options.region) ?? null) : null,
-      );
+      positionRecords(container, orderedRecords, previousRecords, end);
     }
     state.records = nextRecords;
     state.initialized = true;
@@ -1318,7 +1287,8 @@ export const mountKeyedList = (
   // The signature only decides whether the container keeps its state, and the same descriptor object keeps it
   // outright, so serializing the descriptor again on every update of an unchanged list would be wasted work.
   const container = nodeAt(root, path);
-  const current = container instanceof Element ? listStates.get(container) : undefined;
+  const current =
+    container instanceof Element ? listStates.get(ensureListRegion(container, options.region).start) : undefined;
   const signature = current && current.descriptor === options ? current.signature : legacySignature(options);
   mountResolvedKeyedList(root, path, items, resolveLegacyOptions(options, signature), options.scope);
 };

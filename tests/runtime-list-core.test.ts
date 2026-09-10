@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canAppendWithoutMoving,
-  dynamicElementsFor,
+  ensureListRegion,
   longestIncreasingSubsequencePositions,
   moveBefore,
   parentScopeNames,
@@ -11,7 +11,8 @@ import {
   positionRecords,
   readItemPath,
   readPath,
-  replaceDynamicRegion,
+  regionElements,
+  replaceRegionContent,
   scopedItemFromSnapshot,
   syncParentScope,
   type ParentScopeSnapshot,
@@ -19,7 +20,9 @@ import {
 
 const rowsIn = (container: Element): string[] => Array.from(container.children).map((child) => child.id);
 
-const listOf = (keys: readonly string[]): { container: Element; records: Map<PropertyKey, { key: PropertyKey; nodes: Node[] }> } => {
+const listOf = (
+  keys: readonly string[],
+): { container: Element; records: Map<PropertyKey, { key: PropertyKey; nodes: Node[] }> } => {
   const container = document.createElement("ul");
   const records = new Map<PropertyKey, { key: PropertyKey; nodes: Node[] }>();
   for (const key of keys) {
@@ -334,43 +337,76 @@ describe("keyed list core", () => {
   });
 
   describe("regions", () => {
-    it("selects the elements between the static ones, clamping a region that does not fit", () => {
-      const { container } = listOf(["a", "b", "c", "d"]);
+    const markerHtml = (container: Element) =>
+      Array.from(container.childNodes)
+        .map((node) => (node.nodeType === 8 ? `<!--${node.nodeValue}-->` : (node as Element).id))
+        .join(" ");
 
-      expect(dynamicElementsFor(container, undefined).map((element) => element.id)).toEqual(["a", "b", "c", "d"]);
-      expect(dynamicElementsFor(container, { before: 1, after: 1 }).map((element) => element.id)).toEqual(["b", "c"]);
-      expect(dynamicElementsFor(container, { before: 9, after: 0 })).toEqual([]);
-      expect(dynamicElementsFor(container, { before: 0, after: 9 })).toEqual([]);
-      expect(dynamicElementsFor(container, { before: -1, after: -1 }).map((element) => element.id)).toEqual([
-        "a",
+    it("finds the marker pair the container already carries", () => {
+      const container = document.createElement("ul");
+      container.innerHTML = `<li id="head"></li><!--tachyon-for--><li id="a"></li><!--/tachyon-for--><li id="tail"></li>`;
+      const markers = ensureListRegion(container, undefined);
+      expect(markers.start).toBe(container.childNodes[1]);
+      expect(markers.end).toBe(container.childNodes[3]);
+      expect(regionElements(markers).map((element) => element.id)).toEqual(["a"]);
+      expect(markerHtml(container)).toBe("head <!--tachyon-for--> a <!--/tachyon-for--> tail");
+    });
+
+    it("selects the container's own pair by ordinal, skipping regions nested in siblings", () => {
+      const container = document.createElement("ul");
+      container.innerHTML =
+        `<!--tachyon-if--><!--tachyon-for--><li id="nested"></li><!--/tachyon-for--><!--/tachyon-if-->` +
+        `<!--tachyon-for--><li id="a"></li><!--/tachyon-for-->` +
+        `<!--tachyon-for--><li id="b"></li><!--tachyon-for--><li id="inner"></li><!--/tachyon-for--><!--/tachyon-for-->`;
+      expect(regionElements(ensureListRegion(container, { index: 0 })).map((element) => element.id)).toEqual(["a"]);
+      expect(regionElements(ensureListRegion(container, { index: 1 })).map((element) => element.id)).toEqual([
         "b",
-        "c",
-        "d",
+        "inner",
       ]);
     });
 
-    it("replaces the dynamic slice and keeps the static nodes on both sides", () => {
+    it("wraps every child of a plain container when the descriptor declares no region", () => {
+      const { container } = listOf(["a", "b"]);
+      const markers = ensureListRegion(container, undefined);
+      expect(markerHtml(container)).toBe("<!--tachyon-for--> a b <!--/tachyon-for-->");
+      expect(regionElements(markers).map((element) => element.id)).toEqual(["a", "b"]);
+      expect(ensureListRegion(container, undefined)).toEqual(markers);
+    });
+
+    it("places the pair between the static elements a legacy region counts", () => {
       const { container } = listOf(["head", "a", "b", "tail"]);
-      const first = container.children[3] as ChildNode;
+      ensureListRegion(container, { before: 1, after: 1 });
+      expect(markerHtml(container)).toBe("head <!--tachyon-for--> a b <!--/tachyon-for--> tail");
+
+      const empty = listOf(["head", "tail"]).container;
+      ensureListRegion(empty, { before: 1, after: 1 });
+      expect(markerHtml(empty)).toBe("head <!--tachyon-for--> <!--/tachyon-for--> tail");
+
+      const trailing = listOf(["head"]).container;
+      ensureListRegion(trailing, { before: 1, after: 0 });
+      expect(markerHtml(trailing)).toBe("head <!--tachyon-for--> <!--/tachyon-for-->");
+    });
+
+    it("ends the region at a legacy boundary comment", () => {
+      const container = document.createElement("ul");
+      container.innerHTML = `<li id="a"></li><!--tachyon-list-->tail`;
+      ensureListRegion(container, { before: 0, after: 0 });
+      expect(markerHtml(container)).toBe("<!--tachyon-for--> a <!--/tachyon-for--> <!--tachyon-list--> ");
+    });
+
+    it("replaces the region content and keeps the nodes on both sides", () => {
+      const { container } = listOf(["head", "a", "b", "tail"]);
+      const markers = ensureListRegion(container, { before: 1, after: 1 });
       const replacement = ["x", "y"].map((id) => {
         const element = document.createElement("li");
         element.id = id;
         return element;
       });
 
-      replaceDynamicRegion(container, { before: 1, after: 1 }, replacement, first);
+      replaceRegionContent(markers, replacement);
 
       expect(rowsIn(container)).toEqual(["head", "x", "y", "tail"]);
-    });
-
-    it("appends to the end when nothing follows the region", () => {
-      const { container } = listOf(["head", "a"]);
-      const replacement = [document.createElement("li")];
-      replacement[0]!.id = "x";
-
-      replaceDynamicRegion(container, { before: 1, after: 0 }, replacement, undefined);
-
-      expect(rowsIn(container)).toEqual(["head", "x"]);
+      expect(markerHtml(container)).toBe("head <!--tachyon-for--> x y <!--/tachyon-for--> tail");
     });
   });
 });

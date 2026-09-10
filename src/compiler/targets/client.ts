@@ -26,7 +26,6 @@ import {
   attrExpression,
   automaticHydrationId,
   childPathEntries,
-  emitsElementRoot,
   expressionToScopeAccess,
   jsOptionalPropertyAccess,
   hydrationBoundaryFor,
@@ -34,8 +33,6 @@ import {
   isVoidElement,
   isStoreNode,
   itemNameFromKey,
-  listBoundaryMarker,
-  listNeedsBoundaryMarker,
   attrString,
   assertSafeIdentifierName,
   readExpressionAttribute,
@@ -47,7 +44,12 @@ import {
   expressionLocationForText,
 } from "../utils.js";
 import { isAssignableExpression } from "../expression.js";
-import { conditionalEndMarker, conditionalStartMarker } from "../../conditional-marker.js";
+import {
+  conditionalEndMarker,
+  conditionalStartMarker,
+  listEndMarker,
+  listStartMarker,
+} from "../../conditional-marker.js";
 import { expressionAlwaysPlainValue, expressionCallsSomething, expressionScopeNames } from "../optimize.js";
 
 type LoweredNode = {
@@ -101,80 +103,6 @@ const hydrationShapeForNode = (node: TemplateNode): string => {
     return "comment";
   if (node.tagName === "component") return hydrationShapeForChildren(node.children);
   return `element:${node.tagName.toLowerCase()}:${JSON.stringify(hydrationShapeForStaticAttributes(node))}:${hydrationShapeForChildren(node.children)}`;
-};
-
-type HydrationDirectChild = {
-  kind: "static" | "list" | "conditional";
-  shape: string;
-  node: TemplateNode;
-};
-
-const hydrationDirectChildren = (children: readonly TemplateNode[]): HydrationDirectChild[] =>
-  children.flatMap((child) => {
-    if (child.type === "element" && child.tagName === "component") {
-      const renderable = renderableChildren(child);
-      return renderable.length === 1
-        ? hydrationDirectChildren(renderable)
-        : [{ kind: "static", shape: hydrationShapeForNode(child), node: child }];
-    }
-    if (child.type === "element" && child.tagName === "if") {
-      return [{ kind: "conditional", shape: hydrationShapeForRegion(child.children), node: child }];
-    }
-    if (child.type === "element" && child.tagName === "for") {
-      return [{ kind: "list", shape: hydrationShapeForRegion(child.children), node: child }];
-    }
-    return [{ kind: "static", shape: hydrationShapeForNode(child), node: child }];
-  });
-
-const hasGeneratedHydrationAttribute = (node: TemplateNode): boolean =>
-  node.type === "element" &&
-  (node.attrs.some(({ name }) => {
-    const normalizedName = name.toLowerCase();
-    return normalizedName.startsWith("class:") || normalizedName.startsWith("style:");
-  }) ||
-    node.children.some(hasGeneratedHydrationAttribute));
-
-const recordHydrationDynamicRegionErrors = (
-  node: ElementNode,
-  path: readonly number[],
-  context: ClientLoweringContext,
-): void => {
-  const children = hydrationDirectChildren(node.children);
-  const dynamicChildren = children.filter(({ kind }) => kind !== "static");
-  if (dynamicChildren.length >= 2 && dynamicChildren.some(({ kind }) => kind === "list")) {
-    const label = path.length === 0 ? "root" : `root.${path.join(".")}`;
-    context.hydrationDynamicRegionErrors.push(
-      `Hydration cannot safely adopt multiple direct dynamic regions at ${label} when a <for> shares its parent with another dynamic region.`,
-    );
-    return;
-  }
-  for (const [index, child] of children.entries()) {
-    if (child.kind !== "conditional" || child.shape.length === 0) continue;
-    const hasAmbiguousShapeSibling = children.some(
-      (sibling, siblingIndex) => siblingIndex !== index && sibling.shape === child.shape && sibling.shape.length > 0,
-    );
-    const hasGeneratedAttributeSibling = children.some((sibling, siblingIndex) => {
-      if (siblingIndex === index || !hasGeneratedHydrationAttribute(sibling.node)) return false;
-      if (child.node.type !== "element" || child.node.tagName !== "if") return false;
-      const expectedChildren = matcherChildren(child.node.children);
-      const actualChildren = matcherChildren([sibling.node]);
-      return (
-        expectedChildren.length === actualChildren.length &&
-        expectedChildren.every((expectedChild, childIndex) =>
-          conditionalShapeMayAdopt(expectedChild, actualChildren[childIndex] as TemplateNode, [], []),
-        )
-      );
-    });
-    if (!hasAmbiguousShapeSibling && !hasGeneratedAttributeSibling) continue;
-    const label = path.length === 0 ? "root" : `root.${path.join(".")}`;
-    const reason = hasGeneratedAttributeSibling
-      ? "its dynamic attribute shape overlaps another sibling."
-      : "its client shape is shared by another sibling.";
-    context.hydrationDynamicRegionErrors.push(
-      `Hydration cannot safely adopt an ambiguous conditional hydration region at ${label}: ${reason}`,
-    );
-    return;
-  }
 };
 
 type LexicalScope = {
@@ -367,36 +295,9 @@ const loweredNodeCount = (node: TemplateNode): number => {
 const loweredNodeCountFor = (children: readonly TemplateNode[]): number =>
   children.reduce((count, child) => count + loweredNodeCount(child), 0);
 
-const logicalBoundaryNodeCount = (node: TemplateNode): number => {
-  if (node.type !== "text") return loweredNodeCount(node);
-  const segments = textExpressionSegments(node.value);
-  if (!segments.some((segment) => segment.kind === "expression" || segment.value.trim().length > 0)) return 0;
-  return segments.filter((segment) => segment.value.length > 0).length * 2 - 1;
-};
-
-const logicalBoundaryNodeCountFor = (children: readonly TemplateNode[]): number =>
-  children.reduce((count, child) => count + logicalBoundaryNodeCount(child), 0);
-
-const listRegionFor = (children: readonly TemplateNode[], index: number): ListBinding["region"] => {
-  const dynamicChildren = children.filter(
-    (child) => child.type === "element" && (child.tagName === "for" || child.tagName === "if"),
-  );
-  if (dynamicChildren.length !== 1 || dynamicChildren[0]?.type !== "element" || dynamicChildren[0].tagName !== "for") {
-    return undefined;
-  }
-  const before = children.slice(0, index).filter(emitsElementRoot).length;
-  const after = children.slice(index + 1).filter(emitsElementRoot).length;
-  const logicalBefore = logicalBoundaryNodeCountFor(children.slice(0, index));
-  const logicalAfter = logicalBoundaryNodeCountFor(children.slice(index + 1));
-  return before + after > 0 || logicalBefore + logicalAfter > 0
-    ? {
-        before,
-        after,
-        ...(logicalBefore !== before ? { logicalBefore } : {}),
-        ...(logicalAfter !== after ? { logicalAfter } : {}),
-      }
-    : undefined;
-};
+/** Where a list sits in its parent: the ordinal of its marker pair and the logical slot its rows start at. */
+const listRegionOf = (ordinal: number, at: number): ListBinding["region"] =>
+  ordinal === 0 && at === 0 ? undefined : { ...(ordinal ? { index: ordinal } : {}), ...(at ? { at } : {}) };
 
 const lowerComponent = (
   node: ElementNode,
@@ -563,7 +464,9 @@ const lowerElement = (
   }
   if (node.tagName === "for") {
     context.bindings.push(lowerList(node, path, context, listRegion));
-    return "";
+    // The region's markers. Rows live between them, exactly like server-rendered ones; both markers are
+    // invisible to logical paths, so the list still occupies no slot in its parent.
+    return `${listStartMarker}${listEndMarker}`;
   }
   if (node.tagName === "if") {
     return lowerIf(node, path, context);
@@ -575,8 +478,6 @@ const lowerElement = (
   if (node.tagName === "component") {
     return lowerComponent(node, path, context, listRegion);
   }
-
-  recordHydrationDynamicRegionErrors(node, path, context);
 
   const attrs: string[] = [];
   const staticClassNames: string[] = [];
@@ -680,24 +581,12 @@ const lowerElement = (
 
   let children = "";
   let domIndex = 0;
+  let listOrdinal = 0;
   for (const child of node.children) {
-    if (child.type === "element" && child.tagName === "for") {
-      context.hydrationDynamicRegions.push({ path: [...path], index: domIndex, kind: "list" });
-      context.bindings.push(
-        lowerList(child, path, context, listRegionFor(node.children, node.children.indexOf(child))),
-      );
-      if (listNeedsBoundaryMarker(node.children, node.children.indexOf(child))) {
-        children += listBoundaryMarker;
-      }
-      continue;
-    }
     const transparentListRoot = transparentListRootFor(child);
-    const flattenedChildren = transparentListRoot ? domChildren(node) : undefined;
-    const flattenedIndex = transparentListRoot ? flattenedChildren?.indexOf(transparentListRoot) : undefined;
-    const childListRegion =
-      transparentListRoot && flattenedChildren && flattenedIndex !== undefined && flattenedIndex >= 0
-        ? listRegionFor(flattenedChildren, flattenedIndex)
-        : undefined;
+    const childListRegion = transparentListRoot ? listRegionOf(listOrdinal++, domIndex) : undefined;
+    // A direct `<for>` is bound against this element, so its path is the container's own.
+    const childPath = transparentListRoot === child ? path : [...path, domIndex];
     if (transparentListRoot) {
       context.hydrationDynamicRegions.push({ path: [...path], index: domIndex, kind: "list" });
     }
@@ -708,10 +597,7 @@ const lowerElement = (
       addStoreDefinitions(child, [...path, domIndex], context);
       continue;
     }
-    const lowered = lowerNode(child, [...path, domIndex], context, childListRegion);
-    if (transparentListRoot && flattenedChildren && flattenedIndex !== undefined && flattenedIndex >= 0) {
-      if (listNeedsBoundaryMarker(flattenedChildren, flattenedIndex)) children += listBoundaryMarker;
-    }
+    const lowered = lowerNode(child, childPath, context, childListRegion);
     children += lowered.html;
     domIndex += lowered.nodeCount;
   }
@@ -762,7 +648,6 @@ export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client
     hydrationIds,
   };
   const templateHtml = lowerElement(root, [], context);
-  recordHydrationDynamicAttributeRegionErrors(root, context.bindings, context.hydrationDynamicRegionErrors);
   return {
     templateHtml,
     bindings: context.bindings,
@@ -796,10 +681,7 @@ const runtimeNames = {
   preparedNodeAt: "__tachyonPreparedNodeAt",
   mountGeneratedKeyedList: "__tachyonMountGeneratedKeyedList",
   mountTextKeyedList: "__tachyonMountTextKeyedList",
-  mountTextKeyedListWithBoundary: "__tachyonMountTextKeyedListWithBoundary",
   nodeAt: "__tachyonNodeAt",
-  nodeAtWithDynamicLists: "__tachyonNodeAtWithDynamicLists",
-  dynamicListChildOffset: "__tachyonDynamicListChildOffset",
   read: "__tachyonRead",
   setAttributeValue: "__tachyonSetAttributeValue",
   setClassPresence: "__tachyonSetClassPresence",
@@ -998,211 +880,6 @@ const nodeAtElementPath = (root: ElementNode, path: readonly number[]): ElementN
   return current;
 };
 
-const matcherChildren = (children: readonly TemplateNode[]): TemplateNode[] =>
-  children.flatMap((child) => {
-    if (child.type === "text") return child.value.length > 0 ? [child] : [];
-    if (child.tagName === "store" || child.tagName === "for") return [];
-    if (child.tagName === "component") return matcherChildren(child.children);
-    return [child];
-  });
-
-const matcherAttributeFor = (node: ElementNode, name: string): { name: string; value: string | true } | undefined =>
-  node.attrs.find((attribute) => attribute.name.toLowerCase() === name.toLowerCase());
-
-const matcherGeneratedAttributesFor = (node: ElementNode, name: string): { name: string; value: string | true }[] => {
-  const prefix = name.toLowerCase() === "class" ? "class:" : name.toLowerCase() === "style" ? "style:" : "";
-  return prefix.length === 0 ? [] : node.attrs.filter((attribute) => attribute.name.toLowerCase().startsWith(prefix));
-};
-
-const matcherAttributeAllowed = (
-  dynamicAttributes:
-    | readonly ReturnType<typeof conditionalDynamicAttributes>[number][]
-    | readonly {
-        path: number[];
-        name: string;
-        kind?: "value" | "token";
-      }[],
-  path: readonly number[],
-  name: string,
-): { kind?: "value" | "token" } | undefined =>
-  dynamicAttributes.find(
-    (attribute) =>
-      attribute.path.length === path.length &&
-      attribute.path.every((part, index) => part === path[index]) &&
-      attribute.name.toLowerCase() === name.toLowerCase(),
-  );
-
-const matcherStaticAttributeValue = (value: string | true): string => (value === true ? "" : value);
-
-const matcherTokens = (value: string): Set<string> => new Set(value.split(/\s+/).filter(Boolean));
-
-const matcherStyleProperties = (value: string | true): Map<string, string> =>
-  new Map(
-    matcherStaticAttributeValue(value)
-      .split(";")
-      .flatMap((part) => {
-        const separator = part.indexOf(":");
-        if (separator < 1) return [];
-        const name = part.slice(0, separator).trim().toLowerCase();
-        return name.length > 0 ? [[name, part.slice(separator + 1).trim()] as const] : [];
-      }),
-  );
-
-const matcherGeneratedAttributeMayOverlap = (
-  expected: { name: string; value: string | true },
-  actual: ElementNode,
-  dynamicAttribute: { kind?: "value" | "token" } | undefined,
-): boolean | undefined => {
-  const name = expected.name.toLowerCase();
-  const generated = matcherGeneratedAttributesFor(actual, name);
-  if (generated.length === 0) return undefined;
-  if (dynamicAttribute?.kind === "token" && name === "class") return true;
-  if (dynamicAttribute && name === "style") return true;
-  const staticAttribute = matcherAttributeFor(actual, name);
-  if (staticAttribute && readExpressionAttribute(staticAttribute.value) !== undefined) return true;
-
-  if (name === "class") {
-    const expectedTokens = matcherTokens(matcherStaticAttributeValue(expected.value));
-    const staticTokens = staticAttribute
-      ? matcherTokens(matcherStaticAttributeValue(staticAttribute.value))
-      : new Set<string>();
-    const generatedTokens = matcherTokens(generated.map((attribute) => attribute.name.slice(6)).join(" "));
-    if (Array.from(staticTokens).some((token) => !expectedTokens.has(token))) return false;
-    return Array.from(expectedTokens).every((token) => staticTokens.has(token) || generatedTokens.has(token));
-  }
-
-  if (name === "style") {
-    const expectedProperties = matcherStyleProperties(expected.value);
-    const staticProperties = staticAttribute
-      ? matcherStyleProperties(staticAttribute.value)
-      : new Map<string, string>();
-    const generatedProperties = new Set(generated.map((attribute) => attribute.name.slice(6).toLowerCase()));
-    for (const [property, value] of staticProperties) {
-      if (generatedProperties.has(property)) continue;
-      if (expectedProperties.get(property) !== value) return false;
-    }
-    return Array.from(expectedProperties.keys()).every(
-      (property) => staticProperties.has(property) || generatedProperties.has(property),
-    );
-  }
-
-  return undefined;
-};
-
-const conditionalShapeMayAdopt = (
-  expected: TemplateNode,
-  actual: TemplateNode,
-  dynamicAttributes: readonly { path: number[]; name: string; kind?: "value" | "token" }[],
-  path: readonly number[],
-): boolean => {
-  if (expected.type === "text" || actual.type === "text") return expected.type === "text" && actual.type === "text";
-  if (["if", "outlet", "slot", "await"].includes(expected.tagName)) return false;
-  if (["if", "outlet", "slot", "await"].includes(actual.tagName)) return false;
-  if (expected.tagName.toLowerCase() !== actual.tagName.toLowerCase()) return false;
-
-  for (const expectedAttribute of expected.attrs) {
-    if (matcherAttributeIsIgnored(expectedAttribute)) continue;
-    const dynamicAttribute = matcherAttributeAllowed(dynamicAttributes, path, expectedAttribute.name);
-    const generatedOverlap = matcherGeneratedAttributeMayOverlap(expectedAttribute, actual, dynamicAttribute);
-    if (generatedOverlap !== undefined) {
-      if (!generatedOverlap) return false;
-      continue;
-    }
-    const actualAttribute = matcherAttributeFor(actual, expectedAttribute.name);
-    if (!actualAttribute) return false;
-    if (matcherAttributeIsIgnored(actualAttribute)) continue;
-    if (
-      !dynamicAttribute &&
-      matcherStaticAttributeValue(actualAttribute.value) !== matcherStaticAttributeValue(expectedAttribute.value)
-    ) {
-      return false;
-    }
-  }
-  for (const actualAttribute of actual.attrs) {
-    if (matcherAttributeIsIgnored(actualAttribute)) continue;
-    if (matcherAttributeFor(expected, actualAttribute.name)) {
-      const expectedAttribute = matcherAttributeFor(expected, actualAttribute.name);
-      const dynamicAttribute = matcherAttributeAllowed(dynamicAttributes, path, actualAttribute.name);
-      const generatedOverlap = expectedAttribute
-        ? matcherGeneratedAttributeMayOverlap(expectedAttribute, actual, dynamicAttribute)
-        : undefined;
-      if (generatedOverlap !== undefined) {
-        if (!generatedOverlap) return false;
-        continue;
-      }
-      if (dynamicAttribute?.kind === "token" && actualAttribute.name.toLowerCase() === "class" && expectedAttribute) {
-        const expectedTokens = matcherTokens(matcherStaticAttributeValue(expectedAttribute.value));
-        const actualTokens = matcherTokens(matcherStaticAttributeValue(actualAttribute.value));
-        if (Array.from(expectedTokens).some((token) => !actualTokens.has(token))) return false;
-      } else if (
-        !dynamicAttribute &&
-        expectedAttribute &&
-        matcherStaticAttributeValue(expectedAttribute.value) !== matcherStaticAttributeValue(actualAttribute.value)
-      ) {
-        return false;
-      }
-      continue;
-    }
-    if (!matcherAttributeAllowed(dynamicAttributes, path, actualAttribute.name)) return false;
-  }
-
-  const expectedChildren = matcherChildren(expected.children);
-  const actualChildren = matcherChildren(actual.children);
-  return (
-    expectedChildren.length === actualChildren.length &&
-    expectedChildren.every((child, index) =>
-      conditionalShapeMayAdopt(child, actualChildren[index] as TemplateNode, dynamicAttributes, [...path, index]),
-    )
-  );
-};
-
-const recordHydrationDynamicAttributeRegionErrors = (
-  root: ElementNode,
-  bindings: readonly ClientBinding[],
-  errors: string[],
-): void => {
-  for (const binding of bindings) {
-    if (binding.kind !== "if" || !usesConditionalCore(binding)) continue;
-    const dynamicAttributes = conditionalDynamicAttributes(binding);
-    if (dynamicAttributes.length === 0) continue;
-    const parent = nodeAtElementPath(root, binding.path.slice(0, -1));
-    const conditional = nodeAtElementPath(root, binding.path);
-    const index = binding.path.at(-1);
-    if (!parent || !conditional || index === undefined) continue;
-    const expected = matcherChildren(conditional.children);
-    if (expected.length === 0) continue;
-    const siblings = domChildren(parent);
-    for (let start = 0; start + expected.length <= siblings.length; start++) {
-      if (start === index) continue;
-      const actual = siblings.slice(start, start + expected.length);
-      if (
-        actual.some(
-          (candidate) =>
-            candidate.type === "element" &&
-            (candidate.tagName === "if" || candidate.tagName === "for" || candidate.tagName === "store"),
-        )
-      ) {
-        continue;
-      }
-      const matches = expected.every((candidate, candidateIndex) =>
-        conditionalShapeMayAdopt(
-          candidate,
-          actual[candidateIndex] as TemplateNode,
-          dynamicAttributes,
-          expected.length === 1 ? [] : [candidateIndex],
-        ),
-      );
-      if (!matches) continue;
-      const label = binding.path.slice(0, -1).length === 0 ? "root" : `root.${binding.path.slice(0, -1).join(".")}`;
-      const message =
-        `Hydration cannot safely adopt an ambiguous conditional hydration region at ${label}: ` +
-        "its dynamic attribute shape overlaps another sibling.";
-      if (!errors.includes(message)) errors.push(message);
-      break;
-    }
-  }
-};
-
 const templateForHydrationBoundary = (template: CompiledTemplate, id: string): CompiledTemplate | undefined => {
   const boundary = template.client.hydrationBoundaries.find((candidate) => candidate.id === id);
   if (!boundary) return undefined;
@@ -1346,9 +1023,6 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding)) ||
     generatedRowBindings.some((binding) => binding.kind === "list");
   const needsTextList = bindings.some((binding) => binding.kind === "list" && isTextOnlyList(binding));
-  const needsTextListBoundary = bindings.some(
-    (binding) => binding.kind === "list" && isTextOnlyList(binding) && binding.region?.logicalAfter !== undefined,
-  );
   const needsNestedConditional = generatedRowBindings.some((binding) => binding.kind === "if");
   const needsConditional = bindings.some((binding) => binding.kind === "if") || needsNestedConditional;
   const needsConditionalCore = bindings.some((binding) => binding.kind === "if" && usesConditionalCore(binding));
@@ -1365,28 +1039,6 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     (binding) =>
       (binding.kind === "list" || (binding.kind === "if" && !usesConditionalCore(binding))) &&
       (binding.hydrationBoundaries?.length ?? 0) > 0,
-  );
-  const listPathsForBinding = (
-    path: readonly number[],
-  ): Array<{
-    path: number[];
-    region?: ListBinding["region"];
-  }> =>
-    bindings.flatMap((candidate) => {
-      if (
-        candidate.kind !== "list" ||
-        candidate.path.length >= path.length ||
-        !candidate.path.every((part, index) => part === path[index])
-      ) {
-        return [];
-      }
-      const childIndex = path[candidate.path.length];
-      const logicalBefore = candidate.region?.logicalBefore ?? candidate.region?.before ?? 0;
-      if (candidate.region && (childIndex === undefined || childIndex < logicalBefore)) return [];
-      return [{ path: candidate.path, ...(candidate.region ? { region: candidate.region } : {}) }];
-    });
-  const needsListPathResolver = bindings.some(
-    (binding) => binding.kind !== "list" && listPathsForBinding(binding.path).length > 0,
   );
   const needsConditionalCoreAdoptionGuard =
     needsConditionalCore &&
@@ -1447,11 +1099,6 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (classImports.length > 0) {
     lines.push(`import { ${classImports.join(", ")} } from "tachyon-dom/runtime/class";`);
   }
-  if (needsListPathResolver) {
-    lines.push(
-      `import { dynamicListChildOffset as ${runtimeNames.dynamicListChildOffset}, nodeAtWithDynamicLists as ${runtimeNames.nodeAtWithDynamicLists} } from "tachyon-dom/runtime/list-path";`,
-    );
-  }
   const attrImports = [
     ...(bindingsNeedingRuntime.some((binding) => binding.kind === "attr" && !isKnownClassAttribute(binding))
       ? [`setAttributeValue as ${runtimeNames.setAttributeValue}`]
@@ -1483,9 +1130,6 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     const textListImports = [
       `cleanupTextKeyedList as ${runtimeNames.cleanupTextKeyedList}`,
       `mountGeneratedTextKeyedList as ${runtimeNames.mountTextKeyedList}`,
-      ...(needsTextListBoundary
-        ? [`mountGeneratedTextKeyedListWithBoundary as ${runtimeNames.mountTextKeyedListWithBoundary}`]
-        : []),
     ];
     lines.push(`import { ${textListImports.join(", ")} } from "tachyon-dom/runtime/list-text";`);
   }
@@ -1746,33 +1390,14 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       lines.push(`  ]);`);
     }
   }
-  const listPathExpression = (path: readonly number[]): string | undefined => {
-    const lists = listPathsForBinding(path);
-    return lists.length > 0
-      ? `${runtimeNames.nodeAtWithDynamicLists}(root, ${JSON.stringify(path)}, ${JSON.stringify(lists)})`
-      : undefined;
-  };
-  const preparedPathExpression = (path: readonly number[]): string => {
-    const lists = listPathsForBinding(path);
-    const offset =
-      lists.length > 0
-        ? `, (container, parentPath, childIndex) => ${runtimeNames.dynamicListChildOffset}(container, parentPath, childIndex, ${JSON.stringify(lists)})`
-        : "";
-    return `${runtimeNames.preparedNodeAt}(root, ${JSON.stringify(path)}${offset})`;
-  };
-  const bindingNodeExpression = (path: readonly number[]): string => {
-    const listPath = listPathExpression(path);
-    if (listPath && !needsConditionalPrepare) return listPath;
-    return needsConditionalPrepare && path.length > 0 ? preparedPathExpression(path) : nodeExpression(path);
-  };
-  const bindingElementExpression = (path: readonly number[]): string => {
-    const listPath = listPathExpression(path);
-    if (listPath && !needsConditionalPrepare) return listPath;
-    return needsConditionalPrepare && path.length > 0 ? preparedPathExpression(path) : elementExpression(path);
-  };
+  // Every path walker steps over list regions, so a path after a `<for>` needs no list offset.
+  const preparedPathExpression = (path: readonly number[]): string =>
+    `${runtimeNames.preparedNodeAt}(root, ${JSON.stringify(path)})`;
+  const bindingNodeExpression = (path: readonly number[]): string =>
+    needsConditionalPrepare && path.length > 0 ? preparedPathExpression(path) : nodeExpression(path);
+  const bindingElementExpression = (path: readonly number[]): string =>
+    needsConditionalPrepare && path.length > 0 ? preparedPathExpression(path) : elementExpression(path);
   const bindingTextExpression = (path: readonly number[]): string => {
-    const listPath = listPathExpression(path);
-    if (listPath && !needsConditionalPrepare) return `${runtimeNames.textAt}(${listPath}, [])`;
     return needsConditionalPrepare
       ? `${runtimeNames.textAt}(${bindingNodeExpression(path)}, [])`
       : `${runtimeNames.textAt}(root, ${JSON.stringify(path)})`;
@@ -2479,11 +2104,7 @@ const emitListBinding = (
   ].join("\n");
   const target = targetName ?? "root";
   const path = targetName ? [] : binding.path;
-  const mount = isTextOnlyList(binding)
-    ? binding.region?.logicalAfter !== undefined
-      ? runtimeNames.mountTextKeyedListWithBoundary
-      : runtimeNames.mountTextKeyedList
-    : runtimeNames.mountGeneratedKeyedList;
+  const mount = isTextOnlyList(binding) ? runtimeNames.mountTextKeyedList : runtimeNames.mountGeneratedKeyedList;
   const statement = `${mount}(${target}, ${JSON.stringify(path)}, ${runtimeValueExpression(binding.each, reactive, sourceName, aliases)}, ${optionsName})`;
   const targetDeclaration = targetName ? `  const ${targetName} = ${targetExpression(binding.path)};\n` : "";
   const invocation = reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`;

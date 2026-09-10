@@ -349,7 +349,10 @@ const createDriver = (
     ? createKeyedRowsDriver(tbody)
     : createGeneratedTemplateDriver(pathName, tbody, generatedModules);
 
-const domFor = (tbody: HTMLTableSectionElement): string => tbody.innerHTML;
+// The generated paths delimit each keyed list with region markers; the low-level path has none. The oracle
+// compares the rendered content, so the markers are dropped before hashing.
+const domFor = (tbody: HTMLTableSectionElement): string =>
+  tbody.innerHTML.replaceAll("<!--tachyon-for-->", "").replaceAll("<!--/tachyon-for-->", "");
 
 const identitySnapshot = (driver: ListDriver): { rows: Map<number, Element>; children: Map<number, Element> } => {
   const rows = new Map<number, Element>();
@@ -601,10 +604,7 @@ export const runRepresentativeBenchmark = async (
   ) as Record<PathName, RepresentativePathMeasurement>;
   const first = paths[TEMPLATE_REPRESENTATIVE_PATHS[0]] as RepresentativePathMeasurement;
   const oracle = Object.fromEntries(
-    TEMPLATE_REPRESENTATIVE_OPERATIONS.map((operation) => [
-      operation,
-      first.samples[0]?.operationOracles[operation],
-    ]),
+    TEMPLATE_REPRESENTATIVE_OPERATIONS.map((operation) => [operation, first.samples[0]?.operationOracles[operation]]),
   ) as Record<OperationName, RepresentativeOperationOracle>;
   const comparable = (value: RepresentativeOperationOracle, pathName: PathName): RepresentativeOperationOracle =>
     (TEMPLATE_REPRESENTATIVE_LIVE_INPUT_PATHS as readonly string[]).includes(pathName)
@@ -613,7 +613,9 @@ export const runRepresentativeBenchmark = async (
   for (const pathName of TEMPLATE_REPRESENTATIVE_PATHS) {
     for (const sample of paths[pathName].samples) {
       for (const operation of TEMPLATE_REPRESENTATIVE_OPERATIONS) {
-        if (!sameOracle(comparable(sample.operationOracles[operation], pathName), comparable(oracle[operation], pathName))) {
+        if (
+          !sameOracle(comparable(sample.operationOracles[operation], pathName), comparable(oracle[operation], pathName))
+        ) {
           throw new Error(
             `Oracle mismatch for ${pathName} at ${operation}: ${JSON.stringify(sample.operationOracles[operation])} !== ${JSON.stringify(oracle[operation])} ${JSON.stringify(sample.operationDomHtml[operation])}`,
           );

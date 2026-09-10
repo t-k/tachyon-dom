@@ -1,3 +1,5 @@
+import { listEndMarkerValue, listRegionEnd, listRegionStartAt, listStartMarkerValue } from "../conditional-marker.js";
+
 /**
  * The reconciliation core both keyed list runtimes share.
  *
@@ -7,7 +9,7 @@
  * loads both ships one copy of it.
  *
  * Everything here is written against the smallest shape it needs: a positioned row is `{ key, nodes }` and a
- * region is `{ before, after }`. Neither runtime's record type is named, so neither constrains the other.
+ * region is the marker pair that delimits it. Neither runtime's record type is named, so neither constrains the other.
  */
 
 export type PositionedRow = {
@@ -16,8 +18,14 @@ export type PositionedRow = {
 };
 
 export type ListCoreRegion = {
-  before: number;
-  after: number;
+  /** Ordinal of the list's marker pair among its container's own regions. */
+  index?: number;
+  /** Logical child index the rows start at in the template. */
+  at?: number;
+  before?: number;
+  after?: number;
+  logicalBefore?: number;
+  logicalAfter?: number;
 };
 
 export type ParentScopeSnapshot = {
@@ -184,30 +192,55 @@ export const positionRecords = (
   }
 };
 
-export const dynamicElementsFor = (container: Element, region: ListCoreRegion | undefined): Element[] => {
+/**
+ * The marker pair a list owns in its container. Compiled output already carries the pair; a hand-written
+ * descriptor mounted into plain markup gets one placed where its legacy region says the rows go (after
+ * `before` elements, before the last `after` elements or a `<!--tachyon-list-->` boundary), or around every
+ * child when it declares no region. Existing children between the markers are what a first mount adopts.
+ */
+export const ensureListRegion = (container: Element, region: ListCoreRegion | undefined): ListRegionMarkers => {
+  const start = listRegionStartAt(container, region?.index ?? 0);
+  const end = start && listRegionEnd(start);
+  if (start && end) return { start, end };
   const elements = Array.from(container.children);
-  if (!region) return elements;
-  const start = Math.min(elements.length, Math.max(0, region.before));
-  const end = Math.max(start, elements.length - Math.max(0, region.after));
-  return elements.slice(start, end);
+  const before = Math.min(elements.length, Math.max(0, region?.before ?? 0));
+  const after = Math.max(0, region?.after ?? 0);
+  const firstAfter = region
+    ? (Array.from(container.childNodes).find((child) => child.nodeType === 8 && child.nodeValue === "tachyon-list") ??
+      (after > 0 ? elements.at(-after) : undefined) ??
+      null)
+    : null;
+  const firstDynamic = region
+    ? elements.length - before - after > 0
+      ? elements[before]
+      : undefined
+    : container.firstChild;
+  const created = {
+    start: container.ownerDocument.createComment(listStartMarkerValue),
+    end: container.ownerDocument.createComment(listEndMarkerValue),
+  };
+  container.insertBefore(created.start, firstDynamic ?? firstAfter);
+  container.insertBefore(created.end, firstAfter);
+  return created;
 };
 
-export const replaceDynamicRegion = (
-  container: Element,
-  region: ListCoreRegion,
-  nodes: readonly Node[],
-  firstAfter: ChildNode | null | undefined,
-): void => {
-  const childNodes = Array.from(container.childNodes);
-  const firstDynamic = dynamicElementsFor(container, region)[0];
-  const startNode = firstDynamic ?? firstAfter;
-  const start = startNode ? childNodes.indexOf(startNode) : childNodes.length;
-  const end = firstAfter ? childNodes.indexOf(firstAfter) : childNodes.length;
-  for (const node of childNodes.slice(Math.max(0, start), Math.max(start, end))) node.remove();
-  const fragment = document.createDocumentFragment();
+export type ListRegionMarkers = { start: Comment; end: Comment };
+
+/** The elements a region currently holds; nested region markers sit between them and are not rows. */
+export const regionElements = ({ start, end }: ListRegionMarkers): Element[] => {
+  const elements: Element[] = [];
+  for (let node = start.nextSibling; node && node !== end; node = node.nextSibling) {
+    if (node instanceof Element) elements.push(node);
+  }
+  return elements;
+};
+
+/** Replaces everything between the markers with `nodes`. */
+export const replaceRegionContent = ({ start, end }: ListRegionMarkers, nodes: readonly Node[]): void => {
+  while (start.nextSibling && start.nextSibling !== end) start.nextSibling.remove();
+  const fragment = start.ownerDocument.createDocumentFragment();
   fragment.append(...nodes);
-  if (firstAfter?.parentNode === container) container.insertBefore(fragment, firstAfter);
-  else container.append(fragment);
+  end.parentNode?.insertBefore(fragment, end);
 };
 
 /** True when the next order keeps every retained row in place, so new rows only have to be appended. */

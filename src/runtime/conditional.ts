@@ -9,6 +9,7 @@ import { createStore, onOwnerCleanup, read } from "./signal.js";
 import {
   clearConditionalRegion,
   clientShapedNodes,
+  templateNodeAt,
   conditionalRegionEnd,
   isConditionalEndMarker,
   isConditionalStartMarker,
@@ -255,27 +256,7 @@ const detachOwnerCleanup = (anchor: Comment): void => {
   ownerCleanupDisposers.delete(anchor);
 };
 
-export const nodeAt = (root: Node, path: readonly number[]): Node => {
-  let current = root;
-  for (const index of path) {
-    // Skip SSR hydration marker comments so template paths stay valid.
-    let cursor = 0;
-    let next: Node | undefined;
-    for (const child of Array.from(current.childNodes)) {
-      if (
-        child.nodeType === 8 &&
-        ((child.nodeValue ?? "").startsWith("tachyon-hydrate:") || child.nodeValue === "/tachyon-if")
-      )
-        continue;
-      if (cursor++ === index) {
-        next = child;
-        break;
-      }
-    }
-    current = next as Node;
-  }
-  return current;
-};
+export const nodeAt = (root: Node, path: readonly number[]): Node => templateNodeAt(root, path) as Node;
 
 const readPath = (scope: Record<string, unknown>, expression: string): unknown => {
   const parts = expression.split(".");

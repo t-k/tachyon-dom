@@ -103,13 +103,13 @@ export type ListBinding = {
   components?: ComponentBoundary[];
 };
 
+/**
+ * Where a list sits in its parent. `index` is the ordinal of its marker pair among the parent's own list
+ * regions and `at` the logical child index its rows start at; both default to 0 and are omitted then.
+ */
 export type ListRegion = {
-  before: number;
-  after: number;
-  /** Logical child index used when resolving bindings after the list. */
-  logicalBefore?: number;
-  /** Logical child count after the list used to resolve dynamic output boundaries. */
-  logicalAfter?: number;
+  index?: number;
+  at?: number;
 };
 
 export type ConditionalBinding = {

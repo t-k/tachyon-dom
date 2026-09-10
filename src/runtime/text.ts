@@ -6,15 +6,23 @@ export const textAt = (root: Node, path: readonly number[]): Text => {
     // Skip SSR hydration marker comments so template paths stay valid.
     let cursor = 0;
     let next: Node | undefined;
-    for (const child of Array.from(current.childNodes)) {
-      if (
-        child.nodeType === 8 &&
-        ((child.nodeValue ?? "").startsWith("tachyon-hydrate:") || child.nodeValue === "/tachyon-if")
-      )
-        continue;
-      if (cursor++ === index) {
+    for (let child = current.firstChild; child; child = child.nextSibling) {
+      const marker = child.nodeType === 8 ? (child.nodeValue ?? "") : "";
+      const region = marker === "tachyon-for" || marker === "tachyon-if";
+      // A region's content and end marker occupy no logical slot; only a conditional's start marker keeps one.
+      if (!region && (marker.startsWith("tachyon-hydrate:") || marker[0] === "/")) continue;
+      if (marker !== "tachyon-for" && cursor++ === index) {
         next = child;
         break;
+      }
+      if (region) {
+        let depth = 0;
+        for (child = child.nextSibling; child; child = child.nextSibling) {
+          const nested = child.nodeType === 8 ? child.nodeValue : "";
+          if (nested === marker) depth++;
+          else if (nested === `/${marker}` && depth-- === 0) break;
+        }
+        if (!child) break;
       }
     }
     if (!next) {
@@ -31,9 +39,7 @@ export const textAt = (root: Node, path: readonly number[]): Text => {
     return text;
   }
   if (current.nodeType !== 3) {
-    throw new TypeError(
-      `Text binding path ${path.join(".")} resolved to ${current.nodeName} instead of a Text node.`,
-    );
+    throw new TypeError(`Text binding path ${path.join(".")} resolved to ${current.nodeName} instead of a Text node.`);
   }
   return current as Text;
 };
