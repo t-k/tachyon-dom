@@ -4,6 +4,9 @@ import { createRoot, createSignal, effect, onCleanup } from "../src/runtime/sign
 import { createStore } from "../src/runtime/store";
 import { mountKeyedList } from "../src/runtime/list";
 
+// The runtime wraps rows in its region markers; these assertions are about the rows themselves.
+const rowsHtml = (element: Element): string =>
+  element.innerHTML.replaceAll("<!--tachyon-for-->", "").replaceAll("<!--/tachyon-for-->", "");
 const stringify = JSON.stringify;
 const nodeEnv = process.env.NODE_ENV;
 const warn = console.warn;
@@ -503,9 +506,13 @@ describe("mountKeyedList", () => {
     const insertBefore = vi.spyOn(root, "insertBefore");
 
     mountKeyedList(root, [], rows, options);
+    expect(insertBefore).not.toHaveBeenCalled();
     mountKeyedList(root, [], [...rows, { id: "c" }], options);
 
-    expect(insertBefore).not.toHaveBeenCalled();
+    // Only the new row is inserted, and it goes straight before the region's end marker: no retained row moves.
+    expect(insertBefore).toHaveBeenCalledTimes(1);
+    expect(insertBefore.mock.calls[0]?.[0]).toBe(root.children[2]);
+    expect(insertBefore.mock.calls[0]?.[1]).toBe(root.lastChild);
     expect(root.textContent).toBe("");
     insertBefore.mockRestore();
     mountKeyedList(root, [], [{ id: "c" }, { id: "b" }, { id: "a" }], options);
@@ -918,7 +925,7 @@ describe("mountKeyedList", () => {
       },
     );
 
-    expect(root.innerHTML).toBe(`<li><span>One</span></li><li class="danger"><span>Two</span></li>`);
+    expect(rowsHtml(root)).toBe(`<li><span>One</span></li><li class="danger"><span>Two</span></li>`);
   });
 
   it("reuses, moves, updates, and removes keyed rows", () => {
@@ -962,7 +969,7 @@ describe("mountKeyedList", () => {
     expect(root.children[0]).toBe(third);
     expect(root.children[1]).toBe(first);
     expect(second?.isConnected).toBe(false);
-    expect(root.innerHTML).toBe(`<li><span>Three updated</span></li><li><span>One updated</span></li>`);
+    expect(rowsHtml(root)).toBe(`<li><span>Three updated</span></li><li><span>One updated</span></li>`);
   });
 
   it("does not leave orphaned rows after duplicate keys are removed", () => {
@@ -1093,7 +1100,7 @@ describe("mountKeyedList", () => {
 
     expect(root.children[0]).toBe(first);
     expect(root.children[1]).toBe(second);
-    expect(root.innerHTML).toBe(`<li><span>One</span></li><li><span>Two</span></li>`);
+    expect(rowsHtml(root)).toBe(`<li><span>One</span></li><li><span>Two</span></li>`);
 
     mountKeyedList(
       root,
@@ -1107,7 +1114,7 @@ describe("mountKeyedList", () => {
 
     expect(root.children[0]).toBe(second);
     expect(root.children[1]).toBe(first);
-    expect(root.innerHTML).toBe(`<li><span>Two updated</span></li><li><span>One updated</span></li>`);
+    expect(rowsHtml(root)).toBe(`<li><span>Two updated</span></li><li><span>One updated</span></li>`);
   });
 
   it("adopts SSR rows with whitespace text nodes without reordering against text nodes", () => {
@@ -1190,7 +1197,7 @@ describe("mountKeyedList", () => {
     );
 
     expect(attemptedMoveBefore).toBe(true);
-    expect(root.innerHTML).toBe(`<li><span>Two</span></li><li><span>One</span></li>`);
+    expect(rowsHtml(root)).toBe(`<li><span>Two</span></li><li><span>One</span></li>`);
   });
 
   it("moves only out-of-order keyed rows for a far swap", () => {
@@ -1553,7 +1560,7 @@ describe("mountKeyedList", () => {
       ],
       options,
     );
-    expect(root.innerHTML).toBe(`<li class="row">One</li><li class="row">Two</li><li class="footer">Footer</li>`);
+    expect(rowsHtml(root)).toBe(`<li class="row">One</li><li class="row">Two</li><li class="footer">Footer</li>`);
     expect(root.children[0]).toBe(serverRows[0]);
     expect(root.children[1]).toBe(serverRows[1]);
 
@@ -1566,11 +1573,11 @@ describe("mountKeyedList", () => {
       ],
       options,
     );
-    expect(root.innerHTML).toBe(
+    expect(rowsHtml(root)).toBe(
       `<li class="row">Two updated</li><li class="row">One updated</li><li class="footer">Footer</li>`,
     );
     mountKeyedList(root, [], [], options);
-    expect(root.innerHTML).toBe(`<li class="footer">Footer</li>`);
+    expect(rowsHtml(root)).toBe(`<li class="footer">Footer</li>`);
   });
 
   it("defers row bindings until interaction hydration and disposes them with the keyed row", () => {
@@ -1812,7 +1819,7 @@ describe("mountKeyedList", () => {
     appended.click();
     button.click();
     expect(calls).toEqual(["a", "b"]);
-    expect(root.innerHTML).toBe("");
+    expect(rowsHtml(root)).toBe("");
   });
 
   it("rejects adopted SSR rows whose hydration markers are duplicated even when row keys are unique", () => {
@@ -1931,7 +1938,7 @@ describe("mountKeyedList", () => {
       ],
     };
     expect(() => mountKeyedList(root, [], [{ id: "a", label: "A" }], options)).toThrow(/label failed/);
-    expect(root.innerHTML).toBe(before);
+    expect(rowsHtml(root)).toBe(before);
   });
 
   it("preflights every adopted SSR row before binding and preserves the existing DOM on failure", () => {
@@ -1975,7 +1982,7 @@ describe("mountKeyedList", () => {
       ),
     ).toThrow(/could not be adopted/);
     expect(reads).toBe(0);
-    expect(root.innerHTML).toBe(before);
+    expect(rowsHtml(root)).toBe(before);
   });
 
   it("keeps SSR-adopted and client-created hydration rows separate through reorder, removal, and re-append", () => {
@@ -2038,7 +2045,7 @@ describe("mountKeyedList", () => {
     buttons()[1]?.click();
     expect(calls).toEqual(["b", "a", "b", "a", "a2"]);
     mountKeyedList(root, [], [], options);
-    expect(root.innerHTML).toBe("");
+    expect(rowsHtml(root)).toBe("");
   });
 
   it("inserts newly mounted rows before a static trailing sibling", () => {
@@ -2054,7 +2061,7 @@ describe("mountKeyedList", () => {
       bindings: [{ kind: "text" as const, path: [0], expression: "item.label" }],
     });
 
-    expect(root.innerHTML).toBe(`<li class="row">One</li><li class="footer">Footer</li>`);
+    expect(rowsHtml(root)).toBe(`<li class="row">One</li><li class="footer">Footer</li>`);
   });
 
   it("binds row events without a container listener", () => {
@@ -2145,7 +2152,7 @@ describe("mountKeyedList", () => {
 
     expect(root.children[2]).toBe(oneTitle);
     expect(root.children[3]).toBe(oneBody);
-    expect(root.innerHTML).toBe(`<h2>Two updated</h2><p>Second updated</p><h2>One updated</h2><p>First updated</p>`);
+    expect(rowsHtml(root)).toBe(`<h2>Two updated</h2><p>Second updated</p><h2>One updated</h2><p>First updated</p>`);
   });
 
   it("mounts nested lists and conditionals in later roots of a multi-root row", () => {
@@ -2173,7 +2180,7 @@ describe("mountKeyedList", () => {
 
     mountKeyedList(root, [], [{ id: 1, title: "One", visible: true, children: [{ id: 2, label: "Two" }] }], options);
 
-    expect(root.innerHTML).toBe(`<h2>One</h2><section><ul><li>Two</li></ul><!----><em>visible</em></section>`);
+    expect(rowsHtml(root)).toBe(`<h2>One</h2><section><ul><li>Two</li></ul><!----><em>visible</em></section>`);
   });
 
   it("owns formatted separators while adopting, reordering, and removing server rows", () => {
@@ -2211,7 +2218,7 @@ describe("mountKeyedList", () => {
     expect(root.querySelectorAll("li")[1]).toBe(existing[0]);
     expect(root.textContent).toBe(" B updated  A updated ");
     mountKeyedList(root, [], [], options);
-    expect(root.innerHTML).toBe("");
+    expect(rowsHtml(root)).toBe("");
   });
 
   it("adopts every element in a formatted multi-root server row", () => {
@@ -2279,7 +2286,7 @@ describe("mountKeyedList", () => {
 
     mountKeyedList(root, [], [{ ids: [1], labels: [], name: "Ada" }], options);
 
-    expect(root.innerHTML).toBe(`<li><span>Guest Ada</span></li>`);
+    expect(rowsHtml(root)).toBe(`<li><span>Guest Ada</span></li>`);
   });
 
   it("applies bindings once when creating a new keyed row", () => {
@@ -2309,7 +2316,7 @@ describe("mountKeyedList", () => {
     mountKeyedList(root, [], [{ id: 1, label: "One" }], options);
 
     expect(readCount).toBe(1);
-    expect(root.innerHTML).toBe(`<li><span>One</span></li>`);
+    expect(rowsHtml(root)).toBe(`<li><span>One</span></li>`);
   });
 
   it("reuses a stable options signature without JSON serializing on each mount", () => {
@@ -2332,7 +2339,7 @@ describe("mountKeyedList", () => {
     mountKeyedList(root, [], [{ id: 1, label: "One updated" }], options);
 
     expect(json).not.toHaveBeenCalled();
-    expect(root.innerHTML).toBe(`<li><span>One updated</span></li>`);
+    expect(rowsHtml(root)).toBe(`<li><span>One updated</span></li>`);
   });
 
   it("keeps keyed row bindings in a single row effect", async () => {
@@ -2389,7 +2396,7 @@ describe("mountKeyedList", () => {
       },
     );
 
-    expect(root.innerHTML).toBe(
+    expect(rowsHtml(root)).toBe(
       `<ul id="groups"><li><span>Group A</span><ul><li>A1</li><li>A2</li></ul><!----><em>visible</em></li><li><span>Group B</span><ul><li>B1</li></ul><!----></li></ul>`,
     );
   });
@@ -2452,7 +2459,7 @@ describe("mountKeyedList", () => {
     mountKeyedList(root, [0], [{ id: "a", name: "Group A updated", visible: true, badge: "visible", items }], options);
 
     expect(json).not.toHaveBeenCalled();
-    expect(root.innerHTML).toBe(
+    expect(rowsHtml(root)).toBe(
       `<ul id="groups"><li><span>Group A updated</span><ul><li>A1 updated</li></ul><!----><em>visible</em></li></ul>`,
     );
   });
@@ -2519,7 +2526,7 @@ describe("mountKeyedList", () => {
     group.badge = "still visible";
     mountKeyedList(root, [0], [group], options);
 
-    expect(root.innerHTML).toBe(
+    expect(rowsHtml(root)).toBe(
       `<ul id="groups"><li><span>Group A</span><ul><li>A1 updated</li></ul><!----><em>still visible</em></li></ul>`,
     );
   });
@@ -2569,7 +2576,7 @@ describe("mountKeyedList", () => {
     label.set("A1 updated");
 
     expect(nestedReads).toBe(0);
-    expect(root.innerHTML).toBe(`<ul id="groups"></ul>`);
+    expect(rowsHtml(root)).toBe(`<ul id="groups"></ul>`);
   });
 
   it("clears nested conditional refs and listeners when a keyed row is removed", () => {

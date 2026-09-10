@@ -688,10 +688,11 @@ describe("client mount entrypoints", () => {
       ].map((source) => ({ source, ...values })),
     ),
   )(
-    "rejects ambiguous SSR for and if siblings before mutating the DOM",
+    "hydrates SSR for and if siblings under one parent through their region markers",
     ({ source, rows, serverActive, clientActive }) => {
       const compiled = compileTemplate(source);
       if (!compiled.ok) throw new Error(compiled.error.message);
+      expect(compiled.value.client.hydrationDynamicRegionErrors).toEqual([]);
       const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
       const root = document.createElement("div");
       root.innerHTML = renderServerTemplate(compiled.value, {
@@ -700,18 +701,37 @@ describe("client mount entrypoints", () => {
         label: "A",
         tail: "F",
       });
-      const before = root.innerHTML;
-      const result = hydrate(root, module, {
-        rows: createSignal(rows),
-        active: createSignal(clientActive),
-        label: createSignal("A"),
-        tail: createSignal("F"),
-      });
+      const serverRows = Array.from(root.querySelectorAll("p"));
+      const serverFooter = root.querySelector("footer");
+      const rowsSignal = createSignal(rows);
+      const active = createSignal(clientActive);
+      const label = createSignal("A");
+      const tail = createSignal("F");
+      const result = hydrate(root, module, { rows: rowsSignal, active, label, tail });
 
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error("Ambiguous dynamic regions unexpectedly hydrated.");
-      expect(result.error.message).toContain("multiple direct dynamic regions");
-      expect(root.innerHTML).toBe(before);
+      if (!result.ok) throw new Error(result.error.message);
+      expect(Array.from(root.querySelectorAll("p"))).toEqual(serverRows);
+      expect(root.querySelector("footer")).toBe(serverFooter);
+      expect(root.querySelector("button")?.textContent ?? null).toBe(clientActive ? "A" : null);
+      rowsSignal.set([...rows, { id: "z", label: "R9" }]);
+      active.set(!clientActive);
+      label.set("B");
+      tail.set("G");
+      expect(Array.from(root.querySelectorAll("p")).map((row) => row.textContent)).toEqual([
+        ...rows.map((row) => row.label),
+        "R9",
+      ]);
+      expect(root.querySelector("button")?.textContent ?? null).toBe(clientActive ? null : "B");
+      expect(root.querySelector("footer")?.textContent).toBe("G");
+      const order = Array.from(root.querySelector("main")?.children ?? []).map((child) => child.tagName);
+      const rowTags = [...rows, { id: "z" }].map(() => "P");
+      const buttonTags = clientActive ? [] : ["BUTTON"];
+      expect(order).toEqual(
+        source.indexOf("<for") < source.indexOf("<if")
+          ? [...rowTags, ...buttonTags, "FOOTER"]
+          : [...buttonTags, ...rowTags, "FOOTER"],
+      );
+      result.value.dispose();
     },
   );
 
@@ -736,69 +756,61 @@ describe("client mount entrypoints", () => {
       ],
       active: true,
     },
-  ] as const)(
-    "rejects dynamic regions shared inside every generated list row before creating row owners",
-    ({ order, groups, active }) => {
-      const dynamicSource =
-        order === "for-if"
-          ? `<for each={group.rows} key={row.id}><p>{row.label}</p></for><if test={active}><button on:click={save}>{label}</button></if>`
-          : `<if test={active}><button on:click={save}>{label}</button></if><for each={group.rows} key={row.id}><p>{row.label}</p></for>`;
-      const source = `<main><for each={groups} key={group.id}><section>${dynamicSource}<footer>{tail}</footer></section></for></main>`;
-      const compiled = compileTemplate(source);
-      if (!compiled.ok) throw new Error(compiled.error.message);
-      const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
-      const root = document.createElement("div");
-      root.innerHTML = renderServerTemplate(compiled.value, {
-        groups,
-        active,
-        label: "SSR button",
-        tail: "SSR footer",
-        save: () => undefined,
-      });
-      const before = root.innerHTML;
-      const serverButton = root.querySelector("button");
-      const serverFooter = root.querySelector("footer");
-      let owners = 0;
-      let effects = 0;
-      let subscriptions = 0;
-      let cleanups = 0;
-      const restoreHooks = setRuntimeLifecycleHooks({
-        ownerCreated: () => owners++,
-        effectCreated: () => effects++,
-        subscriptionChanged: (delta) => (subscriptions += delta),
-        cleanupChanged: (delta) => (cleanups += delta),
-      });
-      try {
-        const result = hydrate(root, module, {
-          groups: createSignal(groups),
-          active: createSignal(active),
-          label: createSignal("Client button"),
-          tail: createSignal("Client footer"),
-          save: () => undefined,
-        });
+  ] as const)("hydrates dynamic regions shared inside every generated list row", ({ order, groups, active }) => {
+    const dynamicSource =
+      order === "for-if"
+        ? `<for each={group.rows} key={row.id}><p>{row.label}</p></for><if test={active}><button on:click={save}>{label}</button></if>`
+        : `<if test={active}><button on:click={save}>{label}</button></if><for each={group.rows} key={row.id}><p>{row.label}</p></for>`;
+    const source = `<main><for each={groups} key={group.id}><section>${dynamicSource}<footer>{tail}</footer></section></for></main>`;
+    const compiled = compileTemplate(source);
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compiled.value, {
+      groups,
+      active,
+      label: "SSR button",
+      tail: "SSR footer",
+      save: () => undefined,
+    });
+    const serverButtons = Array.from(root.querySelectorAll("button"));
+    const serverFooters = Array.from(root.querySelectorAll("footer"));
+    const serverRows = Array.from(root.querySelectorAll("p"));
+    const activeSignal = createSignal(active);
+    const tail = createSignal("Client footer");
+    const result = hydrate(root, module, {
+      groups: createSignal(groups),
+      active: activeSignal,
+      label: createSignal("Client button"),
+      tail,
+      save: () => undefined,
+    });
 
-        expect(result.ok).toBe(false);
-        if (result.ok) throw new Error("Nested shared dynamic regions unexpectedly hydrated.");
-        expect(result.error.message).toContain("dynamic regions");
-      } finally {
-        restoreHooks();
-      }
-      expect(root.innerHTML).toBe(before);
-      expect(root.querySelector("button")).toBe(serverButton);
-      expect(root.querySelector("footer")).toBe(serverFooter);
-      expect(owners).toBe(0);
-      expect(effects).toBe(0);
-      expect(subscriptions).toBe(0);
-      expect(cleanups).toBe(0);
-    },
-  );
+    if (!result.ok) throw new Error(result.error.message);
+    expect(Array.from(root.querySelectorAll("button"))).toEqual(serverButtons);
+    expect(Array.from(root.querySelectorAll("footer"))).toEqual(serverFooters);
+    expect(Array.from(root.querySelectorAll("p"))).toEqual(serverRows);
+    expect(Array.from(root.querySelectorAll("footer")).map((footer) => footer.textContent)).toEqual(
+      groups.map(() => "Client footer"),
+    );
+    tail.set("Client footer 2");
+    activeSignal.set(!active);
+    expect(root.querySelectorAll("button")).toHaveLength(active ? 0 : groups.length);
+    expect(Array.from(root.querySelectorAll("footer")).map((footer) => footer.textContent)).toEqual(
+      groups.map(() => "Client footer 2"),
+    );
+    expect(Array.from(root.querySelectorAll("p")).map((row) => row.textContent)).toEqual(
+      groups.flatMap((group) => group.rows.map((row) => row.label)),
+    );
+    result.value.dispose();
+  });
 
-  it("rejects dynamic regions split by a transparent component before touching SSR DOM", () => {
+  it("hydrates dynamic regions split by a transparent component", () => {
     const compiled = compileTemplate(
       `<main><component name="Region"><for each={rows} key={row.id}><p>{row.label}</p></for></component><if test={active}><button>{label}</button></if><footer>{tail}</footer></main>`,
     );
     if (!compiled.ok) throw new Error(compiled.error.message);
-    expect(compiled.value.client.hydrationDynamicRegionErrors).toHaveLength(1);
+    expect(compiled.value.client.hydrationDynamicRegionErrors).toHaveLength(0);
     const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
     const rows = [
       { id: "r1", label: "R1" },
@@ -811,42 +823,29 @@ describe("client mount entrypoints", () => {
       label: "SSR button",
       tail: "SSR footer",
     });
-    const before = root.innerHTML;
     const serverRow = root.querySelector("p");
     const serverButton = root.querySelector("button");
     const serverFooter = root.querySelector("footer");
-    let owners = 0;
-    let effects = 0;
-    let subscriptions = 0;
-    let cleanups = 0;
-    const restoreHooks = setRuntimeLifecycleHooks({
-      ownerCreated: () => owners++,
-      effectCreated: () => effects++,
-      subscriptionChanged: (delta) => (subscriptions += delta),
-      cleanupChanged: (delta) => (cleanups += delta),
+    const rowsSignal = createSignal(rows);
+    const active = createSignal(true);
+    const result = hydrate(root, module, {
+      rows: rowsSignal,
+      active,
+      label: createSignal("Client button"),
+      tail: createSignal("Client footer"),
     });
-    try {
-      const result = hydrate(root, module, {
-        rows: createSignal(rows),
-        active: createSignal(true),
-        label: createSignal("Client button"),
-        tail: createSignal("Client footer"),
-      });
 
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error("Component-split dynamic regions unexpectedly hydrated.");
-      expect(result.error.message).toContain("multiple direct dynamic regions");
-    } finally {
-      restoreHooks();
-    }
-    expect(root.innerHTML).toBe(before);
+    if (!result.ok) throw new Error(result.error.message);
     expect(root.querySelector("p")).toBe(serverRow);
     expect(root.querySelector("button")).toBe(serverButton);
     expect(root.querySelector("footer")).toBe(serverFooter);
-    expect(owners).toBe(0);
-    expect(effects).toBe(0);
-    expect(subscriptions).toBe(0);
-    expect(cleanups).toBe(0);
+    expect(root.querySelector("button")?.textContent).toBe("Client button");
+    rowsSignal.set([{ id: "r2", label: "R2" }]);
+    active.set(false);
+    expect(Array.from(root.querySelectorAll("p")).map((row) => row.textContent)).toEqual(["R2"]);
+    expect(root.querySelector("button")).toBeNull();
+    expect(root.querySelector("footer")?.textContent).toBe("Client footer");
+    result.value.dispose();
   });
 
   it("hydrates dynamic regions under separate parents", () => {
@@ -1819,7 +1818,9 @@ describe("client mount entrypoints", () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(root.innerHTML).toBe(`<ul><li class="row">A</li><li class="row">B</li><li class="footer">Footer</li></ul>`);
+    expect(root.innerHTML).toBe(
+      `<ul><!--tachyon-for--><li class="row">A</li><li class="row">B</li><!--/tachyon-for--><li class="footer">Footer</li></ul>`,
+    );
     expect(root.querySelectorAll("li.row")[0]).toBe(serverRows[0]);
     expect(root.querySelectorAll("li.row")[1]).toBe(serverRows[1]);
     if (result.ok) result.value.dispose();
@@ -1837,7 +1838,7 @@ describe("client mount entrypoints", () => {
 
     mount(root, module, { rows: [{ id: "a", count: 7 }] });
 
-    expect(root.innerHTML).toBe(`<main><ul><li><span>7</span></li></ul></main>`);
+    expect(root.innerHTML).toBe(`<main><ul><!--tachyon-for--><li><span>7</span></li><!--/tachyon-for--></ul></main>`);
   });
 
   it("executes compiler-generated row component props and stores on the generic list path", () => {

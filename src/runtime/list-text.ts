@@ -1,17 +1,21 @@
 import { setText, textAt } from "./text.js";
 import { createSignal, effect, onOwnerCleanup, read, untrack, type Signal } from "./signal.js";
+import { templateNodeAt } from "../conditional-marker.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { normalizeListKey } from "./key.js";
 import {
   canAppendWithoutMoving,
-  dynamicElementsFor,
   emptyParentScope,
+  ensureListRegion,
   positionRecords,
   readItemPath,
   readPath,
-  replaceDynamicRegion,
+  regionElements,
+  replaceRegionContent,
   scopedItemFromSnapshot,
   syncParentScope,
+  type ListCoreRegion,
+  type ListRegionMarkers,
   type ParentScopeSnapshot,
 } from "./list-core.js";
 
@@ -86,15 +90,9 @@ type TextKeyedListRuntimeOptions = {
   bindings: TextBinding[];
   readKey: (item: unknown, index: number) => unknown;
   readBinding: (scope: Record<string, unknown>, binding: TextBinding) => unknown;
-  a: (container: Element, region: TextKeyedListRegion) => ChildNode | null | undefined;
 };
 
-type TextKeyedListRegion = {
-  before: number;
-  after: number;
-  logicalBefore?: number;
-  logicalAfter?: number;
-};
+type TextKeyedListRegion = ListCoreRegion;
 
 type RowRecord = {
   key: PropertyKey;
@@ -112,6 +110,8 @@ type RowRecord = {
 type ListState = {
   signature: string;
   options: TextKeyedListRuntimeOptions;
+  /** The markers the rows live between. */
+  markers: ListRegionMarkers;
   parentScope: ParentScopeSnapshot;
   records: Map<PropertyKey, RowRecord>;
   template: HTMLTemplateElement;
@@ -122,7 +122,8 @@ type ListState = {
 
 type CleanupOutcome = { failed: false } | { failed: true; error: unknown };
 
-const listStates = new WeakMap<Element, ListState>();
+// Keyed by the region start marker rather than the container, so sibling lists in one parent keep their own state.
+const listStates = new WeakMap<Comment, ListState>();
 
 const scopedItem = (
   itemName: string,
@@ -132,27 +133,7 @@ const scopedItem = (
   scope: Record<string, unknown> | undefined,
 ): Record<string, unknown> => ({ ...scope, [itemName]: item, ...(indexName ? { [indexName]: index } : {}) });
 
-const nodeAt = (root: Node, path: readonly number[]): Node => {
-  let current = root;
-  for (const index of path) {
-    // Skip SSR hydration marker comments so template paths stay valid on adopted rows.
-    let cursor = 0;
-    let next: Node | undefined;
-    for (const child of Array.from(current.childNodes)) {
-      if (
-        child.nodeType === 8 &&
-        ((child.nodeValue ?? "").startsWith("tachyon-hydrate:") || child.nodeValue === "/tachyon-if")
-      )
-        continue;
-      if (cursor++ === index) {
-        next = child;
-        break;
-      }
-    }
-    current = next as Node;
-  }
-  return current;
-};
+const nodeAt = (root: Node, path: readonly number[]): Node => templateNodeAt(root, path) as Node;
 
 const textAtRecord = (record: RowRecord, path: readonly number[]): Text => {
   if (record.nodes.length <= 1) return textAt(record.element, path);
@@ -190,7 +171,6 @@ const resolveGeneratedOptions = (options: GeneratedTextKeyedListOptions): TextKe
     bindings: options.bindings,
     readKey,
     readBinding: (scope, binding) => read((binding as GeneratedTextBinding).read(scope)),
-    a: defaultAfterNode,
   };
 };
 
@@ -212,8 +192,8 @@ const resolveLegacyOptions = (options: TextKeyedListOptions): TextKeyedListRunti
     templateHtml: options.templateHtml,
     bindings: options.bindings,
     readKey,
-    readBinding: (scope, binding) => read(binding.read ? binding.read(scope) : readPath(scope, binding.expression ?? "")),
-    a: defaultAfterNode,
+    readBinding: (scope, binding) =>
+      read(binding.read ? binding.read(scope) : readPath(scope, binding.expression ?? "")),
   };
 };
 
@@ -262,19 +242,21 @@ const cleanupListState = (state: ListState): void => {
 };
 
 const getListState = (container: Element, options: TextKeyedListRuntimeOptions): ListState => {
-  const current = listStates.get(container);
+  const markers = ensureListRegion(container, options.region);
+  const current = listStates.get(markers.start);
   if (current && current.options === options) return current;
   const signature = options.signature;
   if (current && current.signature === signature) {
     current.options = options;
     return current;
   }
-  if (current) cleanupOwnedSubtree(container);
+  if (current) cleanupOwnedSubtree(markers.start);
   const template = document.createElement("template");
   template.innerHTML = options.templateHtml;
   const next: ListState = {
     signature,
     options,
+    markers,
     parentScope: emptyParentScope,
     records: new Map(),
     template,
@@ -284,17 +266,17 @@ const getListState = (container: Element, options: TextKeyedListRuntimeOptions):
     initialized: false,
     ownerCleanupDispose: undefined,
   };
-  listStates.set(container, next);
-  registerOwnedSubtree(container, () => {
-    if (listStates.get(container) !== next) return;
+  listStates.set(markers.start, next);
+  registerOwnedSubtree(markers.start, () => {
+    if (listStates.get(markers.start) !== next) return;
     try {
       cleanupListState(next);
     } finally {
-      listStates.delete(container);
+      listStates.delete(markers.start);
     }
   });
   next.ownerCleanupDispose = onOwnerCleanup(() => {
-    cleanupOwnedSubtree(container);
+    cleanupOwnedSubtree(markers.start);
   });
   return next;
 };
@@ -418,13 +400,6 @@ const updateRecord = (
   record.revision.update((value) => value + 1);
 };
 
-const defaultAfterNode = (container: Element, region: TextKeyedListRegion): ChildNode | undefined =>
-  region.after ? Array.from(container.children).at(-region.after) : undefined;
-
-const boundaryAfterNode = (container: Element, region: TextKeyedListRegion): ChildNode | undefined =>
-  Array.from(container.childNodes).find((child) => (child.nodeType & 8) && child.nodeValue == "tachyon-list") ||
-  defaultAfterNode(container, region);
-
 /** Releases a text-only list produced by the Tachyon DOM compiler. */
 export const cleanupTextKeyedList = (root: Element, path: readonly number[]): void => {
   const container = nodeAt(root, path);
@@ -440,7 +415,6 @@ const mountTextKeyedListResolved = (
   const container = nodeAt(root, path);
   if (!(container instanceof Element)) return;
   const state = getListState(container, options);
-  const afterNode = options.a;
   const cleanupRecordsNotIn = (
     records: Map<PropertyKey, RowRecord>,
     keep: Pick<ReadonlySet<PropertyKey>, "has">,
@@ -483,13 +457,8 @@ const mountTextKeyedListResolved = (
   const createdRecords: RowRecord[] = [];
   const previousRecords = state.records;
   const inspectServerRows = !state.initialized && state.records.size === 0 && state.elementIndices.length > 0;
-  const serverElements = inspectServerRows ? Array.from(container.children) : [];
-  const serverDynamicElements = inspectServerRows ? dynamicElementsFor(container, options.region) : [];
-  const canAdoptServerRows =
-    inspectServerRows &&
-    (options.region
-      ? serverDynamicElements.length > 0
-      : serverElements.length >= entries.length * state.elementIndices.length);
+  const serverDynamicElements = inspectServerRows ? regionElements(state.markers) : [];
+  const canAdoptServerRows = inspectServerRows && serverDynamicElements.length > 0;
   try {
     for (const [entryIndex, entry] of entries.entries()) {
       const existing = state.records.get(entry.key);
@@ -507,31 +476,21 @@ const mountTextKeyedListResolved = (
       nextRecords.set(entry.key, record);
       orderedRecords.push(record);
     }
-    if (canAdoptServerRows && options.region) {
-      replaceDynamicRegion(
-        container,
-        options.region,
+    const { end } = state.markers;
+    if (canAdoptServerRows) {
+      replaceRegionContent(
+        state.markers,
         orderedRecords.flatMap((record) => record.nodes),
-        afterNode(container, options.region),
       );
-    } else if (canAdoptServerRows) container.replaceChildren(...orderedRecords.flatMap((record) => record.nodes));
-    else if (canAppendWithoutMoving(nextRecords, orderedRecords, previousRecords)) {
+    } else if (canAppendWithoutMoving(nextRecords, orderedRecords, previousRecords)) {
       const previousKeys = new Set(previousRecords.keys());
       for (const record of orderedRecords) {
         if (!previousKeys.has(record.key)) {
-          const staticAfter = options.region ? afterNode(container, options.region) : undefined;
-          if (!staticAfter) {
-            container.append(...record.nodes);
-          } else for (const node of record.nodes) container.insertBefore(node, staticAfter);
+          for (const node of record.nodes) container.insertBefore(node, end);
         }
       }
     } else {
-      positionRecords(
-        container,
-        orderedRecords,
-        previousRecords,
-        options.region ? (afterNode(container, options.region) ?? null) : null,
-      );
+      positionRecords(container, orderedRecords, previousRecords, end);
     }
     state.records = nextRecords;
     state.initialized = true;
@@ -564,17 +523,8 @@ export const mountGeneratedTextKeyedList = (
   mountTextKeyedListResolved(root, path, items, resolveGeneratedOptions(options));
 };
 
-export const mountGeneratedTextKeyedListWithBoundary = (
-  root: Element,
-  path: readonly number[],
-  items: readonly unknown[] | undefined,
-  options: GeneratedTextKeyedListOptions,
-): void => {
-  mountTextKeyedListResolved(root, path, items, {
-    ...resolveGeneratedOptions(options),
-    a: boundaryAfterNode,
-  });
-};
+/** Kept for modules compiled before every list carried its own markers; it is the same entry now. */
+export const mountGeneratedTextKeyedListWithBoundary = mountGeneratedTextKeyedList;
 
 /**
  * Mounts text-only rows from the compatibility descriptor. `templateHtml` must be trusted compiler output, never untrusted input.
@@ -585,11 +535,5 @@ export const mountTextKeyedList = (
   items: readonly unknown[] | undefined,
   options: TextKeyedListOptions,
 ): void => {
-  const resolved = resolveLegacyOptions(options);
-  mountTextKeyedListResolved(
-    root,
-    path,
-    items,
-    options.region?.logicalAfter === undefined ? resolved : { ...resolved, a: boundaryAfterNode },
-  );
+  mountTextKeyedListResolved(root, path, items, resolveLegacyOptions(options));
 };

@@ -259,22 +259,6 @@ export const emitsElementRoot = (node: TemplateNode): boolean => {
   return true;
 };
 
-const emitsLogicalText = (node: TemplateNode): boolean => {
-  if (node.type === "text")
-    return textExpressionSegments(node.value).some(
-      (segment) => segment.kind === "expression" || segment.value.trim().length > 0,
-    );
-  if (node.tagName === "component") return renderableChildren(node).some(emitsLogicalText);
-  return false;
-};
-
-/** Separates a list from text-only siblings that would otherwise merge into one DOM Text node. */
-export const listBoundaryMarker = "<!--tachyon-list-->";
-
-export const listNeedsBoundaryMarker = (children: readonly TemplateNode[], index: number): boolean => {
-  return children.slice(index + 1).some(emitsLogicalText);
-};
-
 export const escapeMarker = (value: unknown): string =>
   String(value ?? "")
     .replaceAll("--", "- -")

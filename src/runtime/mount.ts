@@ -1,4 +1,9 @@
-import { isConditionalEndMarker, isConditionalStartMarker } from "../conditional-marker.js";
+import {
+  isConditionalEndMarker,
+  isConditionalStartMarker,
+  isListEndMarker,
+  isListStartMarker,
+} from "../conditional-marker.js";
 import { err, ok, type Result } from "../result.js";
 import { diagnoseHydrationBoundaries, type CompiledHydrationBoundary, type HydrationBoundaryChunk } from "./hydrate.js";
 import { createRoot, onCleanup } from "./signal.js";
@@ -108,26 +113,15 @@ const hydrationChildNodes = (node: Node): Node[] =>
       child.nodeType !== Node.COMMENT_NODE ||
       child.nodeValue === "td:text" ||
       isConditionalStartMarker(child) ||
-      isConditionalEndMarker(child),
+      isConditionalEndMarker(child) ||
+      isListStartMarker(child) ||
+      isListEndMarker(child),
   );
 
 const hydrationPathLabel = (path: readonly number[]): string => (path.length === 0 ? "root" : `root.${path.join(".")}`);
 
 const hydrationAttributeKey = (path: readonly number[], name: string): string =>
   `${path.join(".")}\0${name.toLowerCase()}`;
-
-const hydrationRegionKey = (path: readonly number[]): string => path.join(".");
-
-const ambiguousDynamicRegionError = (
-  dynamicRegions: ReadonlyMap<string, readonly ClientHydrationDynamicRegion[]>,
-): string | undefined => {
-  for (const [key, regions] of dynamicRegions) {
-    if (regions.length < 2 || !regions.some((region) => region.kind === "list")) continue;
-    const path = key === "" ? [] : key.split(".").map(Number);
-    return `Hydration cannot safely adopt multiple direct dynamic regions at ${hydrationPathLabel(path)} when a <for> shares its parent with another dynamic region.`;
-  }
-  return undefined;
-};
 
 const hydrationUnsafeExtraNodeError = (node: Node, path: readonly number[]): string | undefined => {
   if (node.nodeType !== Node.ELEMENT_NODE) {
@@ -151,12 +145,22 @@ const hydrationUnsafeExtraNodeError = (node: Node, path: readonly number[]): str
   return undefined;
 };
 
+type RegionKind = "conditional" | "list";
+
+const regionMarkers = {
+  conditional: { isStart: isConditionalStartMarker, isEnd: isConditionalEndMarker },
+  list: { isStart: isListStartMarker, isEnd: isListEndMarker },
+} as const;
+
 /**
- * Walks a server-rendered conditional region: the start marker at (or, where earlier extra children are
- * allowed, after) `actualIndex`, its branch, and the matching end marker. Returns the index after the end
- * marker, or the mismatch. Nested regions close their own markers, so a branch can hold further `<if>`s.
+ * Walks a server-rendered dynamic region: the start marker at (or, where earlier extra children are allowed,
+ * after) `actualIndex`, its content, and the matching end marker. Returns the index after the end marker, or
+ * the mismatch. Nested regions of either kind close their own markers, so a branch or row can hold further
+ * `<if>`s and `<for>`s; the content itself is server output the region's runtime adopts, so only nodes that
+ * would be unsafe to leave in place are rejected here.
  */
-const hydrationConditionalRegionEnd = (
+const hydrationRegionEnd = (
+  kind: RegionKind,
   actualChildren: readonly Node[],
   actualIndex: number,
   path: readonly number[],
@@ -164,10 +168,11 @@ const hydrationConditionalRegionEnd = (
   allowsExtraChildren: boolean,
 ): number | string => {
   const label = hydrationPathLabel(path);
+  const { isStart, isEnd } = regionMarkers[kind];
   let index = actualIndex;
-  while (index < actualChildren.length && !isConditionalStartMarker(actualChildren[index] as Node)) {
+  while (index < actualChildren.length && !isStart(actualChildren[index] as Node)) {
     if (!allowsExtraChildren) {
-      return `Hydration structure mismatch at ${label}: expected a conditional region at child ${expectedIndex}.`;
+      return `Hydration structure mismatch at ${label}: expected a ${kind} region at child ${expectedIndex}.`;
     }
     const unsafeError = hydrationUnsafeExtraNodeError(actualChildren[index] as Node, [...path, index]);
     if (unsafeError) return unsafeError;
@@ -179,9 +184,9 @@ const hydrationConditionalRegionEnd = (
   let depth = 0;
   for (index++; index < actualChildren.length; index++) {
     const node = actualChildren[index] as Node;
-    if (isConditionalStartMarker(node)) {
+    if (isStart(node)) {
       depth++;
-    } else if (isConditionalEndMarker(node)) {
+    } else if (isEnd(node)) {
       if (depth === 0) return index + 1;
       depth--;
     } else {
@@ -189,7 +194,7 @@ const hydrationConditionalRegionEnd = (
       if (unsafeError) return unsafeError;
     }
   }
-  return `Hydration structure mismatch at ${label}: unterminated conditional region at child ${expectedIndex}.`;
+  return `Hydration structure mismatch at ${label}: unterminated ${kind} region at child ${expectedIndex}.`;
 };
 
 const hydrationStructureError = (
@@ -197,7 +202,6 @@ const hydrationStructureError = (
   actual: Node,
   path: readonly number[],
   dynamicAttributes: ReadonlyMap<string, ClientHydrationDynamicAttribute>,
-  dynamicRegions: ReadonlyMap<string, readonly ClientHydrationDynamicRegion[]>,
 ): string | undefined => {
   const label = hydrationPathLabel(path);
   if (expected.nodeType === Node.ELEMENT_NODE) {
@@ -231,23 +235,24 @@ const hydrationStructureError = (
     }
     const expectedChildren = Array.from(expected.childNodes);
     const actualChildren = hydrationChildNodes(actual);
-    const regions = dynamicRegions.get(hydrationRegionKey(path)) ?? [];
-    const regionByIndex = new Map(regions.map((region) => [region.index, region]));
     let actualIndex = 0;
     let allowsExtraChildren = false;
-    // Region end markers occupy no logical slot, so the logical index (the one paths and regions use) can trail
-    // the template child index.
+    // Region end markers and list markers occupy no logical slot, so the logical index (the one paths use) can
+    // trail the template child index.
     let logicalIndex = -1;
     for (let expectedIndex = 0; expectedIndex < expectedChildren.length; expectedIndex++) {
       const expectedChild = expectedChildren[expectedIndex] as Node;
-      if (isConditionalEndMarker(expectedChild)) continue;
-      logicalIndex++;
-      const region = regionByIndex.get(logicalIndex);
-      if (region?.kind === "list") {
-        allowsExtraChildren = true;
+      if (isConditionalEndMarker(expectedChild) || isListEndMarker(expectedChild)) continue;
+      if (isListStartMarker(expectedChild)) {
+        const regionEnd = hydrationRegionEnd("list", actualChildren, actualIndex, path, logicalIndex + 1, false);
+        if (typeof regionEnd === "string") return regionEnd;
+        actualIndex = regionEnd;
+        continue;
       }
+      logicalIndex++;
       if (isConditionalStartMarker(expectedChild)) {
-        const regionEnd = hydrationConditionalRegionEnd(
+        const regionEnd = hydrationRegionEnd(
+          "conditional",
           actualChildren,
           actualIndex,
           path,
@@ -271,20 +276,13 @@ const hydrationStructureError = (
         let matched = false;
         while (actualIndex < actualChildren.length) {
           const candidate = actualChildren[actualIndex] as Node;
-          const candidateError = hydrationStructureError(
-            expectedChild,
-            candidate,
-            childPath,
-            dynamicAttributes,
-            dynamicRegions,
-          );
+          const candidateError = hydrationStructureError(expectedChild, candidate, childPath, dynamicAttributes);
           actualIndex++;
           if (!candidateError) {
             matched = true;
             break;
           }
           if (
-            !region &&
             expectedChild.nodeType === Node.ELEMENT_NODE &&
             candidate.nodeType === Node.ELEMENT_NODE &&
             tagNameFor(expectedChild as Element) === tagNameFor(candidate as Element)
@@ -299,21 +297,14 @@ const hydrationStructureError = (
         }
         continue;
       }
-      const mismatch = hydrationStructureError(
-        expectedChild,
-        actualChild,
-        childPath,
-        dynamicAttributes,
-        dynamicRegions,
-      );
+      const mismatch = hydrationStructureError(expectedChild, actualChild, childPath, dynamicAttributes);
       if (mismatch) return mismatch;
       actualIndex++;
     }
-    const trailingRegion = regions.some((region) => region.index > logicalIndex);
-    if (!allowsExtraChildren && !trailingRegion && actualIndex < actualChildren.length) {
+    if (!allowsExtraChildren && actualIndex < actualChildren.length) {
       return `Hydration structure mismatch at ${label}: found an unexpected child.`;
     }
-    if (allowsExtraChildren || trailingRegion) {
+    if (allowsExtraChildren) {
       for (let index = actualIndex; index < actualChildren.length; index++) {
         const extraError = hydrationUnsafeExtraNodeError(actualChildren[index] as Node, [...path, index]);
         if (extraError) return extraError;
@@ -401,23 +392,12 @@ export const hydrate = <Scope extends Record<string, unknown>>(
       attribute,
     ]),
   );
-  const dynamicRegions = new Map<string, ClientHydrationDynamicRegion[]>();
-  for (const region of module.hydrationDynamicRegions ?? []) {
-    const key = hydrationRegionKey(region.path);
-    const regions = dynamicRegions.get(key) ?? [];
-    regions.push(region);
-    dynamicRegions.set(key, regions);
-  }
-  const dynamicRegionError = ambiguousDynamicRegionError(dynamicRegions);
-  if (dynamicRegionError) {
-    return err({ message: dynamicRegionError });
-  }
   const dynamicRegionDiagnostic =
     module.hydrationDynamicRegionErrors?.[0] ?? module.hydrationDynamicRegions?.errors?.[0];
   if (dynamicRegionDiagnostic) {
     return err({ message: dynamicRegionDiagnostic });
   }
-  const structureError = hydrationStructureError(expectedRoot, bindRoot, [], dynamicAttributes, dynamicRegions);
+  const structureError = hydrationStructureError(expectedRoot, bindRoot, [], dynamicAttributes);
   if (structureError) {
     return err({ message: structureError });
   }

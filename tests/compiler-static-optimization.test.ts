@@ -98,7 +98,9 @@ describe("static template optimization", () => {
       `<ul><for each={rows} key={row.id}><li><if test={false}><b>gone</b></if>{row.label}</li></for></ul>`,
     );
 
-    expect(renderServerTemplate(template, { rows: [{ id: "a", label: "A" }] })).toBe(`<ul><li>A</li></ul>`);
+    expect(renderServerTemplate(template, { rows: [{ id: "a", label: "A" }] })).toBe(
+      `<ul><!--tachyon-for--><li>A</li><!--/tachyon-for--></ul>`,
+    );
     const module = evaluateGeneratedClientModule(generateClientModule(template));
     const root = document.createElement("div");
     mount(root, module, {
@@ -288,7 +290,9 @@ describe("static template optimization", () => {
 
   it("emits the aliased key a generated reader actually reads", () => {
     const inner = generateClientModule(
-      compiled(`<component name="Panel" label={title}><ul><for each={rows} key={row.id}><li>{label}</li></for></ul></component>`),
+      compiled(
+        `<component name="Panel" label={title}><ul><for each={rows} key={row.id}><li>{label}</li></for></ul></component>`,
+      ),
       { reactive: true, instrumentBindings: false },
     );
 
@@ -318,7 +322,9 @@ describe("static template optimization", () => {
           type: "element" as const,
           tagName: "div",
           attrs: [],
-          children: [{ type: "element" as const, tagName: "if", attrs: [{ name: "test", value: "{0}" }], children: [] }],
+          children: [
+            { type: "element" as const, tagName: "if", attrs: [{ name: "test", value: "{0}" }], children: [] },
+          ],
         },
       ],
     };

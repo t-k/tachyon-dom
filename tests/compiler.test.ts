@@ -604,10 +604,12 @@ describe("HTML-first compiler", () => {
     if (!result.ok) throw new Error(result.error.message);
     const list = result.value.client.bindings.find((binding) => binding.kind === "list");
 
-    expect(result.value.client.templateHtml).toBe(`<table><tbody></tbody></table>`);
+    expect(result.value.client.templateHtml).toBe(
+      `<table><tbody><!--tachyon-for--><!--/tachyon-for--></tbody></table>`,
+    );
     expect(list).toMatchObject({ kind: "list", path: [0], templateHtml: `<tr><td> </td></tr>` });
     expect(renderServerTemplate(result.value, { rows: [{ id: 1, label: "One" }] })).toBe(
-      `<table><tbody><tr><td>One</td></tr></tbody></table>`,
+      `<table><tbody><!--tachyon-for--><tr><td>One</td></tr><!--/tachyon-for--></tbody></table>`,
     );
   });
 
@@ -1344,7 +1346,7 @@ describe("HTML-first compiler", () => {
       throw new Error(result.error.message);
     }
 
-    expect(result.value.client.templateHtml).toBe("<tbody></tbody>");
+    expect(result.value.client.templateHtml).toBe("<tbody><!--tachyon-for--><!--/tachyon-for--></tbody>");
     expect(result.value.client.bindings).toEqual([
       {
         kind: "list",
@@ -1499,15 +1501,27 @@ describe("HTML-first compiler", () => {
     expect(generateClientModule(result.value)).toContain(`updatePolicy: "reference"`);
   });
 
-  it("emits a region contract when a keyed list has static siblings", () => {
+  it("records where a keyed list sits among its siblings as its region", () => {
     const result = compileTemplate(
       `<ul><li class="header">Header</li><for each={rows} key={row.id}><li>{row.label}</li></for><li class="footer">Footer</li></ul>`,
     );
     if (!result.ok) throw new Error(result.error.message);
 
     const list = result.value.client.bindings.find((binding) => binding.kind === "list");
-    expect(list).toMatchObject({ kind: "list", region: { before: 1, after: 1 } });
-    expect(generateClientModule(result.value)).toContain(`region: {"before":1,"after":1}`);
+    expect(list).toMatchObject({ kind: "list", region: { at: 1 } });
+    expect(generateClientModule(result.value)).toContain(`region: {"at":1}`);
+
+    const first = compileTemplate(`<ul><for each={rows} key={row.id}><li>{row.label}</li></for></ul>`);
+    if (!first.ok) throw new Error(first.error.message);
+    expect(first.value.client.bindings.find((binding) => binding.kind === "list")).not.toHaveProperty("region");
+
+    const second = compileTemplate(
+      `<ul><for each={a} as="row" key={row.id}><li>{row.label}</li></for><if test={x}><li>x</li></if><for each={b} as="row" key={row.id}><li>{row.label}</li></for></ul>`,
+    );
+    if (!second.ok) throw new Error(second.error.message);
+    const lists = second.value.client.bindings.filter((binding) => binding.kind === "list");
+    expect(lists[0]).not.toHaveProperty("region");
+    expect(lists[1]).toMatchObject({ region: { index: 1, at: 1 } });
   });
 
   it.each([
@@ -1633,23 +1647,16 @@ describe("HTML-first compiler", () => {
     if (!deeplyNestedConditional.ok) throw new Error(deeplyNestedConditional.error.message);
     expect(deeplyNestedConditional.value.client.hydrationDynamicRegionErrors[0]).toContain("at root.0.0:");
 
-    const nestedList = compileTemplate(
+    // A list region carries its own markers, so sharing a parent with a conditional is not ambiguous.
+    for (const source of [
       `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></section></main>`,
-    );
-    if (!nestedList.ok) throw new Error(nestedList.error.message);
-    expect(nestedList.value.client.hydrationDynamicRegionErrors[0]).toContain("at root.0");
-
-    const deeplyNestedList = compileTemplate(
       `<main><section><article><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></article></section></main>`,
-    );
-    if (!deeplyNestedList.ok) throw new Error(deeplyNestedList.error.message);
-    expect(deeplyNestedList.value.client.hydrationDynamicRegionErrors[0]).toContain("at root.0.0");
-
-    const rootList = compileTemplate(
       `<main><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></main>`,
-    );
-    if (!rootList.ok) throw new Error(rootList.error.message);
-    expect(rootList.value.client.hydrationDynamicRegionErrors[0]).toContain("at root when");
+    ]) {
+      const sharedParent = compileTemplate(source);
+      if (!sharedParent.ok) throw new Error(sharedParent.error.message);
+      expect(sharedParent.value.client.hydrationDynamicRegionErrors).toEqual([]);
+    }
 
     const sharedShape = compileTemplate(
       `<main><if test={visible}><p class="shared">{left}</p></if><p class="shared">{tail}</p></main>`,
@@ -1670,16 +1677,17 @@ describe("HTML-first compiler", () => {
     expect(result.value.client.hydrationDynamicRegionErrors).toHaveLength(0);
   });
 
-  it("applies list path correction only after a static prefix and composes it with conditional paths", () => {
+  it("addresses siblings after a keyed list by their template paths without a list offset", () => {
     const withSiblings = compileTemplate(
       `<main><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
     );
     if (!withSiblings.ok) throw new Error(withSiblings.error.message);
     const siblingCode = generateClientModule(withSiblings.value, { reactive: true, instrumentBindings: false });
 
+    // The path walkers step over a list region's rows, so the footer keeps its template path.
     expect(siblingCode).toContain(`__tachyonTextAt(root, [0,0])`);
-    expect(siblingCode).not.toContain(`__tachyonNodeAtWithDynamicLists(root, [0,0]`);
-    expect(siblingCode).toContain(`__tachyonNodeAtWithDynamicLists(root, [1,0]`);
+    expect(siblingCode).toContain(`__tachyonTextAt(root, [1,0])`);
+    expect(siblingCode).not.toContain(`runtime/list-path`);
 
     const withConditional = compileTemplate(
       `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></section><aside><if test={visible}><b>{head}</b></if></aside></main>`,
@@ -1687,40 +1695,33 @@ describe("HTML-first compiler", () => {
     if (!withConditional.ok) throw new Error(withConditional.error.message);
     const conditionalCode = generateClientModule(withConditional.value, { reactive: true, instrumentBindings: false });
 
-    expect(conditionalCode).toContain(
-      `dynamicListChildOffset as __tachyonDynamicListChildOffset, nodeAtWithDynamicLists as __tachyonNodeAtWithDynamicLists`,
-    );
-    expect(conditionalCode).toContain(
-      `__tachyonPreparedNodeAt(root, [0,0,0], (container, parentPath, childIndex) => __tachyonDynamicListChildOffset`,
-    );
+    expect(conditionalCode).not.toContain(`runtime/list-path`);
+    expect(conditionalCode).toContain(`__tachyonPreparedNodeAt(root, [0,0,0])`);
 
     const withTextPrefix = compileTemplate(
       `<main>intro<header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
     );
     if (!withTextPrefix.ok) throw new Error(withTextPrefix.error.message);
     const textPrefixList = withTextPrefix.value.client.bindings.find((binding) => binding.kind === "list");
-    expect(textPrefixList).toMatchObject({ kind: "list", region: { before: 1, after: 1, logicalBefore: 2 } });
+    expect(textPrefixList).toMatchObject({ kind: "list", region: { at: 2 } });
     const textPrefixCode = generateClientModule(withTextPrefix.value, { reactive: true, instrumentBindings: false });
-    expect(textPrefixCode).toContain(`region: {"before":1,"after":1,"logicalBefore":2}`);
+    expect(textPrefixCode).toContain(`region: {"at":2}`);
 
     const withTextComponent = compileTemplate(
       `<main><component name="Prefix">intro{prefix}</component><header>{head}</header><for each={rows} key={row.id}><p>{row.label}</p></for><footer>{tail}</footer></main>`,
     );
     if (!withTextComponent.ok) throw new Error(withTextComponent.error.message);
     const textComponentList = withTextComponent.value.client.bindings.find((binding) => binding.kind === "list");
-    expect(textComponentList).toMatchObject({ kind: "list", region: { before: 1, after: 1, logicalBefore: 4 } });
+    expect(textComponentList).toMatchObject({ kind: "list", region: { at: 4 } });
 
     const withTextOnlySiblings = compileTemplate(
       `<main>{head}<for each={rows} key={row.id}><p>{row.label}</p></for>{tail}</main>`,
     );
     if (!withTextOnlySiblings.ok) throw new Error(withTextOnlySiblings.error.message);
     const textOnlyList = withTextOnlySiblings.value.client.bindings.find((binding) => binding.kind === "list");
-    expect(textOnlyList).toMatchObject({
-      kind: "list",
-      region: { before: 0, after: 0, logicalBefore: 1, logicalAfter: 1 },
-    });
+    expect(textOnlyList).toMatchObject({ kind: "list", region: { at: 1 } });
     expect(generateClientModule(withTextOnlySiblings.value, { reactive: true, instrumentBindings: false })).toContain(
-      `region: {"before":0,"after":0,"logicalBefore":1,"logicalAfter":1}`,
+      `region: {"at":1}`,
     );
 
     const withComponentList = compileTemplate(
@@ -1731,7 +1732,7 @@ describe("HTML-first compiler", () => {
     expect(componentList).toMatchObject({
       kind: "list",
       path: [],
-      region: { before: 1, after: 1 },
+      region: { at: 1 },
     });
   });
 
@@ -1750,7 +1751,9 @@ describe("HTML-first compiler", () => {
           { id: 2, label: "<Two>", selected: true },
         ],
       }),
-    ).toBe(`<tbody><tr><td>1</td><td>One</td></tr><tr class="danger"><td>2</td><td>&lt;Two&gt;</td></tr></tbody>`);
+    ).toBe(
+      `<tbody><!--tachyon-for--><tr><td>1</td><td>One</td></tr><tr class="danger"><td>2</td><td>&lt;Two&gt;</td></tr><!--/tachyon-for--></tbody>`,
+    );
   });
 
   it("uses the text-only list runtime when every row binding is text", () => {

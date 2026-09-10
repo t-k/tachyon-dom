@@ -26,7 +26,6 @@ import {
   attrExpression,
   automaticHydrationId,
   childPathEntries,
-  emitsElementRoot,
   expressionToScopeAccess,
   jsOptionalPropertyAccess,
   hydrationBoundaryFor,
@@ -34,8 +33,6 @@ import {
   isVoidElement,
   isStoreNode,
   itemNameFromKey,
-  listBoundaryMarker,
-  listNeedsBoundaryMarker,
   attrString,
   assertSafeIdentifierName,
   readExpressionAttribute,
@@ -47,7 +44,12 @@ import {
   expressionLocationForText,
 } from "../utils.js";
 import { isAssignableExpression } from "../expression.js";
-import { conditionalEndMarker, conditionalStartMarker } from "../../conditional-marker.js";
+import {
+  conditionalEndMarker,
+  conditionalStartMarker,
+  listEndMarker,
+  listStartMarker,
+} from "../../conditional-marker.js";
 import { expressionAlwaysPlainValue, expressionCallsSomething, expressionScopeNames } from "../optimize.js";
 
 type LoweredNode = {
@@ -138,15 +140,9 @@ const recordHydrationDynamicRegionErrors = (
   path: readonly number[],
   context: ClientLoweringContext,
 ): void => {
+  // A `<for>` region is delimited by its own markers, so any number of lists can share a parent with each
+  // other and with conditionals; only conditional branches still need a shape that server output can tell apart.
   const children = hydrationDirectChildren(node.children);
-  const dynamicChildren = children.filter(({ kind }) => kind !== "static");
-  if (dynamicChildren.length >= 2 && dynamicChildren.some(({ kind }) => kind === "list")) {
-    const label = path.length === 0 ? "root" : `root.${path.join(".")}`;
-    context.hydrationDynamicRegionErrors.push(
-      `Hydration cannot safely adopt multiple direct dynamic regions at ${label} when a <for> shares its parent with another dynamic region.`,
-    );
-    return;
-  }
   for (const [index, child] of children.entries()) {
     if (child.kind !== "conditional" || child.shape.length === 0) continue;
     const hasAmbiguousShapeSibling = children.some(
@@ -366,36 +362,9 @@ const loweredNodeCount = (node: TemplateNode): number => {
 const loweredNodeCountFor = (children: readonly TemplateNode[]): number =>
   children.reduce((count, child) => count + loweredNodeCount(child), 0);
 
-const logicalBoundaryNodeCount = (node: TemplateNode): number => {
-  if (node.type !== "text") return loweredNodeCount(node);
-  const segments = textExpressionSegments(node.value);
-  if (!segments.some((segment) => segment.kind === "expression" || segment.value.trim().length > 0)) return 0;
-  return segments.filter((segment) => segment.value.length > 0).length * 2 - 1;
-};
-
-const logicalBoundaryNodeCountFor = (children: readonly TemplateNode[]): number =>
-  children.reduce((count, child) => count + logicalBoundaryNodeCount(child), 0);
-
-const listRegionFor = (children: readonly TemplateNode[], index: number): ListBinding["region"] => {
-  const dynamicChildren = children.filter(
-    (child) => child.type === "element" && (child.tagName === "for" || child.tagName === "if"),
-  );
-  if (dynamicChildren.length !== 1 || dynamicChildren[0]?.type !== "element" || dynamicChildren[0].tagName !== "for") {
-    return undefined;
-  }
-  const before = children.slice(0, index).filter(emitsElementRoot).length;
-  const after = children.slice(index + 1).filter(emitsElementRoot).length;
-  const logicalBefore = logicalBoundaryNodeCountFor(children.slice(0, index));
-  const logicalAfter = logicalBoundaryNodeCountFor(children.slice(index + 1));
-  return before + after > 0 || logicalBefore + logicalAfter > 0
-    ? {
-        before,
-        after,
-        ...(logicalBefore !== before ? { logicalBefore } : {}),
-        ...(logicalAfter !== after ? { logicalAfter } : {}),
-      }
-    : undefined;
-};
+/** Where a list sits in its parent: the ordinal of its marker pair and the logical slot its rows start at. */
+const listRegionOf = (ordinal: number, at: number): ListBinding["region"] =>
+  ordinal === 0 && at === 0 ? undefined : { ...(ordinal ? { index: ordinal } : {}), ...(at ? { at } : {}) };
 
 const lowerComponent = (
   node: ElementNode,
@@ -557,7 +526,9 @@ const lowerElement = (
   }
   if (node.tagName === "for") {
     context.bindings.push(lowerList(node, path, context, listRegion));
-    return "";
+    // The region's markers. Rows live between them, exactly like server-rendered ones; both markers are
+    // invisible to logical paths, so the list still occupies no slot in its parent.
+    return `${listStartMarker}${listEndMarker}`;
   }
   if (node.tagName === "if") {
     return lowerIf(node, path, context);
@@ -674,24 +645,12 @@ const lowerElement = (
 
   let children = "";
   let domIndex = 0;
+  let listOrdinal = 0;
   for (const child of node.children) {
-    if (child.type === "element" && child.tagName === "for") {
-      context.hydrationDynamicRegions.push({ path: [...path], index: domIndex, kind: "list" });
-      context.bindings.push(
-        lowerList(child, path, context, listRegionFor(node.children, node.children.indexOf(child))),
-      );
-      if (listNeedsBoundaryMarker(node.children, node.children.indexOf(child))) {
-        children += listBoundaryMarker;
-      }
-      continue;
-    }
     const transparentListRoot = transparentListRootFor(child);
-    const flattenedChildren = transparentListRoot ? domChildren(node) : undefined;
-    const flattenedIndex = transparentListRoot ? flattenedChildren?.indexOf(transparentListRoot) : undefined;
-    const childListRegion =
-      transparentListRoot && flattenedChildren && flattenedIndex !== undefined && flattenedIndex >= 0
-        ? listRegionFor(flattenedChildren, flattenedIndex)
-        : undefined;
+    const childListRegion = transparentListRoot ? listRegionOf(listOrdinal++, domIndex) : undefined;
+    // A direct `<for>` is bound against this element, so its path is the container's own.
+    const childPath = transparentListRoot === child ? path : [...path, domIndex];
     if (transparentListRoot) {
       context.hydrationDynamicRegions.push({ path: [...path], index: domIndex, kind: "list" });
     }
@@ -702,10 +661,7 @@ const lowerElement = (
       addStoreDefinitions(child, [...path, domIndex], context);
       continue;
     }
-    const lowered = lowerNode(child, [...path, domIndex], context, childListRegion);
-    if (transparentListRoot && flattenedChildren && flattenedIndex !== undefined && flattenedIndex >= 0) {
-      if (listNeedsBoundaryMarker(flattenedChildren, flattenedIndex)) children += listBoundaryMarker;
-    }
+    const lowered = lowerNode(child, childPath, context, childListRegion);
     children += lowered.html;
     domIndex += lowered.nodeCount;
   }
@@ -790,10 +746,7 @@ const runtimeNames = {
   preparedNodeAt: "__tachyonPreparedNodeAt",
   mountGeneratedKeyedList: "__tachyonMountGeneratedKeyedList",
   mountTextKeyedList: "__tachyonMountTextKeyedList",
-  mountTextKeyedListWithBoundary: "__tachyonMountTextKeyedListWithBoundary",
   nodeAt: "__tachyonNodeAt",
-  nodeAtWithDynamicLists: "__tachyonNodeAtWithDynamicLists",
-  dynamicListChildOffset: "__tachyonDynamicListChildOffset",
   read: "__tachyonRead",
   setAttributeValue: "__tachyonSetAttributeValue",
   setClassPresence: "__tachyonSetClassPresence",
@@ -1340,9 +1293,6 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding)) ||
     generatedRowBindings.some((binding) => binding.kind === "list");
   const needsTextList = bindings.some((binding) => binding.kind === "list" && isTextOnlyList(binding));
-  const needsTextListBoundary = bindings.some(
-    (binding) => binding.kind === "list" && isTextOnlyList(binding) && binding.region?.logicalAfter !== undefined,
-  );
   const needsNestedConditional = generatedRowBindings.some((binding) => binding.kind === "if");
   const needsConditional = bindings.some((binding) => binding.kind === "if") || needsNestedConditional;
   const needsConditionalCore = bindings.some((binding) => binding.kind === "if" && usesConditionalCore(binding));
@@ -1359,28 +1309,6 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     (binding) =>
       (binding.kind === "list" || (binding.kind === "if" && !usesConditionalCore(binding))) &&
       (binding.hydrationBoundaries?.length ?? 0) > 0,
-  );
-  const listPathsForBinding = (
-    path: readonly number[],
-  ): Array<{
-    path: number[];
-    region?: ListBinding["region"];
-  }> =>
-    bindings.flatMap((candidate) => {
-      if (
-        candidate.kind !== "list" ||
-        candidate.path.length >= path.length ||
-        !candidate.path.every((part, index) => part === path[index])
-      ) {
-        return [];
-      }
-      const childIndex = path[candidate.path.length];
-      const logicalBefore = candidate.region?.logicalBefore ?? candidate.region?.before ?? 0;
-      if (candidate.region && (childIndex === undefined || childIndex < logicalBefore)) return [];
-      return [{ path: candidate.path, ...(candidate.region ? { region: candidate.region } : {}) }];
-    });
-  const needsListPathResolver = bindings.some(
-    (binding) => binding.kind !== "list" && listPathsForBinding(binding.path).length > 0,
   );
   const needsConditionalCoreAdoptionGuard =
     needsConditionalCore &&
@@ -1441,11 +1369,6 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (classImports.length > 0) {
     lines.push(`import { ${classImports.join(", ")} } from "tachyon-dom/runtime/class";`);
   }
-  if (needsListPathResolver) {
-    lines.push(
-      `import { dynamicListChildOffset as ${runtimeNames.dynamicListChildOffset}, nodeAtWithDynamicLists as ${runtimeNames.nodeAtWithDynamicLists} } from "tachyon-dom/runtime/list-path";`,
-    );
-  }
   const attrImports = [
     ...(bindingsNeedingRuntime.some((binding) => binding.kind === "attr" && !isKnownClassAttribute(binding))
       ? [`setAttributeValue as ${runtimeNames.setAttributeValue}`]
@@ -1477,9 +1400,6 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     const textListImports = [
       `cleanupTextKeyedList as ${runtimeNames.cleanupTextKeyedList}`,
       `mountGeneratedTextKeyedList as ${runtimeNames.mountTextKeyedList}`,
-      ...(needsTextListBoundary
-        ? [`mountGeneratedTextKeyedListWithBoundary as ${runtimeNames.mountTextKeyedListWithBoundary}`]
-        : []),
     ];
     lines.push(`import { ${textListImports.join(", ")} } from "tachyon-dom/runtime/list-text";`);
   }
@@ -1740,33 +1660,14 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
       lines.push(`  ]);`);
     }
   }
-  const listPathExpression = (path: readonly number[]): string | undefined => {
-    const lists = listPathsForBinding(path);
-    return lists.length > 0
-      ? `${runtimeNames.nodeAtWithDynamicLists}(root, ${JSON.stringify(path)}, ${JSON.stringify(lists)})`
-      : undefined;
-  };
-  const preparedPathExpression = (path: readonly number[]): string => {
-    const lists = listPathsForBinding(path);
-    const offset =
-      lists.length > 0
-        ? `, (container, parentPath, childIndex) => ${runtimeNames.dynamicListChildOffset}(container, parentPath, childIndex, ${JSON.stringify(lists)})`
-        : "";
-    return `${runtimeNames.preparedNodeAt}(root, ${JSON.stringify(path)}${offset})`;
-  };
-  const bindingNodeExpression = (path: readonly number[]): string => {
-    const listPath = listPathExpression(path);
-    if (listPath && !needsConditionalPrepare) return listPath;
-    return needsConditionalPrepare && path.length > 0 ? preparedPathExpression(path) : nodeExpression(path);
-  };
-  const bindingElementExpression = (path: readonly number[]): string => {
-    const listPath = listPathExpression(path);
-    if (listPath && !needsConditionalPrepare) return listPath;
-    return needsConditionalPrepare && path.length > 0 ? preparedPathExpression(path) : elementExpression(path);
-  };
+  // Every path walker steps over list regions, so a path after a `<for>` needs no list offset.
+  const preparedPathExpression = (path: readonly number[]): string =>
+    `${runtimeNames.preparedNodeAt}(root, ${JSON.stringify(path)})`;
+  const bindingNodeExpression = (path: readonly number[]): string =>
+    needsConditionalPrepare && path.length > 0 ? preparedPathExpression(path) : nodeExpression(path);
+  const bindingElementExpression = (path: readonly number[]): string =>
+    needsConditionalPrepare && path.length > 0 ? preparedPathExpression(path) : elementExpression(path);
   const bindingTextExpression = (path: readonly number[]): string => {
-    const listPath = listPathExpression(path);
-    if (listPath && !needsConditionalPrepare) return `${runtimeNames.textAt}(${listPath}, [])`;
     return needsConditionalPrepare
       ? `${runtimeNames.textAt}(${bindingNodeExpression(path)}, [])`
       : `${runtimeNames.textAt}(root, ${JSON.stringify(path)})`;
@@ -2473,11 +2374,7 @@ const emitListBinding = (
   ].join("\n");
   const target = targetName ?? "root";
   const path = targetName ? [] : binding.path;
-  const mount = isTextOnlyList(binding)
-    ? binding.region?.logicalAfter !== undefined
-      ? runtimeNames.mountTextKeyedListWithBoundary
-      : runtimeNames.mountTextKeyedList
-    : runtimeNames.mountGeneratedKeyedList;
+  const mount = isTextOnlyList(binding) ? runtimeNames.mountTextKeyedList : runtimeNames.mountGeneratedKeyedList;
   const statement = `${mount}(${target}, ${JSON.stringify(path)}, ${runtimeValueExpression(binding.each, reactive, sourceName, aliases)}, ${optionsName})`;
   const targetDeclaration = targetName ? `  const ${targetName} = ${targetExpression(binding.path)};\n` : "";
   const invocation = reactive ? `  cleanups.push(${runtimeNames.effect}(() => ${statement}));` : `  ${statement};`;

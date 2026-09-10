@@ -62,7 +62,7 @@ describe("testing utilities", () => {
         { locale: "ja" },
       ),
     ).resolves.toBe(
-      `<section lang="ja"><h1>Hello</h1><p class="hidden">&lt;img src=x onerror=alert(1)&gt;</p><ul><li>One</li><li>Two</li></ul></section>`,
+      `<section lang="ja"><h1>Hello</h1><p class="hidden">&lt;img src=x onerror=alert(1)&gt;</p><ul><!--tachyon-for--><li>One</li><li>Two</li><!--/tachyon-for--></ul></section>`,
     );
   });
 

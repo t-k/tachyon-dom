@@ -126,10 +126,12 @@ describe("server stream adapter", () => {
       chunks.push(chunk);
     }
 
-    expect(chunks.join("").replaceAll("<!---->", "")).toBe(`<ul><li>0:Alice</li></ul>`);
+    expect(chunks.join("").replaceAll("<!---->", "")).toBe(
+      `<ul><!--tachyon-for--><li>0:Alice</li><!--/tachyon-for--></ul>`,
+    );
   });
 
-  it("keeps a text-only list boundary in generated stream output", async () => {
+  it("delimits a text-only list with its region markers in generated stream output", async () => {
     const result = compileTemplate(`<main>{head}<for each={rows} key={row.id}><p>{row.label}</p></for>{tail}</main>`);
     if (!result.ok) throw new Error(result.error.message);
     const module = generateServerStreamModule(result.value).replace("export const stream", "const stream");
@@ -142,32 +144,38 @@ describe("server stream adapter", () => {
       chunks.push(chunk);
     }
 
-    expect(chunks.join("").replaceAll("<!---->", "")).toBe(`<main>H<p>A</p><!--tachyon-list-->F</main>`);
+    expect(chunks.join("").replaceAll("<!---->", "")).toBe(
+      `<main>H<!--tachyon-for--><p>A</p><!--/tachyon-for-->F</main>`,
+    );
   });
 
-  it.each([0, 1, 2])("keeps a list boundary in generated synchronous SSR inside await for %i rows", async (count) => {
-    const result = compileTemplate(
-      `<main><await value={rows} then="resolved"><for each={resolved} key={row.id}><p>{row.label}</p></for>{tail}</await></main>`,
-    );
-    if (!result.ok) throw new Error(result.error.message);
-    const server = await import(
-      `data:text/javascript;base64,${Buffer.from(generateServerModule(result.value)).toString("base64")}`
-    );
-    const streamServer = await import(
-      `data:text/javascript;base64,${Buffer.from(generateServerStreamModule(result.value)).toString("base64")}`
-    );
-    const rows = Array.from({ length: count }, (_, index) => ({ id: index, label: `R${index}` }));
-    const scope = { rows, tail: "F" };
-    const generated = server.render(scope);
-    const direct = renderServerTemplate(result.value, scope);
-    let streamed = "";
-    for await (const chunk of streamServer.stream(scope)) streamed += chunk;
+  it.each([0, 1, 2])(
+    "delimits a list inside await with its markers on every server target for %i rows",
+    async (count) => {
+      const result = compileTemplate(
+        `<main><await value={rows} then="resolved"><for each={resolved} key={row.id}><p>{row.label}</p></for>{tail}</await></main>`,
+      );
+      if (!result.ok) throw new Error(result.error.message);
+      const server = await import(
+        `data:text/javascript;base64,${Buffer.from(generateServerModule(result.value)).toString("base64")}`
+      );
+      const streamServer = await import(
+        `data:text/javascript;base64,${Buffer.from(generateServerStreamModule(result.value)).toString("base64")}`
+      );
+      const rows = Array.from({ length: count }, (_, index) => ({ id: index, label: `R${index}` }));
+      const scope = { rows, tail: "F" };
+      const generated = server.render(scope);
+      const direct = renderServerTemplate(result.value, scope);
+      let streamed = "";
+      for await (const chunk of streamServer.stream(scope)) streamed += chunk;
 
-    expect(generated).toBe(direct);
-    expect(streamed).toBe(direct);
-    expect(generated.match(/<!--tachyon-list-->/g)).toHaveLength(1);
-    expect(generated.indexOf("<!--tachyon-list-->")).toBeLessThan(generated.indexOf("F"));
-  });
+      expect(generated).toBe(direct);
+      expect(streamed).toBe(direct);
+      expect(generated.match(/<!--tachyon-for-->/g)).toHaveLength(1);
+      expect(generated.match(/<!--\/tachyon-for-->/g)).toHaveLength(1);
+      expect(generated.indexOf("<!--/tachyon-for-->")).toBeLessThan(generated.indexOf("F"));
+    },
+  );
 
   it("flushes generated stream chunks at the byte threshold even without await boundaries", async () => {
     const result = compileTemplate(`<main>${"<p>Ready</p>".repeat(900)}</main>`);
