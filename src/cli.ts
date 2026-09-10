@@ -3,7 +3,13 @@ import { access, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateTachyonModuleTypes, generateTemplateTypes, pagesFromRouteFiles } from "./app.js";
-import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
+import {
+  explainCompiledTemplate,
+  formatTemplateExplanation,
+  generateClientModule,
+  generateServerModule,
+  generateServerStreamModule,
+} from "./compiler/index.js";
 import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
 import { diagnoseTachyonSfc, diagnosticFromCompilerError, formatDiagnostic } from "./diagnostics.js";
 import { scanFileRoutes } from "./router-node.js";
@@ -65,8 +71,15 @@ export type CliLanguageServerOptions = {
   transport: "stdio";
 };
 
+export type CliExplainOptions = {
+  command: "explain";
+  input: string;
+  format: "text" | "json";
+};
+
 export type CliOptions =
   | CliCompileOptions
+  | CliExplainOptions
   | CliRoutesOptions
   | CliServerOptions
   | CliAddPageOptions
@@ -76,7 +89,7 @@ export type CliOptions =
   | CliLanguageServerOptions;
 
 const usage =
-  "Usage: tachyon-dom <compile|routes|dev|build|preview|add|typegen|typecheck|init|language-server>. Use compile for templates, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, typecheck for script/template TypeScript diagnostics, init for starters, and language-server for editor diagnostics.";
+  "Usage: tachyon-dom <compile|explain|routes|dev|build|preview|add|typegen|typecheck|init|language-server>. Use compile for templates, explain for the runtime modules and hydration constraints a template compiles to, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, typecheck for script/template TypeScript diagnostics, init for starters, and language-server for editor diagnostics.";
 
 const commandUsage: Record<string, string> = {
   add: "Usage: tachyon-dom add page <name> [--routes-dir src/routes] [--force]. Existing files are preserved unless --force is explicit.",
@@ -84,6 +97,7 @@ const commandUsage: Record<string, string> = {
   compile:
     "Usage: tachyon-dom compile <input> [--target client|server|stream] [--out file] [--reactive] [--no-sourcemap]",
   dev: "Usage: tachyon-dom dev [--host 127.0.0.1] [--port 5173]",
+  explain: "Usage: tachyon-dom explain <input> [--json]",
   init: "Usage: tachyon-dom init [--out dir] [--template basic|ssr] [--force]. Any conflict aborts all writes unless --force is explicit.",
   "language-server": "Usage: tachyon-dom language-server --stdio",
   preview: "Usage: tachyon-dom preview [--host 127.0.0.1] [--port 4173]",
@@ -157,6 +171,16 @@ const parseCompileArgs = (input: string, rest: readonly string[]): Result<CliCom
     } else {
       return err(`Unknown argument: ${arg}`);
     }
+  }
+  return ok(options);
+};
+
+const parseExplainArgs = (input: string, rest: readonly string[]): Result<CliExplainOptions, string> => {
+  if (!input) return err(commandUsage.explain as string);
+  const options: CliExplainOptions = { command: "explain", input, format: "text" };
+  for (const arg of rest) {
+    if (arg === "--json") options.format = "json";
+    else return err(`Unknown argument: ${arg}`);
   }
   return ok(options);
 };
@@ -313,6 +337,9 @@ export const parseArgs = (argv: readonly string[]): Result<CliOptions, string> =
   if (command === "compile") {
     return parseCompileArgs(input ?? "", rest);
   }
+  if (command === "explain") {
+    return parseExplainArgs(input ?? "", rest);
+  }
   if (command === "routes") {
     return parseRoutesArgs(input ?? "", rest);
   }
@@ -376,6 +403,27 @@ export const compileFile = async (options: Omit<CliCompileOptions, "command">): 
     await writeFile(options.output, output);
   }
   return ok(output);
+};
+
+/**
+ * Reports the cost decisions behind a template: the runtime module each `<for>` and `<if>` compiles to and
+ * why, the runtime imports of the client module, and the hydration constraints the compiler recorded.
+ */
+export const explainFile = async (options: Omit<CliExplainOptions, "command">): Promise<Result<string, string>> => {
+  const source = await readFile(options.input, "utf8");
+  const result = diagnoseTachyonSfc(source, { target: "client" });
+  if (!result.ok) return err(formatDiagnostic(result.error, options.input));
+  if (result.value.scriptOnly) {
+    return ok(
+      options.format === "json"
+        ? `${JSON.stringify({ regions: [], runtimeImports: [], hydrationDiagnostics: [] })}\n`
+        : "Script-only file: no template.\n",
+    );
+  }
+  const explanation = explainCompiledTemplate(result.value.template);
+  return ok(
+    options.format === "json" ? `${JSON.stringify(explanation, null, 2)}\n` : formatTemplateExplanation(explanation),
+  );
 };
 
 export const typecheckFile = async (options: Omit<CliTypecheckOptions, "command">): Promise<Result<string, string>> => {
@@ -854,6 +902,9 @@ export const runCli = async (
       break;
     case "compile":
       result = await compileFile(parsed.value);
+      break;
+    case "explain":
+      result = await explainFile(parsed.value);
       break;
     case "routes":
       result = await buildRouteManifestFile({

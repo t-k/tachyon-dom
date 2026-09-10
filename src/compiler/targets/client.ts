@@ -850,7 +850,7 @@ const declarationKeyFor = (declaration: object, fallback: string): string =>
 // component boundaries, and hydration boundaries all fall back to the general keyed list.
 const generatedRowBindingKinds = new Set(["text", "class", "attr", "event"]);
 
-const isTextOnlyList = (binding: ListBinding): boolean =>
+export const isTextOnlyList = (binding: ListBinding): boolean =>
   binding.bindings.length > 0 &&
   binding.bindings.every((child) => generatedRowBindingKinds.has(child.kind)) &&
   binding.bindings.some((child) => child.kind !== "event") &&
@@ -878,7 +878,7 @@ const isConditionalCoreBinding = (binding: ClientBinding): boolean =>
   binding.kind === "attr" ||
   binding.kind === "style";
 
-const usesConditionalCore = (binding: ConditionalBinding): boolean =>
+export const usesConditionalCore = (binding: ConditionalBinding): boolean =>
   (binding.stores?.length ?? 0) === 0 &&
   (binding.hydrationBoundaries?.length ?? 0) === 0 &&
   (binding.components?.length ?? 0) === 0 &&

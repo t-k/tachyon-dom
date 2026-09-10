@@ -16,6 +16,7 @@ import {
   parseArgs,
   runCli,
   serverCommandMessage,
+  explainFile,
   typecheckFile,
 } from "../src/cli";
 import {
@@ -1582,6 +1583,29 @@ export default { selected: false };
       ok: true,
       value: { command: "typecheck", input: "page.td", scopeType: "PageScope" },
     });
+    expect(parseArgs(["explain", "page.td", "--json"])).toEqual({
+      ok: true,
+      value: { command: "explain", input: "page.td", format: "json" },
+    });
+  });
+
+  it("explains the runtime modules a template compiles to from the CLI", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-explain-"));
+    try {
+      const input = path.join(dir, "page.td");
+      await writeFile(input, `<ul><for each={rows} key={row.id}><li><input bind:value={row.label} /></li></for></ul>`);
+      const result = await explainFile({ input, format: "text" });
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.value).toContain("<for> under root uses tachyon-dom/runtime/list.");
+        expect(result.value).toContain("bind:value={row.label}");
+      }
+      const json = await explainFile({ input, format: "json" });
+      expect(json.ok).toBe(true);
+      if (json.ok) expect(JSON.parse(json.value).regions[0].runtime).toBe("tachyon-dom/runtime/list");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("runs the same script/template type checker from the CLI", async () => {

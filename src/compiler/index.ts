@@ -78,6 +78,8 @@ export const compileTemplate = (
 };
 
 export * from "./types.js";
+export { explainCompiledTemplate, formatTemplateExplanation } from "./explain.js";
+export type { TemplateExplanation, TemplateRegionExplanation } from "./explain.js";
 export { bindingSourceSpan, generateClientHydrationChunkModule, generateClientModule } from "./targets/client.js";
 export {
   compileServerTemplate,
