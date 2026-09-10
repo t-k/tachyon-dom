@@ -86,7 +86,16 @@ Expression attributes such as `title="{label}"` create dynamic attribute binding
 
 ## Components
 
-`<component name="Name">...</component>` creates a transparent component boundary. It does not emit a wrapper element. A component must currently have exactly one renderable root child.
+Tachyon DOM has two things that are both called "component". They are different, and the syntax keeps them apart:
+
+| Concept                                | What it is                                                                                                                                                | Where it lives              |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
+| `<component name="Name">…</component>` | An inline scope boundary inside one template. It declares local prop names and local `<store>` state for its subtree and emits no wrapper element.        | Template syntax             |
+| `createTemplateComponent({ … })`       | A reusable unit defined in code: typed props, independent reactive scope per instance, `mount`, `hydrate`, `update`, `dispose`, SSR and stream renderers. | Runtime API (`tachyon-dom`) |
+
+`<component name="Panel">` does not call a `Panel` defined elsewhere. The `name` is a label for diagnostics and generated metadata; the subtree is compiled in place. Think of it as `let` for template scope, not as a function call. To reuse UI across files, define it once with `createTemplateComponent()` and mount or render that instance; the compiler may still emit transparent boundaries inside it, but those are an implementation detail.
+
+`<component>` does not emit a wrapper element. A component must currently have exactly one renderable root child.
 
 Component props are expression attributes other than `name`, and are exposed as local names while rendering the component subtree.
 
@@ -133,15 +142,22 @@ Hydration can be scheduled by runtime strategy:
 
 ## Outlet and Slot
 
-`<outlet></outlet>` injects `scope.outlet` in server and stream targets. The client target leaves a marker comment.
+`<outlet></outlet>` and `<slot name="header"></slot>` are server-side composition points, not reactive child content. Their contract is deliberately narrow:
 
-`<slot name="header"></slot>` injects `scope.slots.header` in server and stream targets. The client target leaves a marker comment.
+| Aspect        | Contract                                                                                                                                                  |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Type          | An HTML string. `scope.outlet` and `scope.slots[name]` are inserted verbatim by the server and stream targets; `null` or `undefined` inserts nothing.     |
+| Evaluated in  | The scope of the template that contains the `<outlet>` or `<slot>`; the string was produced earlier by the caller, usually another template's `render()`. |
+| Updates       | Never. The value is read once per render and has no reactive subscription.                                                                                |
+| Owner         | None. Nothing inside the inserted HTML is bound, tracked, or disposed by this template.                                                                   |
+| Client target | Leaves a marker comment only. `mount()` renders no slot content; `hydrate()` leaves whatever the server inserted in place and does not bind it.           |
+| Trust         | The string is trusted HTML. Escape user data before it reaches `scope.outlet` or `scope.slots`, exactly as with `rawHtml()`.                              |
 
-These are intended for route layouts and transparent component composition.
+Use them for route layouts and for composing server-rendered fragments. They are not a mechanism for passing reactive UI into a reusable component. For that, mount a `createTemplateComponent()` instance into an element the parent owns (for example via `ref`), so its state, updates, and disposal follow the parent's owner.
 
 ## Await Streaming
 
-`<await value={promise} then="name">...</await>` creates an async streaming fragment. The stream target awaits `value`, binds the resolved value to `then`, and yields the child HTML as soon as it is ready.
+`<await value={promise} then="name">...</await>` creates an async fragment. The stream target awaits `value`, binds the resolved value to `then`, and yields the child HTML as soon as it is ready.
 
 ```html
 <await value="{messagePromise}" then="message">
@@ -149,13 +165,29 @@ These are intended for route layouts and transparent component composition.
 </await>
 ```
 
-The synchronous server string target treats the current `value` as the resolved value. Use the stream target when `value` is a Promise.
-
 `<await>` also accepts:
 
-- `fallback="..."` to yield static fallback HTML before awaiting in the stream target.
+- `pending="..."` to yield static HTML before awaiting in the stream target. This HTML is appended output: once the value resolves, the resolved children are yielded after it and the pending HTML is not removed or replaced. Use it for a heading or an explanatory line that should remain in the document, not for a spinner that must disappear. `fallback="..."` is accepted as an alias with the same meaning; using both on one element is a compile error.
 - `error="..."` to yield static error HTML if the awaited value rejects in the stream target.
-- `reorder="preserve"` or `reorder="resolve"` in the IR. The client and buffered server targets do not use this streaming ordering hint. The stream target currently supports document-order output (`preserve` or omission); `reorder="resolve"` is rejected with a positioned diagnostic until resolve-order emission is implemented.
+- `reorder="preserve"` or `reorder="resolve"` in the IR. The stream target currently supports document-order output (`preserve` or omission); `reorder="resolve"` is rejected with a positioned diagnostic until resolve-order emission is implemented.
+
+Per-target meaning:
+
+| Target             | `value` is a plain value                                                                                                            | `value` is a Promise                                          | `pending` / `error`        |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------- |
+| Stream             | Rendered as the resolved value                                                                                                      | Awaited; children yielded on resolution                       | Yielded as described above |
+| Synchronous server | Rendered as the resolved value                                                                                                      | Rejected with an error at render time; the target cannot wait | Ignored                    |
+| Client             | Not rendered by the compiler; `<await>` has no client binding. Load data with `createResource()` and render it with `<if>` instead. |                                                               |                            |
+
+Replacing a placeholder with the resolved UI in the browser would require region identification, a replacement protocol, and a hydration contract. That is not implemented, and the `pending` name is chosen so the current behavior is not mistaken for it.
+
+## Target Contract
+
+Every element form is compiled by the client, synchronous server, and stream targets from the same IR. The rule for differences between them is:
+
+> Where a form is supported by more than one target, it has the same meaning in each. Where a target cannot realize that meaning, it reports a diagnostic instead of silently doing something else.
+
+Examples of the rule in this document: a `<for>` region renders the same rows and the same markers in every target; `<await>` with a Promise in the synchronous server target is an error rather than text; `reorder="resolve"` is rejected by the stream target; `<outlet>` and `<slot>` on the client are documented as markers only rather than being emulated. The lightweight and generic client runtimes chosen for a `<for>` or `<if>` (see `tachyon-dom explain`) differ in size only, never in observable behavior.
 
 ## Single File Templates
 

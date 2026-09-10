@@ -26,9 +26,9 @@ This `.td` component combines a signal-backed counter with a keyed list:
 </script>
 
 <main>
-  <button on:click={increment}>{count}</button>
+  <button on:click="{increment}">{count}</button>
   <ul>
-    <for each={rows} key={row.id}>
+    <for each="{rows}" key="{row.id}">
       <li>{row.label}</li>
     </for>
   </ul>
@@ -53,6 +53,24 @@ Static markup remains in a reusable template. Events are attached once per creat
 
 See the [syntax specification](docs/syntax-spec.md) for supported expressions and exact target behavior.
 
+## Predictable Cost
+
+The compiler picks the smallest runtime path a region needs: text-only rows use `runtime/list-text`, rows with attributes or events use `runtime/list`, and simple branches use `runtime/conditional-core` instead of the generic conditional. The lightweight and generic paths differ in size only, never in observable behavior. To see which path a template got and why, ask the compiler:
+
+```sh
+tachyon-dom explain src/routes/index/page.td
+```
+
+```text
+<for> under root.1 uses tachyon-dom/runtime/list.
+  The lightweight module was not chosen because:
+    - a row uses bind:value={row.label}
+
+Runtime imports: tachyon-dom/runtime/text, tachyon-dom/runtime/event, tachyon-dom/runtime/list, tachyon-dom/runtime/signal
+```
+
+The same data is available as `explainCompiledTemplate()` from `tachyon-dom/compiler` and as `tachyon-dom explain --json`.
+
 ## Measured Size
 
 `import { createSignal } from "tachyon-dom"` bundles to **940 bytes minified** in the current esbuild contract.
@@ -73,9 +91,9 @@ On this machine, Tachyon DOM performed within 3% of the comparison implementatio
 
 | Compared with        | Tachyon DOM result |
 | -------------------- | -----------------: |
-| vanillajs-lite-keyed | 1.8% faster |
-| solid-keyed | 0.9% faster |
-| marko-keyed | 2.5% slower |
+| vanillajs-lite-keyed |        1.8% faster |
+| solid-keyed          |        0.9% faster |
+| marko-keyed          |        2.5% slower |
 
 Results are the geometric mean of nine operations: row creation, replacement, partial updates, selection, swapping, removal, append, clear, and creation of many rows. Lower execution time is better.
 
@@ -140,7 +158,7 @@ TypeScript powers SFC script transformation and OXC parses advanced template exp
 - [Getting started](docs/getting-started.md): starter creation, project shape, route files, template types, and testing.
 - [Syntax specification](docs/syntax-spec.md): HTML-first syntax, expressions, directives, components, hydration, and streaming constructs.
 - [Runtime](docs/runtime.md): signals, ownership, DOM helpers, keyed lists, forms, enhancements, portals, and hydration.
-- [Public API layers](docs/api.md): root, runtime, generated, server, and tooling import contracts.
+- [Public API layers](docs/api.md): stability tiers and the root, runtime, generated, server, and tooling import contracts.
 - [App and Vite](docs/app-vite.md): app definitions, file routes, plugins, request-scoped SSR, logging, and packaging.
 - [Routing](docs/routing.md): server routes, layouts, loaders, actions, streaming, and client navigation.
 - [Server adapters](docs/adapters.md): Workers, Node, Lambda, static assets, origins, and deployment behavior.
