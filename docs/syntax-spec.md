@@ -54,9 +54,22 @@ Expressions inside `script` and `style` are rejected because ordinary HTML escap
 
 Use `update="reference"` when the list follows immutable update discipline and an unchanged item reference should not re-evaluate that row. The default is `update="always"`, which preserves in-place mutation behavior. Index changes and changes to the outer scope still invalidate rows in either mode.
 
-The client compiler records static element siblings around a direct `<for>` so SSR rows can be adopted without consuming those siblings. The region uses element counts to place rows between those siblings and records a separate logical child index when text or comment nodes make the binding path longer than the element count. Bindings before the list keep their logical paths, while bindings after the list account for the expanded row region. A direct `<for>` can be hydrated when it is the sole dynamic region under its parent. This rule is checked recursively inside list row templates as well. If a `<for>` shares its parent with another direct `<for>` or `<if>`, `hydrate()` reports an ambiguous dynamic-region error before binding and leaves the SSR DOM untouched. Place the dynamic regions under separate parent elements when they must be hydrated together. Conditional branches with the same client shape as a static or conditional sibling are also rejected before binding because SSR output cannot identify their ownership.
+Every `<for>` region is delimited by the same comment markers on every target: `<!--tachyon-for-->` before the rows and `<!--/tachyon-for-->` after them, exactly as `<if>` uses `<!--tachyon-if-->` and `<!--/tachyon-if-->`. The markers are what identify a region: hydration adopts the SSR rows between them, rows are inserted before the end marker, and nested `<for>` and `<if>` regions nest their own pairs. Because ownership is stated by the compiler rather than inferred from the DOM shape, any number of `<for>` and `<if>` regions can share a parent, sit next to whitespace, text, or static siblings, and be hydrated together without wrapper elements:
 
-Transparent `<component>` boundaries are flattened for this parent check. A list or conditional inside a transparent component therefore shares the surrounding DOM parent, and it is rejected by the same pre-hydration diagnostic when another dynamic region is present.
+```html
+<ul>
+  <for each="{rows}" as="row" key="{row.id}">
+    <li>{row.label}</li>
+  </for>
+  <if test="{loading}">
+    <li>Loading</li>
+  </if>
+</ul>
+```
+
+Both markers occupy no logical child slot, so binding paths for siblings after a region are the same in the client template and in the hydrated document. The markers are part of the generated-only contract (see [Public API layers](api.md)): their text may change between compiler versions, and hand-written server HTML that omits them is not supported for hydration.
+
+Transparent `<component>` boundaries emit no element, so a `<for>` or `<if>` inside one shares the surrounding DOM parent; its markers still identify it.
 
 Row-local `<component>` boundaries, `<store>` declarations, and explicit hydration boundaries are supported. Row stores and component props belong to the keyed row and survive reorder while being disposed when the key leaves the list. A row hydration boundary must use an explicit row-scoped expression such as `hydrate:id={row.id}`; an automatically generated static id inside a row is rejected because it would be duplicated. The runtime does not silently drop unsupported metadata.
 

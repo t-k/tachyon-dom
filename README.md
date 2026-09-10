@@ -164,6 +164,7 @@ TypeScript powers SFC script transformation and OXC parses advanced template exp
 - [Server adapters](docs/adapters.md): Workers, Node, Lambda, static assets, origins, and deployment behavior.
 - [Security](docs/security.md): escaping, trusted HTML, sanitizers, redirects, CSRF, hosts, proxies, and origins.
 - [Whitespace migration](docs/migrations/whitespace.md): compiler versus document policies, legacy mappings, and boundary outcomes.
+- [Region markers and reactivity migration](docs/migrations/region-markers-and-reactivity.md): `<for>` markers, `untrack()` ownership, memo reads in `batch()`, `<await>` targets, and `pending`.
 - [SFC scope optimization](docs/sfc-scope-optimization.md): setup scope narrowing, emission policies, transform caching, and size comparisons.
 - [Benchmarks](benchmark/README.md): provenance, contracts, reproduction, and interpretation.
 - [Releasing](docs/releasing.md): package verification, Trusted Publishing, and release commands.

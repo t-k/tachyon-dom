@@ -9,7 +9,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/enhancement`: small progressive enhancement registry for SSR markup that opts in with `data-td-enhance`.
 - `runtime/event`: direct event listener binding.
 - `runtime/list`: keyed list mounting, reuse, move, multi-root item support, row-local stores/components/hydration boundaries, and precomputed binding plans that avoid rebuilding per-row binding subsets.
-- `runtime/list-path`: compiler path resolution for bindings after keyed-list output expands around static siblings. The list region keeps element counts for placing rows between static siblings and may also carry a `logicalBefore` child index when text or comment nodes precede the list. The expansion offset applies only to logical children after that boundary; prepared conditional paths can supply the same resolver as a child offset.
+- `runtime/list-path`: retained for compatibility with previously generated modules. Since every `<for>` region is delimited by markers, sibling paths no longer shift around rows and the compiler no longer imports this module; its offset is always zero. It is a removal candidate for the next major release.
 - `runtime/keyed-rows`: dependency-free keyed table-row list where the live DOM is the single source of truth (no shadow item/row arrays). Bulk creation binds and clones a reusable multi-row chunk; remove/swap/select are O(1) DOM operations. Suited to large data tables that do not need per-row reactivity.
 - `runtime/virtual-list`: fixed-height virtualized lists with overscan, imperative updates, index scrolling, and ARIA position metadata.
 - `runtime/conditional`: conditional DOM mounting.
@@ -25,25 +25,27 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 Browser feature bundles have independent minified and Brotli budgets. Checks reject compiler, server, TypeScript, parse5, and language-server inputs. After building, run `pnpm update:runtime-sizes` to refresh the measurement JSON and this table together; review any budget changes separately. CI runs `pnpm check:runtime-sizes` to reject stale measurements or documentation. The conditional budget allows approximately 3% over the baseline recorded when the budget was tightened; budgets never increase automatically.
 
 <!-- browser-feature-sizes:start -->
+
 Browser feature measurements (bytes):
 
-| Fixture | Minified | Brotli |
-| --- | ---: | ---: |
-| runtime/list | 14858 | 5348 |
-| runtime/generic-list | 20020 | 6875 |
-| runtime/form | 2944 | 1182 |
-| runtime/conditional | 9387 | 3316 |
-| runtime/generic-conditional | 14421 | 4843 |
-| runtime/router | 18819 | 6321 |
+| Fixture                     | Minified | Brotli |
+| --------------------------- | -------: | -----: |
+| runtime/list                |    14858 |   5348 |
+| runtime/generic-list        |    20020 |   6875 |
+| runtime/form                |     2944 |   1182 |
+| runtime/conditional         |     9387 |   3316 |
+| runtime/generic-conditional |    14421 |   4843 |
+| runtime/router              |    18819 |   6321 |
 
 Source: [measurement JSON](../scripts/browser-feature-sizes.json). It records the commit, dirty state, input hashes, Node/esbuild versions, production define, minification, and Brotli conditions. `pnpm check:runtime-sizes` compares the input hashes, the byte counts, and the conditions needed to reproduce them: esbuild version, production define, minification, compression, and the Node major version that CI pins. The commit and dirty state are recorded for traceability but are not compared. CI uploads fresh reports as the browser-feature-measurements artifact. These feature fixtures differ from the client bundle attribution fixtures and Quick Example.
+
 <!-- browser-feature-sizes:end -->
 
 ## Mount and Hydrate Entrypoints
 
 `mount(root, module, scope)` replaces the root contents with trusted compiler output, passes the rendered template's first element to `module.bind()`, and returns a `MountHandle` whose `root` remains the container supplied by the caller. Calling `dispose()` more than once is harmless; it releases the module's resources but intentionally leaves the rendered DOM in place. `module.bind()` may return a cleanup function, and the generated client binding owns its reactive root through the same handle.
 
-`hydrate(root, module, scope)` accepts either the rendered template element itself or a container holding exactly one rendered template element. It validates the template's element structure and static attributes, allows only compiler-declared dynamic attributes, and rejects unsafe extra nodes or inline event attributes before binding. It also validates compiler-declared dynamic list and conditional regions, including SSR rows between static siblings, and validates the module's hydration markers without replacing server-rendered DOM. It returns a `Result`: an `ok` value contains the same idempotent `MountHandle`, while an `err` value contains a hydration diagnostic when the structure or markers do not match. Both functions expect `templateHtml` and binding metadata produced by the compiler or another trusted build step. They do not sanitize arbitrary HTML.
+`hydrate(root, module, scope)` accepts either the rendered template element itself or a container holding exactly one rendered template element. It validates the template's element structure and static attributes, allows only compiler-declared dynamic attributes, and rejects unsafe extra nodes or inline event attributes before binding. It also walks every compiler-declared `<for>` and `<if>` region from its start marker to its matching end marker, adopting the SSR rows or branch between them, and validates the module's hydration markers without replacing server-rendered DOM. It returns a `Result`: an `ok` value contains the same idempotent `MountHandle`, while an `err` value contains a hydration diagnostic when the structure or markers do not match. Both functions expect `templateHtml` and binding metadata produced by the compiler or another trusted build step. They do not sanitize arbitrary HTML.
 
 ## Reusable Template Components
 
