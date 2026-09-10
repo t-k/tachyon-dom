@@ -449,7 +449,28 @@ export function read<T>(value: T | Accessor<T>): T {
   return isSignal(value) ? (value as Accessor<T>)() : (value as T);
 }
 
+/**
+ * Reads without subscribing the active effect. Ownership is untouched: effects, resources, and `onCleanup()`
+ * registrations created inside still belong to the enclosing effect run and are disposed before its next run.
+ * Use `detachFromEffectOwner()` when work must outlive the current run.
+ */
 export const untrack = <T>(fn: () => T): T => {
+  const previous = activeEffect;
+  activeEffect = undefined;
+  try {
+    return fn();
+  } finally {
+    activeEffect = previous;
+  }
+};
+
+/**
+ * Runs `fn` outside the active effect run: nothing created inside subscribes the active effect, and effects,
+ * resources, and `onCleanup()` registrations attach to the enclosing mount or root owner instead of the run
+ * owner, so they survive the outer effect's reruns and are released when that owner is disposed. This is the
+ * explicit ownership escape; `untrack()` no longer changes lifetimes.
+ */
+export const detachFromEffectOwner = <T>(fn: () => T): T => {
   const previous = activeEffect;
   const previousOwner = currentEffectOwner;
   activeEffect = undefined;
@@ -491,12 +512,33 @@ export const createSignal = <T>(initial: T): Signal<T> => {
   return signal;
 };
 
+// Runs every queued computed effect now. A memo read while its recomputation is still queued (inside `batch()`
+// or an effect run) drains the queue first, so derived values are always fresh even though ordinary effects
+// stay deferred until the flush. Chained memos become fresh through the same loop: each computed run notifies
+// the next one into the queue before the loop checks it again. A failure is delivered to the runner's error
+// owner; an unhandled one reaches the reader.
+const runPendingComputedEffects = (): void => {
+  while (pendingComputedEffects.size > 0) {
+    const runner = pendingComputedEffects.values().next().value as EffectRunner;
+    pendingComputedEffects.delete(runner);
+    try {
+      runner.run();
+    } catch (error) {
+      const delivered = deliverError(runner.errorOwner, error);
+      if (!delivered.handled) throw delivered.error;
+    }
+  }
+};
+
 export const createMemo = <T>(fn: () => T): Accessor<T> => {
   const value = createSignal<T>(undefined as T);
   createEffect(() => {
     value.set(fn());
   }, true);
-  const memo = (() => value()) as Accessor<T>;
+  const memo = (() => {
+    if (pendingComputedEffects.size > 0) runPendingComputedEffects();
+    return value();
+  }) as Accessor<T>;
   Object.defineProperty(memo, signalBrand, { value: true });
   return memo;
 };
