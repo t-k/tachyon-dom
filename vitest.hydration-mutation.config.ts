@@ -16,6 +16,8 @@ export default defineConfig({
       "tests/example-syntax-gallery.test.ts",
       "tests/runtime-list.test.ts",
       "tests/dx.test.ts",
+      "tests/hydration-mutation-survivors.test.ts",
+      "tests/review-regressions-2026-09-11.test.ts",
     ],
   },
 });
