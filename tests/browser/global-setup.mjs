@@ -119,15 +119,33 @@ const hydrationDynamicRegionErrors = hydrationDynamicRegions.errors ?? [];
 export const runSharedParentGuard = () => {
   const root = document.createElement("div");
   root.innerHTML = ${JSON.stringify(sharedMarkup)};
-  const before = root.innerHTML;
+  const serverRows = Array.from(root.querySelectorAll("p"));
+  const serverButton = root.querySelector("button");
+  const serverFooter = root.querySelector("footer");
+  const rows = createSignal([{ id: "a", label: "R1" }, { id: "b", label: "R2" }]);
+  const active = createSignal(true);
+  const tail = createSignal("F");
   const result = hydrate(root, { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, hydrationDynamicRegionErrors, bind }, {
-    rows: createSignal([{ id: "a", label: "R1" }, { id: "b", label: "R2" }]),
-    active: createSignal(true),
+    rows,
+    active,
     label: createSignal("A"),
-    tail: createSignal("F"),
+    tail,
   });
-  if (result.ok) result.value.dispose();
-  return { ok: result.ok, unchanged: root.innerHTML === before, message: result.ok ? "" : result.error.message };
+  if (!result.ok) return { ok: false, identityPreserved: false, updated: false, message: result.error.message };
+  const identityPreserved =
+    Array.from(root.querySelectorAll("p")).every((row, index) => row === serverRows[index]) &&
+    root.querySelector("button") === serverButton &&
+    root.querySelector("footer") === serverFooter;
+  rows.set([{ id: "b", label: "R2" }, { id: "a", label: "R1" }, { id: "c", label: "R3" }]);
+  active.set(false);
+  tail.set("G");
+  const order = Array.from(root.querySelector("main").children).map((child) => child.tagName + ":" + child.textContent);
+  const updated =
+    JSON.stringify(order) === JSON.stringify(["P:R2", "P:R1", "P:R3", "FOOTER:G"]) &&
+    root.querySelectorAll("p")[0] === serverRows[1] &&
+    root.querySelectorAll("p")[1] === serverRows[0];
+  result.value.dispose();
+  return { ok: true, identityPreserved, updated, message: "" };
 };
 `,
     };
@@ -216,24 +234,28 @@ const clientModule = { templateHtml, hydrationBoundaries, hydrationDynamicAttrib
 export const runDynamicShapeCase = () => {
   const root = document.createElement("div");
   root.innerHTML = ${JSON.stringify(shapeMarkup)};
-  const before = root.innerHTML;
   const staticSibling = root.querySelector("main > p");
+  const visible = createSignal(false);
+  const tail = createSignal("client static");
   const result = hydrate(root, clientModule, {
-    visible: createSignal(false),
+    visible,
     title: createSignal("client branch"),
     active: createSignal(${serverActive}),
     classes: createSignal(${JSON.stringify(serverClasses)}),
     left: createSignal("client branch"),
-    tail: createSignal("client static"),
+    tail,
     save: () => undefined,
   });
-  if (result.ok) result.value.dispose();
-  return {
-    ok: result.ok,
-    unchanged: root.innerHTML === before,
-    staticPreserved: root.querySelector("main > p") === staticSibling,
-    message: result.ok ? "" : result.error.message,
-  };
+  if (!result.ok) return { ok: false, staticPreserved: false, tailUpdated: false, branchToggled: false, message: result.error.message };
+  tail.set("client static 2");
+  const tailUpdated = staticSibling?.textContent === "client static 2";
+  visible.set(true);
+  const branchShown = root.querySelectorAll("main > p").length === 2 && root.querySelector("main > p")?.textContent === "client branch";
+  visible.set(false);
+  const branchToggled = branchShown && root.querySelectorAll("main > p").length === 1;
+  const staticPreserved = root.querySelector("main > p") === staticSibling;
+  result.value.dispose();
+  return { ok: true, staticPreserved, tailUpdated, branchToggled, message: "" };
 };
 `,
     };
@@ -306,19 +328,21 @@ export const runComponentSplitCase = () => {
   const serverRow = root.querySelector("p");
   const serverButton = root.querySelector("button");
   const serverFooter = root.querySelector("footer");
+  const rows = createSignal([{ id: "a", label: "R1" }, { id: "b", label: "R2" }]);
+  const active = createSignal(true);
   const result = hydrate(root, clientModule, {
-    rows: createSignal([{ id: "a", label: "R1" }, { id: "b", label: "R2" }]),
-    active: createSignal(true),
+    rows,
+    active,
     label: createSignal("A"),
     tail: createSignal("F"),
   });
-  if (result.ok) result.value.dispose();
-  return {
-    ok: result.ok,
-    unchanged: root.innerHTML === before,
-    identityPreserved: root.querySelector("p") === serverRow && root.querySelector("button") === serverButton && root.querySelector("footer") === serverFooter,
-    message: result.ok ? "" : result.error.message,
-  };
+  if (!result.ok) return { ok: false, identityPreserved: false, updated: false, message: result.error.message };
+  const identityPreserved = root.querySelector("p") === serverRow && root.querySelector("button") === serverButton && root.querySelector("footer") === serverFooter;
+  rows.set([{ id: "b", label: "R2" }]);
+  active.set(false);
+  const updated = Array.from(root.querySelectorAll("p")).map((row) => row.textContent).join(",") === "R2" && root.querySelector("button") === null && before !== root.innerHTML;
+  result.value.dispose();
+  return { ok: true, identityPreserved, updated, message: "" };
 };
 `,
   };

@@ -1530,141 +1530,25 @@ describe("HTML-first compiler", () => {
     `<main><if test={visible}><p title={title}>{left}</p></if><p title="static" on:click={save}>{tail}</p></main>`,
     `<main><if test={visible}><p title="same" class:active={active}>{left}</p></if><p title={title}>{tail}</p></main>`,
     `<main><if test={visible}><p class="active" title={title}>{left}</p></if><p class={classes} class:extra={active} title="static">{tail}</p></main>`,
-  ])("diagnoses dynamic conditional shape overlap with a static sibling", (source) => {
+    `<main><if test={visible}><p class="active" title="static">{left}</p></if><p class:active={active} title="static">{tail}</p></main>`,
+    `<main><if test={visible}><p class="base active">{left}</p></if><p class="base" class:active={active}>{tail}</p></main>`,
+    `<main><if test={visible}><p style="color:red">{left}</p></if><p style:color={color}>{tail}</p></main>`,
+    `<main><if test={visible}><p style="color:red;background:blue">{left}</p></if><p style:color={color} style:background={background}>{tail}</p></main>`,
+    `<main><if test={visible}><section><span>{left}</span><span class="active">{left}</span></section></if><section><span>{tail}</span><span class:active={active}>{tail}</span></section></main>`,
+    `<main><if test={visible}><p class="shared">{left}</p></if><p class="shared">{tail}</p></main>`,
+    `<main><section><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></section></main>`,
+    `<main><section><article><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></article></section></main>`,
+    `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></section></main>`,
+    `<main><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></main>`,
+    `<main>prefix<if test={visible}><span>{left}</span></if></main>`,
+  ])("compiles conditional and list regions beside same-shaped siblings without a hydration diagnostic %#", (source) => {
+    // Every region is delimited by its own markers on the server and in the client template, so hydration
+    // never has to tell a branch apart from a sibling by shape.
     const result = compileTemplate(source);
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error(result.error.message);
-    expect(result.value.client.hydrationDynamicRegionErrors).toHaveLength(1);
-    expect(result.value.client.hydrationDynamicRegionErrors[0]).toContain("dynamic attribute shape overlaps");
-  });
-
-  it.each([
-    [
-      `<main><if test={visible}><p class="active" title="static">{left}</p></if><p class:active={active} title="static">{tail}</p></main>`,
-      1,
-    ],
-    [
-      `<main><if test={visible}><p class="active" title={title}>{left}</p></if><p class={classes} class:extra={active} title="static">{tail}</p></main>`,
-      1,
-    ],
-    [
-      `<main><if test={visible}><p class="base active">{left}</p></if><p class="base" class:active={active}>{tail}</p></main>`,
-      1,
-    ],
-    [`<main><if test={visible}><p class="active">{left}</p></if><p class:other={active}>{tail}</p></main>`, 0],
-    [`<main><if test={visible}><p style="color:red">{left}</p></if><p style:color={color}>{tail}</p></main>`, 1],
-    [`<main><if test={visible}><p style="color:red">{left}</p></if><p style:background={color}>{tail}</p></main>`, 0],
-    [
-      `<main><if test={visible}><p style="color:red">{left}</p></if><p style="color:blue" style:color={color}>{tail}</p></main>`,
-      1,
-    ],
-    [
-      `<main><if test={visible}><p class="base active">{left}</p></if><p class:base={active} class:active={active}>{tail}</p></main>`,
-      1,
-    ],
-    [`<main><if test={visible}><p class="base active">{left}</p></if><p class:base={active}>{tail}</p></main>`, 0],
-    [
-      `<main><if test={visible}><p class="base active">{left}</p></if><p class="base extra" class:active={active}>{tail}</p></main>`,
-      0,
-    ],
-    [
-      `<main><if test={visible}><p style="color:red;background:blue">{left}</p></if><p style:color={color} style:background={background}>{tail}</p></main>`,
-      1,
-    ],
-    [
-      `<main><if test={visible}><p style="color:red;background:blue">{left}</p></if><p style:color={color}>{tail}</p></main>`,
-      0,
-    ],
-    [
-      `<main><if test={visible}><p style="color:red;background:blue">{left}</p></if><p style="color:green" style:background={background}>{tail}</p></main>`,
-      0,
-    ],
-    [
-      `<main><if test={visible}><p style="color:red;background:blue">{left}</p></if><p style="color:red" style:background={background}>{tail}</p></main>`,
-      1,
-    ],
-    [`<main><if test={visible}><p class="active ">{left}</p></if><p class:active={active}>{tail}</p></main>`, 1],
-    [
-      `<main><if test={visible}><section><span>{left}</span><span class="active">{left}</span></section></if><section><span>{tail}</span><span class:active={active}>{tail}</span></section></main>`,
-      1,
-    ],
-    [
-      `<main><if test={visible}><section><span>{left}</span></section></if><section><span class:active={active}>{tail}</span><span>{tail}</span></section></main>`,
-      0,
-    ],
-    [
-      `<main><if test={visible}><section><span class="wrong">{left}</span><span class="active">{left}</span></section></if><section><span class="different">{tail}</span><span class:active={active}>{tail}</span></section></main>`,
-      0,
-    ],
-    [
-      `<main><if test={visible}><p class="label active" data-label="foo">{left}</p></if><p class:active={active} data-label="foo">{tail}</p></main>`,
-      0,
-    ],
-    [
-      `<main><if test={visible}><p class="active">{left}</p><span>{left}</span></if><p class:active={active}>{tail}</p></main>`,
-      0,
-    ],
-    [
-      `<main><if test={visible}><p style="color: red; background: blue">{left}</p></if><p style="color: red" style:background={background}>{tail}</p></main>`,
-      1,
-    ],
-  ])("matches generated class and style attributes against conditional siblings %#", (source, expectedErrors) => {
-    const result = compileTemplate(source);
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error(result.error.message);
-    expect(result.value.client.hydrationDynamicRegionErrors).toHaveLength(expectedErrors);
-  });
-
-  it("keeps direct text children out of dynamic region classification", () => {
-    const result = compileTemplate(`<main>prefix<if test={visible}><span>{left}</span></if></main>`);
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error(result.error.message);
-    expect(result.value.client.hydrationDynamicRegionErrors).toHaveLength(0);
-  });
-
-  it("preserves nested dynamic-region diagnostic paths and reasons", () => {
-    const rootConditional = compileTemplate(
-      `<main><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></main>`,
-    );
-    if (!rootConditional.ok) throw new Error(rootConditional.error.message);
-    expect(rootConditional.value.client.hydrationDynamicRegionErrors[0]).toContain("at root:");
-
-    const nestedConditional = compileTemplate(
-      `<main><section><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></section></main>`,
-    );
-    if (!nestedConditional.ok) throw new Error(nestedConditional.error.message);
-    expect(nestedConditional.value.client.hydrationDynamicRegionErrors[0]).toContain("at root.0:");
-    expect(nestedConditional.value.client.hydrationDynamicRegionErrors[0]).toContain(
-      "its dynamic attribute shape overlaps another sibling.",
-    );
-
-    const deeplyNestedConditional = compileTemplate(
-      `<main><section><article><if test={visible}><p title={title}>{left}</p></if><p title="static">{tail}</p></article></section></main>`,
-    );
-    if (!deeplyNestedConditional.ok) throw new Error(deeplyNestedConditional.error.message);
-    expect(deeplyNestedConditional.value.client.hydrationDynamicRegionErrors[0]).toContain("at root.0.0:");
-
-    // A list region carries its own markers, so sharing a parent with a conditional is not ambiguous.
-    for (const source of [
-      `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></section></main>`,
-      `<main><section><article><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></article></section></main>`,
-      `<main><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></main>`,
-    ]) {
-      const sharedParent = compileTemplate(source);
-      if (!sharedParent.ok) throw new Error(sharedParent.error.message);
-      expect(sharedParent.value.client.hydrationDynamicRegionErrors).toEqual([]);
-    }
-
-    const sharedShape = compileTemplate(
-      `<main><if test={visible}><p class="shared">{left}</p></if><p class="shared">{tail}</p></main>`,
-    );
-    if (!sharedShape.ok) throw new Error(sharedShape.error.message);
-    expect(sharedShape.value.client.hydrationDynamicRegionErrors[0]).toContain(
-      "its client shape is shared by another sibling.",
-    );
+    expect(result.value.client.hydrationDynamicRegionErrors).toEqual([]);
   });
 
   it("requires every child in a generated-attribute sibling shape to match", () => {

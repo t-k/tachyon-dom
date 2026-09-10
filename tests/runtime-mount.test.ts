@@ -303,153 +303,62 @@ describe("client mount entrypoints", () => {
     `<main><if test={visible}><p class="shared" class:active={active}>{left}</p></if><p class="shared active">{tail}</p></main>`,
     `<main><if test={visible}><p title={title}>{left}</p></if><p title="static" on:click={save}>{tail}</p></main>`,
     `<main><if test={visible}><p class="active" title={title}>{left}</p></if><p class={classes} class:extra={active} title="static">{tail}</p></main>`,
-  ])("rejects dynamic conditional shape overlap before changing a static sibling", (source) => {
+    `<main><if test={visible}><p title="same" class:active={active}>{left}</p></if><p title={title}>{tail}</p></main>`,
+    `<main><if test={visible}><p class="active" title="static">{left}</p></if><p class:active={active} title="static">{tail}</p></main>`,
+  ])("hydrates a conditional beside a same-shaped static sibling through its region markers", (source) => {
     const compiled = compileTemplate(source);
     if (!compiled.ok) throw new Error(compiled.error.message);
-    expect(compiled.value.client.hydrationDynamicRegionErrors).toHaveLength(1);
+    expect(compiled.value.client.hydrationDynamicRegionErrors).toEqual([]);
     const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
-    const root = document.createElement("div");
-    root.innerHTML = renderServerTemplate(compiled.value, {
-      visible: false,
-      title: "branch title",
-      active: false,
-      classes: "active",
-      left: "branch",
-      tail: "static",
-    });
-    const before = root.innerHTML;
-    const staticSibling = root.querySelector("main > p");
-    let owners = 0;
-    let effects = 0;
-    let subscriptions = 0;
-    let cleanups = 0;
-    const restoreHooks = setRuntimeLifecycleHooks({
-      ownerCreated: () => owners++,
-      effectCreated: () => effects++,
-      subscriptionChanged: (delta) => (subscriptions += delta),
-      cleanupChanged: (delta) => (cleanups += delta),
-    });
-    try {
-      const result = hydrate(root, module, {
-        visible: createSignal(false),
-        title: createSignal("client title"),
-        active: createSignal(false),
-        classes: createSignal("active"),
-        left: createSignal("client branch"),
-        tail: createSignal("client static"),
-        save: () => undefined,
+    for (const serverVisible of [false, true]) {
+      const root = document.createElement("div");
+      root.innerHTML = renderServerTemplate(compiled.value, {
+        visible: serverVisible,
+        title: "same",
+        active: false,
+        classes: "active",
+        left: "branch",
+        tail: "static",
       });
-
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error("Dynamic conditional shape overlap unexpectedly hydrated.");
-      expect(result.error.message).toContain("ambiguous conditional hydration");
-    } finally {
-      restoreHooks();
-    }
-    expect(root.innerHTML).toBe(before);
-    expect(root.querySelector("main > p")).toBe(staticSibling);
-    expect(owners).toBe(0);
-    expect(effects).toBe(0);
-    expect(subscriptions).toBe(0);
-    expect(cleanups).toBe(0);
-  });
-
-  it("rejects a conditional whose static sibling has an expression-valued comparison attribute", () => {
-    const compiled = compileTemplate(
-      `<main><if test={visible}><p title="same" class:active={active}>{left}</p></if><p title={title}>{tail}</p></main>`,
-    );
-    if (!compiled.ok) throw new Error(compiled.error.message);
-    expect(compiled.value.client.hydrationDynamicRegionErrors).toHaveLength(1);
-    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
-    const root = document.createElement("div");
-    root.innerHTML = renderServerTemplate(compiled.value, {
-      visible: false,
-      title: "same",
-      active: false,
-      left: "branch",
-      tail: "static",
-    });
-    const before = root.innerHTML;
-    const staticSibling = root.querySelector("main > p");
-    let owners = 0;
-    let effects = 0;
-    let subscriptions = 0;
-    let cleanups = 0;
-    const restoreHooks = setRuntimeLifecycleHooks({
-      ownerCreated: () => owners++,
-      effectCreated: () => effects++,
-      subscriptionChanged: (delta) => (subscriptions += delta),
-      cleanupChanged: (delta) => (cleanups += delta),
-    });
-    try {
+      const staticSibling = root.querySelector("main > p:last-child");
+      const branchOnServer = serverVisible ? root.querySelector("main > p") : null;
+      const visible = createSignal(serverVisible);
+      const tail = createSignal("client static");
+      const left = createSignal("client branch");
+      let clicks = 0;
       const result = hydrate(root, module, {
-        visible: createSignal(false),
+        visible,
         title: createSignal("same"),
         active: createSignal(false),
-        left: createSignal("client branch"),
-        tail: createSignal("client static"),
+        classes: createSignal("active"),
+        left,
+        tail,
+        save: () => clicks++,
       });
 
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error("Expression-valued conditional shape overlap unexpectedly hydrated.");
-      expect(result.error.message).toContain("ambiguous conditional hydration");
-    } finally {
-      restoreHooks();
+      if (!result.ok) throw new Error(result.error.message);
+      // The static sibling is the server element and is the only node the static bindings touch.
+      expect(root.querySelector("main > p:last-child")).toBe(staticSibling);
+      expect(staticSibling?.textContent).toBe("client static");
+      tail.set("updated static");
+      expect(staticSibling?.textContent).toBe("updated static");
+      if (serverVisible) {
+        expect(root.querySelector("main > p")).toBe(branchOnServer);
+        expect(branchOnServer?.textContent).toBe("client branch");
+      }
+      visible.set(!serverVisible);
+      expect(root.querySelectorAll("main > p")).toHaveLength(serverVisible ? 1 : 2);
+      expect(root.querySelector("main > p:last-child")).toBe(staticSibling);
+      visible.set(true);
+      left.set("toggled branch");
+      expect(root.querySelector("main > p")?.textContent).toBe("toggled branch");
+      expect(root.querySelector("main > p:last-child")).toBe(staticSibling);
+      if (source.includes("on:click")) {
+        (staticSibling as HTMLElement).click();
+        expect(clicks).toBe(1);
+      }
+      result.value.dispose();
     }
-    expect(root.innerHTML).toBe(before);
-    expect(root.querySelector("main > p")).toBe(staticSibling);
-    expect(owners).toBe(0);
-    expect(effects).toBe(0);
-    expect(subscriptions).toBe(0);
-    expect(cleanups).toBe(0);
-  });
-
-  it("rejects a conditional whose static sibling derives its class from a class directive", () => {
-    const compiled = compileTemplate(
-      `<main><if test={visible}><p class="active" title="static">{left}</p></if><p class:active={active} title="static">{tail}</p></main>`,
-    );
-    if (!compiled.ok) throw new Error(compiled.error.message);
-    expect(compiled.value.client.hydrationDynamicRegionErrors).toHaveLength(1);
-    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
-    const root = document.createElement("div");
-    root.innerHTML = renderServerTemplate(compiled.value, {
-      visible: false,
-      active: false,
-      left: "branch",
-      tail: "static",
-    });
-    const before = root.innerHTML;
-    const staticSibling = root.querySelector("main > p");
-    let owners = 0;
-    let effects = 0;
-    let subscriptions = 0;
-    let cleanups = 0;
-    const restoreHooks = setRuntimeLifecycleHooks({
-      ownerCreated: () => owners++,
-      effectCreated: () => effects++,
-      subscriptionChanged: (delta) => (subscriptions += delta),
-      cleanupChanged: (delta) => (cleanups += delta),
-    });
-    try {
-      const result = hydrate(root, module, {
-        visible: createSignal(false),
-        active: createSignal(true),
-        left: createSignal("client branch"),
-        tail: createSignal("client static"),
-      });
-
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error("Class directive conditional shape overlap unexpectedly hydrated.");
-      expect(result.error.message).toContain("ambiguous conditional hydration");
-    } finally {
-      restoreHooks();
-    }
-    expect(root.innerHTML).toBe(before);
-    expect(root.querySelector("main > p")).toBe(staticSibling);
-    expect(owners).toBe(0);
-    expect(effects).toBe(0);
-    expect(subscriptions).toBe(0);
-    expect(cleanups).toBe(0);
   });
 
   it("hydrates a class-directive sibling when its generated token is distinct", () => {
@@ -555,57 +464,68 @@ describe("client mount entrypoints", () => {
     expect(clicks).toBe(1);
   });
 
-  it.each([
-    `<main><p data-kind="same">Before</p><if test={visible}><p data-kind="same">{label}</p></if><p data-kind="same">After</p></main>`,
-    `<main><if test={leftVisible}><p data-kind="same">{left}</p></if><if test={rightVisible}><p data-kind="same">{right}</p></if><footer>Static</footer></main>`,
-  ])("rejects ambiguous conditional adoption before changing same-shaped SSR siblings", (source) => {
-    const compiled = compileTemplate(source);
-    if (!compiled.ok) throw new Error(compiled.error.message);
-    const module = evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+  it("hydrates conditionals between same-shaped static siblings and beside each other", () => {
+    const between = compileTemplate(
+      `<main><p data-kind="same">Before</p><if test={visible}><p data-kind="same">{label}</p></if><p data-kind="same">After</p></main>`,
+    );
+    if (!between.ok) throw new Error(between.error.message);
+    const betweenModule = evaluateGeneratedClientModule(generateClientModule(between.value, { reactive: true }));
     const root = document.createElement("div");
-    root.innerHTML = source.includes("Before")
-      ? renderServerTemplate(compiled.value, { visible: false, label: "Client", tail: "ignored" })
-      : renderServerTemplate(compiled.value, {
-          leftVisible: true,
-          rightVisible: false,
-          left: "Left",
-          right: "Right",
-        });
-    const before = root.innerHTML;
+    root.innerHTML = renderServerTemplate(between.value, { visible: false, label: "Server" });
     const serverNodes = Array.from(root.querySelectorAll('[data-kind="same"]'));
-    let owners = 0;
-    let effects = 0;
-    let subscriptions = 0;
-    let cleanups = 0;
-    const restoreHooks = setRuntimeLifecycleHooks({
-      ownerCreated: () => owners++,
-      effectCreated: () => effects++,
-      subscriptionChanged: (delta) => (subscriptions += delta),
-      cleanupChanged: (delta) => (cleanups += delta),
-    });
-    try {
-      const scope = source.includes("Before")
-        ? { visible: createSignal(false), label: createSignal("Client") }
-        : {
-            leftVisible: createSignal(true),
-            rightVisible: createSignal(true),
-            left: createSignal("Client left"),
-            right: createSignal("Client right"),
-          };
-      const result = hydrate(root, module, scope);
-
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error("Ambiguous conditional adoption unexpectedly hydrated.");
-      expect(result.error.message).toContain("ambiguous conditional");
-    } finally {
-      restoreHooks();
-    }
-    expect(root.innerHTML).toBe(before);
+    const visible = createSignal(false);
+    const label = createSignal("Client");
+    const hydrated = hydrate(root, betweenModule, { visible, label });
+    if (!hydrated.ok) throw new Error(hydrated.error.message);
     expect(Array.from(root.querySelectorAll('[data-kind="same"]'))).toEqual(serverNodes);
-    expect(owners).toBe(0);
-    expect(effects).toBe(0);
-    expect(subscriptions).toBe(0);
-    expect(cleanups).toBe(0);
+    visible.set(true);
+    expect(Array.from(root.querySelectorAll('[data-kind="same"]')).map((node) => node.textContent)).toEqual([
+      "Before",
+      "Client",
+      "After",
+    ]);
+    label.set("Client 2");
+    expect(root.querySelectorAll('[data-kind="same"]')[1]?.textContent).toBe("Client 2");
+    visible.set(false);
+    expect(Array.from(root.querySelectorAll('[data-kind="same"]'))).toEqual(serverNodes);
+    hydrated.value.dispose();
+
+    const beside = compileTemplate(
+      `<main><if test={leftVisible}><p data-kind="same">{left}</p></if><if test={rightVisible}><p data-kind="same">{right}</p></if><footer>Static</footer></main>`,
+    );
+    if (!beside.ok) throw new Error(beside.error.message);
+    const besideModule = evaluateGeneratedClientModule(generateClientModule(beside.value, { reactive: true }));
+    const besideRoot = document.createElement("div");
+    besideRoot.innerHTML = renderServerTemplate(beside.value, {
+      leftVisible: true,
+      rightVisible: false,
+      left: "Left",
+      right: "Right",
+    });
+    const serverLeft = besideRoot.querySelector('[data-kind="same"]');
+    const leftVisible = createSignal(true);
+    const rightVisible = createSignal(true);
+    const besideHydrated = hydrate(besideRoot, besideModule, {
+      leftVisible,
+      rightVisible,
+      left: createSignal("Client left"),
+      right: createSignal("Client right"),
+    });
+    if (!besideHydrated.ok) throw new Error(besideHydrated.error.message);
+    // The left branch is adopted from its own region; the right one is created because its region was empty.
+    expect(besideRoot.querySelector('[data-kind="same"]')).toBe(serverLeft);
+    expect(Array.from(besideRoot.querySelectorAll('[data-kind="same"]')).map((node) => node.textContent)).toEqual([
+      "Client left",
+      "Client right",
+    ]);
+    leftVisible.set(false);
+    expect(Array.from(besideRoot.querySelectorAll('[data-kind="same"]')).map((node) => node.textContent)).toEqual([
+      "Client right",
+    ]);
+    rightVisible.set(false);
+    expect(besideRoot.querySelectorAll('[data-kind="same"]')).toHaveLength(0);
+    expect(besideRoot.querySelector("footer")?.textContent).toBe("Static");
+    besideHydrated.value.dispose();
   });
 
   it.each([
