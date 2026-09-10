@@ -7,6 +7,7 @@ import {
   createResource,
   createRoot,
   createSignal,
+  detachFromEffectOwner,
   effect,
   onCleanup,
   read,
@@ -437,7 +438,48 @@ describe("signal runtime", () => {
     expect(seen).toEqual([1]);
   });
 
-  it("creates effects inside untrack without attaching them to the active owner", () => {
+  it("keeps effects created inside untrack owned by the active effect run", () => {
+    const outer = createSignal(0);
+    const inner = createSignal("a");
+    const seen: string[] = [];
+
+    const disposeOuter = effect(() => {
+      outer();
+      untrack(() => {
+        effect(() => {
+          seen.push(inner());
+        });
+      });
+    });
+
+    inner.set("b");
+    // The rerun disposes the previous run's inner effect, so only one subscription observes "c".
+    outer.set(1);
+    inner.set("c");
+    disposeOuter();
+    inner.set("d");
+
+    expect(seen).toEqual(["a", "b", "b", "c"]);
+  });
+
+  it("does not let untrack change which owner receives onCleanup", () => {
+    const outer = createSignal(0);
+    const events: string[] = [];
+
+    const dispose = effect(() => {
+      outer();
+      untrack(() => {
+        onCleanup(() => events.push("run-cleanup"));
+      });
+    });
+
+    outer.set(1);
+    expect(events).toEqual(["run-cleanup"]);
+    dispose();
+    expect(events).toEqual(["run-cleanup", "run-cleanup"]);
+  });
+
+  it("detaches effects from the active effect run only through detachFromEffectOwner", () => {
     const outer = createSignal(0);
     const inner = createSignal("a");
     const seen: string[] = [];
@@ -446,11 +488,11 @@ describe("signal runtime", () => {
     const disposeOuter = effect(() => {
       outer();
       if (!disposeInner) {
-        untrack(() => {
-          disposeInner = effect(() => {
+        disposeInner = detachFromEffectOwner(() =>
+          effect(() => {
             seen.push(inner());
-          });
-        });
+          }),
+        );
       }
     });
 
@@ -462,6 +504,147 @@ describe("signal runtime", () => {
     inner.set("d");
 
     expect(seen).toEqual(["a", "b", "c"]);
+  });
+
+  it("attaches detached effects to the enclosing root so the root still disposes them", () => {
+    const outer = createSignal(0);
+    const inner = createSignal("a");
+    const seen: string[] = [];
+
+    const disposeRoot = createRoot((dispose) => {
+      effect(() => {
+        outer();
+        detachFromEffectOwner(() =>
+          effect(() => {
+            seen.push(inner());
+          }),
+        );
+      });
+      return dispose;
+    });
+
+    inner.set("b");
+    disposeRoot();
+    inner.set("c");
+
+    expect(seen).toEqual(["a", "b"]);
+  });
+
+  it("does not subscribe the reader inside detachFromEffectOwner", () => {
+    const count = createSignal(1);
+    const seen: number[] = [];
+
+    effect(() => {
+      seen.push(detachFromEffectOwner(() => count()));
+    });
+    count.set(2);
+
+    expect(seen).toEqual([1]);
+  });
+
+  it("returns the fresh memo value when read inside batch", () => {
+    const count = createSignal(1);
+    const doubled = createMemo(() => count() * 2);
+    let runs = 0;
+    effect(() => {
+      doubled();
+      runs++;
+    });
+
+    batch(() => {
+      count.set(2);
+      expect(count()).toBe(2);
+      expect(doubled()).toBe(4);
+      expect(runs).toBe(1);
+    });
+
+    expect(doubled()).toBe(4);
+    expect(runs).toBe(2);
+  });
+
+  it("recomputes a memo at most once per flush even when it was read early", () => {
+    const count = createSignal(1);
+    let computations = 0;
+    const doubled = createMemo(() => {
+      computations++;
+      return count() * 2;
+    });
+
+    batch(() => {
+      count.set(2);
+      doubled();
+      doubled();
+      count.set(3);
+      expect(doubled()).toBe(6);
+    });
+
+    expect(computations).toBe(3);
+    expect(doubled()).toBe(6);
+  });
+
+  it("reads chained memos fresh inside batch", () => {
+    const count = createSignal(1);
+    const doubled = createMemo(() => count() * 2);
+    const quadrupled = createMemo(() => doubled() * 2);
+
+    batch(() => {
+      count.set(2);
+      expect(quadrupled()).toBe(8);
+      expect(doubled()).toBe(4);
+    });
+
+    expect(quadrupled()).toBe(8);
+  });
+
+  it("reads a memo fresh inside an effect after that effect wrote its source", () => {
+    const count = createSignal(1);
+    const doubled = createMemo(() => count() * 2);
+    const trigger = createSignal(0);
+    const seen: number[] = [];
+
+    effect(() => {
+      trigger();
+      count.set(untrack(count) + 1);
+      seen.push(untrack(doubled));
+    });
+    trigger.set(1);
+
+    expect(seen).toEqual([4, 6]);
+  });
+
+  it("keeps tracking the memo when it is read fresh inside an effect", () => {
+    const count = createSignal(1);
+    const doubled = createMemo(() => count() * 2);
+    const seen: number[] = [];
+
+    effect(() => {
+      seen.push(doubled());
+    });
+    batch(() => {
+      count.set(2);
+      doubled();
+    });
+    count.set(3);
+
+    expect(seen).toEqual([2, 4, 6]);
+  });
+
+  it("throws the memo failure to an early reader and does not run it again in the flush", () => {
+    const count = createSignal(1);
+    let computations = 0;
+    const doubled = createMemo(() => {
+      computations++;
+      if (count() === 2) throw new Error("memo failed");
+      return count() * 2;
+    });
+
+    expect(() =>
+      batch(() => {
+        count.set(2);
+        doubled();
+      }),
+    ).toThrow("memo failed");
+    expect(computations).toBe(2);
   });
 
   it("batches multiple signal writes into one effect run", () => {

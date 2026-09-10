@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { catchError, readDeferredDataScriptResult, sanitizeUrlAttribute, untrack } from "../src/index";
+import { catchError, detachFromEffectOwner, readDeferredDataScriptResult, sanitizeUrlAttribute, untrack } from "../src/index";
 
 describe("public API", () => {
   it("exports catchError from the main entry", () => {
@@ -8,6 +8,7 @@ describe("public API", () => {
 
   it("exports untrack from the main entry", () => {
     expect(untrack).toBeTypeOf("function");
+    expect(detachFromEffectOwner).toBeTypeOf("function");
   });
 
   it("exports the Result-based deferred data reader", () => {

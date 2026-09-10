@@ -1,5 +1,5 @@
 import { setText, textAt } from "./text.js";
-import { createSignal, effect, onOwnerCleanup, read, untrack, type Signal } from "./signal.js";
+import { createSignal, detachFromEffectOwner, effect, onOwnerCleanup, read, type Signal } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { normalizeListKey } from "./key.js";
 import {
@@ -312,8 +312,9 @@ const bindRow = (record: RowRecord, options: TextKeyedListRuntimeOptions): void 
     if (element instanceof Element) record.cleanups.push(event.bind(element, record.scope));
   }
   if (options.bindings.length === 0) return;
+  // The row effect outlives the list effect run that created it; the row releases it through `cleanups`.
   record.cleanups.push(
-    untrack(() =>
+    detachFromEffectOwner(() =>
       effect(() => {
         record.revision();
         for (let index = 0; index < options.bindings.length; index++) {
