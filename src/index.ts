@@ -30,6 +30,7 @@ export {
   createResource,
   createRoot,
   createSignal,
+  detachFromEffectOwner,
   effect,
   onCleanup,
   untrack,

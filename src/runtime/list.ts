@@ -3,7 +3,7 @@ import { bindRef, setAttributeValue, setRef, setStyleValue } from "./attr.js";
 import { setText, textAt } from "./text.js";
 import { bindControl, setControlValue, writeModelValue } from "./form.js";
 import { mountConditional } from "./conditional.js";
-import { createSignal, createStore, effect, onOwnerCleanup, read, untrack, type Signal } from "./signal.js";
+import { createSignal, createStore, detachFromEffectOwner, effect, onOwnerCleanup, read, type Signal } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { normalizeListKey } from "./key.js";
 import {
@@ -698,8 +698,9 @@ const bindRowBindings = (
   if (plan.nonEvent.length === 0) {
     return;
   }
+  // Row effects outlive the list effect run that created them; rows are released through `cleanups`.
   cleanups.push(
-    untrack(() =>
+    detachFromEffectOwner(() =>
       effect(() => {
         for (const { binding, index } of plan.nonEvent) {
           applyRowBinding(record, record.scope, options, binding, index);
@@ -763,7 +764,7 @@ const bindRow = (
 ): void => {
   bindRowEvents(record, options, plan, cleanups);
   bindRowBindings(record, options, plan, cleanups);
-  untrack(() => bindRowControls(record, options, plan, cleanups));
+  detachFromEffectOwner(() => bindRowControls(record, options, plan, cleanups));
 };
 
 const keyFor = (
