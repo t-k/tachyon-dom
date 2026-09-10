@@ -122,13 +122,14 @@ const renderElementYieldStatements = (
   }
   if (node.tagName === "await") {
     const thenName = attrString(node, "then") ?? "value";
-    const fallback = attrString(node, "fallback");
+    // The pending HTML is appended output: the stream never replaces it once the value resolves.
+    const pending = attrString(node, "pending") ?? attrString(node, "fallback");
     const errorText = attrString(node, "error");
     const childLocals = new Set(locals);
     childLocals.add(thenName);
     const statements = [`${indent}{`];
-    if (fallback) {
-      statements.push(`${indent}  yield ${jsString(fallback)};`);
+    if (pending) {
+      statements.push(`${indent}  yield ${jsString(pending)};`);
     }
     if (errorText) {
       statements.push(`${indent}  try {`);

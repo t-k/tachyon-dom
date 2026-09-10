@@ -178,6 +178,9 @@ export type TemplateDirective =
       path: number[];
       value: string;
       thenName: string;
+      /** HTML yielded by the stream target before awaiting. It is appended output and is not replaced. */
+      pending?: string;
+      /** Alias of `pending`, kept for IR consumers that read the original attribute name. */
       fallback?: string;
       error?: string;
       reorder?: "preserve" | "resolve";

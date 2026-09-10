@@ -164,7 +164,9 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
   if (node.tagName === "if") {
     // The region keeps the same markers the client template carries, so whitespace beside it stays separate
     // and hydration adopts exactly the nodes between them.
-    const branch = readPath(scope, attrExpression(node, "test") ?? "false") ? renderChildren(node.children, scope, path) : "";
+    const branch = readPath(scope, attrExpression(node, "test") ?? "false")
+      ? renderChildren(node.children, scope, path)
+      : "";
     return `${conditionalStartMarker}${branch}${conditionalEndMarker}`;
   }
   if (node.tagName === "store") {
@@ -180,7 +182,7 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
   }
   if (node.tagName === "await") {
     const thenName = attrString(node, "then") ?? "value";
-    const value = readPath(scope, attrExpression(node, "value") ?? "undefined");
+    const value = awaitedServerValue(readPath(scope, attrExpression(node, "value") ?? "undefined"));
     return renderChildren(node.children, { ...scope, [thenName]: value }, path);
   }
 
@@ -248,6 +250,29 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
   );
   return `<!--tachyon-hydrate:${marker}:start-->${html}<!--tachyon-hydrate:${marker}:end-->`;
 };
+
+export const synchronousAwaitPromiseMessage =
+  "<await> received a Promise in the synchronous server target; render with the stream target or resolve the value before rendering.";
+
+const isThenable = (value: unknown): boolean =>
+  typeof value === "object" && value !== null && typeof (value as { then?: unknown }).then === "function";
+
+/**
+ * The synchronous server target has no way to wait, so a Promise here would otherwise render as
+ * "[object Promise]". Failing loudly keeps the `<await>` contract the same across targets: where the value
+ * cannot be awaited, the target reports it instead of silently doing something else.
+ */
+const awaitedServerValue = (value: unknown): unknown => {
+  if (isThenable(value)) throw new Error(synchronousAwaitPromiseMessage);
+  return value;
+};
+
+const hasAwaitNode = (node: TemplateNode): boolean =>
+  node.type === "element" && (node.tagName === "await" || node.children.some(hasAwaitNode));
+
+const generatedAwaitGuardLines = [
+  `const awaitValue = (value) => { if (value && typeof value.then === "function") throw new Error(${JSON.stringify(synchronousAwaitPromiseMessage)}); return value; };`,
+];
 
 const renderNode = (node: TemplateNode, scope: Record<string, unknown>, path: number[] = []): string => {
   if (node.type === "text") {
@@ -443,7 +468,7 @@ const renderElementExpression = (
     const childLocals = new Set(locals);
     childLocals.add(thenName);
     const childExpression = renderChildExpressions(node.children, childLocals, path);
-    return `(((${thenName}) => ${childExpression || `""`})(${value}))`;
+    return `(((${thenName}) => ${childExpression || `""`})(awaitValue(${value})))`;
   }
 
   const parts: string[] = [renderOpenTagExpression(node, locals)];
@@ -540,6 +565,7 @@ export const generateServerModule = (template: CompiledTemplate, options: Server
   const lines = [
     ...generatedEscapeHtmlHelperLines,
     ...(hasDynamicUrlAttribute(template.root) ? generatedUrlAttributeHelperLines : []),
+    ...(hasAwaitNode(template.root) ? generatedAwaitGuardLines : []),
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll(">", "\\\\u003e");`,
     `const ATTRIBUTE_ESCAPE = { "&": "&amp;", '"': "&quot;", "<": "&lt;" };`,

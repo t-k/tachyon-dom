@@ -2068,7 +2068,7 @@ describe("HTML-first compiler", () => {
     if (!result.ok) throw new Error(result.error.message);
 
     const code = generateServerModule(result.value);
-    expect(code).toContain(`((message) => "")(scope.messagePromise)`);
+    expect(code).toContain(`((message) => "")(awaitValue(scope.messagePromise))`);
 
     const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
       render: (scope: { messagePromise: unknown }) => string;
@@ -2108,6 +2108,7 @@ describe("HTML-first compiler", () => {
       path: [0],
       value: "messagePromise",
       thenName: "message",
+      pending: "Loading",
       fallback: "Loading",
       error: "Failed",
       reorder: "preserve",

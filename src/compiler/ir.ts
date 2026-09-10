@@ -259,6 +259,12 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
         attributeSpan(node.attrs.find((attr) => attr.name === "reorder") as Attribute),
       );
     }
+    if (attrString(node, "pending") !== undefined && attrString(node, "fallback") !== undefined) {
+      return semanticError(
+        `<await> accepts either pending="..." or its alias fallback="...", not both.`,
+        attributeSpan(node.attrs.find((attr) => attr.name === "fallback") as Attribute),
+      );
+    }
   }
   for (const attr of node.attrs) {
     if (attr.name.startsWith("hydrate:") && !isKnownHydrationAttribute(attr.name)) {
@@ -348,7 +354,9 @@ const collectDirectives = (node: TemplateNode, path: number[], directives: Templ
     });
   }
   if (node.tagName === "await") {
-    const fallback = attrString(node, "fallback");
+    // `pending` is the documented name; `fallback` remains an alias. Both fields are recorded so existing
+    // consumers of the IR keep reading `fallback`.
+    const pending = attrString(node, "pending") ?? attrString(node, "fallback");
     const errorText = attrString(node, "error");
     const reorder = attrString(node, "reorder");
     directives.push({
@@ -356,7 +364,7 @@ const collectDirectives = (node: TemplateNode, path: number[], directives: Templ
       path: [...path],
       value: attrExpression(node, "value") ?? "undefined",
       thenName: attrString(node, "then") ?? "value",
-      ...(fallback ? { fallback } : {}),
+      ...(pending ? { pending, fallback: pending } : {}),
       ...(errorText ? { error: errorText } : {}),
       ...(reorder === "preserve" || reorder === "resolve" ? { reorder } : {}),
     });
