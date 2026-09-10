@@ -12,13 +12,19 @@
   "mutate": [
     "src/runtime/store.ts",
     "src/compiler/sfc.ts:887:0-949:0",
-    "src/compiler/targets/client.ts:1578:0-1591:0",
-    "src/compiler/targets/client.ts:1655:0-1663:0",
-    "src/compiler/targets/client.ts:1961:0-1970:0",
+    "src/compiler/targets/client.ts:1248:0-1261:0",
+    "src/compiler/targets/client.ts:1325:0-1333:0",
+    "src/compiler/targets/client.ts:1613:0-1622:0",
     "src/compiler/html-tree.ts:96:0-127:1"
   ],
-  "plugins": ["./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"],
-  "reporters": ["clear-text", "html", "json"],
+  "plugins": [
+    "./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"
+  ],
+  "reporters": [
+    "clear-text",
+    "html",
+    "json"
+  ],
   "testRunner": "vitest",
   "thresholds": {
     "high": 80,
@@ -29,5 +35,11 @@
     "configFile": "vitest.release-readiness.config.ts",
     "related": false
   },
-  "ignorePatterns": ["docs.local", "tests/browser/generated", "test-results", "benchmark", ".worktree"]
+  "ignorePatterns": [
+    "docs.local",
+    "tests/browser/generated",
+    "test-results",
+    "benchmark",
+    ".worktree"
+  ]
 }

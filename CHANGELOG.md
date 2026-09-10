@@ -6,15 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-11
+
+This release follows an external design review. The observable meaning of `untrack()`, `<for>` server output, and `<await>` changed; see Changed and the [region markers and reactivity migration guide](docs/migrations/region-markers-and-reactivity.md) before upgrading.
+
+### Added
+
+- Explain the cost decisions behind a template with `explainCompiledTemplate()` and `formatTemplateExplanation()` from `tachyon-dom/compiler`, and with `tachyon-dom explain <file> [--json]`: the runtime module each `<for>` and `<if>` region compiles to (`list-text` or `list`, `conditional-core` or `conditional`) with the reasons the lightweight module was not chosen, the runtime modules the client module imports, and the hydration diagnostics the compiler recorded.
+- `detachFromEffectOwner(fn)` runs `fn` with no active effect and attaches the effects, resources, and cleanups it creates to the enclosing mount or root owner instead of the current effect run. It is the explicit form of the ownership escape `untrack()` used to perform implicitly.
+- `<await pending="...">` names the HTML the stream target yields before awaiting. `fallback="..."` remains an alias with the same meaning; using both on one element is a compile error. The IR records both `pending` and `fallback`.
+- Adopt the server-rendered route on client router start, so the first navigation does not re-render the page the server already produced, and the adopted history entry keeps a scroll key.
+- Stability tiers in the [public API layers](docs/api.md): application, integration, and generated-only surfaces carry different compatibility promises, and the generated-only runtime entries are compatible only with the compiler version that produced the module.
+
 ### Changed
 
+- Every `<for>` region is delimited by `<!--tachyon-for-->` and `<!--/tachyon-for-->` in server, stream, and client output, exactly as `<if>` regions are delimited by `<!--tachyon-if-->` and `<!--/tachyon-if-->`. Hydration adopts the rows between the markers instead of inferring them from element counts between static siblings. Any number of `<for>` and `<if>` regions can share a parent and sit next to whitespace, text, or static siblings; the "multiple direct dynamic regions" and "ambiguous conditional hydration region" diagnostics are gone, along with the wrapper elements they required. A `<for>` may be a direct child of an `<if>` branch. Both markers occupy no logical slot, so binding paths are unchanged; snapshot tests of server output must include the markers, and hand-written server HTML without them is not a supported hydration input. `runtime/list-path` is no longer imported by generated code and remains exported with a zero offset for one more release.
+- `untrack(fn)` stops dependency tracking only. Effects, resources, and `onCleanup()` registrations created inside it belong to the enclosing effect run, exactly like those created outside it, and are released before that run repeats. Code that relied on `untrack()` to make inner work outlive the outer effect must use `detachFromEffectOwner()`.
+- Reading a `createMemo()` accessor inside `batch()` or inside an effect run returns the value for the current signal state: queued memos recompute on read, in dependency order, at most once per flush. Ordinary effects still wait for the flush. A failure of the memo being read reaches the reader; a failure of another queued memo is reported by the flush that follows, never by an unrelated later one.
+- The synchronous server target throws when `<await value={...}>` receives a Promise instead of rendering `[object Promise]`. The client target lowers `<await>` to a marker comment with no bindings, and `hydrate()` refuses a template that contains `<await>` because the server-rendered children would shift later siblings; `mount()` still works.
+- A `<for>` placed directly inside a `<for>` row, or reached only through a transparent `<component>` directly under an `<if>` or a row, is a compile error. It previously nested its rows inside a sibling element or left the server rows unmanaged without a diagnostic.
 - Server and stream output delimit every `<if>` region with `<!--tachyon-if-->` and `<!--/tachyon-if-->`, and the client template carries the same pair in place of the bare placeholder comment. A hidden branch renders the two markers, a visible branch renders them around its nodes. The end marker occupies no logical slot, so binding paths, hydration regions, and hand-written runtime paths still count an `<if>` as one node; only code that indexed raw `childNodes` past a server-rendered branch sees a different shape.
+- The syntax specification separates the inline `<component name>` scope boundary from reusable `createTemplateComponent()` instances, gives `<outlet>` and `<slot>` a type, scope, update, owner, client, and trust contract, documents the per-target meaning of `<await>`, and states the target contract: a form supported by more than one target has the same meaning in each, and a target that cannot realize it reports a diagnostic.
+- Measured client sizes grew with the marker-aware walkers: the browser entry (`createSignal` only) is 977 bytes minified, the quick example 15845 bytes minified and 5505 bytes Brotli, `runtime/list` 14984 bytes minified. Budgets and baselines follow the measured sizes.
 
 ### Fixed
 
-- Hydrate `<if>` regions that whitespace text surrounds. The formatting text on either side of a hidden branch used to land in one text node, and a visible branch's own leading and trailing whitespace merged with its neighbours, so `hydrate()` reported a missing child or bound a later sibling to the wrong node. The region markers keep every text node separate, the structure check walks a region marker to marker (a same-tag static sibling right after the branch no longer trips it), and adoption takes exactly the nodes between the markers, nested regions included.
-- Keep later siblings aligned with a nested `<if>` that shares its parent: the region's live node count is now read from the DOM between its markers rather than from the count its last mount recorded, which left the nested branch out.
-- Declare `?client&mount-only` and `?client&hydrate-only` modules for the `.tachyon` and `.tachyon.html` extensions. The Vite plugin accepts all three template extensions for every target mode, but `tachyon-dom/td-modules` only typed those two modes for `.td`, so a template lost its types when only its extension differed.
+- Hydrate `<if>` regions that whitespace text surrounds. The formatting text on either side of a hidden branch used to land in one text node, and a visible branch's own leading and trailing whitespace merged with its neighbours, so `hydrate()` reported a missing child or bound a later sibling to the wrong node. The region markers keep every text node separate, the structure check walks a region marker to marker, and adoption takes exactly the nodes between the markers, nested regions included.
+- Keep later siblings aligned with a nested `<if>` that shares its parent: the region's live node count is now read from the DOM between its markers rather than from the count its last mount recorded.
+- Declare `?client&mount-only` and `?client&hydrate-only` modules for the `.tachyon` and `.tachyon.html` extensions, so a template keeps its types when only its extension differs.
+
+### Validation
+
+- The hydration mutation campaign is re-anchored to the current source layout and extended with the review regression tests and a survivor test file: 573 mutants, raw score 89.18%, covered score 90.28%, with every remaining survivor classified by group in [the ledger](docs/hydration-mutation-testing.md).
 
 ## [0.2.0] - 2026-09-09
 
