@@ -97,7 +97,8 @@ const hydrationShapeForStaticAttributes = (node: ElementNode): string[] =>
 const hydrationShapeForNode = (node: TemplateNode): string => {
   if (node.type === "text") return node.value.length > 0 ? "text" : "";
   if (node.tagName === "store" || node.tagName === "for") return "";
-  if (node.tagName === "if" || node.tagName === "outlet" || node.tagName === "slot") return "comment";
+  if (node.tagName === "if" || node.tagName === "outlet" || node.tagName === "slot" || node.tagName === "await")
+    return "comment";
   if (node.tagName === "component") return hydrationShapeForChildren(node.children);
   return `element:${node.tagName.toLowerCase()}:${JSON.stringify(hydrationShapeForStaticAttributes(node))}:${hydrationShapeForChildren(node.children)}`;
 };
@@ -554,6 +555,11 @@ const lowerElement = (
   }
   if (node.tagName === "slot") {
     return `<!--tachyon-slot:${attrString(node, "name") ?? "default"}-->`;
+  }
+  if (node.tagName === "await") {
+    // The client target has no way to await: it leaves a marker and binds nothing, the same as <slot>, instead
+    // of emitting an <await> element with bindings that would read the Promise as a plain value.
+    return "<!--tachyon-await-->";
   }
   if (node.tagName === "for") {
     context.bindings.push(lowerList(node, path, context, listRegion));
@@ -1090,8 +1096,8 @@ const conditionalShapeMayAdopt = (
   path: readonly number[],
 ): boolean => {
   if (expected.type === "text" || actual.type === "text") return expected.type === "text" && actual.type === "text";
-  if (expected.tagName === "if" || expected.tagName === "outlet" || expected.tagName === "slot") return false;
-  if (actual.tagName === "if" || actual.tagName === "outlet" || actual.tagName === "slot") return false;
+  if (["if", "outlet", "slot", "await"].includes(expected.tagName)) return false;
+  if (["if", "outlet", "slot", "await"].includes(actual.tagName)) return false;
   if (expected.tagName.toLowerCase() !== actual.tagName.toLowerCase()) return false;
 
   for (const expectedAttribute of expected.attrs) {

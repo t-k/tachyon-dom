@@ -38,6 +38,12 @@ describe("<await> target contracts", () => {
     );
   });
 
+  it("lowers <await> to a marker without bindings in the client target", () => {
+    const compiled = compile(template);
+    expect(compiled.client.templateHtml).toBe(`<main><!--tachyon-await--></main>`);
+    expect(compiled.client.bindings).toEqual([]);
+  });
+
   it("does not emit the await guard when a template has no <await>", () => {
     expect(generateServerModule(compile(`<main>{label}</main>`))).not.toContain("awaitValue");
   });
