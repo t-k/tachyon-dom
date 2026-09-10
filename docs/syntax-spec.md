@@ -67,7 +67,7 @@ Every `<for>` region is delimited by the same comment markers on every target: `
 </ul>
 ```
 
-Both markers occupy no logical child slot, so binding paths for siblings after a region are the same in the client template and in the hydrated document. The markers are part of the generated-only contract (see [Public API layers](api.md)): their text may change between compiler versions, and hand-written server HTML that omits them is not supported for hydration.
+Both markers occupy no logical child slot, so binding paths for siblings after a region are the same in the client template and in the hydrated document. A `<for>` may also be a direct child of an `<if>` branch; the branch owns the pair and removes the rows with itself. A `<for>` placed directly inside a `<for>` row is not supported yet and is reported by the compiler; wrap it in an element. The markers are part of the generated-only contract (see [Public API layers](api.md)): their text may change between compiler versions, and hand-written server HTML that omits them is not supported for hydration.
 
 Transparent `<component>` boundaries emit no element, so a `<for>` or `<if>` inside one shares the surrounding DOM parent; its markers still identify it.
 
@@ -186,11 +186,11 @@ Use them for route layouts and for composing server-rendered fragments. They are
 
 Per-target meaning:
 
-| Target             | `value` is a plain value                                                                                                            | `value` is a Promise                                          | `pending` / `error`        |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | -------------------------- |
-| Stream             | Rendered as the resolved value                                                                                                      | Awaited; children yielded on resolution                       | Yielded as described above |
-| Synchronous server | Rendered as the resolved value                                                                                                      | Rejected with an error at render time; the target cannot wait | Ignored                    |
-| Client             | Not rendered by the compiler; `<await>` has no client binding. Load data with `createResource()` and render it with `<if>` instead. |                                                               |                            |
+| Target             | `value` is a plain value                                                                                                                                                                                                                                                                   | `value` is a Promise                                          | `pending` / `error`        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- | -------------------------- |
+| Stream             | Rendered as the resolved value                                                                                                                                                                                                                                                             | Awaited; children yielded on resolution                       | Yielded as described above |
+| Synchronous server | Rendered as the resolved value                                                                                                                                                                                                                                                             | Rejected with an error at render time; the target cannot wait | Ignored                    |
+| Client             | Lowered to a marker comment with no binding. `mount()` renders nothing there; `hydrate()` refuses a template containing `<await>` with a diagnostic, because the server-rendered children would shift later siblings. Load data with `createResource()` and render it with `<if>` instead. |                                                               |                            |
 
 Replacing a placeholder with the resolved UI in the browser would require region identification, a replacement protocol, and a hydration contract. That is not implemented, and the `pending` name is chosen so the current behavior is not mistaken for it.
 
