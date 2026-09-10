@@ -412,6 +412,9 @@ const flushPendingEffects = (): void => {
     }
   } finally {
     flushing = false;
+    // A memo read during this flush may have deferred another memo's failure; it is reported by this flush,
+    // never left for an unrelated later one.
+    unhandled.push(...deferredComputedErrors.splice(0));
   }
   if (unhandled.length === 1) throw unhandled[0];
   if (unhandled.length > 1) throw new AggregateError(unhandled, "Reactive effects failed.");

@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { compileTemplate, explainCompiledTemplate, generateClientModule, renderServerTemplate } from "../src/compiler";
 import { hydrate, mount } from "../src/runtime/mount";
-import { batch, createMemo, createSignal } from "../src/runtime/signal";
+import { batch, createMemo, createSignal, effect } from "../src/runtime/signal";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
 
 const compile = (template: string) => {
@@ -166,6 +166,30 @@ describe("memo reads inside batch", () => {
       }),
     ).toThrow("bad memo");
     expect(rest).toBe(true);
+  });
+
+  it("reports a memo failure deferred during a flush at the end of that flush", () => {
+    const a = createSignal(1);
+    const b = createSignal(1);
+    const c = createSignal(1);
+    const onC = createMemo(() => c() * 2);
+    const onB = createMemo(() => {
+      if (b() > 1) throw new Error("b memo");
+      return b();
+    });
+    void onB;
+    let seen = 0;
+    effect(() => {
+      if (a() > 1) {
+        b.set(a());
+        c.set(a());
+        seen = onC();
+      }
+    });
+    expect(() => a.set(5)).toThrow("b memo");
+    expect(seen).toBe(10);
+    // Nothing is left behind for an unrelated later effect to trip over.
+    expect(() => effect(() => undefined)).not.toThrow();
   });
 
   it("recomputes queued memos in order so chained memos read fresh", () => {
