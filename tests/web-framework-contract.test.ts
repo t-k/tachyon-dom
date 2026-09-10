@@ -28,7 +28,7 @@ describe("web framework benchmark contract", () => {
     expect(WEB_FRAMEWORK_CONTRACT_VERSION).toBe(5);
     const valid = await serve((_request, response) => {
       response.write('<main data-stream="shell">Shell');
-      setTimeout(() => response.end('<section data-stream="done">Done</section></main>'), 12);
+      setTimeout(() => response.end('<section data-stream="done">Done</section></main>'), 40);
     });
     const measured = await measureStreamDistribution(`${valid}/stream`, { warmups: 1, samples: 3 });
     expect(measured.warmups).toBe(1);
