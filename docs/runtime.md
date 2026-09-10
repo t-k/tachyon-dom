@@ -25,18 +25,20 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 Browser feature bundles have independent minified and Brotli budgets. Checks reject compiler, server, TypeScript, parse5, and language-server inputs. After building, run `pnpm update:runtime-sizes` to refresh the measurement JSON and this table together; review any budget changes separately. CI runs `pnpm check:runtime-sizes` to reject stale measurements or documentation. The conditional budget allows approximately 3% over the baseline recorded when the budget was tightened; budgets never increase automatically.
 
 <!-- browser-feature-sizes:start -->
+
 Browser feature measurements (bytes):
 
-| Fixture | Minified | Brotli |
-| --- | ---: | ---: |
-| runtime/list | 13688 | 4935 |
-| runtime/generic-list | 18942 | 6497 |
-| runtime/form | 2734 | 1107 |
-| runtime/conditional | 8599 | 3124 |
-| runtime/generic-conditional | 13589 | 4600 |
-| runtime/router | 18819 | 6321 |
+| Fixture                     | Minified | Brotli |
+| --------------------------- | -------: | -----: |
+| runtime/list                |    13688 |   4935 |
+| runtime/generic-list        |    18942 |   6497 |
+| runtime/form                |     2734 |   1107 |
+| runtime/conditional         |     8599 |   3124 |
+| runtime/generic-conditional |    13589 |   4600 |
+| runtime/router              |    18819 |   6321 |
 
 Source: [measurement JSON](../scripts/browser-feature-sizes.json). It records the commit, dirty state, input hashes, Node/esbuild versions, production define, minification, and Brotli conditions. `pnpm check:runtime-sizes` compares the input hashes, the byte counts, and the conditions needed to reproduce them: esbuild version, production define, minification, compression, and the Node major version that CI pins. The commit and dirty state are recorded for traceability but are not compared. CI uploads fresh reports as the browser-feature-measurements artifact. These feature fixtures differ from the client bundle attribution fixtures and Quick Example.
+
 <!-- browser-feature-sizes:end -->
 
 ## Mount and Hydrate Entrypoints
@@ -253,7 +255,16 @@ Client action concurrency is latest-operation-wins. A newer submission or naviga
 
 ## Signals
 
-`runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, `read()`, `untrack()`, `createResource()`, and `catchError()`. Effects run once when registered, then subsequent signal notifications are queued. Each effect run has its own cleanup owner: `onCleanup()` registrations and a synchronous function returned by the callback run in reverse registration order before the next run and once more when the effect is disposed. The returned function is therefore a cleanup contract, not a value-producing callback. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. A throwing effect does not prevent queued siblings from running. After the queue drains, one unhandled failure is rethrown directly and multiple failures are reported in an ordered `AggregateError`. `untrack(fn)` reads signals without subscribing the active effect, and effects created inside `untrack()` are not attached to the active effect lifecycle. `createMemo()` exposes a cached computed accessor that updates before dependent effects observe the next flush.
+`runtime/signal` provides `createSignal()`, `createMemo()`, `effect()`, `batch()`, `read()`, `untrack()`, `createResource()`, and `catchError()`. Effects run once when registered, then subsequent signal notifications are queued. Each effect run has its own cleanup owner: `onCleanup()` registrations and a synchronous function returned by the callback run in reverse registration order before the next run and once more when the effect is disposed. The returned function is therefore a cleanup contract, not a value-producing callback. `batch()` groups multiple writes into one flush, and writes made from inside an active effect are queued until that effect exits so the same effect is not synchronously re-entered. A throwing effect does not prevent queued siblings from running. After the queue drains, one unhandled failure is rethrown directly and multiple failures are reported in an ordered `AggregateError`. `untrack(fn)` reads signals without subscribing the active effect. It does not change ownership: effects, resources, and `onCleanup()` registrations created inside `untrack()` still belong to the enclosing effect run and are released before that run repeats. Use `detachFromEffectOwner(fn)` when work must outlive the current run; it runs `fn` with no active effect and attaches what `fn` creates to the enclosing mount or root owner, which releases it on dispose. Dependency tracking and ownership are therefore two separate, explicit operations.
+
+`createMemo()` exposes a cached computed accessor. Reading a memo always returns the value for the current signal state: inside `batch()` or an effect run, a memo whose recomputation is queued recomputes on read, and chained memos recompute in dependency order. Ordinary effects still wait for the flush, so a batch sees fresh derived values and deferred side effects. Each memo recomputes at most once per flush. A memo that throws during an early read delivers the error to the nearest reactive error owner and, when unhandled, to the reader.
+
+The short rules for predicting reactive behavior are:
+
+1. What re-runs: an effect re-runs when a signal it read outside `untrack()` changes.
+2. What is read: a signal or memo read anywhere returns the current value; a memo never returns a stale cache.
+3. When side effects run: after the outermost `batch()` or the current effect run finishes, computed memos first, then ordinary effects.
+4. What is released: cleanups registered during an effect run are released before the next run of that effect; everything else is released when its mount or root owner is disposed.
 
 Effect callbacks are synchronous. A returned Promise is not a cleanup and asynchronous work must own its `AbortController` or other cleanup synchronously, before the callback returns. A rejection from an async callback is observed by the runtime and delivered to the nearest reactive error owner; an async callback should still be avoided when a synchronous effect plus an explicit task is sufficient. Calling `onCleanup()` after an `await` has no active run owner and does not attach that cleanup to the earlier run; it returns `false` in that case. Use `onCleanup()` before starting the task and check its abort signal in the continuation.
 
