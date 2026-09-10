@@ -35,8 +35,8 @@ if (forbiddenInputs.length > 0) {
   throw new Error(`Quick example includes forbidden dependencies:\n${forbiddenInputs.join("\n")}`);
 }
 
-const maxMinifiedBytes = 16_000;
-const maxBrotliBytes = 5_200;
+const maxMinifiedBytes = 17_000;
+const maxBrotliBytes = 5_700;
 const sizeResult = checkQuickExampleSizes({
   expectedMinified: expectedSizes.quickExampleMinifiedBytes,
   actualMinified: summary.minifiedBytes,

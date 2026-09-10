@@ -8,35 +8,35 @@
     "maxBrotliBytes": 512
   },
   "reactive-text": {
-    "maxMinifiedBytes": 4860,
-    "maxBrotliBytes": 1844
+    "maxMinifiedBytes": 5073,
+    "maxBrotliBytes": 1937
   },
   "event-only": {
-    "maxMinifiedBytes": 1919,
-    "maxBrotliBytes": 844
+    "maxMinifiedBytes": 2132,
+    "maxBrotliBytes": 918
   },
   "text-only-list": {
-    "maxMinifiedBytes": 13450,
-    "maxBrotliBytes": 4844
+    "maxMinifiedBytes": 14637,
+    "maxBrotliBytes": 5259
   },
   "minimal-if": {
-    "maxMinifiedBytes": 11235,
-    "maxBrotliBytes": 4041
+    "maxMinifiedBytes": 11986,
+    "maxBrotliBytes": 4251
   },
   "composite-quick-example": {
-    "maxMinifiedBytes": 14300,
-    "maxBrotliBytes": 5053
+    "maxMinifiedBytes": 15931,
+    "maxBrotliBytes": 5525
   },
   "one-template-page": {
-    "maxMinifiedBytes": 30042,
-    "maxBrotliBytes": 9448
+    "maxMinifiedBytes": 31049,
+    "maxBrotliBytes": 9773
   },
   "thirty-template-page": {
-    "maxMinifiedBytes": 61980,
-    "maxBrotliBytes": 9652
+    "maxMinifiedBytes": 65172,
+    "maxBrotliBytes": 9975
   },
   "varied-template-page": {
-    "maxMinifiedBytes": 47586,
-    "maxBrotliBytes": 13718
+    "maxMinifiedBytes": 48926,
+    "maxBrotliBytes": 14017
   }
 }

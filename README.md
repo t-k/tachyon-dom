@@ -26,9 +26,9 @@ This `.td` component combines a signal-backed counter with a keyed list:
 </script>
 
 <main>
-  <button on:click="{increment}">{count}</button>
+  <button on:click={increment}>{count}</button>
   <ul>
-    <for each="{rows}" key="{row.id}">
+    <for each={rows} key={row.id}>
       <li>{row.label}</li>
     </for>
   </ul>
@@ -75,7 +75,7 @@ The same data is available as `explainCompiledTemplate()` from `tachyon-dom/comp
 
 `import { createSignal } from "tachyon-dom"` bundles to **940 bytes minified** in the current esbuild contract.
 
-Quick example client bundle: 14088 bytes minified, 4978 bytes Brotli, including the counter, text-only keyed-list binding code, and browser runtime. CI requires the minified baseline exactly, permits 1% Brotli variance across Node/zlib patch versions, enforces absolute 16000-byte minified and 5200-byte Brotli budgets, and rejects TypeScript, parse5, compiler, server, app, language-server, and runtime diagnostics modules from both browser metafiles. `pnpm check:client-bundle-attribution` records ten smaller fixtures, including a one-template and a thirty-template page whose difference is the per-template descriptor and glue cost, and a varied page of eight structurally different templates (forms, dynamic attributes, nested control flow, refs, richer expressions) that shows the per-template cost the repeated page understates, with the same build settings and keeps their esbuild contribution data and provenance in a unique ignored artifact.
+Quick example client bundle: 15695 bytes minified, 5443 bytes Brotli, including the counter, text-only keyed-list binding code, and browser runtime. CI requires the minified baseline exactly, permits 1% Brotli variance across Node/zlib patch versions, enforces absolute 17000-byte minified and 5700-byte Brotli budgets, and rejects TypeScript, parse5, compiler, server, app, language-server, and runtime diagnostics modules from both browser metafiles. `pnpm check:client-bundle-attribution` records ten smaller fixtures, including a one-template and a thirty-template page whose difference is the per-template descriptor and glue cost, and a varied page of eight structurally different templates (forms, dynamic attributes, nested control flow, refs, richer expressions) that shows the per-template cost the repeated page understates, with the same build settings and keeps their esbuild contribution data and provenance in a unique ignored artifact.
 
 ```sh
 pnpm build
@@ -91,9 +91,9 @@ On this machine, Tachyon DOM performed within 3% of the comparison implementatio
 
 | Compared with        | Tachyon DOM result |
 | -------------------- | -----------------: |
-| vanillajs-lite-keyed |        1.8% faster |
-| solid-keyed          |        0.9% faster |
-| marko-keyed          |        2.5% slower |
+| vanillajs-lite-keyed | 1.8% faster |
+| solid-keyed | 0.9% faster |
+| marko-keyed | 2.5% slower |
 
 Results are the geometric mean of nine operations: row creation, replacement, partial updates, selection, swapping, removal, append, clear, and creation of many rows. Lower execution time is better.
 
