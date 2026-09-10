@@ -36,9 +36,7 @@ export const applyDeferredDataChunk = (root: ParentNode, chunk: DeferredDataChun
   return true;
 };
 
-export type DeferredDataReadError =
-  | { kind: "missing"; id: string }
-  | { kind: "invalid"; id: string; cause: unknown };
+export type DeferredDataReadError = { kind: "missing"; id: string } | { kind: "invalid"; id: string; cause: unknown };
 
 export const readDeferredDataScriptResult = <T = unknown>(
   root: ParentNode,

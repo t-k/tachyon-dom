@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { catchError, detachFromEffectOwner, readDeferredDataScriptResult, sanitizeUrlAttribute, untrack } from "../src/index";
+import {
+  catchError,
+  detachFromEffectOwner,
+  readDeferredDataScriptResult,
+  sanitizeUrlAttribute,
+  untrack,
+} from "../src/index";
 
 describe("public API", () => {
   it("exports catchError from the main entry", () => {

@@ -140,7 +140,7 @@ describe("reusable template component interface", () => {
     });
     const parent = createTemplateComponent({
       client: {
-        templateHtml: "<section><div id=\"child\"></div></section>",
+        templateHtml: '<section><div id="child"></div></section>',
         bind: (root) => {
           const childRoot = root.querySelector("#child");
           if (!childRoot) throw new Error("Missing child root.");

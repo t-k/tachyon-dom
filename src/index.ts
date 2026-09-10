@@ -16,11 +16,7 @@ export {
 export { hydrate, hydrateClientTemplate, mount, mountClientTemplate } from "./runtime/mount.js";
 export type { HydratableTemplateModule, HydrateOnlyTemplateModule } from "./runtime/mount.js";
 export { createTemplateComponent } from "./runtime/component.js";
-export type {
-  TemplateComponent,
-  TemplateComponentInstance,
-  TemplateComponentOptions,
-} from "./runtime/component.js";
+export type { TemplateComponent, TemplateComponentInstance, TemplateComponentOptions } from "./runtime/component.js";
 export { createErrorBoundary } from "./runtime/error-boundary.js";
 export { createKeyedRows } from "./runtime/keyed-rows.js";
 export {

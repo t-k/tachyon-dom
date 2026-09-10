@@ -3,7 +3,12 @@
 // whitespace text on either side of it never merges with the branch in the parsed document and hydration adopts
 // exactly the nodes between the markers. These cases cover the whitespace-formatted shapes that used to merge.
 import { describe, expect, it } from "vitest";
-import { compileTemplate, generateClientModule, renderServerTemplate, type CompileTemplateOptions } from "../src/compiler";
+import {
+  compileTemplate,
+  generateClientModule,
+  renderServerTemplate,
+  type CompileTemplateOptions,
+} from "../src/compiler";
 import { hydrate } from "../src/runtime/mount";
 import { createSignal, type Signal } from "../src/runtime/signal";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
@@ -65,7 +70,9 @@ describe("hydrating a formatted template around a conditional", () => {
     expect(renderServerTemplate(compiled, { open: true, footer: "Footer" })).toContain(
       `</button>\n  <!--tachyon-if-->\n    <p id="details">Details</p>\n  <!--/tachyon-if-->\n  <p id="footer">Footer</p>`,
     );
-    expect(compiled.client.templateHtml).toContain(`</button>\n  <!--tachyon-if--><!--/tachyon-if-->\n  <p id="footer">`);
+    expect(compiled.client.templateHtml).toContain(
+      `</button>\n  <!--tachyon-if--><!--/tachyon-if-->\n  <p id="footer">`,
+    );
   });
 
   it("hydrates when the branch starts hidden and toggles it afterwards", () => {
@@ -139,7 +146,11 @@ describe("hydrating conditional regions beside other structure", () => {
     const outer = createSignal(client.outer);
     const inner = createSignal(client.inner);
     const footer = createSignal("Footer");
-    const { root, result } = hydrateServerOutput(nestedSource, { ...server, footer: "Footer" }, { outer, inner, footer });
+    const { root, result } = hydrateServerOutput(
+      nestedSource,
+      { ...server, footer: "Footer" },
+      { outer, inner, footer },
+    );
     return { root, result, outer, inner, footer };
   };
 

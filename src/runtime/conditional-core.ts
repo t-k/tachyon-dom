@@ -334,11 +334,16 @@ const adoptRegion = (
 ): void => {
   const end = conditionalRegionEnd(anchor);
   if (!end || anchor.nextSibling === end) return;
-  const expected = createNodes(templateHtml);
+  // The template's own list regions are skipped exactly as the live region count skips them.
+  const expected = logicalNodesBetween(createFragment(templateHtml).firstChild, null);
   const parent = anchor.parentNode as Node;
+  const liveCount = regionNodeCount(anchor, end);
+  // A branch made only of list regions has no shaped nodes of its own; its rows are adopted by the list.
   const nodes =
-    regionNodeCount(anchor, end) === expected.length
-      ? adoptableNodesBy(match, parent, logicalChildren(parent).indexOf(anchor) + 1, expected, dynamicAttributes)
+    liveCount === expected.length
+      ? expected.length === 0
+        ? []
+        : adoptableNodesBy(match, parent, logicalChildren(parent).indexOf(anchor) + 1, expected, dynamicAttributes)
       : undefined;
   if (nodes) setPreparedConditionalNodes(anchor, nodes);
   else clearConditionalRegion(anchor);
@@ -540,11 +545,14 @@ const nodeAt = (root: Node, path: readonly number[]): Node | undefined => {
   return current;
 };
 
-const createNodes = (templateHtml: string): Node[] => {
+const createFragment = (templateHtml: string): DocumentFragment => {
   const template = document.createElement("template");
   template.innerHTML = templateHtml;
-  return Array.from(template.content.childNodes).map((node) => node.cloneNode(true));
+  return template.content;
 };
+
+const createNodes = (templateHtml: string): Node[] =>
+  Array.from(createFragment(templateHtml).childNodes).map((node) => node.cloneNode(true));
 
 const sameNodeShape: ConditionalCoreNodeMatcher = (expected, actual): boolean => {
   if (expected.nodeType !== actual.nodeType) return false;

@@ -182,9 +182,7 @@ describe("generated binding readers", () => {
       digestsFor(`<ul><for each={rows} key={row.id}><li>{row.title}</li></for></ul>`),
     );
     // So is a different template.
-    expect(digestsFor(rows)).not.toEqual(
-      digestsFor(`<ul><for each={rows} key={row.id}><b>{row.label}</b></for></ul>`),
-    );
+    expect(digestsFor(rows)).not.toEqual(digestsFor(`<ul><for each={rows} key={row.id}><b>{row.label}</b></for></ul>`));
   });
 
   // A ref's cleanup has to clear the object it was written into, not whatever the path resolves to later. A row
@@ -260,7 +258,9 @@ describe("generated binding readers", () => {
       { reactive: true },
     );
 
-    expect(code).toMatch(/stores: \[\{ name: "\w+", key: "__tachyon_store_\d+_\d+", read: \(scope\) => scope\.row\.label \}\]/);
+    expect(code).toMatch(
+      /stores: \[\{ name: "\w+", key: "__tachyon_store_\d+_\d+", read: \(scope\) => scope\.row\.label \}\]/,
+    );
     expect(code).not.toContain(`initial:`);
   });
 
@@ -297,10 +297,16 @@ describe("generated binding readers", () => {
 
     const branch = document.createElement("section");
     branch.innerHTML = `<!---->`;
-    mountConditional(branch, [0], true, { message: "M" }, {
-      templateHtml: `<p> </p>`,
-      bindings: [{ kind: "text", path: [0], expression: "message" }],
-    });
+    mountConditional(
+      branch,
+      [0],
+      true,
+      { message: "M" },
+      {
+        templateHtml: `<p> </p>`,
+        bindings: [{ kind: "text", path: [0], expression: "message" }],
+      },
+    );
 
     expect(branch.textContent).toBe("M");
   });
@@ -325,11 +331,17 @@ describe("generated binding readers", () => {
 
     const branch = document.createElement("section");
     branch.innerHTML = `<!---->`;
-    mountGeneratedConditional(branch, [0], true, { message: "M" }, {
-      signature: "if:test",
-      templateHtml: `<p> </p>`,
-      bindings: [{ kind: "text", path: [0], read: (scope) => scope.message }],
-    });
+    mountGeneratedConditional(
+      branch,
+      [0],
+      true,
+      { message: "M" },
+      {
+        signature: "if:test",
+        templateHtml: `<p> </p>`,
+        bindings: [{ kind: "text", path: [0], read: (scope) => scope.message }],
+      },
+    );
     expect(branch.textContent).toBe("M");
 
     // The generated entries never compute a signature, so a descriptor that leaves it out is a compile error
@@ -443,7 +455,9 @@ describe("generated row bindings", () => {
 
   // The handler is read when the event fires, so replacing it under the same key takes effect on the next click.
   it("calls the handler the row currently holds, not the one it was bound with", () => {
-    const module = rowModule(`<ul><for each={rows} key={row.id}><li on:click={row.handler}>{row.label}</li></for></ul>`);
+    const module = rowModule(
+      `<ul><for each={rows} key={row.id}><li on:click={row.handler}>{row.label}</li></for></ul>`,
+    );
     const root = document.createElement("div");
     const calls: string[] = [];
     const row = (label: string, handler: (() => void) | undefined) => ({ id: "a", label, handler });

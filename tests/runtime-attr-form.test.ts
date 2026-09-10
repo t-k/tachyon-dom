@@ -22,12 +22,8 @@ describe("attribute and form runtime helpers", () => {
     ];
     for (const namespace of [undefined, "http://www.w3.org/2000/svg"] as const) {
       for (const value of values) {
-        const generic = namespace
-          ? document.createElementNS(namespace, "circle")
-          : document.createElement("div");
-        const specialized = namespace
-          ? document.createElementNS(namespace, "circle")
-          : document.createElement("div");
+        const generic = namespace ? document.createElementNS(namespace, "circle") : document.createElement("div");
+        const specialized = namespace ? document.createElementNS(namespace, "circle") : document.createElement("div");
         document.body.replaceChildren(generic, specialized);
 
         setAttributeValue(generic, "class", value);

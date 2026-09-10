@@ -19,10 +19,7 @@ export type DiagnoseOptions = CompileTemplateOptions & {
   target?: "client" | "server" | "stream";
 };
 
-export const locateOffset = (
-  source: string,
-  offset: number,
-): { line: number; column: number; sourceLine: string } => {
+export const locateOffset = (source: string, offset: number): { line: number; column: number; sourceLine: string } => {
   const before = source.slice(0, offset);
   const lines = before.split(/\r?\n/);
   const sourceLines = source.split(/\r?\n/);

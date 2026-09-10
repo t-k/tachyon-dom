@@ -84,17 +84,28 @@ const conditionalReasons = (binding: ConditionalBinding): string[] => {
   return reasons;
 };
 
-const collectRegions = (bindings: readonly ClientBinding[], into: TemplateRegionExplanation[]): void => {
+const collectRegions = (
+  bindings: readonly ClientBinding[],
+  into: TemplateRegionExplanation[],
+  nestedIn: "<for>" | "<if>" | undefined,
+): void => {
   for (const binding of bindings) {
     if (binding.kind === "list") {
-      const textOnly = isTextOnlyList(binding);
+      // A region nested in a row or branch is mounted by the generic list runtime through its parent's
+      // descriptor, whatever its own bindings are; only a top-level list can take the text-only path.
+      const textOnly = nestedIn === undefined && isTextOnlyList(binding);
+      const reasons = textOnly
+        ? []
+        : nestedIn
+          ? [`it is nested in ${nestedIn}; nested lists always use the generic list runtime`]
+          : listReasons(binding);
       into.push({
         kind: "list",
         path: [...binding.path],
         runtime: textOnly ? "tachyon-dom/runtime/list-text" : "tachyon-dom/runtime/list",
-        reasons: textOnly ? [] : listReasons(binding),
+        reasons,
       });
-      collectRegions(binding.bindings, into);
+      collectRegions(binding.bindings, into, "<for>");
     } else if (binding.kind === "if") {
       const core = usesConditionalCore(binding);
       into.push({
@@ -103,7 +114,7 @@ const collectRegions = (bindings: readonly ClientBinding[], into: TemplateRegion
         runtime: core ? "tachyon-dom/runtime/conditional-core" : "tachyon-dom/runtime/conditional",
         reasons: core ? [] : conditionalReasons(binding),
       });
-      collectRegions(binding.bindings, into);
+      collectRegions(binding.bindings, into, "<if>");
     }
   }
 };
@@ -117,7 +128,7 @@ const runtimeImportPattern = /from "(tachyon-dom\/runtime\/[a-z-]+)"/g;
  */
 export const explainCompiledTemplate = (template: CompiledTemplate): TemplateExplanation => {
   const regions: TemplateRegionExplanation[] = [];
-  collectRegions(template.client.bindings, regions);
+  collectRegions(template.client.bindings, regions, undefined);
   const runtimeImports = [
     ...new Set(
       Array.from(generateClientModule(template).matchAll(runtimeImportPattern), (match) => match[1] as string),

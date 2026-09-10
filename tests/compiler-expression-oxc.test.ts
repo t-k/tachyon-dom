@@ -150,9 +150,7 @@ describe("compiler expression OXC backend", () => {
     for (const source of ["object()[key()]", "object()[key()]()"]) {
       for (const value of [null, undefined]) {
         const scope = { object: () => value, key: () => "label" };
-        expect(() => evaluateExpression(source, scope)).toThrow(
-          new TypeError(`Cannot read properties of ${value}.`),
-        );
+        expect(() => evaluateExpression(source, scope)).toThrow(new TypeError(`Cannot read properties of ${value}.`));
         for (const run of [
           Function("scope", `return ${expressionToJs(source, new Set(), "scope", { backend: "oxc" })}`),
           Function("scope", `with (scope) { return ${source}; }`),
@@ -174,7 +172,10 @@ describe("compiler expression OXC backend", () => {
         expect(run({ object: () => ({ label: "not callable" }), key: () => "label" })).toBeUndefined();
       }
       expect(() =>
-        Function("scope", `with (scope) { return ${source}; }`)({
+        Function(
+          "scope",
+          `with (scope) { return ${source}; }`,
+        )({
           object: () => ({ label: "not callable" }),
           key: () => "label",
         }),
@@ -183,7 +184,10 @@ describe("compiler expression OXC backend", () => {
   });
 
   it("passes every computed member call argument in source order", () => {
-    for (const source of ["object()?.[key()](first(), second(), third())", "object()[key()](first(), second(), third())"]) {
+    for (const source of [
+      "object()?.[key()](first(), second(), third())",
+      "object()[key()](first(), second(), third())",
+    ]) {
       for (const run of [
         (scope: Record<string, unknown>) => evaluateExpression(source, scope),
         Function("scope", `return ${expressionToJs(source, new Set(), "scope", { backend: "oxc" })}`),

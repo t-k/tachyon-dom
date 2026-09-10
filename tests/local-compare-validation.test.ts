@@ -82,21 +82,24 @@ const authoritativeRuns = () =>
       runIndex: index,
       seed: 17,
     });
-    return attachArtifactManifest({
-      ...value,
-      workload: {
-        ...value.workload,
-        runId: `run-${index}`,
-        runIndex: index,
-        seed: 17,
-        order: plan.implementationOrder,
-        scenarioOrder: plan.scenarioOrder,
+    return attachArtifactManifest(
+      {
+        ...value,
+        workload: {
+          ...value.workload,
+          runId: `run-${index}`,
+          runIndex: index,
+          seed: 17,
+          order: plan.implementationOrder,
+          scenarioOrder: plan.scenarioOrder,
+        },
+        measurements: {
+          ...value.measurements,
+          summaries: value.measurements.summaries.map((summary) => ({ ...summary, values: Array(30).fill(1) })),
+        },
       },
-      measurements: {
-        ...value.measurements,
-        summaries: value.measurements.summaries.map((summary) => ({ ...summary, values: Array(30).fill(1) })),
-      },
-    }, { pid: 1_000 + index, processStartedAt: new Date(index * 1_000).toISOString() });
+      { pid: 1_000 + index, processStartedAt: new Date(index * 1_000).toISOString() },
+    );
   });
 
 describe("local compare validation", () => {
@@ -117,8 +120,15 @@ describe("local compare validation", () => {
     ["historical contract", (runs: ReturnType<typeof authoritativeRuns>) => (runs[0]!.benchmark.contractVersion = 2)],
     ["too few runs", (runs: ReturnType<typeof authoritativeRuns>) => runs.splice(4)],
     ["duplicate run id", (runs: ReturnType<typeof authoritativeRuns>) => (runs[1]!.workload.runId = "run-0")],
-    ["too few measured samples", (runs: ReturnType<typeof authoritativeRuns>) => runs[0]!.measurements.summaries[0]!.values.pop()],
-    ["fixed implementation order", (runs: ReturnType<typeof authoritativeRuns>) => runs.forEach((item) => (item.workload.order = [...implementationNames]))],
+    [
+      "too few measured samples",
+      (runs: ReturnType<typeof authoritativeRuns>) => runs[0]!.measurements.summaries[0]!.values.pop(),
+    ],
+    [
+      "fixed implementation order",
+      (runs: ReturnType<typeof authoritativeRuns>) =>
+        runs.forEach((item) => (item.workload.order = [...implementationNames])),
+    ],
   ])("rejects %s as non-authoritative", (_label, mutate) => {
     const runs = authoritativeRuns();
     mutate(runs);
@@ -169,11 +179,7 @@ describe("local compare validation", () => {
     ["missing summary implementation", "summaries", (entries: any[]) => entries.pop()],
     ["duplicate summary implementation", "summaries", (entries: any[]) => entries.push({ ...entries[0] })],
     ["missing auxiliary implementation", "auxiliaryMetrics", (entries: any[]) => entries.pop()],
-    [
-      "duplicate auxiliary implementation",
-      "auxiliaryMetrics",
-      (entries: any[]) => entries.push({ ...entries[0] }),
-    ],
+    ["duplicate auxiliary implementation", "auxiliaryMetrics", (entries: any[]) => entries.push({ ...entries[0] })],
   ])("rejects %s for each metric id", (_label, collectionName, mutate) => {
     const value = run();
     mutate(value.measurements[collectionName as "summaries" | "auxiliaryMetrics"]);
@@ -247,14 +253,12 @@ describe("local compare validation", () => {
     ],
     [
       "unknown implementation",
-      (value: ReturnType<typeof run>) =>
-        ((value.measurements.summaries[0]!.implementation as unknown) = "unknown"),
+      (value: ReturnType<typeof run>) => ((value.measurements.summaries[0]!.implementation as unknown) = "unknown"),
       "measurements.summaries[0].implementation",
     ],
     [
       "summary metric",
-      (value: ReturnType<typeof run>) =>
-        ((value.measurements.summaries[0]!.trimmedMean as number) = Number.NaN),
+      (value: ReturnType<typeof run>) => ((value.measurements.summaries[0]!.trimmedMean as number) = Number.NaN),
       "measurements.summaries[0].trimmedMean",
     ],
     [

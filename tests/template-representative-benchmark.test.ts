@@ -47,7 +47,9 @@ describe("representative template benchmark", () => {
     expect(oracle.create.liveInputValues[0]).toBe("Row 0");
     expect(oracle["partial-update"].liveInputValues[0]).toBe("Row 0 !");
     expect(oracle.swap.preservedRowIdentities).toBe(oracle.swap.rowCount);
-    expect(oracle.swap.preservedChildIdentities).toBe(oracle.swap.childCounts.reduce((total, count) => total + count, 0));
+    expect(oracle.swap.preservedChildIdentities).toBe(
+      oracle.swap.childCounts.reduce((total, count) => total + count, 0),
+    );
     expect(oracle["child-reorder"].preservedChildIdentities).toBe(
       oracle["child-reorder"].childCounts.reduce((total, count) => total + count, 0),
     );

@@ -1138,9 +1138,13 @@ describe("signal runtime", () => {
     resource = createResource(source, (value, { signal }) => {
       calls.push(value);
       if (value === "a") {
-        signal.addEventListener("abort", () => {
-          nested = resource.refetchOutcome();
-        }, { once: true });
+        signal.addEventListener(
+          "abort",
+          () => {
+            nested = resource.refetchOutcome();
+          },
+          { once: true },
+        );
       }
       return new Promise<string>((resolve) => resolvers.set(value, resolve));
     });

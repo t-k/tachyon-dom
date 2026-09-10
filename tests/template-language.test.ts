@@ -12,12 +12,24 @@ const positionAt = (source: string, offset: number): { line: number; character: 
   return { line: lines.length - 1, character: lines.at(-1)?.length ?? 0 };
 };
 
-const applyEdits = (source: string, edits: readonly { range: { start: { line: number; character: number }; end: { line: number; character: number } }; newText: string }[]): string =>
+const applyEdits = (
+  source: string,
+  edits: readonly {
+    range: { start: { line: number; character: number }; end: { line: number; character: number } };
+    newText: string;
+  }[],
+): string =>
   [...edits]
-    .sort((left, right) => right.range.start.line - left.range.start.line || right.range.start.character - left.range.start.character)
+    .sort(
+      (left, right) =>
+        right.range.start.line - left.range.start.line || right.range.start.character - left.range.start.character,
+    )
     .reduce((value, edit) => {
       const offsetOf = (position: { line: number; character: number }): number =>
-        value.split(/\r?\n/).slice(0, position.line).reduce((total, line) => total + line.length + 1, 0) + position.character;
+        value
+          .split(/\r?\n/)
+          .slice(0, position.line)
+          .reduce((total, line) => total + line.length + 1, 0) + position.character;
       return value.slice(0, offsetOf(edit.range.start)) + edit.newText + value.slice(offsetOf(edit.range.end));
     }, source);
 
@@ -61,10 +73,21 @@ function local() { const title = "local"; return title; }
     const rename = templateRenameAt(source, positionAt(source, source.lastIndexOf("{title") + 2), "heading");
     expect(rename).toBeDefined();
     const rewritten = [...(rename?.edits ?? [])]
-      .sort((left, right) => right.range.start.line - left.range.start.line || right.range.start.character - left.range.start.character)
+      .sort(
+        (left, right) =>
+          right.range.start.line - left.range.start.line || right.range.start.character - left.range.start.character,
+      )
       .reduce((value, edit) => {
-        const start = value.split(/\r?\n/).slice(0, edit.range.start.line).reduce((total, line) => total + line.length + 1, 0) + edit.range.start.character;
-        const end = value.split(/\r?\n/).slice(0, edit.range.end.line).reduce((total, line) => total + line.length + 1, 0) + edit.range.end.character;
+        const start =
+          value
+            .split(/\r?\n/)
+            .slice(0, edit.range.start.line)
+            .reduce((total, line) => total + line.length + 1, 0) + edit.range.start.character;
+        const end =
+          value
+            .split(/\r?\n/)
+            .slice(0, edit.range.end.line)
+            .reduce((total, line) => total + line.length + 1, 0) + edit.range.end.character;
         return value.slice(0, start) + edit.newText + value.slice(end);
       }, source);
 
@@ -92,13 +115,21 @@ function local() { const title = "local"; return title; }
       `<script>const row = 1;</script><ul><for each={rows} as="entry" key={entry.id}><li>{entry.name}</li></for></ul>`,
     );
 
-    const keyDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf("key={row") + 5), "file:///page.td");
+    const keyDefinition = templateDefinitionAt(
+      source,
+      positionAt(source, source.indexOf("key={row") + 5),
+      "file:///page.td",
+    );
     expect(keyDefinition?.range.start).toEqual(positionAt(source, source.indexOf(`as="row"`) + 4));
   });
 
   it("resolves the for each expression in the outer scope and an implicit key alias in the row scope", () => {
     const source = `<script>const rows = [];</script><ul><for each={rows} key={row.id}><li>{row.name}</li></for></ul>`;
-    const eachDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf("each={rows") + 6), "file:///page.td");
+    const eachDefinition = templateDefinitionAt(
+      source,
+      positionAt(source, source.indexOf("each={rows") + 6),
+      "file:///page.td",
+    );
     expect(eachDefinition?.range.start).toEqual(positionAt(source, source.indexOf("const rows") + 6));
 
     const rename = templateRenameAt(source, positionAt(source, source.indexOf("row.name") + 1), "entry");
@@ -115,7 +146,11 @@ function local() { const title = "local"; return title; }
       `<script>const heading="outer";function f(title){return title;}const g=(title: string)=>title;const h=title=>title.length;const k=(x)=>{const title=x;return title;};</script><p>{heading}</p>`,
     );
 
-    const parameterDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf("return title") + 8), "file:///page.td");
+    const parameterDefinition = templateDefinitionAt(
+      source,
+      positionAt(source, source.indexOf("return title") + 8),
+      "file:///page.td",
+    );
     expect(parameterDefinition?.range.start).toEqual(positionAt(source, source.indexOf("f(title") + 2));
   });
 
@@ -146,7 +181,11 @@ function local() { const title = "local"; return title; }
     expect(applyEdits(source, rename?.edits ?? [])).toBe(
       `<script lang="ts">const heading="outer";const f=(title: string): string => title;const g=(title: string): { value: string } => ({ value: title });const h=<T,>(title: T): Promise<T> => Promise.resolve(title);const k=(title: string): string => { return title; };</script><p>{heading}</p>`,
     );
-    const parameterDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf("=> title") + 4), "file:///page.td");
+    const parameterDefinition = templateDefinitionAt(
+      source,
+      positionAt(source, source.indexOf("=> title") + 4),
+      "file:///page.td",
+    );
     expect(parameterDefinition?.range.start).toEqual(positionAt(source, source.indexOf("(title: string)") + 1));
   });
 
@@ -161,9 +200,17 @@ function local() { const title = "local"; return title; }
     expect(applyEdits(source, rename?.edits ?? [])).toBe(
       `<script>const row = 1;const rows = [];</script><ul><for each="{rows}" as="entry" key="{entry.id}"><li>{entry.name}</li></for></ul>`,
     );
-    const keyDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf('key="{row') + 6), "file:///page.td");
+    const keyDefinition = templateDefinitionAt(
+      source,
+      positionAt(source, source.indexOf('key="{row') + 6),
+      "file:///page.td",
+    );
     expect(keyDefinition?.range.start).toEqual(positionAt(source, source.indexOf(`as="row"`) + 4));
-    const eachDefinition = templateDefinitionAt(source, positionAt(source, source.indexOf('each="{rows') + 7), "file:///page.td");
+    const eachDefinition = templateDefinitionAt(
+      source,
+      positionAt(source, source.indexOf('each="{rows') + 7),
+      "file:///page.td",
+    );
     expect(eachDefinition?.range.start).toEqual(positionAt(source, source.indexOf("const rows") + 6));
 
     const implicit = `<ul><for each="{rows}" key='{row.id}'><li>{row.name}</li></for></ul>`;

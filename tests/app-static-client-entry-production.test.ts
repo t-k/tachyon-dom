@@ -32,9 +32,7 @@ const serve = async (outputDirectory: string): Promise<string> => {
         return;
       }
       const body = await readFile(filePath);
-      response
-        .writeHead(200, { "content-type": filePath.endsWith(".js") ? "text/javascript" : "text/html" })
-        .end(body);
+      response.writeHead(200, { "content-type": filePath.endsWith(".js") ? "text/javascript" : "text/html" }).end(body);
     } catch {
       response.writeHead(404).end();
     }
@@ -87,10 +85,7 @@ describe("static pages and the client entry in a production build", () => {
   beforeAll(async () => {
     projectDirectory = await mkdtemp(path.join(tmpdir(), "tachyon-static-client-entry-"));
     // A shared module with a side effect of its own, the way an application's client entry usually has one.
-    await writeFile(
-      path.join(projectDirectory, "shared.ts"),
-      `document.documentElement.dataset.shared = "ready";\n`,
-    );
+    await writeFile(path.join(projectDirectory, "shared.ts"), `document.documentElement.dataset.shared = "ready";\n`);
     await writeFile(
       path.join(projectDirectory, "main.ts"),
       `

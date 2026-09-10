@@ -108,8 +108,15 @@ export type ListBinding = {
  * regions and `at` the logical child index its rows start at; both default to 0 and are omitted then.
  */
 export type ListRegion = {
+  /** Ordinal of the list's marker pair among its owner's regions. */
   index?: number;
   at?: number;
+  /**
+   * The list is a direct node of a branch or row: its markers sit among the owner's own nodes and its rows
+   * belong to the owner's parent element, so the runtime finds the pair between the owner's markers instead
+   * of resolving a container by path.
+   */
+  direct?: true;
 };
 
 export type ConditionalBinding = {

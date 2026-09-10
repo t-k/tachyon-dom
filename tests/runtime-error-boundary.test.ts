@@ -118,16 +118,22 @@ describe("runtime error boundary", () => {
 
   it.each([
     ["Node", () => Object.assign(document.createElement("p"), { textContent: "node" }), "node"],
-    ["DocumentFragment", () => {
-      const fragment = document.createDocumentFragment();
-      fragment.append("fragment");
-      return fragment;
-    }, "fragment"],
+    [
+      "DocumentFragment",
+      () => {
+        const fragment = document.createDocumentFragment();
+        fragment.append("fragment");
+        return fragment;
+      },
+      "fragment",
+    ],
     ["Node array", () => [document.createTextNode("first"), document.createTextNode("second")], "firstsecond"],
   ])("renders an explicit %s fallback", (_name, fallback, expected) => {
     const root = document.createElement("section");
     const dispose = createErrorBoundary(root, {
-      render: () => { throw new Error("broken"); },
+      render: () => {
+        throw new Error("broken");
+      },
       fallback,
     });
 

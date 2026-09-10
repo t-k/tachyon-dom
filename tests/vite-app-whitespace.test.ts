@@ -49,13 +49,16 @@ describe("tachyonApp HTML whitespace policy", () => {
     ["deprecated minify true", { minifyHtml: true }, false, false],
     ["deprecated minify false", { minifyHtml: false }, true, true],
     ["mode defaults", {}, true, false],
-  ] as const)("applies %s consistently to actual development and build hooks", (_label, options, devPreserves, buildPreserves) => {
-    const frozen = Object.freeze({ ...options });
-    const result = invokeHooks(frozen);
-    expect(result.development.includes(`<main   id="app">`)).toBe(devPreserves);
-    expect(result.production.includes(`<main   id="app">`)).toBe(buildPreserves);
-    expect(frozen).toEqual(options);
-  });
+  ] as const)(
+    "applies %s consistently to actual development and build hooks",
+    (_label, options, devPreserves, buildPreserves) => {
+      const frozen = Object.freeze({ ...options });
+      const result = invokeHooks(frozen);
+      expect(result.development.includes(`<main   id="app">`)).toBe(devPreserves);
+      expect(result.production.includes(`<main   id="app">`)).toBe(buildPreserves);
+      expect(frozen).toEqual(options);
+    },
+  );
 
   it("gives explicit htmlWhitespace precedence over deprecated minifyHtml", () => {
     const result = invokeHooks({ htmlWhitespace: "preserve-tags", minifyHtml: true });

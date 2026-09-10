@@ -195,6 +195,17 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     if (!key) {
       return semanticError("<for> requires key={item.id}.", openingTagSpan(node));
     }
+    const directList = node.children.find(
+      (child): child is ElementNode => child.type === "element" && child.tagName === "for",
+    );
+    if (directList) {
+      // A row's nodes are bound before they are inserted and moved as a fixed set, so a list whose rows would
+      // sit among them has no owner yet. The compiler reports it instead of nesting the rows in a sibling.
+      return semanticError(
+        "A <for> placed directly inside a <for> row is not supported yet; wrap it in an element such as <ul>.",
+        openingTagSpan(directList),
+      );
+    }
     for (const name of ["as", "index"] as const) {
       const attribute = node.attrs.find((candidate) => candidate.name === name);
       if (attribute && (typeof attribute.value !== "string" || !isSafeIdentifierName(attribute.value.trim()))) {

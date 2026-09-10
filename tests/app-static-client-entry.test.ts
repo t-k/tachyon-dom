@@ -26,7 +26,11 @@ const app = () =>
         template: `<main><h1>Static</h1><section hydrate:interaction="click"><button on:click={open}>Open</button></section></main>`,
         scope: { open: () => undefined },
       },
-      { path: "/setup", fileName: "setup.html", template: `<script setup>const title = "T";</script><main><h1>Fixed</h1></main>` },
+      {
+        path: "/setup",
+        fileName: "setup.html",
+        template: `<script setup>const title = "T";</script><main><h1>Fixed</h1></main>`,
+      },
       {
         path: "/dead-branch",
         fileName: "dead.html",
@@ -74,7 +78,14 @@ describe("tachyonApp client entry emission", () => {
   const runBundle = (
     options: EntryOptions = {},
     bundle: Record<string, unknown> = {
-      "assets/entry.js": { type: "chunk", isEntry: true, fileName: "assets/entry.js", code: "", imports: [], dynamicImports: [] },
+      "assets/entry.js": {
+        type: "chunk",
+        isEntry: true,
+        fileName: "assets/entry.js",
+        code: "",
+        imports: [],
+        dynamicImports: [],
+      },
     },
   ) => {
     const plugin = tachyonApp(app(), options);
@@ -93,8 +104,7 @@ describe("tachyonApp client entry emission", () => {
     return { pages: emitted, warnings, bundle };
   };
 
-  const emitPages = (clientEntry?: "always" | "when-required") =>
-    runBundle(clientEntry ? { clientEntry } : {}).pages;
+  const emitPages = (clientEntry?: "always" | "when-required") => runBundle(clientEntry ? { clientEntry } : {}).pages;
 
   it("puts the entry on every page by default", () => {
     const pages = emitPages();
@@ -158,7 +168,14 @@ describe("tachyonApp client entry emission", () => {
   });
 
   const entryBundle = (code: string | undefined) => ({
-    "assets/entry.js": { type: "chunk", isEntry: true, fileName: "assets/entry.js", code, imports: [], dynamicImports: [] },
+    "assets/entry.js": {
+      type: "chunk",
+      isEntry: true,
+      fileName: "assets/entry.js",
+      code,
+      imports: [],
+      dynamicImports: [],
+    },
   });
 
   // A source map link and a strict mode directive are not work a page could need.
@@ -203,9 +220,12 @@ describe("tachyonApp client entry emission", () => {
     });
     const bundle: Record<string, unknown> = {
       // The tachyon entry, a chunk it shares with a cycle back to it, and one it only reaches lazily.
-      "assets/entry.js": chunk("assets/entry.js", true, ["assets/private.js", "assets/common.js", "external.js"], [
-        "assets/lazy.js",
-      ]),
+      "assets/entry.js": chunk(
+        "assets/entry.js",
+        true,
+        ["assets/private.js", "assets/common.js", "external.js"],
+        ["assets/lazy.js"],
+      ),
       "assets/entry.js.map": { type: "asset", fileName: "assets/entry.js.map" },
       "assets/private.js": chunk("assets/private.js", false, ["assets/entry.js"]),
       "assets/lazy.js": chunk("assets/lazy.js", false, []),
@@ -216,11 +236,7 @@ describe("tachyonApp client entry emission", () => {
     };
     plugin.generateBundle.call({ emitFile() {}, warn() {} } as never, {} as never, bundle as never, false as never);
 
-    expect(Object.keys(bundle).sort()).toEqual([
-      "assets/common.js",
-      "assets/site.css",
-      "assets/worker.js",
-    ]);
+    expect(Object.keys(bundle).sort()).toEqual(["assets/common.js", "assets/site.css", "assets/worker.js"]);
   });
 
   it("keeps the entry chunk when at least one page loads it", () => {

@@ -11,9 +11,7 @@ describe("optional peer diagnostics", () => {
   });
 
   it("preserves the actionable diagnostic when module loading fails", () => {
-    expect(() =>
-      requireOptionalPeer("missing-peer", "Test feature", "tachyon-dom-intentionally-missing-peer"),
-    ).toThrow(
+    expect(() => requireOptionalPeer("missing-peer", "Test feature", "tachyon-dom-intentionally-missing-peer")).toThrow(
       'Test feature requires the optional peer dependency "missing-peer". Install it with "pnpm add missing-peer".',
     );
   });

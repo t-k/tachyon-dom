@@ -16,7 +16,7 @@ describe("README landing page", () => {
     expect(readme).toContain("## Why Tachyon DOM?");
     expect(readme).toContain("## Quick Example");
     expect(readme).toContain("<button on:click={increment}>{count}</button>");
-    expect(readme).toContain('<for each={rows} key={row.id}>');
+    expect(readme).toContain("<for each={rows} key={row.id}>");
     expect(readme).toContain("## What the Compiler Emits");
     expect(readme).toContain("__tachyonTextAt");
     expect(readme).toContain("__tachyonMountTextKeyedList");
@@ -77,9 +77,7 @@ describe("README landing page", () => {
     const packageJson = JSON.parse(await read("package.json")) as { scripts: Record<string, string> };
     const ci = await read(".github/workflows/ci.yml");
 
-    expect(packageJson.scripts["check:quick-example-size"]).toBe(
-      "node scripts/verify-quick-example-bundle.mjs",
-    );
+    expect(packageJson.scripts["check:quick-example-size"]).toBe("node scripts/verify-quick-example-bundle.mjs");
     expect(ci).toContain("pnpm check:quick-example-size");
   });
 
@@ -124,8 +122,6 @@ describe("README landing page", () => {
     expect(readme).toContain("| marko-keyed | 2.5% slower |");
     expect(readme).toContain("geometric mean of nine operations");
     expect(readme).toContain("Lower execution time is better.");
-    expect(result.measurements.tables.directComparisons).toContain(
-      "| vanillajs-lite-keyed | tachyon-dom | 0.982x |",
-    );
+    expect(result.measurements.tables.directComparisons).toContain("| vanillajs-lite-keyed | tachyon-dom | 0.982x |");
   });
 });

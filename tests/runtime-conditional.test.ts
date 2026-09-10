@@ -118,10 +118,7 @@ describe("mountConditional", () => {
     expect(scope.refs.panel).toBeUndefined();
 
     // Half a reader is not a reader: only a descriptor carrying both falls out of the path string.
-    for (const half of [
-      { owner: (current: Record<string, unknown>) => current.refs },
-      { property: "panel" },
-    ]) {
+    for (const half of [{ owner: (current: Record<string, unknown>) => current.refs }, { property: "panel" }]) {
       const partial = {
         signature: `half-${Object.keys(half)[0]}`,
         templateHtml: `<div></div>`,

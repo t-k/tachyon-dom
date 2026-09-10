@@ -88,13 +88,14 @@ export const createI18n = <Locale extends string>(options: I18nOptions<Locale>) 
   return { localeFromPath, negotiateLocale, t };
 };
 
-export const localeMiddleware = <Locale extends string>(
-  options: LocaleMiddlewareOptions<Locale>,
-): RouteMiddleware => {
+export const localeMiddleware = <Locale extends string>(options: LocaleMiddlewareOptions<Locale>): RouteMiddleware => {
   const i18n = createI18n({
     defaultLocale: options.defaultLocale,
     locales: options.locales,
-    messages: Object.fromEntries(options.locales.map((locale) => [locale, {}])) as Record<Locale, Record<string, string>>,
+    messages: Object.fromEntries(options.locales.map((locale) => [locale, {}])) as Record<
+      Locale,
+      Record<string, string>
+    >,
   });
   const localeSet = new Set<string>(options.locales);
   return ({ request, url }) => {

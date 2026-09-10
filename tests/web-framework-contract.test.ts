@@ -44,7 +44,9 @@ describe("web framework benchmark contract", () => {
     await expect(validateDynamicRouteSemantics(valid)).resolves.toHaveLength(4);
 
     const precomputed = await serve((_request, response) => response.end("<h1>Product 42</h1>"));
-    await expect(validateDynamicRouteSemantics(precomputed)).rejects.toThrow("Dynamic product route did not render request id");
+    await expect(validateDynamicRouteSemantics(precomputed)).rejects.toThrow(
+      "Dynamic product route did not render request id",
+    );
 
     const finiteBodies = new Map([
       ["/products/42", "<h1>Product 42</h1>"],
@@ -55,7 +57,9 @@ describe("web framework benchmark contract", () => {
       response.statusCode = body === undefined ? 404 : 200;
       response.end(body ?? "Not Found");
     });
-    await expect(validateDynamicRouteSemantics(finite)).rejects.toThrow("Dynamic product route did not render request id");
+    await expect(validateDynamicRouteSemantics(finite)).rejects.toThrow(
+      "Dynamic product route did not render request id",
+    );
   });
 
   it("requires a shell and delayed payload with distinct arrival timestamps", async () => {

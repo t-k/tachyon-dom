@@ -46,9 +46,9 @@ describe("createKeyedRows", () => {
       const tbody = document.querySelector("#tbody") as HTMLTableSectionElement;
       const before = tbody.innerHTML;
 
-      expect(() =>
-        createKeyedRows<Item>({ tbody, row: "<tr><td></td></tr>", bind: () => undefined, chunks }),
-      ).toThrow(new TypeError("keyed-rows: `chunks` must be a positive finite integer."));
+      expect(() => createKeyedRows<Item>({ tbody, row: "<tr><td></td></tr>", bind: () => undefined, chunks })).toThrow(
+        new TypeError("keyed-rows: `chunks` must be a positive finite integer."),
+      );
       expect(tbody.innerHTML).toBe(before);
     },
   );
@@ -75,13 +75,13 @@ describe("createKeyedRows", () => {
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
     "rejects invalid update stride %s before DOM mutation",
     (stride) => {
-    const { tbody, list } = setup();
-    list.replace(items(2));
-    const before = tbody.innerHTML;
+      const { tbody, list } = setup();
+      list.replace(items(2));
+      const before = tbody.innerHTML;
       expect(() => list.update(stride, () => tbody.replaceChildren())).toThrow(
         new TypeError("keyed-rows: `stride` must be a positive finite integer."),
       );
-    expect(tbody.innerHTML).toBe(before);
+      expect(tbody.innerHTML).toBe(before);
     },
   );
 

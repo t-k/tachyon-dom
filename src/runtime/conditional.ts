@@ -13,8 +13,13 @@ import {
   conditionalRegionEnd,
   isConditionalEndMarker,
   isConditionalStartMarker,
+  isListEndMarker,
+  isListStartMarker,
+  listRegionStartBetween,
   removeConditionalRegion,
+  removeListRegion,
 } from "../conditional-marker.js";
+import { withListRegionStart } from "./list-core.js";
 import { setPreparedConditionalNodeCount, takePreparedConditionalNodes } from "./conditional-prepared.js";
 import {
   createHydrationBoundary,
@@ -125,6 +130,8 @@ type NestedListBinding = {
   hydrationBoundaries?: CompiledHydrationBoundary[];
   components?: ComponentBoundary[];
   read?: (scope: Record<string, unknown>) => unknown;
+  /** A direct list's marker pair ordinal among the branch's own regions; see the compiler's `ListRegion`. */
+  region?: { index?: number; at?: number; direct?: true };
 };
 
 type StoreDefinition = {
@@ -436,6 +443,7 @@ const cleanup = (state: ConditionalState): void => {
       failed = true;
     } finally {
       if (isConditionalStartMarker(node)) removeConditionalRegion(node);
+      else if (isListStartMarker(node)) removeListRegion(node);
       node.parentNode?.removeChild(node);
     }
   }
@@ -454,6 +462,7 @@ const removeAdoptedNodes = (nodes: readonly Node[]): void => {
       failed = true;
     } finally {
       if (isConditionalStartMarker(node)) removeConditionalRegion(node);
+      else if (isListStartMarker(node)) removeListRegion(node);
       node.parentNode?.removeChild(node);
     }
   }
@@ -496,8 +505,20 @@ const createNodes = (templateHtml: string): Node[] => {
   return Array.from(template.content.childNodes).map((node) => node.cloneNode(true));
 };
 
-/** The branch nodes a path can address: fresh template nodes minus the region end markers they carry. */
-const logicalNodes = (nodes: readonly Node[]): Node[] => nodes.filter((node) => !isConditionalEndMarker(node));
+/**
+ * The branch nodes a path can address: fresh template nodes minus the region end markers and minus the list
+ * regions they carry, which the branch's direct lists own.
+ */
+const logicalNodes = (nodes: readonly Node[]): Node[] => {
+  const logical: Node[] = [];
+  let listDepth = 0;
+  for (const node of nodes) {
+    if (isListStartMarker(node)) listDepth++;
+    else if (isListEndMarker(node)) listDepth--;
+    else if (listDepth === 0 && !isConditionalEndMarker(node)) logical.push(node);
+  }
+  return logical;
+};
 
 const nodeAtState = (state: ConditionalState, path: readonly number[]): Node => {
   if (state.nodes.length <= 1) return nodeAt(state.nodes[0] as Node, path);
@@ -584,15 +605,19 @@ const bindNodes = (
         });
       }
     } else if (binding.kind === "list") {
-      const container = nodeAtState(state, binding.path);
+      // A list binding's path names the element whose child region holds the rows. A direct list has no such
+      // element: its rows belong to the branch's parent and its marker pair is the nth among the branch nodes.
+      const direct = binding.region?.direct === true;
+      const container = direct ? anchor.parentNode : nodeAtState(state, binding.path);
       if (!(container instanceof Element)) continue;
-      if (cleanups !== state.cleanups) cleanups.push(() => cleanupOwnedSubtree(container));
-      options.mountList(
-        binding,
-        container,
-        options.readDeclaration(state.scope, binding.each, binding.read) as readonly unknown[] | undefined,
-        state.scope,
-      );
+      const start = direct
+        ? listRegionStartBetween(anchor.nextSibling, conditionalRegionEnd(anchor) ?? null, binding.region?.index ?? 0)
+        : undefined;
+      if (direct && !start) continue;
+      if (cleanups !== state.cleanups) cleanups.push(() => cleanupOwnedSubtree(start ?? container));
+      const items = options.readDeclaration(state.scope, binding.each, binding.read) as readonly unknown[] | undefined;
+      if (start) withListRegionStart(start, () => options.mountList(binding, container, items, state.scope));
+      else options.mountList(binding, container, items, state.scope);
     } else if (binding.kind === "if") {
       const target = nodeAtState(state, binding.path);
       if (cleanups !== state.cleanups) cleanups.push(() => cleanupOwnedSubtree(target));
@@ -739,6 +764,9 @@ const mountResolvedConditional = (
       }
     }
     if (adoptedNodes) removeAdoptedNodes(adoptedNodes);
+    // List regions the server rendered directly in the branch are not among the shaped nodes; the region is
+    // emptied as a whole so their rows leave with the branch.
+    if (isConditionalStartMarker(anchor)) clearConditionalRegion(anchor);
     setPreparedConditionalNodeCount(anchor, 0);
     return;
   }

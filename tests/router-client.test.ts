@@ -178,7 +178,10 @@ describe("client router", () => {
       root,
       routes: [
         { path: "/", render: () => rawHtml("<p>home</p>") },
-        { path: "/next", render: () => ({ value: rawHtml(`<${tagName}></${tagName}>`), dispose: () => nextDisposeCount++ }) },
+        {
+          path: "/next",
+          render: () => ({ value: rawHtml(`<${tagName}></${tagName}>`), dispose: () => nextDisposeCount++ }),
+        },
         { path: "/other", render: () => rawHtml("<p>other</p>") },
       ],
       scrollTo: () => undefined,

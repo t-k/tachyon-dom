@@ -62,9 +62,7 @@ describe("streaming backpressure comparison", () => {
     const baseline = envelope({ revision: "baseline", queued: 1_000 });
     const candidate = envelope({ revision: "candidate", queued: 100 });
     baseline.benchmark.contractVersion = candidate.benchmark.contractVersion = 3;
-    expect(() =>
-      compareStreamingBackpressureResults(baseline, candidate),
-    ).toThrow(/contractVersion must be 4/);
+    expect(() => compareStreamingBackpressureResults(baseline, candidate)).toThrow(/contractVersion must be 4/);
   });
 
   it("records explicit revisions and ratios when controls match", () => {

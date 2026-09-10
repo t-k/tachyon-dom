@@ -41,9 +41,7 @@ describe("benchmark statistical authority", () => {
   });
 
   it("keeps a noisy apparent win inconclusive", () => {
-    expect(analyzeRatios([0.8, 1.2, 0.82, 1.18, 0.9], { seed: 7, resamples: 10_000 }).status).toBe(
-      "inconclusive",
-    );
+    expect(analyzeRatios([0.8, 1.2, 0.82, 1.18, 0.9], { seed: 7, resamples: 10_000 }).status).toBe("inconclusive");
   });
 
   it("treats fewer than five independent runs as inconclusive", () => {
@@ -57,9 +55,7 @@ describe("benchmark statistical authority", () => {
     expect(() => analyzeRatios([0.9, 0.9, 0.9, 0.9, Number.NaN], { seed: 7, resamples: 100 })).toThrow(
       "finite positive",
     );
-    expect(() => analyzeRatios([0.9, 0.9, 0.9, 0.9, 0.9], { seed: 7, resamples: 0 })).toThrow(
-      "positive integer",
-    );
+    expect(() => analyzeRatios([0.9, 0.9, 0.9, 0.9, 0.9], { seed: 7, resamples: 0 })).toThrow("positive integer");
   });
 
   it("reproduces balanced order from the same seed", () => {
@@ -81,7 +77,12 @@ describe("benchmark statistical authority", () => {
     expect(validateCompletePositionCycles(complete, items)).toBe(true);
     expect(validateCompletePositionCycles(complete.slice(0, 2), items)).toBe(false);
     expect(validateCompletePositionCycles([...complete, complete[0]!], items)).toBe(false);
-    expect(validateCompletePositionCycles(complete.map(() => [...items]), items)).toBe(false);
+    expect(
+      validateCompletePositionCycles(
+        complete.map(() => [...items]),
+        items,
+      ),
+    ).toBe(false);
   });
 
   it("creates reproducible local implementation and scenario orders", () => {
@@ -93,7 +94,9 @@ describe("benchmark statistical authority", () => {
     expect(
       new Set(
         [0, 1, 2].map(
-          (runIndex) => createLocalRunPlan(implementations, scenarios, { runId: `run-${runIndex}`, runIndex, seed: 9 }).implementationOrder[0],
+          (runIndex) =>
+            createLocalRunPlan(implementations, scenarios, { runId: `run-${runIndex}`, runIndex, seed: 9 })
+              .implementationOrder[0],
         ),
       ),
     ).toEqual(new Set(implementations));
@@ -102,8 +105,9 @@ describe("benchmark statistical authority", () => {
   it("balances nine scenarios across the early and late halves of seven runs", () => {
     const implementations = ["a", "b", "c", "d", "e", "f", "g"];
     const scenarios = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
-    const orders = implementations.map((_, runIndex) =>
-      createLocalRunPlan(implementations, scenarios, { runId: `run-${runIndex}`, runIndex, seed: 9 }).scenarioOrder,
+    const orders = implementations.map(
+      (_, runIndex) =>
+        createLocalRunPlan(implementations, scenarios, { runId: `run-${runIndex}`, runIndex, seed: 9 }).scenarioOrder,
     );
     for (const scenario of scenarios) {
       const positions = orders.map((order) => order.indexOf(scenario));

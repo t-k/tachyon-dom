@@ -26,8 +26,20 @@ describe("local compare report", () => {
       workload: { candidate: "tachyon-dom", implementations: ["competitor", "tachyon-dom"], trimFraction: 0.2 },
       measurements: {
         summaries: [
-          { id: "createRows", label: "create rows", implementation: "competitor", trimmedMean: 10, values: Array(30).fill(10) },
-          { id: "createRows", label: "create rows", implementation: "tachyon-dom", trimmedMean: 9.8, values: Array(30).fill(9.8) },
+          {
+            id: "createRows",
+            label: "create rows",
+            implementation: "competitor",
+            trimmedMean: 10,
+            values: Array(30).fill(10),
+          },
+          {
+            id: "createRows",
+            label: "create rows",
+            implementation: "tachyon-dom",
+            trimmedMean: 9.8,
+            values: Array(30).fill(9.8),
+          },
         ],
       },
     }));
@@ -50,8 +62,20 @@ describe("local compare report", () => {
       workload: { candidate: "tachyon-dom", implementations: ["competitor", "tachyon-dom"], trimFraction: 0.2 },
       measurements: {
         summaries: [
-          { id: "createRows", label: "create rows", implementation: "competitor", trimmedMean: 20, values: Array(30).fill(20) },
-          { id: "createRows", label: "create rows", implementation: "tachyon-dom", trimmedMean: 9, values: Array(30).fill(21) },
+          {
+            id: "createRows",
+            label: "create rows",
+            implementation: "competitor",
+            trimmedMean: 20,
+            values: Array(30).fill(20),
+          },
+          {
+            id: "createRows",
+            label: "create rows",
+            implementation: "tachyon-dom",
+            trimmedMean: 9,
+            values: Array(30).fill(21),
+          },
         ],
       },
     }));

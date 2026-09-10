@@ -207,12 +207,14 @@ describe("router platform features", () => {
   });
 
   it("keeps identity-dependent route responses private by default", async () => {
-    const routes: RouteDefinition[] = [{
-      path: "/account",
-      cache: { maxAge: 60 },
-      loader: ({ request }) => request.headers.get("cookie"),
-      render: ({ data }) => `<p>${data}</p>`,
-    }];
+    const routes: RouteDefinition[] = [
+      {
+        path: "/account",
+        cache: { maxAge: 60 },
+        loader: ({ request }) => request.headers.get("cookie"),
+        render: ({ data }) => `<p>${data}</p>`,
+      },
+    ];
 
     const [alice, bob] = await Promise.all([
       renderRoute(routes, new Request("https://x.test/account", { headers: { cookie: "sid=alice" } })),

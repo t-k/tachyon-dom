@@ -49,10 +49,18 @@ export const listRegionEnd = (start: Comment): Comment | undefined => {
  * The start marker of the container's `index`-th own list region. Regions inside a sibling conditional or list
  * region belong to that region's content and are skipped.
  */
-export const listRegionStartAt = (container: Node, index: number): Comment | undefined => {
+export const listRegionStartAt = (container: Node, index: number): Comment | undefined =>
+  listRegionStartBetween(container.firstChild, null, index);
+
+/**
+ * The nth list start marker among the nodes from `first` up to (excluding) `end`, counting only regions at
+ * this level: a list inside a sibling `<if>` or `<for>` region belongs to that region. A branch mounts its
+ * own direct `<for>` by searching the nodes between its conditional markers this way.
+ */
+export const listRegionStartBetween = (first: Node | null, end: Node | null, index: number): Comment | undefined => {
   let depth = 0;
   let ordinal = 0;
-  for (let node = container.firstChild; node; node = node.nextSibling) {
+  for (let node = first; node && node !== end; node = node.nextSibling) {
     if (isConditionalStartMarker(node) || isListStartMarker(node)) {
       if (depth === 0 && isListStartMarker(node) && ordinal++ === index) return node;
       depth++;
@@ -61,6 +69,13 @@ export const listRegionStartAt = (container: Node, index: number): Comment | und
     }
   }
   return undefined;
+};
+
+/** Removes a list region's rows and its end marker; the start marker is the caller's to remove. */
+export const removeListRegion = (start: Comment): void => {
+  const end = listRegionEnd(start);
+  while (end && start.nextSibling && start.nextSibling !== end) start.nextSibling.remove();
+  end?.remove();
 };
 
 /**

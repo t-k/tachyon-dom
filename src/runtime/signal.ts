@@ -391,7 +391,7 @@ const flushPendingEffects = (): void => {
     return;
   }
   flushing = true;
-  const unhandled: unknown[] = [];
+  const unhandled: unknown[] = deferredComputedErrors.splice(0);
   try {
     while (pendingComputedEffects.size > 0 || pendingEffects.size > 0) {
       const runner = pendingComputedEffects.values().next().value ?? pendingEffects.values().next().value;
@@ -512,12 +512,15 @@ export const createSignal = <T>(initial: T): Signal<T> => {
   return signal;
 };
 
-// Runs every queued computed effect now. A memo read while its recomputation is still queued (inside `batch()`
-// or an effect run) drains the queue first, so derived values are always fresh even though ordinary effects
-// stay deferred until the flush. Chained memos become fresh through the same loop: each computed run notifies
-// the next one into the queue before the loop checks it again. A failure is delivered to the runner's error
-// owner; an unhandled one reaches the reader.
-const runPendingComputedEffects = (): void => {
+// Recomputes the queued memos before a memo is read inside `batch()` or an effect run, so derived values
+// are always fresh even though ordinary effects stay deferred until the flush. Every queued memo runs, in
+// queue order: a chained memo is queued by the memo it depends on and is reached by the same loop. A failure
+// is delivered to the runner's error owner. When it is unhandled, the failure of the memo being read reaches
+// the reader; the failure of any other memo is held until the flush, so an unrelated memo cannot abort the
+// caller's batch body.
+const deferredComputedErrors: unknown[] = [];
+
+const runPendingComputedEffects = (reading: EffectRunner): void => {
   while (pendingComputedEffects.size > 0) {
     const runner = pendingComputedEffects.values().next().value as EffectRunner;
     pendingComputedEffects.delete(runner);
@@ -525,18 +528,21 @@ const runPendingComputedEffects = (): void => {
       runner.run();
     } catch (error) {
       const delivered = deliverError(runner.errorOwner, error);
-      if (!delivered.handled) throw delivered.error;
+      if (!delivered.handled) {
+        if (runner === reading) throw delivered.error;
+        deferredComputedErrors.push(delivered.error);
+      }
     }
   }
 };
 
 export const createMemo = <T>(fn: () => T): Accessor<T> => {
   const value = createSignal<T>(undefined as T);
-  createEffect(() => {
+  const runner = createEffectRunner(() => {
     value.set(fn());
   }, true);
   const memo = (() => {
-    if (pendingComputedEffects.size > 0) runPendingComputedEffects();
+    if (runner && pendingComputedEffects.size > 0) runPendingComputedEffects(runner);
     return value();
   }) as Accessor<T>;
   Object.defineProperty(memo, signalBrand, { value: true });
@@ -608,9 +614,15 @@ const reportAsyncEffectError = (runner: EffectRunner, runOwner: Owner, generatio
 };
 
 const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
+  const runner = createEffectRunner(fn, computed);
+  return runner ? () => disposeRunner(runner) : () => undefined;
+};
+
+/** Creates and runs an effect runner, or returns `undefined` when the current owner is already disposed. */
+const createEffectRunner = (fn: EffectCallback, computed: boolean): EffectRunner | undefined => {
   const registrationOwner = currentEffectOwner ?? currentOwner;
   if (registrationOwner?.disposed || currentOwner?.disposed) {
-    return () => undefined;
+    return undefined;
   }
   const parent = activeEffect && !activeEffect.disposed ? activeEffect : undefined;
   const errorOwner = currentErrorOwner;
@@ -710,7 +722,7 @@ const createEffect = (fn: EffectCallback, computed: boolean): (() => void) => {
       throw delivered.error;
     }
   }
-  return dispose;
+  return runner;
 };
 
 export const effect = (fn: EffectCallback): (() => void) => createEffect(fn, false);

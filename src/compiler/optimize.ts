@@ -9,9 +9,7 @@ import { attrExpression } from "./utils.js";
  * - `dynamic`: anything else. Identifiers, calls, member access, and getters stay dynamic even when a type or a
  *   declaration suggests a value, because evaluating them could observe or change program state.
  */
-export type ConditionalTestAnalysis =
-  | { kind: "constant"; value: boolean }
-  | { kind: "dynamic" };
+export type ConditionalTestAnalysis = { kind: "constant"; value: boolean } | { kind: "dynamic" };
 
 export type RemovedConditional = {
   /** Template child path of the removed `<if>`, in the tree it was removed from. */
@@ -41,8 +39,7 @@ export const analyzeConditionalTest = (test: string): ConditionalTestAnalysis =>
   return value === undefined ? { kind: "dynamic" } : { kind: "constant", value };
 };
 
-const isConditional = (node: TemplateNode): node is ElementNode =>
-  node.type === "element" && node.tagName === "if";
+const isConditional = (node: TemplateNode): node is ElementNode => node.type === "element" && node.tagName === "if";
 
 /**
  * Removes `<if>` elements whose test is constant and false, before the IR is built. Doing it here keeps the
@@ -161,7 +158,6 @@ export const expressionAlwaysPlainValue = (expression: string): boolean => {
       return false;
   }
 };
-
 
 const containsCall = (node: ExpressionNode): boolean => {
   switch (node.type) {

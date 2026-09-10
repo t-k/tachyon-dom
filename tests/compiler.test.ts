@@ -1541,15 +1541,18 @@ describe("HTML-first compiler", () => {
     `<main><section><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></section></main>`,
     `<main><for each={rows} key={row.id}><p>{row.label}</p></for><if test={visible}><span>{left}</span></if></main>`,
     `<main>prefix<if test={visible}><span>{left}</span></if></main>`,
-  ])("compiles conditional and list regions beside same-shaped siblings without a hydration diagnostic %#", (source) => {
-    // Every region is delimited by its own markers on the server and in the client template, so hydration
-    // never has to tell a branch apart from a sibling by shape.
-    const result = compileTemplate(source);
+  ])(
+    "compiles conditional and list regions beside same-shaped siblings without a hydration diagnostic %#",
+    (source) => {
+      // Every region is delimited by its own markers on the server and in the client template, so hydration
+      // never has to tell a branch apart from a sibling by shape.
+      const result = compileTemplate(source);
 
-    expect(result.ok).toBe(true);
-    if (!result.ok) throw new Error(result.error.message);
-    expect(result.value.client.hydrationDynamicRegionErrors).toEqual([]);
-  });
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error(result.error.message);
+      expect(result.value.client.hydrationDynamicRegionErrors).toEqual([]);
+    },
+  );
 
   it("requires every child in a generated-attribute sibling shape to match", () => {
     const result = compileTemplate(

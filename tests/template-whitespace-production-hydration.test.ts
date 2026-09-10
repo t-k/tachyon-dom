@@ -82,7 +82,9 @@ Object.assign(window, {
         rollupOptions: { output: { format: "es" } },
       },
     });
-    const serverModule = await import(`data:text/javascript;base64,${Buffer.from(outputChunk(serverBuild).code).toString("base64")}`) as {
+    const serverModule = (await import(
+      `data:text/javascript;base64,${Buffer.from(outputChunk(serverBuild).code).toString("base64")}`
+    )) as {
       html: string;
     };
     serverHtml = serverModule.html;

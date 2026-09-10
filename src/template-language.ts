@@ -456,8 +456,7 @@ const scriptSymbols = (
         continue;
       }
       if (!token.name || reservedWords.has(token.name)) continue;
-      const spread =
-        previous?.punct === "." && tokens[index - 2]?.punct === "." && tokens[index - 3]?.punct === ".";
+      const spread = previous?.punct === "." && tokens[index - 2]?.punct === "." && tokens[index - 3]?.punct === ".";
       if (depth === 0 && (previous?.punct === "(" || previous?.punct === "," || spread)) names.push(token);
       else if (depth > 0 && (previous?.punct !== "." || spread) && tokens[index + 1]?.punct !== ":") names.push(token);
     }
@@ -579,7 +578,13 @@ const scriptSymbols = (
       continue;
     }
     if (token.name && declarationWords.has(token.name)) {
-      if (token.name === "function" || token.name === "class" || token.name === "interface" || token.name === "type" || token.name === "enum") {
+      if (
+        token.name === "function" ||
+        token.name === "class" ||
+        token.name === "interface" ||
+        token.name === "type" ||
+        token.name === "enum"
+      ) {
         const next = tokens[index + 1];
         if (next?.name) declare(next, "Declared in the component script");
         variable = undefined;
@@ -589,16 +594,18 @@ const scriptSymbols = (
       continue;
     }
     if (!variable) continue;
-    const sameLevel = braceDepthAt(token.start) === variable.brace && paren === variable.paren && bracket === variable.bracket;
+    const sameLevel =
+      braceDepthAt(token.start) === variable.brace && paren === variable.paren && bracket === variable.bracket;
     if (token.name && variable.expect && sameLevel) {
       declare(token, "Declared in the component script", variable.scope);
       variable.expect = false;
     } else if (token.punct === "," && sameLevel) {
       variable.expect = true;
     } else if (token.punct === ";" || (token.name && declarationWords.has(token.name) && sameLevel)) {
-      variable = token.name && declarationWords.has(token.name)
-        ? { scope: scopeAt(token.start), brace: braceDepthAt(token.start), paren, bracket, expect: true }
-        : undefined;
+      variable =
+        token.name && declarationWords.has(token.name)
+          ? { scope: scopeAt(token.start), brace: braceDepthAt(token.start), paren, bracket, expect: true }
+          : undefined;
     }
   }
   for (let index = 0; index < tokens.length; index += 1) {

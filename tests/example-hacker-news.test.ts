@@ -167,7 +167,7 @@ describe("Hacker News example renderer", () => {
     const html = renderHackerNewsError("Unable to load top stories");
 
     expect(html).toContain("Unable to load top stories");
-    expect(html).toContain("data-state=\"error\"");
+    expect(html).toContain('data-state="error"');
   });
 
   it("streaming yields shell before story rows", async () => {

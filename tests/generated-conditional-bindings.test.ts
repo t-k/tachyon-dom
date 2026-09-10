@@ -216,13 +216,19 @@ describe("generated conditional bindings", () => {
     const branch = document.createElement("section");
     branch.innerHTML = `<!---->`;
 
-    mountConditionalCore(branch, [0], true, { message: "M", flag: true }, {
-      templateHtml: `<p> </p>`,
-      bindings: [
-        { kind: "text", path: [0], expression: "message" },
-        { kind: "class", path: [], className: "on", expression: "flag" },
-      ],
-    });
+    mountConditionalCore(
+      branch,
+      [0],
+      true,
+      { message: "M", flag: true },
+      {
+        templateHtml: `<p> </p>`,
+        bindings: [
+          { kind: "text", path: [0], expression: "message" },
+          { kind: "class", path: [], className: "on", expression: "flag" },
+        ],
+      },
+    );
 
     expect(branch.textContent).toBe("M");
     expect(branch.querySelector("p")?.getAttribute("class")).toBe("on");
@@ -236,20 +242,26 @@ describe("generated conditional bindings", () => {
     let reads = 0;
 
     expect(() =>
-      mountGeneratedConditionalCore(branch, [0], true, {}, {
-        signature: "missing-node",
-        templateHtml: `<p> </p>`,
-        bindings: [
-          { path: [0], read: () => "kept" },
-          {
-            path: [5],
-            read: () => {
-              reads += 1;
-              return "unreachable";
+      mountGeneratedConditionalCore(
+        branch,
+        [0],
+        true,
+        {},
+        {
+          signature: "missing-node",
+          templateHtml: `<p> </p>`,
+          bindings: [
+            { path: [0], read: () => "kept" },
+            {
+              path: [5],
+              read: () => {
+                reads += 1;
+                return "unreachable";
+              },
             },
-          },
-        ],
-      }),
+          ],
+        },
+      ),
     ).not.toThrow();
 
     expect(branch.textContent).toBe("kept");
@@ -265,16 +277,22 @@ describe("generated conditional bindings", () => {
       return () => undefined;
     };
 
-    mountGeneratedConditionalCore(branch, [0], true, {}, {
-      signature: "text-target",
-      templateHtml: `<p> </p>`,
-      bindings: [{ path: [0], read: () => "T" }],
-      // Path [0] is the template's text node, and path [] is the element that holds it.
-      events: [
-        { path: [0], bind },
-        { path: [], bind },
-      ],
-    });
+    mountGeneratedConditionalCore(
+      branch,
+      [0],
+      true,
+      {},
+      {
+        signature: "text-target",
+        templateHtml: `<p> </p>`,
+        bindings: [{ path: [0], read: () => "T" }],
+        // Path [0] is the template's text node, and path [] is the element that holds it.
+        events: [
+          { path: [0], bind },
+          { path: [], bind },
+        ],
+      },
+    );
 
     expect(bound).toEqual([branch.querySelector("p")]);
   });
@@ -285,11 +303,17 @@ describe("generated conditional bindings", () => {
     const branch = document.createElement("section");
     branch.innerHTML = `<!---->`;
 
-    mountGeneratedConditionalCore(branch, [0], true, { message: "M" }, {
-      signature: "generated",
-      templateHtml: `<p> </p>`,
-      bindings: [{ path: [0], read: (scope) => scope.message }],
-    });
+    mountGeneratedConditionalCore(
+      branch,
+      [0],
+      true,
+      { message: "M" },
+      {
+        signature: "generated",
+        templateHtml: `<p> </p>`,
+        bindings: [{ path: [0], read: (scope) => scope.message }],
+      },
+    );
 
     expect(branch.textContent).toBe("M");
     // @ts-expect-error a generated binding without a reader is a compile error

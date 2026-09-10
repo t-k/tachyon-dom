@@ -93,7 +93,8 @@ describe("web framework benchmark report", () => {
     });
 
     const duplicateMetricValues = structuredClone(consistentValues);
-    for (const run of duplicateMetricValues) run.measurements.metrics.push(structuredClone(run.measurements.metrics[0]!));
+    for (const run of duplicateMetricValues)
+      run.measurements.metrics.push(structuredClone(run.measurements.metrics[0]!));
     expect(analyzeWebStreamRuns(signRuns(duplicateMetricValues), { seed: 7, resamples: 1_000 })).toMatchObject({
       ok: false,
     });

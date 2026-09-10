@@ -22,6 +22,8 @@ export type ListCoreRegion = {
   index?: number;
   /** Logical child index the rows start at in the template. */
   at?: number;
+  /** The list is a direct node of a branch or row; see the compiler's `ListRegion`. */
+  direct?: true;
   before?: number;
   after?: number;
   logicalBefore?: number;
@@ -198,8 +200,25 @@ export const positionRecords = (
  * `before` elements, before the last `after` elements or a `<!--tachyon-list-->` boundary), or around every
  * child when it declares no region. Existing children between the markers are what a first mount adopts.
  */
+// A branch or row that mounts a `<for>` placed directly among its own nodes has already located the marker
+// pair inside its range; the container-level search would count only the container's top-level regions.
+let explicitRegionStart: Comment | undefined;
+
+export const withListRegionStart = <T>(start: Comment, fn: () => T): T => {
+  const previous = explicitRegionStart;
+  explicitRegionStart = start;
+  try {
+    return fn();
+  } finally {
+    explicitRegionStart = previous;
+  }
+};
+
 export const ensureListRegion = (container: Element, region: ListCoreRegion | undefined): ListRegionMarkers => {
-  const start = listRegionStartAt(container, region?.index ?? 0);
+  const start =
+    explicitRegionStart?.parentNode === container
+      ? explicitRegionStart
+      : listRegionStartAt(container, region?.index ?? 0);
   const end = start && listRegionEnd(start);
   if (start && end) return { start, end };
   const elements = Array.from(container.children);

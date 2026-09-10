@@ -99,9 +99,9 @@ const onAny = (event: Event) => event.type;
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error(result.error);
-    expect(result.value.map((diagnostic) => [diagnostic.code, source.slice(diagnostic.offset, diagnostic.endOffset)])).toEqual([
-      [2322, "onKey"],
-    ]);
+    expect(
+      result.value.map((diagnostic) => [diagnostic.code, source.slice(diagnostic.offset, diagnostic.endOffset)]),
+    ).toEqual([[2322, "onKey"]]);
     expect(result.value[0]?.message).toContain("KeyboardEvent");
   });
 
@@ -122,7 +122,9 @@ const plainName = "Alice";
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error(result.error);
-    expect(result.value.map((diagnostic) => source.slice(diagnostic.offset, diagnostic.endOffset))).toEqual(["readonlyName"]);
+    expect(result.value.map((diagnostic) => source.slice(diagnostic.offset, diagnostic.endOffset))).toEqual([
+      "readonlyName",
+    ]);
     expect(result.value[0]?.message).toMatch(/readonly/i);
   });
 });

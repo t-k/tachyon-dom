@@ -3,7 +3,15 @@ import { bindRef, setAttributeValue, setRef, setStyleValue } from "./attr.js";
 import { setText, textAt } from "./text.js";
 import { bindControl, setControlValue, writeModelValue } from "./form.js";
 import { mountConditional } from "./conditional.js";
-import { createSignal, createStore, detachFromEffectOwner, effect, onOwnerCleanup, read, type Signal } from "./signal.js";
+import {
+  createSignal,
+  createStore,
+  detachFromEffectOwner,
+  effect,
+  onOwnerCleanup,
+  read,
+  type Signal,
+} from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { normalizeListKey } from "./key.js";
 import {

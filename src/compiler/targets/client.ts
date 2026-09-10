@@ -365,7 +365,18 @@ const lowerIf = (node: ElementNode, path: number[], context: ClientLoweringConte
   );
   let templateHtml = "";
   let domIndex = 0;
+  let listIndex = 0;
   for (const child of children) {
+    if (child.type === "element" && child.tagName === "for") {
+      // A direct list's path is the branch's own parent (empty), and its marker pair is the nth among the
+      // branch nodes; the runtime locates it between the conditional markers rather than by a node index.
+      childContext.bindings.push(
+        lowerList(child, [], childContext, listIndex > 0 ? { direct: true, index: listIndex } : { direct: true }),
+      );
+      listIndex++;
+      templateHtml += `${listStartMarker}${listEndMarker}`;
+      continue;
+    }
     const lowered = lowerNode(child, renderedChildren.length === 1 ? [] : [domIndex], childContext);
     templateHtml += lowered.html;
     domIndex += lowered.nodeCount;
@@ -459,7 +470,13 @@ const lowerElement = (
   }
   if (node.tagName === "await") {
     // The client target has no way to await: it leaves a marker and binds nothing, the same as <slot>, instead
-    // of emitting an <await> element with bindings that would read the Promise as a plain value.
+    // of emitting an <await> element with bindings that would read the Promise as a plain value. The server
+    // renders the resolved children in this slot, so a hydrated document has nodes here the client template
+    // does not; hydrate() refuses the template rather than binding later siblings to the wrong nodes.
+    const label = path.length === 0 ? "root" : `root.${path.join(".")}`;
+    context.hydrationDynamicRegionErrors.push(
+      `Hydration does not support <await> at ${label}: the client target renders no await content. Render the resolved value with createResource() and <if>, or mount() the template instead.`,
+    );
     return "<!--tachyon-await-->";
   }
   if (node.tagName === "for") {
