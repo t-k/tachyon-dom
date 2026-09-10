@@ -67,7 +67,7 @@ Every `<for>` region is delimited by the same comment markers on every target: `
 </ul>
 ```
 
-Both markers occupy no logical child slot, so binding paths for siblings after a region are the same in the client template and in the hydrated document. A `<for>` may also be a direct child of an `<if>` branch; the branch owns the pair and removes the rows with itself. A `<for>` placed directly inside a `<for>` row is not supported yet and is reported by the compiler; wrap it in an element. The markers are part of the generated-only contract (see [Public API layers](api.md)): their text may change between compiler versions, and hand-written server HTML that omits them is not supported for hydration.
+Both markers occupy no logical child slot, so binding paths for siblings after a region are the same in the client template and in the hydrated document. A `<for>` may also be a direct child of an `<if>` branch; the branch owns the pair and removes the rows with itself. A `<for>` placed directly inside a `<for>` row, or reached only through a transparent `<component>` directly under an `<if>` or a row, is not supported yet and is reported by the compiler; wrap it in an element. The markers are part of the generated-only contract (see [Public API layers](api.md)): their text may change between compiler versions, and hand-written server HTML that omits them is not supported for hydration.
 
 Transparent `<component>` boundaries emit no element, so a `<for>` or `<if>` inside one shares the surrounding DOM parent; its markers still identify it.
 

@@ -128,6 +128,24 @@ describe("sibling lists directly inside a branch or row", () => {
   });
 });
 
+describe("transparent <component> wrappers around a direct <for>", () => {
+  it("reports a <for> reached through a <component> directly under <if>", () => {
+    const result = compileTemplate(
+      `<ul><if test={open}><component name="x"><for each={rows} key={row.id}><li>{row.label}</li></for></component></if></ul>`,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toMatch(/<component> that is a direct child of <if>/);
+  });
+
+  it("reports a <for> reached through a <component> directly inside a <for> row", () => {
+    const result = compileTemplate(
+      `<ul><for each={groups} as="group" key={group.id}><component name="x"><for each={group.items} as="item" key={item.id}><li>{item.id}</li></for></component></for></ul>`,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toMatch(/directly inside a <for> row/);
+  });
+});
+
 describe("memo reads inside batch", () => {
   it("does not abort the batch body because an unrelated memo fails", () => {
     const a = createSignal(1);

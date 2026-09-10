@@ -36,6 +36,33 @@ const semanticError = (message: string, span?: SourceSpan): Result<never, Compil
 
 const openingTagSpan = (node: ElementNode): SourceSpan => ({ start: node.start, end: node.openEnd });
 
+/**
+ * A `<for>` that would sit directly among `node`'s own nodes: a direct child, or a child of a transparent
+ * `<component>` chain, which emits no element of its own.
+ */
+const listAmongTransparentChildren = (node: ElementNode, throughComponent = false): ElementNode | undefined => {
+  for (const child of node.children) {
+    if (child.type !== "element") continue;
+    if (child.tagName === "for" && throughComponent) return child;
+    if (child.tagName === "for") return child;
+    if (child.tagName === "component") {
+      const nested = listAmongTransparentChildren(child, true);
+      if (nested) return nested;
+    }
+  }
+  return undefined;
+};
+
+/** Like `listAmongTransparentChildren`, but only a `<for>` reached through a `<component>` counts. */
+const listThroughComponentChildren = (node: ElementNode): ElementNode | undefined => {
+  for (const child of node.children) {
+    if (child.type !== "element" || child.tagName !== "component") continue;
+    const nested = listAmongTransparentChildren(child, true);
+    if (nested) return nested;
+  }
+  return undefined;
+};
+
 const attributeSpan = (attribute: Attribute): SourceSpan => ({ start: attribute.start, end: attribute.end });
 
 export const storeDefinitionsFor = (node: ElementNode): StoreDefinition[] => {
@@ -195,9 +222,7 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
     if (!key) {
       return semanticError("<for> requires key={item.id}.", openingTagSpan(node));
     }
-    const directList = node.children.find(
-      (child): child is ElementNode => child.type === "element" && child.tagName === "for",
-    );
+    const directList = listAmongTransparentChildren(node);
     if (directList) {
       // A row's nodes are bound before they are inserted and moved as a fixed set, so a list whose rows would
       // sit among them has no owner yet. The compiler reports it instead of nesting the rows in a sibling.
@@ -228,6 +253,17 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
   }
   if (node.tagName === "if" && !attrExpression(node, "test")) {
     return semanticError("<if> requires test={condition}.", openingTagSpan(node));
+  }
+  if (node.tagName === "if") {
+    const componentList = listThroughComponentChildren(node);
+    if (componentList) {
+      // A transparent <component> emits no element, so this <for> would sit among the branch nodes without the
+      // branch knowing it; the compiler reports it instead of leaving the rows unmanaged.
+      return semanticError(
+        "A <for> inside a <component> that is a direct child of <if> is not supported yet; place the <for> directly in the <if> or wrap it in an element.",
+        openingTagSpan(componentList),
+      );
+    }
   }
   if (node.tagName === "component") {
     if (!componentName(node)) {
