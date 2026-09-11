@@ -4,8 +4,10 @@ import { delegateTarget } from "./event.js";
 import {
   clearConditionalRegion,
   conditionalRegionEnd,
+  isInsertionStartMarker,
   isPathInvisibleNode,
   logicalNodesBetween,
+  removeInsertionRegion,
 } from "../conditional-marker.js";
 import { onOwnerCleanup, read } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
@@ -660,6 +662,8 @@ const cleanupState = (state: Pick<ConditionalCoreState, "nodes" | "cleanups">): 
       if (!failed) firstError = error;
       failed = true;
     } finally {
+      // A server-only insertion leaves with its start marker: its content and end marker are never logical nodes.
+      if (isInsertionStartMarker(node)) removeInsertionRegion(node);
       node.parentNode?.removeChild(node);
     }
   }
@@ -680,16 +684,23 @@ const disposeState = (anchor: Comment, state: ConditionalCoreState): void => {
   cleanupState(state);
 };
 
+// A created branch keeps every template node so it can be inserted as a whole, but binding paths count only
+// logical nodes: an insertion's end marker occupies no slot, exactly as it does not in the parent template.
+const logicalStateNodes = (state: ConditionalCoreState): Node[] =>
+  state.nodes.filter((node) => !isPathInvisibleNode(node));
+
 const nodeAtState = (state: ConditionalCoreState, path: readonly number[]): Node | undefined => {
-  if (state.nodes.length <= 1) return nodeAt(state.nodes[0] as Node, path);
+  const nodes = logicalStateNodes(state);
+  if (nodes.length <= 1) return nodeAt(nodes[0] as Node, path);
   const [firstIndex, ...rest] = path;
-  return nodeAt(state.nodes[firstIndex ?? 0] as Node, rest);
+  return nodeAt(nodes[firstIndex ?? 0] as Node, rest);
 };
 
 const textAtState = (state: ConditionalCoreState, path: readonly number[]): Text => {
-  if (state.nodes.length <= 1) return textAt(state.nodes[0] as Node, path);
+  const nodes = logicalStateNodes(state);
+  if (nodes.length <= 1) return textAt(nodes[0] as Node, path);
   const [firstIndex, ...rest] = path;
-  return textAt(state.nodes[firstIndex ?? 0] as Node, rest);
+  return textAt(nodes[firstIndex ?? 0] as Node, rest);
 };
 
 const bindNodes = (state: ConditionalCoreState, options: ConditionalCoreOptions, bindEvents: boolean): void => {

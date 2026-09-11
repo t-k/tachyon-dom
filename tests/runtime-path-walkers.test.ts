@@ -29,6 +29,9 @@ describe("template path walkers", () => {
     ["a named slot insertion", `<!--tachyon-slot:header--><b>x</b><i>y</i><!--/tachyon-slot:header-->`, 1],
     ["an empty slot insertion", `<!--tachyon-slot:header--><!--/tachyon-slot:header-->`, 1],
     ["a hydration marker", `<!--tachyon-hydrate:td-h-1:start-->`, 0],
+    ["a stray end marker", `<!--/tachyon-if-->`, 0],
+    ["a text node that starts with a slash", `/not-a-marker`, 1],
+    ["a text node that spells a marker", `tachyon-if`, 1],
     [
       "a nested region of the same kind",
       `<!--tachyon-if--><!--tachyon-if--><b>x</b><!--/tachyon-if--><i>y</i><!--/tachyon-if-->`,

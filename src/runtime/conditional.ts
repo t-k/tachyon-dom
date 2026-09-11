@@ -16,7 +16,10 @@ import {
   isListEndMarker,
   isListStartMarker,
   listRegionStartBetween,
+  isInsertionEndMarker,
+  isInsertionStartMarker,
   removeConditionalRegion,
+  removeInsertionRegion,
   removeListRegion,
 } from "../conditional-marker.js";
 import { withListRegionStart } from "./list-core.js";
@@ -444,6 +447,7 @@ const cleanup = (state: ConditionalState): void => {
     } finally {
       if (isConditionalStartMarker(node)) removeConditionalRegion(node);
       else if (isListStartMarker(node)) removeListRegion(node);
+      else if (isInsertionStartMarker(node)) removeInsertionRegion(node);
       node.parentNode?.removeChild(node);
     }
   }
@@ -463,6 +467,7 @@ const removeAdoptedNodes = (nodes: readonly Node[]): void => {
     } finally {
       if (isConditionalStartMarker(node)) removeConditionalRegion(node);
       else if (isListStartMarker(node)) removeListRegion(node);
+      else if (isInsertionStartMarker(node)) removeInsertionRegion(node);
       node.parentNode?.removeChild(node);
     }
   }
@@ -512,10 +517,15 @@ const createNodes = (templateHtml: string): Node[] => {
 const logicalNodes = (nodes: readonly Node[]): Node[] => {
   const logical: Node[] = [];
   let listDepth = 0;
+  let insertionDepth = 0;
   for (const node of nodes) {
     if (isListStartMarker(node)) listDepth++;
     else if (isListEndMarker(node)) listDepth--;
-    else if (listDepth === 0 && !isConditionalEndMarker(node)) logical.push(node);
+    else if (isInsertionEndMarker(node)) insertionDepth--;
+    else if (listDepth === 0 && insertionDepth === 0 && !isConditionalEndMarker(node)) logical.push(node);
+    // A server-only insertion is one logical node: its start marker. Its content, empty in a fresh template,
+    // and its end marker are skipped like a list's rows.
+    if (isInsertionStartMarker(node)) insertionDepth++;
   }
   return logical;
 };

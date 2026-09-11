@@ -130,6 +130,13 @@ export const isInsertionEndMarker = (node: Node): node is Comment => {
 export const insertionRegionEnd = (start: Comment): Comment | undefined =>
   regionEnd(start, isInsertionStartMarker, isInsertionEndMarker);
 
+/** Removes an insertion's content and its end marker; the start marker is the caller's to remove. */
+export const removeInsertionRegion = (start: Comment): void => {
+  const end = insertionRegionEnd(start);
+  while (end && start.nextSibling && start.nextSibling !== end) start.nextSibling.remove();
+  end?.remove();
+};
+
 /**
  * For the start marker of a region whose content the parent template never addresses (a conditional's branch
  * or a server-only insertion), the matching end marker; `undefined` for any other node.

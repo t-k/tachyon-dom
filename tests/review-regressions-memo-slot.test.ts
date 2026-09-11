@@ -321,3 +321,81 @@ describe("memo notification details", () => {
     expect(runs).toBe(2);
   });
 });
+
+describe("insertions inside managed regions", () => {
+  const template = `<section><if test={open}><slot name="s"></slot><p>{title}</p></if></section>`;
+
+  it("hydrates a branch holding a two-element slot and binds the sibling after it", () => {
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compile(template), {
+      open: true,
+      slots: { s: "<b>A</b><b>B</b>" },
+      title: "T",
+    });
+    const open = createSignal(true);
+    const title = createSignal("T");
+    const result = hydrate(root, moduleFor(template), { open, title });
+    expect(result.ok).toBe(true);
+    title.set("T2");
+    expect(strip(root.innerHTML)).toBe(`<section><b>A</b><b>B</b><p>T2</p></section>`);
+    open.set(false);
+    expect(strip(root.innerHTML)).toBe(`<section></section>`);
+    open.set(true);
+    expect(strip(root.innerHTML)).toBe(`<section><p>T2</p></section>`);
+  });
+
+  it("hydrates a row holding a slot and binds the row text after it", () => {
+    const rows = `<ul><for each={rows} key={r}><li><slot name="s"></slot><span>{r}</span></li></for></ul>`;
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compile(rows), { rows: ["a", "b"], slots: { s: "<b>1</b><b>2</b>" } });
+    const list = createSignal(["a", "b"]);
+    const result = hydrate(root, moduleFor(rows), { rows: list });
+    expect(result.ok).toBe(true);
+    list.set(["b"]);
+    expect(strip(root.innerHTML)).toBe(`<ul><li><b>1</b><b>2</b><span>b</span></li></ul>`);
+  });
+});
+
+describe("insertions inside generic regions and new rows", () => {
+  it("mounts, hides, and re-shows a generic branch holding a slot and a nested list", () => {
+    const template = `<section><if test={open}><slot name="s"></slot><ul><for each={rows} key={r}><li>{r}</li></for></ul><p>{title}</p></if></section>`;
+    const root = document.createElement("div");
+    const open = createSignal(true);
+    const title = createSignal("T");
+    mount(root, moduleFor(template), { open, title, rows: ["a"] });
+    expect(strip(root.innerHTML)).toBe(`<section><ul><li>a</li></ul><p>T</p></section>`);
+    open.set(false);
+    expect(strip(root.innerHTML)).toBe(`<section></section>`);
+    open.set(true);
+    title.set("T2");
+    expect(strip(root.innerHTML)).toBe(`<section><ul><li>a</li></ul><p>T2</p></section>`);
+  });
+
+  it("hydrates a generic branch holding a two-element slot and removes the slot content with the branch", () => {
+    const template = `<section><if test={open}><slot name="s"></slot><ul><for each={rows} key={r}><li>{r}</li></for></ul><p>{title}</p></if></section>`;
+    const root = document.createElement("div");
+    root.innerHTML = renderServerTemplate(compile(template), {
+      open: true,
+      rows: ["a"],
+      slots: { s: "<b>A</b><b>B</b>" },
+      title: "T",
+    });
+    const open = createSignal(true);
+    const title = createSignal("T");
+    const result = hydrate(root, moduleFor(template), { open, title, rows: ["a"] });
+    expect(result.ok).toBe(true);
+    title.set("T2");
+    expect(strip(root.innerHTML)).toBe(`<section><b>A</b><b>B</b><ul><li>a</li></ul><p>T2</p></section>`);
+    open.set(false);
+    expect(strip(root.innerHTML)).toBe(`<section></section>`);
+  });
+
+  it("creates new rows whose template carries an empty slot and binds the row text", () => {
+    const rows = `<ul><for each={rows} key={r}><li><slot name="s"></slot><span>{r}</span></li></for></ul>`;
+    const root = document.createElement("div");
+    const list = createSignal(["a"]);
+    mount(root, moduleFor(rows), { rows: list });
+    list.set(["a", "b"]);
+    expect(strip(root.innerHTML)).toBe(`<ul><li><span>a</span></li><li><span>b</span></li></ul>`);
+  });
+});
