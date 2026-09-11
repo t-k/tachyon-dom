@@ -68,8 +68,14 @@ export const listRegionStartAt = (container: Node, index: number): Comment | und
 export const listRegionStartBetween = (first: Node | null, end: Node | null, index: number): Comment | undefined => {
   let depth = 0;
   let ordinal = 0;
-  for (let node = first; node && node !== end; node = node.nextSibling) {
-    if (isConditionalStartMarker(node) || isListStartMarker(node)) {
+  for (let node: Node | null = first; node && node !== end; node = node.nextSibling) {
+    if (isInsertionStartMarker(node)) {
+      // Server-inserted content is never the parent's: whatever regions it holds are skipped as a whole. An
+      // unterminated insertion cannot be skipped safely, so nothing after it is claimed either.
+      const insertionEnd = insertionRegionEnd(node);
+      if (!insertionEnd) return undefined;
+      node = insertionEnd;
+    } else if (isConditionalStartMarker(node) || isListStartMarker(node)) {
       if (depth === 0 && isListStartMarker(node) && ordinal++ === index) return node;
       depth++;
     } else if (isConditionalEndMarker(node) || isListEndMarker(node)) {

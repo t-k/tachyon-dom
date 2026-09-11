@@ -20,6 +20,13 @@ type EffectRunner = {
   registration: CleanupRegistration | undefined;
   /** For a memo: the subscribers of its own value, so a queued memo can queue the memos derived from it. */
   dependents: SubscriberSet | undefined;
+  /**
+   * For a memo: whether a value it read actually changed. A queued memo that is not dirty is only queued to be
+   * checked; it recomputes only if pulling the memos it reads turns out to change one of them.
+   */
+  dirty: boolean;
+  /** For a memo: the memo runners it read during its last run, pulled first when the memo is checked. */
+  memoDependencies: Set<EffectRunner> | undefined;
   run: () => void;
 };
 
@@ -315,6 +322,7 @@ const cleanup = (runner: EffectRunner, createNextRunOwner: boolean): void => {
     }
   }
   runner.dependencies.clear();
+  runner.memoDependencies?.clear();
   // A run that registered no cleanup left its owner empty, so the next run can keep the same object instead of
   // disposing one and allocating another. Development builds always allocate so lifecycle diagnostics still see
   // one ownerCreated/ownerDisposed pair per run, including when hooks are installed after the effect starts.
@@ -400,13 +408,11 @@ const flushPendingEffects = (): void => {
       if (!runner) {
         break;
       }
-      if (runner.computed) {
-        pendingComputedEffects.delete(runner);
-      } else {
-        pendingEffects.delete(runner);
-      }
+      // A computed runner leaves the queue inside runComputed, which may settle it without running it.
+      if (!runner.computed) pendingEffects.delete(runner);
       try {
-        runner.run();
+        if (runner.computed) runComputed(runner);
+        else runner.run();
       } catch (error) {
         const delivered = deliverError(runner.errorOwner, error);
         if (!delivered.handled) unhandled.push(delivered.error);
@@ -433,7 +439,7 @@ const notify = (subscribers: SubscriberSet): void => {
   for (const subscriber of subscribers) {
     if (!subscriber.disposed) {
       if (subscriber.computed) {
-        queueComputed(subscriber);
+        queueComputed(subscriber, true);
       } else {
         pendingEffects.add(subscriber);
       }
@@ -442,17 +448,34 @@ const notify = (subscribers: SubscriberSet): void => {
   scheduleFlush();
 };
 
-// A queued memo may change, so every memo derived from it is queued too: a read of the derived memo then pulls
-// the chain in dependency order instead of returning a cache that only looks current. A memo whose value
-// turns out unchanged notifies nobody, so plain effects still run only for real changes.
-const queueComputed = (runner: EffectRunner): void => {
+// A memo notified of a real change is dirty. A queued memo may change, so every memo derived from it is queued
+// too, but only to be checked: a read of the derived memo pulls the chain in dependency order, and the derived
+// memo recomputes only if one of the memos it reads actually changed. A memo whose value turns out unchanged
+// notifies nobody, so neither the memos nor the plain effects downstream run for it.
+const queueComputed = (runner: EffectRunner, dirty: boolean): void => {
+  if (dirty) runner.dirty = true;
   if (pendingComputedEffects.has(runner)) return;
   pendingComputedEffects.add(runner);
   if (runner.dependents) {
     for (const dependent of runner.dependents) {
-      if (dependent.computed && !dependent.disposed) queueComputed(dependent);
+      if (dependent.computed && !dependent.disposed) queueComputed(dependent, false);
     }
   }
+};
+
+// Runs a queued memo, or settles it without running when it was queued only to be checked and none of the
+// memos it reads changed. Pulling a dependency that does change marks this memo dirty through notify.
+const runComputed = (runner: EffectRunner): void => {
+  if (!pendingComputedEffects.delete(runner)) return;
+  if (!runner.dirty) {
+    runner.memoDependencies?.forEach((dependency) => {
+      if (!runner.dirty) pullComputed(dependency);
+    });
+    pendingComputedEffects.delete(runner);
+    if (!runner.dirty) return;
+  }
+  runner.dirty = false;
+  runner.run();
 };
 
 export const isSignal = (value: unknown): value is Accessor<unknown> =>
@@ -535,9 +558,8 @@ export const createSignal = <T>(initial: T): Signal<T> => {
  * it (see `createMemo`).
  */
 const pullComputed = (runner: EffectRunner): void => {
-  pendingComputedEffects.delete(runner);
   try {
-    runner.run();
+    runComputed(runner);
   } catch (error) {
     deliverError(runner.errorOwner, error);
   }
@@ -569,7 +591,10 @@ export const createMemo = <T>(fn: () => T): Accessor<T> => {
   }, true);
   if (runner) runner.dependents = subscribers;
   const memo = (() => {
-    if (runner && pendingComputedEffects.has(runner)) pullComputed(runner);
+    if (runner) {
+      pullComputed(runner);
+      if (activeEffect?.computed && !activeEffect.disposed) (activeEffect.memoDependencies ??= new Set()).add(runner);
+    }
     track(subscribers);
     if (failure) throw failure.error;
     return current as T;
@@ -669,6 +694,8 @@ const createEffectRunner = (fn: EffectCallback, computed: boolean): EffectRunner
     generation: 0,
     registration: undefined,
     dependents: undefined,
+    dirty: false,
+    memoDependencies: undefined,
     run: () => {
       if (runner.disposed) {
         return;

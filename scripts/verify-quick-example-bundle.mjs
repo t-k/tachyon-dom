@@ -36,7 +36,7 @@ if (forbiddenInputs.length > 0) {
 }
 
 const maxMinifiedBytes = 17_000;
-const maxBrotliBytes = 5_800;
+const maxBrotliBytes = 6_000;
 const sizeResult = checkQuickExampleSizes({
   expectedMinified: expectedSizes.quickExampleMinifiedBytes,
   actualMinified: summary.minifiedBytes,
