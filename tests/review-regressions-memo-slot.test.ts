@@ -263,3 +263,61 @@ describe("bindings after a server-only <slot> or <outlet>", () => {
     expect(strip(root.innerHTML)).toBe(`<section><div><b>x</b><i>a</i><i>b</i></div><p>T2</p></section>`);
   });
 });
+
+describe("memo notification details", () => {
+  it("delivers an early-read failure to the memo's error owner and to the reader", () => {
+    const source = createSignal(0);
+    const errors: string[] = [];
+    const scope = createReactiveErrorScope((error) => errors.push(String((error as Error).message)));
+    const value = scope.run(() =>
+      createMemo(() => {
+        if (source() !== 0) throw new Error("invalid");
+        return "old";
+      }),
+    );
+    batch(() => {
+      source.set(1);
+      expect(() => value()).toThrow("invalid");
+    });
+    expect(errors).toEqual(["invalid"]);
+    scope.dispose();
+  });
+
+  it("reruns a dependent effect on failure even when the memo later recovers to the same value", () => {
+    const source = createSignal(0);
+    const errors: string[] = [];
+    const scope = createReactiveErrorScope((error) => errors.push(String((error as Error).message)));
+    const attempts: string[] = [];
+    scope.run(() => {
+      const value = createMemo(() => {
+        if (source() === 1) throw new Error("invalid");
+        return "same";
+      });
+      effect(() => {
+        attempts.push("run");
+        attempts.push(value());
+      });
+    });
+    source.set(1);
+    // The memo's own failure reaches the scope, and so does the rerun effect's.
+    expect(errors).toEqual(["invalid", "invalid"]);
+    expect(attempts).toEqual(["run", "same", "run"]);
+    source.set(2);
+    expect(attempts).toEqual(["run", "same", "run", "run", "same"]);
+    scope.dispose();
+  });
+
+  it("does not rerun a dependent effect when the memo recomputes to an equal value", () => {
+    const source = createSignal(1);
+    const parity = createMemo(() => source() % 2);
+    let runs = 0;
+    effect(() => {
+      parity();
+      runs++;
+    });
+    source.set(3);
+    expect(runs).toBe(1);
+    source.set(4);
+    expect(runs).toBe(2);
+  });
+});
