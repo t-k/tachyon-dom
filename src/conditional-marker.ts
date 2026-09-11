@@ -37,9 +37,10 @@ const regionEnd = (
   start: Comment,
   isStart: (node: Node) => boolean,
   isEnd: (node: Node) => boolean,
+  bound: Node | null = null,
 ): Comment | undefined => {
   let depth = 0;
-  for (let node = start.nextSibling; node; node = node.nextSibling) {
+  for (let node = start.nextSibling; node && node !== bound; node = node.nextSibling) {
     if (isStart(node)) depth++;
     else if (isEnd(node)) {
       if (depth === 0) return node as Comment;
@@ -72,7 +73,8 @@ export const listRegionStartBetween = (first: Node | null, end: Node | null, ind
     if (isInsertionStartMarker(node)) {
       // Server-inserted content is never the parent's: whatever regions it holds are skipped as a whole. An
       // unterminated insertion cannot be skipped safely, so nothing after it is claimed either.
-      const insertionEnd = insertionRegionEnd(node);
+      // The search bound applies inside the insertion too: an end at or inside it means nothing after it.
+      const insertionEnd = insertionRegionEnd(node, end);
       if (!insertionEnd) return undefined;
       node = insertionEnd;
     } else if (isConditionalStartMarker(node) || isListStartMarker(node)) {
@@ -133,8 +135,8 @@ export const isInsertionEndMarker = (node: Node): node is Comment => {
 };
 
 /** The end marker that closes the insertion `start` opens, skipping nested insertions. */
-export const insertionRegionEnd = (start: Comment): Comment | undefined =>
-  regionEnd(start, isInsertionStartMarker, isInsertionEndMarker);
+export const insertionRegionEnd = (start: Comment, bound: Node | null = null): Comment | undefined =>
+  regionEnd(start, isInsertionStartMarker, isInsertionEndMarker, bound);
 
 /** Removes an insertion's content and its end marker; the start marker is the caller's to remove. */
 export const removeInsertionRegion = (start: Comment): void => {

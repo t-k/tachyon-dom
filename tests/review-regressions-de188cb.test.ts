@@ -204,3 +204,19 @@ describe("memo check state bookkeeping", () => {
     expect(listRegionStartBetween(main.firstChild, null, 0)).toBe(main.childNodes[3]);
   });
 });
+
+describe("list lookup end bound inside an insertion", () => {
+  const html = `<!--tachyon-slot:s--><p>inside</p><!--/tachyon-slot:s--><!--tachyon-for--><p>outside</p><!--/tachyon-for-->`;
+  const outletHtml = html.replace("tachyon-slot:s", "tachyon-outlet").replace("/tachyon-slot:s", "/tachyon-outlet");
+
+  it.each([
+    ["the slot's end marker", html, 2],
+    ["a node inside the slot", html, 1],
+    ["the outlet's end marker", outletHtml, 2],
+  ])("finds nothing when end is %s", (_label, markup, endIndex) => {
+    const main = document.createElement("main");
+    main.innerHTML = markup;
+    expect(listRegionStartBetween(main.firstChild, main.childNodes[endIndex] as Node, 0)).toBeUndefined();
+    expect(listRegionStartBetween(main.firstChild, null, 0)).toBe(main.childNodes[3]);
+  });
+});
