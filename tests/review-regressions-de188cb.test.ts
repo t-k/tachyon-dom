@@ -162,3 +162,45 @@ describe("equal intermediate memo values stop downstream recomputation", () => {
     expect(runs).toBe(3);
   });
 });
+
+describe("memo check state bookkeeping", () => {
+  it("clears the dirty flag after a real recomputation so the next equal upstream value is skipped", () => {
+    const source = createSignal(1);
+    const parity = createMemo(() => source() % 2);
+    let runs = 0;
+    const model = createMemo(() => {
+      runs++;
+      return parity();
+    });
+    expect(model()).toBe(1);
+    source.set(4);
+    expect(runs).toBe(2);
+    source.set(6);
+    expect(runs).toBe(2);
+    expect(model()).toBe(0);
+  });
+
+  it("runs a checked memo once when the pull of its dependency dirties it inside batch", () => {
+    const source = createSignal(1);
+    const parity = createMemo(() => source() % 2);
+    let runs = 0;
+    const model = createMemo(() => {
+      runs++;
+      return parity();
+    });
+    expect(model()).toBe(1);
+    batch(() => {
+      source.set(4);
+      expect(model()).toBe(0);
+    });
+    expect(runs).toBe(2);
+  });
+
+  it("stops the list lookup at the given end node", () => {
+    const main = document.createElement("main");
+    main.innerHTML = `<p>x</p><!--tachyon-if--><!--/tachyon-if--><!--tachyon-for--><p>A</p><!--/tachyon-for-->`;
+    const ifEnd = main.childNodes[2] as Node;
+    expect(listRegionStartBetween(main.firstChild, ifEnd, 0)).toBeUndefined();
+    expect(listRegionStartBetween(main.firstChild, null, 0)).toBe(main.childNodes[3]);
+  });
+});
