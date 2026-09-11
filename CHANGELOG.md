@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-11
+
 ### Fixed
 
 - `listRegionStartBetween()` honours its end bound inside an insertion: when the bound sits on or inside a `<slot>` or `<outlet>` region, the lookup returns nothing instead of skipping past the bound to a list after it.
