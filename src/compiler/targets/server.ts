@@ -5,6 +5,10 @@ import {
   conditionalStartMarker,
   listEndMarker,
   listStartMarker,
+  outletEndMarker,
+  outletStartMarker,
+  slotEndMarker,
+  slotStartMarker,
 } from "../../conditional-marker.js";
 import { emptyTextMarker } from "../../text-marker.js";
 import { sanitizeMetaRefreshContent, sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../../url-policy.js";
@@ -144,12 +148,13 @@ const renderFor = (node: ElementNode, scope: Record<string, unknown>, path: numb
 
 const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: number[] = []): string => {
   if (node.tagName === "outlet") {
-    return String(scope.outlet ?? "");
+    return `${outletStartMarker}${String(scope.outlet ?? "")}${outletEndMarker}`;
   }
   if (node.tagName === "slot") {
     const slots = scope.slots;
     const name = attrString(node, "name") ?? "default";
-    return slots && typeof slots === "object" ? String((slots as Record<string, unknown>)[name] ?? "") : "";
+    const content = slots && typeof slots === "object" ? String((slots as Record<string, unknown>)[name] ?? "") : "";
+    return `${slotStartMarker(name)}${content}${slotEndMarker(name)}`;
   }
   if (node.tagName === "for") {
     return renderFor(node, scope, path);
@@ -435,11 +440,11 @@ const renderElementExpression = (
   path: number[] = [],
 ): string => {
   if (node.tagName === "outlet") {
-    return `String(scope.outlet ?? "")`;
+    return `${JSON.stringify(outletStartMarker)} + String(scope.outlet ?? "") + ${JSON.stringify(outletEndMarker)}`;
   }
   if (node.tagName === "slot") {
     const name = attrString(node, "name") ?? "default";
-    return `String(${jsOptionalPropertyAccess("scope.slots", name)} ?? "")`;
+    return `${JSON.stringify(slotStartMarker(name))} + String(${jsOptionalPropertyAccess("scope.slots", name)} ?? "") + ${JSON.stringify(slotEndMarker(name))}`;
   }
   if (node.tagName === "for") {
     return renderForExpression(node, locals, path);

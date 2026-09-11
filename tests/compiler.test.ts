@@ -1294,23 +1294,33 @@ describe("HTML-first compiler", () => {
       throw new Error(result.error.message);
     }
 
+    // Every target delimits the insertion with the same marker pair, so hydration can step over the inserted
+    // nodes regardless of how many the caller supplied.
     expect(result.value.client.templateHtml).toBe(
-      `<main><header><!--tachyon-slot:header--></header><!--tachyon-outlet--></main>`,
+      `<main><header><!--tachyon-slot:header--><!--/tachyon-slot:header--></header><!--tachyon-outlet--><!--/tachyon-outlet--></main>`,
     );
     expect(
       renderServerTemplate(result.value, {
         outlet: `<section>Child</section>`,
         slots: { header: `<h1>Title</h1>` },
       }),
-    ).toBe(`<main><header><h1>Title</h1></header><section>Child</section></main>`);
+    ).toBe(
+      `<main><header><!--tachyon-slot:header--><h1>Title</h1><!--/tachyon-slot:header--></header><!--tachyon-outlet--><section>Child</section><!--/tachyon-outlet--></main>`,
+    );
 
     const serverCode = generateServerModule(result.value);
-    expect(serverCode).toContain(`String(scope.slots?.header ?? "")`);
-    expect(serverCode).toContain(`String(scope.outlet ?? "")`);
+    expect(serverCode).toContain(
+      `"<!--tachyon-slot:header-->" + String(scope.slots?.header ?? "") + "<!--/tachyon-slot:header-->"`,
+    );
+    expect(serverCode).toContain(`"<!--tachyon-outlet-->" + String(scope.outlet ?? "") + "<!--/tachyon-outlet-->"`);
 
     const streamCode = generateServerStreamModule(result.value);
+    expect(streamCode).toContain(`__tachyonPush("<!--tachyon-slot:header-->");`);
     expect(streamCode).toContain(`__tachyonPush(String(scope.slots?.header ?? ""));`);
+    expect(streamCode).toContain(`__tachyonPush("<!--/tachyon-slot:header-->");`);
+    expect(streamCode).toContain(`__tachyonPush("<!--tachyon-outlet-->");`);
     expect(streamCode).toContain(`__tachyonPush(String(scope.outlet ?? ""));`);
+    expect(streamCode).toContain(`__tachyonPush("<!--/tachyon-outlet-->");`);
   });
 
   it("generates bracket slot access for non-identifier slot names", () => {
@@ -1320,7 +1330,7 @@ describe("HTML-first compiler", () => {
     }
 
     expect(renderServerTemplate(result.value, { slots: { "header-title": "<h1>Title</h1>" } })).toBe(
-      `<main><h1>Title</h1></main>`,
+      `<main><!--tachyon-slot:header-title--><h1>Title</h1><!--/tachyon-slot:header-title--></main>`,
     );
     expect(generateServerModule(result.value)).toContain(`String(scope.slots?.["header-title"] ?? "")`);
     expect(generateServerStreamModule(result.value)).toContain(

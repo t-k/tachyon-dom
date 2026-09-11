@@ -73,9 +73,9 @@ The same data is available as `explainCompiledTemplate()` from `tachyon-dom/comp
 
 ## Measured Size
 
-`import { createSignal } from "tachyon-dom"` bundles to **977 bytes minified** in the current esbuild contract.
+`import { createSignal } from "tachyon-dom"` bundles to **1037 bytes minified** in the current esbuild contract.
 
-Quick example client bundle: 15845 bytes minified, 5505 bytes Brotli, including the counter, text-only keyed-list binding code, and browser runtime. CI requires the minified baseline exactly, permits 1% Brotli variance across Node/zlib patch versions, enforces absolute 17000-byte minified and 5700-byte Brotli budgets, and rejects TypeScript, parse5, compiler, server, app, language-server, and runtime diagnostics modules from both browser metafiles. `pnpm check:client-bundle-attribution` records ten smaller fixtures, including a one-template and a thirty-template page whose difference is the per-template descriptor and glue cost, and a varied page of eight structurally different templates (forms, dynamic attributes, nested control flow, refs, richer expressions) that shows the per-template cost the repeated page understates, with the same build settings and keeps their esbuild contribution data and provenance in a unique ignored artifact.
+Quick example client bundle: 16378 bytes minified, 5662 bytes Brotli, including the counter, text-only keyed-list binding code, and browser runtime. CI requires the minified baseline exactly, permits 1% Brotli variance across Node/zlib patch versions, enforces absolute 17000-byte minified and 5800-byte Brotli budgets, and rejects TypeScript, parse5, compiler, server, app, language-server, and runtime diagnostics modules from both browser metafiles. `pnpm check:client-bundle-attribution` records ten smaller fixtures, including a one-template and a thirty-template page whose difference is the per-template descriptor and glue cost, and a varied page of eight structurally different templates (forms, dynamic attributes, nested control flow, refs, richer expressions) that shows the per-template cost the repeated page understates, with the same build settings and keeps their esbuild contribution data and provenance in a unique ignored artifact.
 
 ```sh
 pnpm build

@@ -4,39 +4,39 @@
     "maxBrotliBytes": 598
   },
   "signal-only": {
-    "maxMinifiedBytes": 1021,
-    "maxBrotliBytes": 564
+    "maxMinifiedBytes": 1081,
+    "maxBrotliBytes": 557
   },
   "reactive-text": {
     "maxMinifiedBytes": 5159,
     "maxBrotliBytes": 1966
   },
   "event-only": {
-    "maxMinifiedBytes": 2132,
-    "maxBrotliBytes": 918
+    "maxMinifiedBytes": 2186,
+    "maxBrotliBytes": 941
   },
   "text-only-list": {
-    "maxMinifiedBytes": 14765,
-    "maxBrotliBytes": 5340
+    "maxMinifiedBytes": 15220,
+    "maxBrotliBytes": 5475
   },
   "minimal-if": {
-    "maxMinifiedBytes": 11986,
-    "maxBrotliBytes": 4251
+    "maxMinifiedBytes": 12475,
+    "maxBrotliBytes": 4436
   },
   "composite-quick-example": {
-    "maxMinifiedBytes": 16083,
-    "maxBrotliBytes": 5588
+    "maxMinifiedBytes": 16624,
+    "maxBrotliBytes": 5747
   },
   "one-template-page": {
-    "maxMinifiedBytes": 31668,
-    "maxBrotliBytes": 9976
+    "maxMinifiedBytes": 32265,
+    "maxBrotliBytes": 10155
   },
   "thirty-template-page": {
-    "maxMinifiedBytes": 65793,
-    "maxBrotliBytes": 10226
+    "maxMinifiedBytes": 66390,
+    "maxBrotliBytes": 10398
   },
   "varied-template-page": {
-    "maxMinifiedBytes": 49550,
-    "maxBrotliBytes": 14230
+    "maxMinifiedBytes": 50200,
+    "maxBrotliBytes": 14445
   }
 }

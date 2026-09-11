@@ -1,6 +1,8 @@
 import {
   isConditionalEndMarker,
   isConditionalStartMarker,
+  isInsertionEndMarker,
+  isInsertionStartMarker,
   isListEndMarker,
   isListStartMarker,
 } from "../conditional-marker.js";
@@ -115,7 +117,9 @@ const hydrationChildNodes = (node: Node): Node[] =>
       isConditionalStartMarker(child) ||
       isConditionalEndMarker(child) ||
       isListStartMarker(child) ||
-      isListEndMarker(child),
+      isListEndMarker(child) ||
+      isInsertionStartMarker(child) ||
+      isInsertionEndMarker(child),
   );
 
 const hydrationPathLabel = (path: readonly number[]): string => (path.length === 0 ? "root" : `root.${path.join(".")}`);
@@ -145,11 +149,12 @@ const hydrationUnsafeExtraNodeError = (node: Node, path: readonly number[]): str
   return undefined;
 };
 
-type RegionKind = "conditional" | "list";
+type RegionKind = "conditional" | "list" | "insertion";
 
 const regionMarkers = {
   conditional: { isStart: isConditionalStartMarker, isEnd: isConditionalEndMarker },
   list: { isStart: isListStartMarker, isEnd: isListEndMarker },
+  insertion: { isStart: isInsertionStartMarker, isEnd: isInsertionEndMarker },
 } as const;
 
 /**
@@ -242,7 +247,12 @@ const hydrationStructureError = (
     let logicalIndex = -1;
     for (let expectedIndex = 0; expectedIndex < expectedChildren.length; expectedIndex++) {
       const expectedChild = expectedChildren[expectedIndex] as Node;
-      if (isConditionalEndMarker(expectedChild) || isListEndMarker(expectedChild)) continue;
+      if (
+        isConditionalEndMarker(expectedChild) ||
+        isListEndMarker(expectedChild) ||
+        isInsertionEndMarker(expectedChild)
+      )
+        continue;
       if (isListStartMarker(expectedChild)) {
         const regionEnd = hydrationRegionEnd("list", actualChildren, actualIndex, path, logicalIndex + 1, false);
         if (typeof regionEnd === "string") return regionEnd;
@@ -250,9 +260,11 @@ const hydrationStructureError = (
         continue;
       }
       logicalIndex++;
-      if (isConditionalStartMarker(expectedChild)) {
+      if (isConditionalStartMarker(expectedChild) || isInsertionStartMarker(expectedChild)) {
+        // A server-only insertion (<outlet>, <slot>) is walked like a branch: whatever the server inserted sits
+        // between its markers, is left in place, and is never bound by this template.
         const regionEnd = hydrationRegionEnd(
-          "conditional",
+          isConditionalStartMarker(expectedChild) ? "conditional" : "insertion",
           actualChildren,
           actualIndex,
           path,

@@ -11,8 +11,13 @@ export const delegate = (
     let next: Node | undefined;
     for (let child = target.firstChild; child; child = child.nextSibling) {
       const marker = child.nodeType === 8 ? (child.nodeValue ?? "") : "";
-      const region = marker === "tachyon-for" || marker === "tachyon-if";
-      // A region's content and end marker occupy no logical slot; only a conditional's start marker keeps one.
+      const region =
+        marker === "tachyon-for" ||
+        marker === "tachyon-if" ||
+        marker === "tachyon-outlet" ||
+        marker.startsWith("tachyon-slot:");
+      // A region's content and end marker occupy no logical slot; only the start marker of a conditional or of
+      // a server-only insertion (<outlet>, <slot>) keeps one.
       if (!region && (marker.startsWith("tachyon-hydrate:") || marker[0] === "/")) continue;
       if (marker !== "tachyon-for" && cursor++ === index) {
         next = child;

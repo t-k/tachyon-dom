@@ -163,7 +163,8 @@ Hydration can be scheduled by runtime strategy:
 | Evaluated in  | The scope of the template that contains the `<outlet>` or `<slot>`; the string was produced earlier by the caller, usually another template's `render()`. |
 | Updates       | Never. The value is read once per render and has no reactive subscription.                                                                                |
 | Owner         | None. Nothing inside the inserted HTML is bound, tracked, or disposed by this template.                                                                   |
-| Client target | Leaves a marker comment only. `mount()` renders no slot content; `hydrate()` leaves whatever the server inserted in place and does not bind it.           |
+| Markers       | Every target delimits the insertion with the same pair: `<!--tachyon-outlet-->`/`<!--/tachyon-outlet-->` or `<!--tachyon-slot:name-->`/`<!--/tachyon-slot:name-->`. The start marker occupies one logical child slot, the inserted nodes and the end marker occupy none, so bindings after the insertion keep their template paths however many nodes were inserted. The markers are generated-only (see [Public API layers](api.md)). |
+| Client target | Renders the empty marker pair. `mount()` renders no slot content; `hydrate()` steps over whatever the server inserted between the markers, leaves it in place, and does not bind it.           |
 | Trust         | The string is trusted HTML. Escape user data before it reaches `scope.outlet` or `scope.slots`, exactly as with `rawHtml()`.                              |
 
 Use them for route layouts and for composing server-rendered fragments. They are not a mechanism for passing reactive UI into a reusable component. For that, mount a `createTemplateComponent()` instance into an element the parent owns (for example via `ref`), so its state, updates, and disposal follow the parent's owner.

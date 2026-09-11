@@ -6,6 +6,10 @@ import {
   conditionalStartMarker,
   listEndMarker,
   listStartMarker,
+  outletEndMarker,
+  outletStartMarker,
+  slotEndMarker,
+  slotStartMarker,
 } from "../../conditional-marker.js";
 import { emptyTextMarker } from "../../text-marker.js";
 import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
@@ -95,11 +99,18 @@ const renderElementYieldStatements = (
   path: number[],
 ): string[] => {
   if (node.tagName === "outlet") {
-    return [`${indent}yield String(scope.outlet ?? "");`];
+    return [
+      `${indent}yield ${JSON.stringify(outletStartMarker)};`,
+      `${indent}yield String(scope.outlet ?? "");`,
+      `${indent}yield ${JSON.stringify(outletEndMarker)};`,
+    ];
   }
   if (node.tagName === "slot") {
+    const name = attrString(node, "name") ?? "default";
     return [
-      `${indent}yield String(${jsOptionalPropertyAccess("scope.slots", attrString(node, "name") ?? "default")} ?? "");`,
+      `${indent}yield ${JSON.stringify(slotStartMarker(name))};`,
+      `${indent}yield String(${jsOptionalPropertyAccess("scope.slots", name)} ?? "");`,
+      `${indent}yield ${JSON.stringify(slotEndMarker(name))};`,
     ];
   }
   if (node.tagName === "for") {

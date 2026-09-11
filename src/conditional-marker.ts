@@ -32,18 +32,26 @@ export const isListStartMarker = (node: Node): node is Comment =>
 export const isListEndMarker = (node: Node): node is Comment =>
   node.nodeType === Node.COMMENT_NODE && node.nodeValue === listEndMarkerValue;
 
-/** The end marker that closes the list region `start` opens, skipping nested list regions. */
-export const listRegionEnd = (start: Comment): Comment | undefined => {
+/** The end marker that closes the region `start` opens, skipping nested regions of the same kind. */
+const regionEnd = (
+  start: Comment,
+  isStart: (node: Node) => boolean,
+  isEnd: (node: Node) => boolean,
+): Comment | undefined => {
   let depth = 0;
   for (let node = start.nextSibling; node; node = node.nextSibling) {
-    if (isListStartMarker(node)) depth++;
-    else if (isListEndMarker(node)) {
-      if (depth === 0) return node;
+    if (isStart(node)) depth++;
+    else if (isEnd(node)) {
+      if (depth === 0) return node as Comment;
       depth--;
     }
   }
   return undefined;
 };
+
+/** The end marker that closes the list region `start` opens, skipping nested list regions. */
+export const listRegionEnd = (start: Comment): Comment | undefined =>
+  regionEnd(start, isListStartMarker, isListEndMarker);
 
 /**
  * The start marker of the container's `index`-th own list region. Regions inside a sibling conditional or list
@@ -82,17 +90,8 @@ export const removeListRegion = (start: Comment): void => {
  * The end marker that closes the region `start` opens, skipping nested regions, or `undefined` when the
  * region has no end marker (a hand-built anchor comment without one).
  */
-export const conditionalRegionEnd = (start: Comment): Comment | undefined => {
-  let depth = 0;
-  for (let node = start.nextSibling; node; node = node.nextSibling) {
-    if (isConditionalStartMarker(node)) depth++;
-    else if (isConditionalEndMarker(node)) {
-      if (depth === 0) return node;
-      depth--;
-    }
-  }
-  return undefined;
-};
+export const conditionalRegionEnd = (start: Comment): Comment | undefined =>
+  regionEnd(start, isConditionalStartMarker, isConditionalEndMarker);
 
 /** Removes every node between a region's markers; the markers themselves stay. */
 export const clearConditionalRegion = (start: Comment): void => {
@@ -100,13 +99,59 @@ export const clearConditionalRegion = (start: Comment): void => {
   while (end && start.nextSibling && start.nextSibling !== end) start.nextSibling.remove();
 };
 
-/** Hydration markers, region end markers, and both list markers occupy no logical slot: paths count past them. */
+/**
+ * Comment markers that delimit a server-only insertion: `<outlet>` renders `<!--tachyon-outlet-->` and
+ * `<slot name="x">` renders `<!--tachyon-slot:x-->`, each closed by the same value prefixed with `/`. The
+ * server and stream targets put the inserted HTML between the pair; the client template carries the empty pair.
+ * The start marker occupies one logical slot, exactly like a conditional's, and the content and end marker
+ * occupy none, so a binding after the insertion keeps its template path however many nodes the server inserted.
+ * Nothing inside the pair is bound or managed by the parent template.
+ */
+export const outletMarkerValue = "tachyon-outlet";
+export const slotMarkerPrefix = "tachyon-slot:";
+export const outletStartMarker = `<!--${outletMarkerValue}-->`;
+export const outletEndMarker = `<!--/${outletMarkerValue}-->`;
+export const slotStartMarker = (name: string): string => `<!--${slotMarkerPrefix}${name}-->`;
+export const slotEndMarker = (name: string): string => `<!--/${slotMarkerPrefix}${name}-->`;
+
+export const isInsertionStartMarker = (node: Node): node is Comment => {
+  if (node.nodeType !== Node.COMMENT_NODE) return false;
+  const value = node.nodeValue ?? "";
+  return value === outletMarkerValue || value.startsWith(slotMarkerPrefix);
+};
+
+export const isInsertionEndMarker = (node: Node): node is Comment => {
+  if (node.nodeType !== Node.COMMENT_NODE) return false;
+  const value = node.nodeValue ?? "";
+  return value === `/${outletMarkerValue}` || value.startsWith(`/${slotMarkerPrefix}`);
+};
+
+/** The end marker that closes the insertion `start` opens, skipping nested insertions. */
+export const insertionRegionEnd = (start: Comment): Comment | undefined =>
+  regionEnd(start, isInsertionStartMarker, isInsertionEndMarker);
+
+/**
+ * For the start marker of a region whose content the parent template never addresses (a conditional's branch
+ * or a server-only insertion), the matching end marker; `undefined` for any other node.
+ */
+const opaqueRegionEnd = (node: Node): Comment | undefined =>
+  isConditionalStartMarker(node)
+    ? conditionalRegionEnd(node)
+    : isInsertionStartMarker(node)
+      ? insertionRegionEnd(node)
+      : undefined;
+
+/**
+ * Hydration markers, region end markers, both list markers, and insertion end markers occupy no logical slot:
+ * paths count past them.
+ */
 export const isPathInvisibleNode = (node: Node): boolean =>
   node.nodeType === Node.COMMENT_NODE &&
   ((node.nodeValue ?? "").startsWith("tachyon-hydrate:") ||
     isConditionalEndMarker(node) ||
     isListStartMarker(node) ||
-    isListEndMarker(node));
+    isListEndMarker(node) ||
+    isInsertionEndMarker(node));
 
 /**
  * The logical nodes from `first` up to (excluding) `end`: the shape the client template gives them, where a
@@ -123,10 +168,9 @@ export const clientShapedNodes = (first: Node | null, end: Node | null): Node[] 
     }
     if (isPathInvisibleNode(node)) continue;
     nodes.push(node);
-    if (isConditionalStartMarker(node)) {
-      const nestedEnd = conditionalRegionEnd(node);
-      if (nestedEnd && nestedEnd !== end) node = nestedEnd;
-    }
+    // A branch or server-inserted content is opaque to the parent template; the start marker stands in for it.
+    const nestedEnd = opaqueRegionEnd(node);
+    if (nestedEnd && nestedEnd !== end) node = nestedEnd;
   }
   return nodes;
 };
@@ -143,14 +187,14 @@ export const templateNodeAt = (root: Node, path: readonly number[]): Node | unde
     let next: Node | undefined;
     for (let child: ChildNode | null = current?.firstChild ?? null; child; child = child.nextSibling) {
       const list = isListStartMarker(child);
-      const conditional = isConditionalStartMarker(child);
-      if (!list && !conditional && isPathInvisibleNode(child)) continue;
+      const opaqueEnd = list ? undefined : opaqueRegionEnd(child);
+      if (!list && !opaqueEnd && isPathInvisibleNode(child)) continue;
       if (!list && cursor++ === index) {
         next = child;
         break;
       }
       if (list) child = listRegionEnd(child as Comment) ?? child;
-      else if (conditional) child = conditionalRegionEnd(child as Comment) ?? child;
+      else if (opaqueEnd) child = opaqueEnd;
     }
     current = next;
   }
@@ -170,7 +214,12 @@ export const logicalNodesBetween = (first: Node | null, end: Node | null): Node[
       if (nestedEnd && nestedEnd !== end) node = nestedEnd;
       continue;
     }
-    if (!isPathInvisibleNode(node)) nodes.push(node);
+    if (isPathInvisibleNode(node)) continue;
+    nodes.push(node);
+    if (isInsertionStartMarker(node)) {
+      const nestedEnd = insertionRegionEnd(node);
+      if (nestedEnd && nestedEnd !== end) node = nestedEnd;
+    }
   }
   return nodes;
 };

@@ -18,6 +18,8 @@ type EffectRunner = {
   /** Monotonic run counter; async continuations capture it so a stale rejection can be recognised. */
   generation: number;
   registration: CleanupRegistration | undefined;
+  /** For a memo: the subscribers of its own value, so a queued memo can queue the memos derived from it. */
+  dependents: SubscriberSet | undefined;
   run: () => void;
 };
 
@@ -391,7 +393,7 @@ const flushPendingEffects = (): void => {
     return;
   }
   flushing = true;
-  const unhandled: unknown[] = deferredComputedErrors.splice(0);
+  const unhandled: unknown[] = [];
   try {
     while (pendingComputedEffects.size > 0 || pendingEffects.size > 0) {
       const runner = pendingComputedEffects.values().next().value ?? pendingEffects.values().next().value;
@@ -412,9 +414,6 @@ const flushPendingEffects = (): void => {
     }
   } finally {
     flushing = false;
-    // A memo read during this flush may have deferred another memo's failure; it is reported by this flush,
-    // never left for an unrelated later one.
-    unhandled.push(...deferredComputedErrors.splice(0));
   }
   if (unhandled.length === 1) throw unhandled[0];
   if (unhandled.length > 1) throw new AggregateError(unhandled, "Reactive effects failed.");
@@ -434,13 +433,26 @@ const notify = (subscribers: SubscriberSet): void => {
   for (const subscriber of subscribers) {
     if (!subscriber.disposed) {
       if (subscriber.computed) {
-        pendingComputedEffects.add(subscriber);
+        queueComputed(subscriber);
       } else {
         pendingEffects.add(subscriber);
       }
     }
   }
   scheduleFlush();
+};
+
+// A queued memo may change, so every memo derived from it is queued too: a read of the derived memo then pulls
+// the chain in dependency order instead of returning a cache that only looks current. A memo whose value
+// turns out unchanged notifies nobody, so plain effects still run only for real changes.
+const queueComputed = (runner: EffectRunner): void => {
+  if (pendingComputedEffects.has(runner)) return;
+  pendingComputedEffects.add(runner);
+  if (runner.dependents) {
+    for (const dependent of runner.dependents) {
+      if (dependent.computed && !dependent.disposed) queueComputed(dependent);
+    }
+  }
 };
 
 export const isSignal = (value: unknown): value is Accessor<unknown> =>
@@ -515,38 +527,52 @@ export const createSignal = <T>(initial: T): Signal<T> => {
   return signal;
 };
 
-// Recomputes the queued memos before a memo is read inside `batch()` or an effect run, so derived values
-// are always fresh even though ordinary effects stay deferred until the flush. Every queued memo runs, in
-// queue order: a chained memo is queued by the memo it depends on and is reached by the same loop. A failure
-// is delivered to the runner's error owner. When it is unhandled, the failure of the memo being read reaches
-// the reader; the failure of any other memo is held until the flush, so an unrelated memo cannot abort the
-// caller's batch body.
-const deferredComputedErrors: unknown[] = [];
-
-const runPendingComputedEffects = (reading: EffectRunner): void => {
-  while (pendingComputedEffects.size > 0) {
-    const runner = pendingComputedEffects.values().next().value as EffectRunner;
-    pendingComputedEffects.delete(runner);
-    try {
-      runner.run();
-    } catch (error) {
-      const delivered = deliverError(runner.errorOwner, error);
-      if (!delivered.handled) {
-        if (runner === reading) throw delivered.error;
-        deferredComputedErrors.push(delivered.error);
-      }
-    }
+/**
+ * Recomputes one queued memo on demand. A memo read inside `batch()` or an effect run pulls its own
+ * recomputation forward, and the memo's callback pulls the memos it reads the same way, so a value is always
+ * derived from fresh dependencies without running any unrelated queued memo. Failures are delivered to the
+ * runner's error owner here exactly as the flush would; the memo also caches the failure so every reader sees
+ * it (see `createMemo`).
+ */
+const pullComputed = (runner: EffectRunner): void => {
+  pendingComputedEffects.delete(runner);
+  try {
+    runner.run();
+  } catch (error) {
+    deliverError(runner.errorOwner, error);
   }
 };
 
+/**
+ * A memo holds either its last computed value or the failure of its last computation. Reading a failed memo
+ * rethrows that failure until a dependency changes and the recomputation succeeds; the last successful value
+ * is never handed out in its place. Dependents are notified of a failure like any other change, so an effect
+ * that reads the memo reruns, fails in turn, and reports to its own error owner.
+ */
 export const createMemo = <T>(fn: () => T): Accessor<T> => {
-  const value = createSignal<T>(undefined as T);
+  const subscribers: SubscriberSet = new Set();
+  let current: T | undefined;
+  let failure: { error: unknown } | undefined;
   const runner = createEffectRunner(() => {
-    value.set(fn());
+    let next: T;
+    try {
+      next = fn();
+    } catch (error) {
+      failure = { error };
+      notify(subscribers);
+      throw error;
+    }
+    const changed = failure !== undefined || !Object.is(current, next);
+    failure = undefined;
+    current = next;
+    if (changed) notify(subscribers);
   }, true);
+  if (runner) runner.dependents = subscribers;
   const memo = (() => {
-    if (runner && pendingComputedEffects.size > 0) runPendingComputedEffects(runner);
-    return value();
+    if (runner && pendingComputedEffects.has(runner)) pullComputed(runner);
+    track(subscribers);
+    if (failure) throw failure.error;
+    return current as T;
   }) as Accessor<T>;
   Object.defineProperty(memo, signalBrand, { value: true });
   return memo;
@@ -642,6 +668,7 @@ const createEffectRunner = (fn: EffectCallback, computed: boolean): EffectRunner
     runOwner: createOwner(),
     generation: 0,
     registration: undefined,
+    dependents: undefined,
     run: () => {
       if (runner.disposed) {
         return;

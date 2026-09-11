@@ -49,6 +49,10 @@ import {
   conditionalStartMarker,
   listEndMarker,
   listStartMarker,
+  outletEndMarker,
+  outletStartMarker,
+  slotEndMarker,
+  slotStartMarker,
 } from "../../conditional-marker.js";
 import { expressionAlwaysPlainValue, expressionCallsSomething, expressionScopeNames } from "../optimize.js";
 
@@ -463,10 +467,13 @@ const lowerElement = (
   listRegion?: ListBinding["region"],
 ): string => {
   if (node.tagName === "outlet") {
-    return "<!--tachyon-outlet-->";
+    // The insertion's markers. Server-inserted HTML lives between them and is never bound by this template;
+    // the pair occupies one logical slot, so later siblings keep their paths whatever the server inserted.
+    return `${outletStartMarker}${outletEndMarker}`;
   }
   if (node.tagName === "slot") {
-    return `<!--tachyon-slot:${attrString(node, "name") ?? "default"}-->`;
+    const name = attrString(node, "name") ?? "default";
+    return `${slotStartMarker(name)}${slotEndMarker(name)}`;
   }
   if (node.tagName === "await") {
     // The client target has no way to await: it leaves a marker and binds nothing, the same as <slot>, instead
