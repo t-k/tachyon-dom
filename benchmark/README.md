@@ -50,7 +50,7 @@ Run `pnpm bench:client-bundle` to build the fixtures in `benchmark/client-bundle
 
 ## Manual GitHub Actions runs
 
-The `Benchmarks` workflow can be started manually from GitHub Actions. Its `suite` input accepts `all`, `web-framework`, `js-framework`, or `client-bundle`; `all` is the default.
+The `Benchmarks` workflow can be started manually from GitHub Actions. Its `suite` input accepts `all`, `web-framework`, `js-framework`, `client-bundle`, or `generated-template`; `all` is the default. The generated template suite stores separate production timing, counter-build, and GC-after-memory reports for 1,000 rows with two nested children. Only the production report is suitable for timing analysis, and one hosted-runner dispatch is not a base/head performance claim.
 
 The workflow writes an overall ranking and a separate ranking for every measured metric to the GitHub Actions job summary, and a table of client bundle sizes per interactive page fixture when that suite is selected. Each row includes the measured value and its ratio to the best value in that run. The JSON results, generated Markdown, and available benchmark logs are uploaded as a workflow artifact.
 

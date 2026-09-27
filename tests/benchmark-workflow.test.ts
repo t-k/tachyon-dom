@@ -11,6 +11,7 @@ describe("benchmark GitHub Actions workflow", () => {
     expect(workflow).toContain("- web-framework");
     expect(workflow).toContain("- js-framework");
     expect(workflow).toContain("- client-bundle");
+    expect(workflow).toContain("- generated-template");
     expect(workflow).not.toContain("schedule:");
   });
 
@@ -20,6 +21,10 @@ describe("benchmark GitHub Actions workflow", () => {
     expect(workflow).toContain("pnpm bench:web-framework --output");
     expect(workflow).toContain("pnpm bench:local:stable --output");
     expect(workflow).toContain("pnpm bench:client-bundle --output");
+    expect(workflow).toContain("pnpm bench:template-browser -- --iterations 5 --warmup 2 --item-count 1000 --child-count 2 --output");
+    expect(workflow).toContain("pnpm bench:template-browser -- --iterations 1 --warmup 0 --item-count 1000 --child-count 2 --counters true --output");
+    expect(workflow).toContain("pnpm bench:template-browser -- --iterations 1 --warmup 0 --item-count 1000 --child-count 2 --memory true --memory-cycles 10 --output");
+    expect(workflow).toContain("inputs.suite != 'generated-template'");
     expect(workflow).toContain('summary_args+=(--client "$RESULT_DIR/client-bundle.json")');
     expect(workflow).toContain('pnpm bench:summary "${summary_args[@]}"');
     expect(workflow).not.toContain("pnpm bench:web-framework -- --output");

@@ -13,6 +13,7 @@ on:
           - web-framework
           - js-framework
           - client-bundle
+          - generated-template
 
 permissions:
   contents: read
@@ -65,7 +66,20 @@ jobs:
         if: ${{ inputs.suite == 'all' || inputs.suite == 'client-bundle' }}
         run: pnpm bench:client-bundle --output "$RESULT_DIR/client-bundle.json"
 
+      - name: Measure generated templates in a production browser
+        if: ${{ inputs.suite == 'all' || inputs.suite == 'generated-template' }}
+        run: pnpm bench:template-browser -- --iterations 5 --warmup 2 --item-count 1000 --child-count 2 --output "$RESULT_DIR/generated-template-timing.json"
+
+      - name: Count generated template work
+        if: ${{ inputs.suite == 'all' || inputs.suite == 'generated-template' }}
+        run: pnpm bench:template-browser -- --iterations 1 --warmup 0 --item-count 1000 --child-count 2 --counters true --output "$RESULT_DIR/generated-template-counters.json"
+
+      - name: Diagnose generated template retained memory
+        if: ${{ inputs.suite == 'all' || inputs.suite == 'generated-template' }}
+        run: pnpm bench:template-browser -- --iterations 1 --warmup 0 --item-count 1000 --child-count 2 --memory true --memory-cycles 10 --output "$RESULT_DIR/generated-template-memory.json"
+
       - name: Write benchmark summary
+        if: ${{ inputs.suite != 'generated-template' }}
         shell: bash
         run: |
           summary_args=(--suite "${{ inputs.suite }}" --output "$RESULT_DIR/summary.md")
@@ -80,6 +94,12 @@ jobs:
           fi
           pnpm bench:summary "${summary_args[@]}"
           cat "$RESULT_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Describe generated template artifacts
+        if: ${{ inputs.suite == 'all' || inputs.suite == 'generated-template' }}
+        run: |
+          echo '## Generated template browser benchmark' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The artifact contains separate production timing, operation counter, and GC-after-memory reports for keyed rows, generated text lists, and generated mixed lists. Timings from counter and memory runs are diagnostic only.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload benchmark results
         if: ${{ always() }}
