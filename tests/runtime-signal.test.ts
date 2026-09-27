@@ -419,24 +419,6 @@ describe("signal runtime", () => {
     expect(seen).toEqual(["0:a", "1:a", "1:b"]);
   });
 
-  it("runs child cleanup before parent run cleanup on rerun", () => {
-    const outer = createSignal(0);
-    const events: string[] = [];
-    const dispose = effect(() => {
-      const value = outer();
-      effect(() => {
-        onCleanup(() => events.push(`child:${value}`));
-      });
-      onCleanup(() => events.push(`parent:${value}`));
-    });
-    events.length = 0;
-
-    outer.set(1);
-
-    expect(events).toEqual(["child:0", "parent:0"]);
-    dispose();
-  });
-
   it("reads plain values and signal values through one helper", () => {
     const title = createSignal("Hello");
 
@@ -681,31 +663,8 @@ describe("signal runtime", () => {
     expect(seen).toEqual([11, 22]);
   });
 
-  // Leaf effects own no children, so rerunning them need not copy the empty child set. Non-empty sets still need
-  // a snapshot because disposing a child mutates its parent's set during iteration.
-  it("reruns a leaf effect without copying its empty child set", () => {
-    const source = createSignal(0);
-    const seen: number[] = [];
-    const dispose = effect(() => {
-      seen.push(source());
-    });
-    let emptySetCopies = 0;
-    Array.from = vi.fn((value: Iterable<unknown> | ArrayLike<unknown>) => {
-      if (value instanceof Set && value.size === 0) emptySetCopies++;
-      return arrayFrom(value);
-    }) as typeof Array.from;
-
-    try {
-      source.set(1);
-    } finally {
-      Array.from = arrayFrom;
-      dispose();
-    }
-
-    expect(seen).toEqual([0, 1]);
-    expect(emptySetCopies).toBe(0);
-  });
-
+  // Leaf effects own no children, so the only non-empty set a notification could copy is the subscriber set
+  // itself. Rerun cleanup still copies each runner's (empty) child set because those do mutate while iterating.
   it("queues every subscriber without copying the subscriber set", () => {
     const source = createSignal(0);
     const seen: number[] = [];

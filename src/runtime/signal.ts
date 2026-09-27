@@ -345,14 +345,12 @@ export type Signal<T> = Accessor<T> & {
 const cleanup = (runner: EffectRunner, createNextRunOwner: boolean): void => {
   let firstError: unknown;
   let failed = false;
-  if (runner.children.size !== 0) {
-    for (const child of Array.from(runner.children)) {
-      try {
-        disposeRunner(child);
-      } catch (error) {
-        if (!failed) firstError = error;
-        failed = true;
-      }
+  for (const child of Array.from(runner.children)) {
+    try {
+      disposeRunner(child);
+    } catch (error) {
+      if (!failed) firstError = error;
+      failed = true;
     }
   }
   runner.children.clear();
