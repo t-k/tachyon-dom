@@ -82,6 +82,62 @@ describe("mountKeyedList", () => {
     firstChild.mockRestore();
   });
 
+  it("releases only the disposed container when two roots share generated options", () => {
+    const first = document.createElement("ul");
+    const second = document.createElement("ul");
+    const options = {
+      signature: "shared-general-cache-lifetime",
+      key: "item.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [],
+    };
+    const disposeFirst = createRoot((disposeRoot) => {
+      mountGeneratedKeyedList(first, [], [{ id: "a" }], options, {});
+      return disposeRoot;
+    });
+    const disposeSecond = createRoot((disposeRoot) => {
+      mountGeneratedKeyedList(second, [], [{ id: "b" }], options, {});
+      return disposeRoot;
+    });
+    const remove = vi.spyOn(WeakMap.prototype, "delete");
+
+    disposeFirst();
+    expect(remove.mock.calls.some(([key]) => key === options)).toBe(false);
+    const firstChild = vi.spyOn(second, "firstChild", "get");
+    mountGeneratedKeyedList(second, [], [{ id: "b" }], options, {});
+    expect(firstChild).not.toHaveBeenCalled();
+    firstChild.mockRestore();
+    disposeSecond();
+    expect(remove.mock.calls.some(([key]) => key === options)).toBe(true);
+    remove.mockRestore();
+  });
+
+  it("drops the old descriptor cache when a compatible generated descriptor replaces it", () => {
+    const root = document.createElement("ul");
+    const original = {
+      signature: "replaced-general-descriptor",
+      key: "item.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [],
+    };
+    const replacement = { ...original };
+    mountGeneratedKeyedList(root, [], [{ id: "a" }], original, {});
+    const remove = vi.spyOn(WeakMap.prototype, "delete");
+
+    mountGeneratedKeyedList(root, [], [{ id: "a" }], replacement, {});
+
+    expect(remove.mock.calls.some(([key]) => key === original)).toBe(true);
+    const firstChild = vi.spyOn(root, "firstChild", "get");
+    mountGeneratedKeyedList(root, [], [{ id: "a" }], replacement, {});
+    expect(firstChild).not.toHaveBeenCalled();
+    firstChild.mockRestore();
+    remove.mockRestore();
+  });
+
   it("keeps the reconciliation map when keyed order and values are unchanged", () => {
     const root = document.createElement("ul");
     const options = {
