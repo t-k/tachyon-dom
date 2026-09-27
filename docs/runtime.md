@@ -12,6 +12,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/list`: keyed list mounting, reuse, move, multi-root item support, row-local stores/components/hydration boundaries, and precomputed binding plans that avoid rebuilding per-row binding subsets.
 - `runtime/list-path`: retained for compatibility with previously generated modules. Since every `<for>` region is delimited by markers, sibling paths no longer shift around rows and the compiler no longer imports this module; its offset is always zero. It is a removal candidate for the next major release.
 - `runtime/keyed-rows`: dependency-free keyed table-row list where the live DOM is the single source of truth (no shadow item/row arrays). Bulk creation binds and clones a reusable multi-row chunk; remove/swap/select are O(1) DOM operations. Suited to large data tables that do not need per-row reactivity.
+
 - `runtime/virtual-list`: fixed-height virtualized lists with overscan, imperative updates, index/key scrolling, optional scroll anchoring, and ARIA position metadata.
 - `runtime/conditional`: conditional DOM mounting.
 - `runtime/conditional-core`: lightweight conditional mounting selected for branches whose bindings are limited to text, class, attr, style, and event.
@@ -22,6 +23,8 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/store` and `runtime/signal`: fine-grained store/signal helpers, memoized computed accessors, async resources, and recoverable effect errors.
 - `runtime/stream-client`: browser stream chunk reading.
 - `runtime/error-boundary`: DOM-mounted client fallback boundaries.
+
+`createKeyedRows<Item, Prepared>` can prepare references for each reusable template row with `prepare(row)`. Its return value becomes the fourth argument of `bind(row, item, index, prepared)`, so bulk builds can write to cached Text nodes without traversing the template row for every item. Preparation runs again only when the template chunk size changes; the references belong to the reusable template rows, not the visible cloned rows. Calls without `prepare` receive `undefined` as the fourth argument.
 
 Browser feature bundles have independent minified and Brotli budgets. Checks reject compiler, server, TypeScript, parse5, and language-server inputs. After building, run `pnpm update:runtime-sizes` to refresh the measurement JSON and this table together; review any budget changes separately. CI runs `pnpm check:runtime-sizes` to reject stale measurements or documentation. The conditional budget allows approximately 3% over the baseline recorded when the budget was tightened; budgets never increase automatically.
 

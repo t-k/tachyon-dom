@@ -17,18 +17,23 @@
  * dependency-free keeps both its parse cost and its dev-server module graph minimal.
  */
 
-export type KeyedRowsOptions<T> = {
+export type KeyedRowsOptions<T, Prepared = undefined> = {
   /** Table body the rows live in. The DOM beneath it is the source of truth. */
   tbody: HTMLTableSectionElement;
   /** Single-row markup, e.g. `"<tr><td></td>...</tr>"`. Parsed once into a template. */
   row: string;
   /** Write an item's fields into a row before it is cloned into the table. */
-  bind: (row: HTMLTableRowElement, item: T, index: number) => void;
+  bind: (row: HTMLTableRowElement, item: T, index: number, prepared: Prepared) => void;
   /** Class toggled on the selected row. Defaults to `"selected"`. */
   selectedClass?: string;
   /** Target number of DOM insertions per bulk build. Defaults to `50`. */
   chunks?: number;
-};
+} & ([Prepared] extends [undefined]
+  ? { prepare?: never }
+  : {
+      /** Resolve reusable references when a template row is created. */
+      prepare: (row: HTMLTableRowElement) => Prepared;
+    });
 
 export type KeyedRows<T> = {
   /** Replace every row from an array of items. */
@@ -69,9 +74,10 @@ const positiveInteger = (name: string, value: number): void => {
   }
 };
 
-export const createKeyedRows = <T>(options: KeyedRowsOptions<T>): KeyedRows<T> => {
+export const createKeyedRows = <T, Prepared = undefined>(options: KeyedRowsOptions<T, Prepared>): KeyedRows<T> => {
   const tbody = options.tbody;
   const bind = options.bind;
+  const prepare = options.prepare;
   const selectedClass = options.selectedClass ?? "selected";
   const targetChunks = options.chunks ?? defaultChunks;
   positiveInteger("chunks", targetChunks);
@@ -86,6 +92,7 @@ export const createKeyedRows = <T>(options: KeyedRowsOptions<T>): KeyedRows<T> =
   // Reusable chunk of template rows; rebuilt only when the per-chunk size changes.
   const chunk = document.createDocumentFragment();
   let chunkRows = 0;
+  let preparedRows: Prepared[] = [];
   let selectedRow: HTMLTableRowElement | undefined;
 
   const ensureChunk = (rowsPerChunk: number): void => {
@@ -93,8 +100,13 @@ export const createKeyedRows = <T>(options: KeyedRowsOptions<T>): KeyedRows<T> =
       return;
     }
     chunk.replaceChildren();
+    preparedRows = [];
     for (let i = 0; i < rowsPerChunk; i++) {
-      chunk.appendChild(baseRow.cloneNode(true));
+      const row = baseRow.cloneNode(true) as HTMLTableRowElement;
+      chunk.appendChild(row);
+      if (prepare) {
+        preparedRows.push(prepare(row));
+      }
     }
     chunkRows = rowsPerChunk;
   };
@@ -111,7 +123,7 @@ export const createKeyedRows = <T>(options: KeyedRowsOptions<T>): KeyedRows<T> =
       const size = Math.min(perChunk, count - done);
       for (let local = 0; local < size; local++) {
         const index = start + done + local;
-        bind(templateRows[local] as HTMLTableRowElement, make(index), index);
+        bind(templateRows[local] as HTMLTableRowElement, make(index), index, preparedRows[local] as Prepared);
       }
       if (size === perChunk) {
         tbody.appendChild(chunk.cloneNode(true));

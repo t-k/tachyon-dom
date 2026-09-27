@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createKeyedRows } from "../src/index";
+import { createKeyedRows, type KeyedRowsOptions } from "../src/index";
 
 type Item = { id: number; label: string };
 
@@ -37,6 +37,15 @@ describe("createKeyedRows", () => {
     document.body.innerHTML = `<table><tbody id="tbody"></tbody></table>`;
     const tbody = document.querySelector("#tbody") as HTMLTableSectionElement;
     expect(() => createKeyedRows<Item>({ tbody, row: "<div></div>", bind: () => {} })).toThrow();
+  });
+
+  it("requires prepare when bind declares a prepared value", () => {
+    document.body.innerHTML = `<table><tbody id="tbody"></tbody></table>`;
+    const tbody = document.querySelector("#tbody") as HTMLTableSectionElement;
+    const acceptsOptions = (_options: KeyedRowsOptions<Item, { id: Text }>) => undefined;
+
+    // @ts-expect-error A prepared binding requires a prepare callback.
+    acceptsOptions({ tbody, row: "<tr><td> </td></tr>", bind: (_row, _item, _index, prepared) => prepared.id });
   });
 
   it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
@@ -113,6 +122,43 @@ describe("createKeyedRows", () => {
     expect(list.length()).toBe(7);
     expect(ids(tbody)).toEqual(["1", "2", "3", "4", "5", "6", "7"]);
     expect(labels(tbody)[6]).toBe("row 7");
+  });
+
+  it("prepares reusable template rows once per chunk size and binds through their cached nodes", () => {
+    document.body.innerHTML = `<table><tbody id="tbody"></tbody></table>`;
+    const tbody = document.querySelector("#tbody") as HTMLTableSectionElement;
+    const preparedRows: HTMLTableRowElement[] = [];
+    const list = createKeyedRows<Item, { id: Text; label: Text }>({
+      tbody,
+      row: "<tr><td> </td><td><a> </a></td></tr>",
+      chunks: 2,
+      prepare: (row) => {
+        preparedRows.push(row);
+        return {
+          id: row.firstChild!.firstChild as Text,
+          label: row.children[1]!.firstChild!.firstChild as Text,
+        };
+      },
+      bind: (_row, item, _index, prepared) => {
+        prepared.id.data = String(item.id);
+        prepared.label.data = item.label;
+      },
+    });
+
+    list.replace(items(6));
+    expect(ids(tbody)).toEqual(["1", "2", "3", "4", "5", "6"]);
+    expect(preparedRows).toHaveLength(3);
+    expect(preparedRows.every((row) => row.parentNode !== tbody)).toBe(true);
+
+    list.append(items(2, 6));
+    list.append(items(2, 8));
+    expect(ids(tbody)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
+    expect(preparedRows).toHaveLength(4);
+
+    list.replace(items(6, 10));
+    expect(ids(tbody)).toEqual(["11", "12", "13", "14", "15", "16"]);
+    expect(labels(tbody)[5]).toBe("row 16");
+    expect(preparedRows).toHaveLength(7);
   });
 
   it("updates every stride-th row", () => {
