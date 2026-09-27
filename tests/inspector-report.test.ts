@@ -30,6 +30,7 @@ describe("Inspector report", () => {
       );
       expect(report.observed.snapshot.effects).toBeGreaterThan(0);
       expect(report.observed.liveBindings.some((binding) => binding.templateId === templateId)).toBe(true);
+      expect(report.observed.liveBindings.some((binding) => binding.path.join(".") === "0.0")).toBe(true);
       expect(report.observed).not.toHaveProperty("lifecycleEvents");
       expect(JSON.stringify(report)).not.toContain("private-token-123");
 
@@ -52,10 +53,47 @@ describe("Inspector report", () => {
     const dispose = createRoot((disposeRoot) => disposeRoot);
     expect(diagnostics.events().length).toBeGreaterThan(0);
     expect(report.observed.lifecycleEvents).toEqual([]);
-    expect(createInspectorReport(diagnostics, { includeLifecycleEvents: true }).observed.lifecycleEvents?.length).toBeGreaterThan(
-      0,
-    );
+    const activeReport = createInspectorReport(diagnostics, { includeLifecycleEvents: true });
+    expect(activeReport.observed.lifecycleEvents).toEqual(diagnostics.events());
+    expect(activeReport.observed.lifecycleEvents?.[0]?.snapshot.owners).toBeGreaterThan(0);
     dispose();
+    expect(activeReport.observed.lifecycleEvents?.[0]?.snapshot.owners).toBeGreaterThan(0);
+    diagnostics.dispose();
+  });
+
+  it("preserves static paths, reasons, imports, and hydration diagnostics in a detached report", () => {
+    const diagnostics = createRuntimeDiagnostics();
+    const explanation = {
+      regions: [
+        {
+          kind: "list" as const,
+          path: [2, 1],
+          runtime: "tachyon-dom/runtime/list" as const,
+          reasons: ["row has a store"],
+        },
+      ],
+      runtimeImports: ["tachyon-dom/runtime/list"],
+      hydrationDiagnostics: ["dynamic region cannot hydrate"],
+    };
+    const report = createInspectorReport(diagnostics, { templates: [{ templateId: "list.td", explanation }] });
+
+    expect(report.static.templates).toEqual([{ templateId: "list.td", explanation }]);
+    explanation.regions[0].path[0] = 9;
+    explanation.regions[0].reasons[0] = "changed";
+    explanation.runtimeImports[0] = "changed";
+    explanation.hydrationDiagnostics[0] = "changed";
+    expect(report.static.templates[0]?.explanation).toEqual({
+      regions: [
+        {
+          kind: "list",
+          path: [2, 1],
+          runtime: "tachyon-dom/runtime/list",
+          reasons: ["row has a store"],
+        },
+      ],
+      runtimeImports: ["tachyon-dom/runtime/list"],
+      hydrationDiagnostics: ["dynamic region cannot hydrate"],
+    });
     diagnostics.dispose();
   });
 });
