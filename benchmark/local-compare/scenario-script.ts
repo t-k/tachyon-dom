@@ -1,5 +1,5 @@
 export const browserScenarioScript = String.raw`
-window.__runLocalBenchmarkScenario = async (id) => {
+window.__runLocalBenchmarkScenario = async (id, trace = false) => {
   const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
   const settle = async () => {
     await frame();
@@ -62,10 +62,19 @@ window.__runLocalBenchmarkScenario = async (id) => {
     await settle();
   }
 
+  if (trace) performance.mark("local-compare:" + id + ":start");
   const start = performance.now();
   click(actionFor(plan.measure));
   const syncUpdateMs = performance.now() - start;
-  await settle();
+  if (trace) {
+    performance.mark("local-compare:" + id + ":sync-end");
+    await frame();
+    performance.mark("local-compare:" + id + ":first-frame");
+    await frame();
+    performance.mark("local-compare:" + id + ":second-frame");
+  } else {
+    await settle();
+  }
   return { syncUpdateMs, settledUpdateMs: performance.now() - start };
 };
 `;

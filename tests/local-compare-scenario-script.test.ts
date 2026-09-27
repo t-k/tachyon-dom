@@ -34,4 +34,38 @@ describe("local comparison scenario timing", () => {
     expect(result.settledUpdateMs).toBeGreaterThanOrEqual(result.syncUpdateMs);
     expect(frame).toHaveBeenCalledTimes(4);
   });
+
+  it("marks only the unscored trace from click through both frame callbacks", async () => {
+    document.body.innerHTML = `<button id="run"></button><button id="clear"></button>`;
+    const marks: string[] = [];
+    const timing = {
+      now: () => 1,
+      getEntriesByType: () => [],
+      mark: (name: string) => marks.push(name),
+    };
+    const frame = (callback: FrameRequestCallback) => {
+      queueMicrotask(() => callback(1));
+      return 1;
+    };
+    const benchmarkWindow = {} as {
+      __runLocalBenchmarkScenario: (id: string, trace?: boolean) => Promise<unknown>;
+    };
+    new Function("window", "document", "performance", "requestAnimationFrame", browserScenarioScript)(
+      benchmarkWindow,
+      document,
+      timing,
+      frame,
+    );
+
+    await benchmarkWindow.__runLocalBenchmarkScenario("createRows");
+    expect(marks).toEqual([]);
+
+    await benchmarkWindow.__runLocalBenchmarkScenario("createRows", true);
+    expect(marks).toEqual([
+      "local-compare:createRows:start",
+      "local-compare:createRows:sync-end",
+      "local-compare:createRows:first-frame",
+      "local-compare:createRows:second-frame",
+    ]);
+  });
 });

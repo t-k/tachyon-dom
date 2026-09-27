@@ -445,11 +445,16 @@ const clickInPage = async (page: Page, selector: string): Promise<void> => {
 
 type ScenarioTiming = { syncUpdateMs: number; settledUpdateMs: number };
 
-const runBrowserScenario = async (page: Page, url: string, scenarioId: string): Promise<ScenarioTiming> => {
+const runBrowserScenario = async (
+  page: Page,
+  url: string,
+  scenarioId: string,
+  trace = false,
+): Promise<ScenarioTiming> => {
   await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForSelector("#run");
   await page.addScriptTag({ content: browserScenarioScript });
-  return await page.evaluate(`window.__runLocalBenchmarkScenario(${JSON.stringify(scenarioId)})`);
+  return await page.evaluate(`window.__runLocalBenchmarkScenario(${JSON.stringify(scenarioId)}, ${trace})`);
 };
 
 const defaultTracePath = (implementation: ImplementationName, scenarioId: string): string => {
@@ -482,7 +487,7 @@ const captureChromeTrace = async <T>(page: Page, runScenario: () => Promise<T>, 
   await mkdir(path.dirname(outputPath), { recursive: true });
   try {
     await session.send("Tracing.start", {
-      categories: "devtools.timeline,disabled-by-default-devtools.timeline,blink,cc,v8",
+      categories: "devtools.timeline,disabled-by-default-devtools.timeline,blink,blink.user_timing,cc,v8",
       transferMode: "ReturnAsStream",
     });
     const value = await runScenario();
@@ -530,7 +535,7 @@ const measureImplementation = async (
       if (options.traceImplementation === implementation.name && options.traceScenario === scenario.id) {
         await captureChromeTrace(
           page,
-          () => runBrowserScenario(page, `${baseUrl}${implementation.path}`, scenario.id),
+          () => runBrowserScenario(page, `${baseUrl}${implementation.path}`, scenario.id, true),
           path.resolve(projectRoot, options.traceOutput ?? defaultTracePath(implementation.name, scenario.id)),
         );
       }
