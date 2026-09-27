@@ -12,7 +12,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/list`: keyed list mounting, reuse, move, multi-root item support, row-local stores/components/hydration boundaries, and precomputed binding plans that avoid rebuilding per-row binding subsets.
 - `runtime/list-path`: retained for compatibility with previously generated modules. Since every `<for>` region is delimited by markers, sibling paths no longer shift around rows and the compiler no longer imports this module; its offset is always zero. It is a removal candidate for the next major release.
 - `runtime/keyed-rows`: dependency-free keyed table-row list where the live DOM is the single source of truth (no shadow item/row arrays). Bulk creation binds and clones a reusable multi-row chunk; remove/swap/select are O(1) DOM operations. Suited to large data tables that do not need per-row reactivity.
-- `runtime/virtual-list`: fixed-height virtualized lists with overscan, imperative updates, index scrolling, and ARIA position metadata.
+- `runtime/virtual-list`: fixed-height virtualized lists with overscan, imperative updates, index/key scrolling, optional scroll anchoring, and ARIA position metadata.
 - `runtime/conditional`: conditional DOM mounting.
 - `runtime/conditional-core`: lightweight conditional mounting selected for branches whose bindings are limited to text, class, attr, style, and event.
 - `runtime/hydrate`: SSR boundary location, state handoff, hydration scheduling, and dev diagnostics.
@@ -26,18 +26,20 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 Browser feature bundles have independent minified and Brotli budgets. Checks reject compiler, server, TypeScript, parse5, and language-server inputs. After building, run `pnpm update:runtime-sizes` to refresh the measurement JSON and this table together; review any budget changes separately. CI runs `pnpm check:runtime-sizes` to reject stale measurements or documentation. The conditional budget allows approximately 3% over the baseline recorded when the budget was tightened; budgets never increase automatically.
 
 <!-- browser-feature-sizes:start -->
+
 Browser feature measurements (bytes):
 
-| Fixture | Minified | Brotli |
-| --- | ---: | ---: |
-| runtime/list | 16586 | 5902 |
-| runtime/generic-list | 21842 | 7430 |
-| runtime/form | 2997 | 1210 |
-| runtime/conditional | 9990 | 3508 |
-| runtime/generic-conditional | 15994 | 5362 |
-| runtime/router | 18819 | 6321 |
+| Fixture                     | Minified | Brotli |
+| --------------------------- | -------: | -----: |
+| runtime/list                |    16586 |   5902 |
+| runtime/generic-list        |    21842 |   7430 |
+| runtime/form                |     2997 |   1210 |
+| runtime/conditional         |     9990 |   3508 |
+| runtime/generic-conditional |    15994 |   5362 |
+| runtime/router              |    18819 |   6321 |
 
 Source: [measurement JSON](../scripts/browser-feature-sizes.json). It records the commit, dirty state, input hashes, Node/esbuild versions, production define, minification, and Brotli conditions. `pnpm check:runtime-sizes` compares the input hashes, the byte counts, and the conditions needed to reproduce them: esbuild version, production define, minification, compression, and the Node major version that CI pins. The commit and dirty state are recorded for traceability but are not compared. CI uploads fresh reports as the browser-feature-measurements artifact. These feature fixtures differ from the client bundle attribution fixtures and Quick Example.
+
 <!-- browser-feature-sizes:end -->
 
 ## Mount and Hydrate Entrypoints
@@ -128,6 +130,8 @@ void env.value.env.SESSION_SECRET;
 ## Virtualized Lists
 
 `createVirtualizedList()` renders a fixed-height visible window with overscan. Provide `getKey(item, index)` to preserve row elements across scrolling and `update()` calls. Duplicate keys are rejected before the current window changes. When new objects reuse an existing key, use `updateItem(element, item, index)` to refresh their visible content without replacing the element; omitting it intentionally preserves local DOM state such as an edited input value. Without `getKey`, list identity remains index-based.
+
+With `getKey`, `scrollToKey(key)` scrolls to the matching item and returns `true`, or returns `false` if the key is absent. Call `update(nextItems, { preserveScrollAnchor: true })` when prepending or reordering items to keep the first visible keyed row at the same offset in the viewport. When that key is removed, the update keeps the numeric scroll position if it remains in range; otherwise it clamps to the new maximum and immediately renders the final visible rows. Both methods require `getKey`; calling them without it throws. An update that fails before DOM commit restores the previous items and scroll position. This uses the configured fixed `itemHeight`; rows that change height need a different virtualization strategy.
 
 ## Hydration Strategies
 

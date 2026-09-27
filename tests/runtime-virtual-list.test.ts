@@ -399,6 +399,237 @@ describe("virtualized list runtime", () => {
     list.destroy();
   });
 
+  it("scrolls to a key and preserves the visible keyed row when items are prepended", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const original = Array.from({ length: 8 }, (_, index) => ({ id: `row-${index}` }));
+    const list = createVirtualizedList({
+      scroller,
+      items: original,
+      itemHeight: 20,
+      viewportHeight: 40,
+      overscan: 0,
+      getKey: (item) => item.id,
+      renderItem: (item) => {
+        const row = document.createElement("input");
+        row.value = item.id;
+        return row;
+      },
+    });
+
+    expect(list.scrollToKey("row-3")).toBe(true);
+    expect(scroller.scrollTop).toBe(60);
+    const focused = scroller.querySelector(`[data-tachyon-virtual-item="row-3"]`);
+    if (!(focused instanceof HTMLInputElement)) throw new Error("Missing row.");
+    focused.focus();
+    focused.value = "draft";
+    scroller.scrollTop = 65;
+    list.update([{ id: "new-a" }, { id: "new-b" }, ...original], { preserveScrollAnchor: true });
+
+    expect(scroller.scrollTop).toBe(105);
+    expect(scroller.querySelector(`[data-tachyon-virtual-item="row-3"]`)).toBe(focused);
+    expect(focused.value).toBe("draft");
+    expect(document.activeElement).toBe(focused);
+    expect(list.scrollToKey("missing")).toBe(false);
+    expect(scroller.scrollTop).toBe(105);
+    list.destroy();
+  });
+
+  it("requires keys for anchored updates and key scrolling", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const list = createVirtualizedList({
+      scroller,
+      items: ["a", "b"],
+      itemHeight: 20,
+      viewportHeight: 20,
+      renderItem: (item) => Object.assign(document.createElement("div"), { textContent: item }),
+    });
+
+    expect(() => list.scrollToKey("b")).toThrow("getKey");
+    expect(() => list.update(["new", "a", "b"], { preserveScrollAnchor: true })).toThrow("getKey");
+    expect(scroller.textContent).toBe("ab");
+    list.destroy();
+  });
+
+  it("restores scroll position when an anchored update fails before commit", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    let fail = false;
+    const original = Array.from({ length: 8 }, (_, index) => ({ id: index }));
+    const list = createVirtualizedList({
+      scroller,
+      items: original,
+      itemHeight: 20,
+      viewportHeight: 40,
+      overscan: 0,
+      getKey: (item) => item.id,
+      renderItem: (item) => Object.assign(document.createElement("div"), { textContent: String(item.id) }),
+      updateItem: () => {
+        if (fail) throw new Error("row update failed");
+      },
+    });
+    list.scrollToIndex(3);
+    scroller.scrollTop = 65;
+    fail = true;
+
+    expect(() => list.update([{ id: -1 }, ...original], { preserveScrollAnchor: true })).toThrow("row update failed");
+    expect(scroller.scrollTop).toBe(65);
+    expect(scroller.firstElementChild?.getAttribute("style")).toContain("height: 160px");
+    fail = false;
+    expect(list.scrollToKey(3)).toBe(true);
+    expect(scroller.scrollTop).toBe(60);
+    list.destroy();
+  });
+
+  it("keeps the numeric offset when the visible anchor key is removed", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const list = createVirtualizedList({
+      scroller,
+      items: [0, 1, 2, 3, 4, 5],
+      itemHeight: 20,
+      viewportHeight: 40,
+      overscan: 0,
+      getKey: (item) => item,
+      renderItem: (item) => Object.assign(document.createElement("div"), { textContent: String(item) }),
+    });
+    list.scrollToIndex(2);
+    scroller.scrollTop = 45;
+
+    list.update([0, 1, 3, 4, 5], { preserveScrollAnchor: true });
+
+    expect(scroller.scrollTop).toBe(45);
+    expect(list.scrollToKey(2)).toBe(false);
+    list.destroy();
+  });
+
+  it.each([false, true])(
+    "renders the clamped end window after shrinking, preserveScrollAnchor=%s",
+    (preserveScrollAnchor) => {
+      document.body.innerHTML = `<div id="scroller"></div>`;
+      const scroller = document.querySelector("#scroller");
+      if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+      let requestedTop = 0;
+      const clampedTop = () => {
+        const height = Number.parseFloat((scroller.firstElementChild as HTMLElement | null)?.style.height ?? "0");
+        return Math.max(0, Math.min(requestedTop, height - 40));
+      };
+      Object.defineProperty(scroller, "scrollTop", {
+        configurable: true,
+        get: clampedTop,
+        set: (value: number) => {
+          requestedTop = value;
+        },
+      });
+      const items = Array.from({ length: 10 }, (_, index) => index);
+      const list = createVirtualizedList({
+        scroller,
+        items,
+        itemHeight: 20,
+        viewportHeight: 40,
+        overscan: 0,
+        getKey: (item) => item,
+        renderItem: (item) => Object.assign(document.createElement("div"), { textContent: String(item) }),
+      });
+      list.scrollToIndex(8);
+      expect(scroller.textContent).toBe("89");
+
+      list.update(items.slice(0, 8), { preserveScrollAnchor });
+
+      expect(scroller.scrollTop).toBe(120);
+      expect(scroller.textContent).toBe("67");
+      list.destroy();
+    },
+  );
+
+  it("clamps the logical scroll position even when the DOM host does not clamp it", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const items = Array.from({ length: 10 }, (_, index) => index);
+    const list = createVirtualizedList({
+      scroller,
+      items,
+      itemHeight: 20,
+      viewportHeight: 40,
+      overscan: 0,
+      renderItem: (item) => Object.assign(document.createElement("div"), { textContent: String(item) }),
+    });
+    list.scrollToIndex(8);
+
+    list.update(items.slice(0, 8));
+
+    expect(scroller.scrollTop).toBe(120);
+    expect(scroller.textContent).toBe("67");
+    list.destroy();
+  });
+
+  it("grows the spacer before scrolling to a prepended anchor near the bottom", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    let top = 0;
+    Object.defineProperty(scroller, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (value: number) => {
+        const height = Number.parseFloat((scroller.firstElementChild as HTMLElement | null)?.style.height ?? "0");
+        top = Math.max(0, Math.min(value, height - 40));
+      },
+    });
+    const items = Array.from({ length: 8 }, (_, index) => ({ id: index }));
+    const list = createVirtualizedList({
+      scroller,
+      items,
+      itemHeight: 20,
+      viewportHeight: 40,
+      overscan: 0,
+      getKey: (item) => item.id,
+      renderItem: (item) => Object.assign(document.createElement("div"), { textContent: String(item.id) }),
+    });
+    list.scrollToKey(6);
+    expect(scroller.scrollTop).toBe(120);
+
+    list.update([{ id: -2 }, { id: -1 }, ...items], { preserveScrollAnchor: true });
+
+    expect(scroller.scrollTop).toBe(160);
+    list.destroy();
+  });
+
+  it("anchors the current key through reordering, not the old numeric index", () => {
+    document.body.innerHTML = `<div id="scroller"></div>`;
+    const scroller = document.querySelector("#scroller");
+    if (!(scroller instanceof HTMLElement)) throw new Error("Missing scroller.");
+    const items = Array.from({ length: 8 }, (_, index) => ({ id: index }));
+    const list = createVirtualizedList({
+      scroller,
+      items,
+      itemHeight: 20,
+      viewportHeight: 40,
+      overscan: 0,
+      getKey: (item) => item.id,
+      renderItem: (item) => Object.assign(document.createElement("div"), { textContent: String(item.id) }),
+    });
+    list.scrollToKey(3);
+    scroller.scrollTop = 65;
+    const retained = scroller.querySelector(`[data-tachyon-virtual-item="3"]`);
+
+    list.update([items[3]!, items[0]!, items[1]!, items[2]!, ...items.slice(4)], {
+      preserveScrollAnchor: true,
+    });
+
+    expect(scroller.scrollTop).toBe(5);
+    expect(scroller.querySelector(`[data-tachyon-virtual-item="3"]`)).toBe(retained);
+    list.destroy();
+    expect(list.scrollToKey(3)).toBe(false);
+    expect(() => list.update([{ id: 1 }, { id: 1 }], { preserveScrollAnchor: true })).not.toThrow();
+  });
+
   it("coalesces scroll rendering with requestAnimationFrame", () => {
     document.body.innerHTML = `<div id="scroller"></div>`;
     const scroller = document.querySelector("#scroller");

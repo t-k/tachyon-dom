@@ -19,8 +19,9 @@ export type VirtualizedListOptions<T> = {
 };
 
 export type VirtualizedList<T> = {
-  update: (items: readonly T[]) => void;
+  update: (items: readonly T[], options?: { preserveScrollAnchor?: boolean }) => void;
   scrollToIndex: (index: number) => void;
+  scrollToKey: (key: PropertyKey) => boolean;
   destroy: () => void;
 };
 
@@ -72,20 +73,31 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
     }
     return viewportHeight;
   };
-  const validateItems = (nextItems: readonly T[]): T[] => {
+  const validateItems = (
+    nextItems: readonly T[],
+  ): {
+    items: T[];
+    keys: PropertyKey[];
+    positions: Map<PropertyKey, number>;
+  } => {
     const copy = [...nextItems];
-    if (!getKey) return copy;
-    const keys = new Set<PropertyKey>();
+    const keys: PropertyKey[] = [];
+    const positions = new Map<PropertyKey, number>();
+    if (!getKey) return { items: copy, keys, positions };
     for (let index = 0; index < copy.length; index++) {
       const key = normalizeListKey(getKey(copy[index] as T, index));
-      if (keys.has(key)) throw new Error(`Duplicate virtual list key: ${String(key)}`);
-      keys.add(key);
+      if (positions.has(key)) throw new Error(`Duplicate virtual list key: ${String(key)}`);
+      keys.push(key);
+      positions.set(key, index);
     }
-    return copy;
+    return { items: copy, keys, positions };
   };
   const initialViewportHeight = validateViewportHeight(viewportHeightForList());
   const previousChildren = Array.from(scroller.childNodes);
-  let items = validateItems(options.items);
+  const initialItems = validateItems(options.items);
+  let items = initialItems.items;
+  let keys = initialItems.keys;
+  let positions = initialItems.positions;
   let rendered = new Map<PropertyKey, RenderedRow>();
   let lastRangeKey = "";
   let animationFrame: number | undefined;
@@ -146,7 +158,7 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
     try {
       for (let index = start; index < end; index++) {
         const item = items[index] as T;
-        const key = getKey ? normalizeListKey(getKey(item, index)) : index;
+        const key = getKey ? (keys[index] as PropertyKey) : index;
         const existing = rendered.get(key);
         const row = existing ?? elementAndDisposer(renderItem(item, index));
         if (!existing) createdRows.push(row);
@@ -235,30 +247,64 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
     throw error;
   }
 
+  const scrollToIndex = (index: number): void => {
+    if (disposed) return;
+    if (!Number.isInteger(index) || !Number.isFinite(index)) {
+      throw new RangeError("Virtual list scrollToIndex must be a finite integer.");
+    }
+    scroller.scrollTop = clamp(index, 0, Math.max(0, items.length - 1)) * itemHeight;
+    renderWindow(true);
+  };
+
   return {
-    update: (nextItems) => {
+    update: (nextItems, updateOptions = {}) => {
       if (disposed) return;
+      if (updateOptions.preserveScrollAnchor && !getKey) {
+        throw new TypeError("Virtual list preserveScrollAnchor requires getKey.");
+      }
       const previousItems = items;
+      const previousKeys = keys;
+      const previousPositions = positions;
       const previousRangeKey = lastRangeKey;
-      items = validateItems(nextItems);
+      const previousScrollTop = scroller.scrollTop;
+      const previousSpacerHeight = spacer.style.height;
+      const next = validateItems(nextItems);
+      const anchorIndex = clamp(Math.floor(previousScrollTop / itemHeight), 0, Math.max(0, items.length - 1));
+      const anchorKey = updateOptions.preserveScrollAnchor ? keys[anchorIndex] : undefined;
+      const nextAnchorIndex = anchorKey === undefined ? undefined : next.positions.get(anchorKey);
+      items = next.items;
+      keys = next.keys;
+      positions = next.positions;
       lastRangeKey = "";
       try {
-        renderWindow(true);
+        const viewportHeight = validateViewportHeight(viewportHeightForList());
+        const desiredScrollTop =
+          nextAnchorIndex === undefined
+            ? previousScrollTop
+            : nextAnchorIndex * itemHeight + (previousScrollTop - anchorIndex * itemHeight);
+        spacer.style.height = `${items.length * itemHeight}px`;
+        scroller.scrollTop = clamp(desiredScrollTop, 0, Math.max(0, items.length * itemHeight - viewportHeight));
+        renderWindow(true, viewportHeight);
       } catch (error) {
         if (!lastRenderCommitted && !disposed) {
           items = previousItems;
+          keys = previousKeys;
+          positions = previousPositions;
           lastRangeKey = previousRangeKey;
+          spacer.style.height = previousSpacerHeight;
+          scroller.scrollTop = previousScrollTop;
         }
         throw error;
       }
     },
-    scrollToIndex: (index) => {
-      if (disposed) return;
-      if (!Number.isInteger(index) || !Number.isFinite(index)) {
-        throw new RangeError("Virtual list scrollToIndex must be a finite integer.");
-      }
-      scroller.scrollTop = clamp(index, 0, Math.max(0, items.length - 1)) * itemHeight;
-      renderWindow(true);
+    scrollToIndex,
+    scrollToKey: (key) => {
+      if (disposed) return false;
+      if (!getKey) throw new TypeError("Virtual list scrollToKey requires getKey.");
+      const index = positions.get(normalizeListKey(key));
+      if (index === undefined) return false;
+      scrollToIndex(index);
+      return true;
     },
     destroy: () => {
       if (disposed) return;
@@ -272,6 +318,8 @@ export const createVirtualizedList = <T>(options: VirtualizedListOptions<T>): Vi
       const activeRows = Array.from(rendered.values());
       rendered = new Map();
       items = [];
+      keys = [];
+      positions = new Map();
       lastRangeKey = "";
       windowEl.replaceChildren();
       scroller.replaceChildren();
