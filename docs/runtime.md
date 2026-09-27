@@ -145,6 +145,25 @@ The compiler records hydration boundaries with `hydrate:id={id}`. Runtime schedu
 
 `diagnoseHydrationBoundaries(root, expectedIds)` reports missing, duplicate, or empty boundary markers so SSR/client mismatches can fail loudly in tests and development builds.
 
+## Browser Lifecycle Tests
+
+`tachyon-dom/testing/lifecycle` exports `compareTemplateLifecycles()`. It creates independent scopes for server rendering, client mount, and SSR hydration, runs the same `exercise()` callback against mount and hydrate, then compares the JSON-serializable values returned by `observe()`. Each run uses a container attached to `document.body`, so focus and browser event tests can operate on live DOM. The helper disposes the template handle and scope even when an operation throws, and checks that reactive owner, effect, subscription, and cleanup counts return to their initial values.
+
+```ts
+import { compareTemplateLifecycles } from "tachyon-dom/testing/lifecycle";
+import { createSignal } from "tachyon-dom";
+
+await compareTemplateLifecycles({
+  client: pageClient,
+  createScope: () => ({ count: createSignal(0) }),
+  renderServer: (scope) => pageServer.render(scope),
+  exercise: (root) => root.querySelector("button")?.dispatchEvent(new Event("click")),
+  observe: (root) => ({ text: root.textContent }),
+});
+```
+
+The caller chooses which DOM state, input values, event results, focus, and keyed node identity to assert or return from `observe()`. Use `afterDispose(root, mode)` to verify listener removal or external resource cleanup that reactive counters cannot see; it runs even if `exercise()` throws. Both modes run and dispose even if one fails; failures from both modes are returned as an `AggregateError`. The comparison applies to shared mount/hydrate behavior only; it does not prove arbitrary JavaScript equivalent and does not minimize a failing case. Run it in a DOM test environment with development diagnostics enabled, without unrelated concurrent reactive work that would change the process-wide lifecycle counts.
+
 ## Development Runtime Diagnostics
 
 `tachyon-dom/runtime/diagnostics` is an opt-in development entry. `createRuntimeDiagnostics({ bindings, onEvent })` observes aggregate owner, effect, subscription, and cleanup counts, records lifecycle events, and maps a `(templateId, path)` pair to a source location supplied by the compiler or integration. It retains event data and source descriptors, not runtime owners or DOM nodes. In development the Vite plugin also asks the compiler to register each generated binding's template source span (a root-relative template id, a source revision hash, and UTF-16 offsets) and to mark the binding while it is installed, so `bindingForEffect(effectId)`, `bindingsForOwner(ownerId)`, and `liveBindings()` resolve live effects and owners back to the `.td` expression they came from; owners and effects created later by reruns (rows, branches, boundary chunks) stay attributed to the binding that created them, and the entries disappear when the owner or effect is disposed. Bindings inside a row or branch attribute to the enclosing `<for>` or `<if>` binding. Production builds emit none of this instrumentation. Multiple diagnostic consumers can be attached independently and disposing one does not affect the others. Normal compiler-generated production modules do not import this entry, and the Tachyon Vite plugin automatically defines `__TACHYON_PRODUCTION__` for production builds so lifecycle counters and hook calls are removed from the signal hot path. Verify the browser metafile before shipping a custom diagnostic integration.

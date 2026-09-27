@@ -81,6 +81,10 @@
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js"
     },
+    "./testing/lifecycle": {
+      "types": "./dist/testing-lifecycle.d.ts",
+      "import": "./dist/testing-lifecycle.js"
+    },
     "./language-server": {
       "types": "./dist/language-server.d.ts",
       "import": "./dist/language-server.js"
@@ -482,6 +486,14 @@
     {
       "name": "testing",
       "path": "dist/testing.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
+    },
+    {
+      "name": "testing/lifecycle",
+      "path": "dist/testing-lifecycle.js",
       "disablePlugins": [
         "@size-limit/esbuild"
       ],
