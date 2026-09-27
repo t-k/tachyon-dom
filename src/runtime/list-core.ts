@@ -157,16 +157,16 @@ export const positionRecords = (
   staticAfter: Node | null,
 ): void => {
   const previousKeys = Array.from(previousRecords.keys());
-  const nextKeys = orderedRecords.map((record) => record.key);
-  const sharedLength = Math.min(previousKeys.length, nextKeys.length);
+  const nextLength = orderedRecords.length;
+  const sharedLength = Math.min(previousKeys.length, nextLength);
   let prefixLength = 0;
-  while (prefixLength < sharedLength && previousKeys[prefixLength] === nextKeys[prefixLength]) {
+  while (prefixLength < sharedLength && previousKeys[prefixLength] === orderedRecords[prefixLength]?.key) {
     prefixLength++;
   }
   let suffixLength = 0;
   while (
     suffixLength < sharedLength - prefixLength &&
-    previousKeys[previousKeys.length - suffixLength - 1] === nextKeys[nextKeys.length - suffixLength - 1]
+    previousKeys[previousKeys.length - suffixLength - 1] === orderedRecords[nextLength - suffixLength - 1]?.key
   ) {
     suffixLength++;
   }
@@ -174,15 +174,15 @@ export const positionRecords = (
   for (let index = prefixLength; index < previousKeys.length - suffixLength; index++) {
     previousOrder.set(previousKeys[index] as PropertyKey, index);
   }
-  const stablePositions = longestIncreasingSubsequencePositions(
-    nextKeys.map((key, index) =>
-      index < prefixLength || index >= nextKeys.length - suffixLength ? -1 : (previousOrder.get(key) ?? -1),
-    ),
-  );
-  let anchor: Node | null = orderedRecords[nextKeys.length - suffixLength]?.nodes[0] ?? staticAfter;
-  for (let index = nextKeys.length - suffixLength - 1; index >= prefixLength; index--) {
+  const middlePositions: number[] = [];
+  for (let index = prefixLength; index < nextLength - suffixLength; index++) {
+    middlePositions.push(previousOrder.get((orderedRecords[index] as PositionedRow).key) ?? -1);
+  }
+  const stablePositions = longestIncreasingSubsequencePositions(middlePositions);
+  let anchor: Node | null = orderedRecords[nextLength - suffixLength]?.nodes[0] ?? staticAfter;
+  for (let index = nextLength - suffixLength - 1; index >= prefixLength; index--) {
     const record = orderedRecords[index] as PositionedRow;
-    if (stablePositions.has(index)) {
+    if (stablePositions.has(index - prefixLength)) {
       anchor = record.nodes[0] ?? anchor;
       continue;
     }
@@ -245,6 +245,25 @@ export const ensureListRegion = (container: Element, region: ListCoreRegion | un
 
 export type ListRegionMarkers = { start: Comment; end: Comment };
 
+/** Tests the complete key sequence after key preflight, without allocating a second order array. */
+export const hasSameKeyOrder = (
+  entries: readonly { key: PropertyKey }[],
+  records: ReadonlyMap<PropertyKey, unknown>,
+): boolean => {
+  if (entries.length !== records.size) return false;
+  let index = 0;
+  for (const key of records.keys()) {
+    if (entries[index++]?.key !== key) return false;
+  }
+  return true;
+};
+
+/** A generated mount can reuse its resolved pair while the same boundary still owns this container. */
+export const canReuseListRegion = (container: Element, markers: ListRegionMarkers): boolean =>
+  markers.start.parentNode === container &&
+  markers.end.parentNode === container &&
+  (!explicitRegionStart || explicitRegionStart.parentNode !== container || explicitRegionStart === markers.start);
+
 /** The elements a region currently holds; nested region markers sit between them and are not rows. */
 export const regionElements = ({ start, end }: ListRegionMarkers): Element[] => {
   const elements: Element[] = [];
@@ -254,12 +273,32 @@ export const regionElements = ({ start, end }: ListRegionMarkers): Element[] => 
   return elements;
 };
 
-/** Replaces everything between the markers with `nodes`. */
+/** Makes the region match `nodes`, leaving already ordered nodes attached. */
 export const replaceRegionContent = ({ start, end }: ListRegionMarkers, nodes: readonly Node[]): void => {
-  while (start.nextSibling && start.nextSibling !== end) start.nextSibling.remove();
-  const fragment = start.ownerDocument.createDocumentFragment();
-  fragment.append(...nodes);
-  end.parentNode?.insertBefore(fragment, end);
+  const container = end.parentNode;
+  if (!container) return;
+  let cursor = start.nextSibling;
+  let desiredNodes: Set<Node> | undefined;
+  for (const node of nodes) {
+    if (cursor !== node && node.parentNode === container) {
+      desiredNodes ??= new Set(nodes);
+      while (cursor && cursor !== end && cursor !== node && !desiredNodes.has(cursor)) {
+        const next = cursor.nextSibling;
+        cursor.remove();
+        cursor = next;
+      }
+    }
+    if (cursor === node) {
+      cursor = cursor.nextSibling;
+    } else {
+      container.insertBefore(node, cursor ?? end);
+    }
+  }
+  while (cursor && cursor !== end) {
+    const next = cursor.nextSibling;
+    cursor.remove();
+    cursor = next;
+  }
 };
 
 /** True when the next order keeps every retained row in place, so new rows only have to be appended. */
@@ -268,13 +307,13 @@ export const canAppendWithoutMoving = (
   orderedRecords: readonly PositionedRow[],
   previousRecords: ReadonlyMap<PropertyKey, unknown>,
 ): boolean => {
-  const previousKeys = Array.from(previousRecords.keys());
-  const nextKeys = orderedRecords.map((record) => record.key);
-  const retainedPrevious = previousKeys.filter((key) => nextRecords.has(key));
-  const retainedNext = nextKeys.filter((key) => previousRecords.has(key));
-  if (retainedPrevious.length !== retainedNext.length) return false;
-  for (let index = 0; index < retainedPrevious.length; index++) {
-    if (retainedPrevious[index] !== retainedNext[index]) return false;
+  let nextIndex = 0;
+  for (const key of previousRecords.keys()) {
+    if (!nextRecords.has(key)) continue;
+    if (orderedRecords[nextIndex++]?.key !== key) return false;
   }
-  return nextKeys.slice(0, retainedNext.length).every((key) => previousRecords.has(key));
+  for (; nextIndex < orderedRecords.length; nextIndex++) {
+    if (previousRecords.has((orderedRecords[nextIndex] as PositionedRow).key)) return false;
+  }
+  return true;
 };

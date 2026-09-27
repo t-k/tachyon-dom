@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRoot, createSignal, effect, onCleanup } from "../src/runtime/signal";
 import { createStore } from "../src/runtime/store";
-import { mountKeyedList } from "../src/runtime/list";
+import { mountGeneratedKeyedList, mountKeyedList } from "../src/runtime/list";
 
 // The runtime wraps rows in its region markers; these assertions are about the rows themselves.
 const rowsHtml = (element: Element): string =>
@@ -18,6 +18,156 @@ afterEach(() => {
 });
 
 describe("mountKeyedList", () => {
+  it("reuses the generated list boundary on a warm update", () => {
+    const root = document.createElement("ul");
+    const options = {
+      signature: "cached-general-boundary",
+      key: "item.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [],
+    };
+    mountGeneratedKeyedList(root, [], [{ id: "a" }], options, {});
+    const firstChild = vi.spyOn(root, "firstChild", "get");
+
+    mountGeneratedKeyedList(root, [], [{ id: "a" }], options, {});
+
+    expect(root.querySelectorAll("li")).toHaveLength(1);
+    expect(firstChild).not.toHaveBeenCalled();
+    firstChild.mockRestore();
+  });
+
+  it("keeps the reconciliation map when keyed order and values are unchanged", () => {
+    const root = document.createElement("ul");
+    const options = {
+      signature: "same-order-generic-map",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [],
+    };
+    const item = { id: "a" };
+    mountKeyedList(root, [], [item], options);
+    const originalMap = globalThis.Map;
+    let mapsCreated = 0;
+    class CountingMap<K, V> extends originalMap<K, V> {
+      constructor(entries?: Iterable<readonly [K, V]> | null) {
+        super(entries);
+        mapsCreated++;
+      }
+    }
+    globalThis.Map = CountingMap as MapConstructor;
+    try {
+      mountKeyedList(root, [], [item], options);
+    } finally {
+      globalThis.Map = originalMap;
+    }
+    expect(mapsCreated).toBe(0);
+  });
+
+  it("adopts matching SSR rows without cloning or detaching their elements", () => {
+    document.body.innerHTML = `<ul id="items"><li><input value=""><span>A</span></li></ul>`;
+    const root = document.querySelector("#items");
+    const row = root?.querySelector("li");
+    const input = row?.querySelector("input");
+    if (!(root instanceof HTMLElement) || !row || !input) throw new Error("Missing SSR row.");
+    input.value = "typed";
+    input.focus();
+    const remove = vi.spyOn(row, "remove");
+    const cloneNode = vi.spyOn(Node.prototype, "cloneNode");
+    const options = {
+      signature: "general-ssr-adoption-without-detach",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><input value=""><span> </span></li>`,
+      bindings: [{ kind: "text" as const, path: [1, 0], expression: "item.label" }],
+    };
+
+    mountKeyedList(root, [], [{ id: "a", label: "A" }], options);
+
+    expect(root.querySelector("li")).toBe(row);
+    expect(cloneNode).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(input.value).toBe("typed");
+    expect(document.activeElement).toBe(input);
+    cloneNode.mockRestore();
+    remove.mockRestore();
+  });
+
+  it("keeps both roots of a matching SSR row attached in order", () => {
+    const root = document.createElement("ul");
+    root.innerHTML = `<li>A</li><li>B</li>`;
+    const first = root.children[0];
+    const second = root.children[1];
+    if (!first || !second) throw new Error("Missing SSR roots.");
+    const firstRemove = vi.spyOn(first, "remove");
+    const secondRemove = vi.spyOn(second, "remove");
+    const insertBefore = vi.spyOn(root, "insertBefore");
+
+    mountKeyedList(root, [], [{ id: "a" }], {
+      signature: "multi-root-ssr-adoption",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li>A</li><li>B</li>`,
+      bindings: [],
+    });
+
+    expect(Array.from(root.children)).toEqual([first, second]);
+    expect(firstRemove).not.toHaveBeenCalled();
+    expect(secondRemove).not.toHaveBeenCalled();
+    expect(insertBefore.mock.calls.filter(([node]) => node === first || node === second)).toHaveLength(0);
+    firstRemove.mockRestore();
+    secondRemove.mockRestore();
+    insertBefore.mockRestore();
+  });
+
+  it("does not move adopted element roots when server whitespace differs from template whitespace", () => {
+    const root = document.createElement("ul");
+    root.innerHTML = `\n<li>A</li>\n<li>B</li>\n`;
+    const first = root.children[0];
+    const second = root.children[1];
+    if (!first || !second) throw new Error("Missing SSR roots.");
+    const insertBefore = vi.spyOn(root, "insertBefore");
+
+    mountKeyedList(root, [], [{ id: "a" }], {
+      signature: "multi-root-whitespace-ssr-adoption",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: ` <li>A</li> <li>B</li> `,
+      bindings: [],
+    });
+
+    expect(Array.from(root.children)).toEqual([first, second]);
+    expect(insertBefore.mock.calls.filter(([node]) => node === first || node === second)).toHaveLength(0);
+    insertBefore.mockRestore();
+  });
+
+  it("reuses a row target for changed text and attribute bindings", () => {
+    const root = document.createElement("ul");
+    const options = {
+      signature: "cached-row-targets",
+      key: "item.id",
+      itemName: "item",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        { kind: "text" as const, path: [0, 0], expression: "item.label" },
+        { kind: "attr" as const, path: [0], name: "title", expression: "item.label" },
+      ],
+    };
+    mountKeyedList(root, [], [{ id: "a", label: "A" }], options);
+    const row = root.querySelector("li");
+    if (!row) throw new Error("Missing row.");
+    const firstChild = vi.spyOn(row, "firstChild", "get");
+
+    mountKeyedList(root, [], [{ id: "a", label: "B" }], options);
+
+    expect(row.textContent).toBe("B");
+    expect(row.querySelector("span")?.title).toBe("B");
+    expect(firstChild).not.toHaveBeenCalled();
+    firstChild.mockRestore();
+  });
+
   // The compatibility entry is the one that still interprets expression strings and applies them through the
   // setters this runtime imports. Splitting the generated entry off left that half reachable only from here, so
   // every kind it has to drive is exercised through a hand-written descriptor.

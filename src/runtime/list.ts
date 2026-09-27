@@ -16,13 +16,15 @@ import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtre
 import { normalizeListKey } from "./key.js";
 import {
   canAppendWithoutMoving,
+  canReuseListRegion,
   emptyParentScope,
   ensureListRegion,
+  hasSameKeyOrder,
   positionRecords,
+  replaceRegionContent,
   readItemPath,
   readPath,
   regionElements,
-  replaceRegionContent,
   scopedItemFromSnapshot,
   syncParentScope,
   type ListCoreRegion,
@@ -240,6 +242,7 @@ type RowRecord = {
   cleanups: Array<() => void>;
   refCleanups?: Map<number, () => void>;
   lastValues: unknown[];
+  targets: Array<Node | undefined>;
   item: unknown;
   index: number;
   appliedParentScope: ParentScopeSnapshot;
@@ -318,6 +321,7 @@ type ListRuntimeOptions = KeyedListOptions & {
 
 // Keyed by the region start marker rather than the container, so sibling lists in one parent keep their own state.
 const listStates = new WeakMap<Comment, ListState>();
+const generatedStateCaches = new WeakMap<GeneratedKeyedListOptions, ListState>();
 
 const writePath = (scope: Record<string, unknown>, expression: string, value: unknown): void => {
   const parts = expression.split(".");
@@ -545,8 +549,11 @@ const cleanupListState = (state: ListState): void => {
   if (failed) throw firstError;
 };
 
-const getListState = (container: Element, options: ListRuntimeOptions): ListState => {
-  const markers = ensureListRegion(container, options.region);
+const getListState = (container: Element, options: ListRuntimeOptions, cached?: ListState): ListState => {
+  const markers =
+    cached && canReuseListRegion(container, cached.markers) && listStates.get(cached.markers.start) === cached
+      ? cached.markers
+      : ensureListRegion(container, options.region);
   const current = listStates.get(markers.start);
   if (current && current.descriptor === options.descriptor) {
     return current;
@@ -658,7 +665,8 @@ const applyRowBinding = (
   if (binding.kind === "text") {
     const value = options.readValue(scope, binding);
     if (shouldApplyValue(record, index, value)) {
-      setText(textAtRecord(record, binding.path), value);
+      const target = record.targets[index] ?? (record.targets[index] = textAtRecord(record, binding.path));
+      setText(target as Text, value);
     }
   } else if (
     binding.kind === "class" ||
@@ -668,7 +676,8 @@ const applyRowBinding = (
   ) {
     const value = options.readValue(scope, binding);
     if (shouldApplyValue(record, index, value)) {
-      options.applyValue(binding, nodeAtRecord(record, binding.path), value);
+      const target = record.targets[index] ?? (record.targets[index] = nodeAtRecord(record, binding.path));
+      options.applyValue(binding, target, value);
     }
   } else if (binding.kind === "ref") {
     record.refCleanups?.get(index)?.();
@@ -795,13 +804,11 @@ const createRecord = (
   existingElements?: readonly Element[],
   index = 0,
 ): RowRecord | undefined => {
-  const nodes = Array.from(state.template.content.childNodes).map((node) => node.cloneNode(true));
-  if (existingElements) {
-    state.elementIndices.forEach((nodeIndex, elementIndex) => {
-      const existing = existingElements[elementIndex];
-      if (existing) nodes[nodeIndex] = existing;
-    });
-  }
+  let elementIndex = 0;
+  const nodes = Array.from(state.template.content.childNodes, (node) => {
+    const adopted = node instanceof Element ? existingElements?.[elementIndex++] : undefined;
+    return adopted ?? node.cloneNode(true);
+  });
   const element = nodes.find((node): node is Element => node instanceof Element);
   if (!element) {
     return undefined;
@@ -817,6 +824,7 @@ const createRecord = (
     scope,
     cleanups: [],
     lastValues: [],
+    targets: [],
     item,
     index,
     appliedParentScope: parentScope,
@@ -959,12 +967,14 @@ const mountResolvedKeyedList = (
   items: readonly unknown[] | undefined,
   options: ListRuntimeOptions,
   scope: Record<string, unknown> | undefined,
+  generatedOptions?: GeneratedKeyedListOptions,
 ): void => {
   const container = nodeAt(root, path);
   if (!(container instanceof Element)) {
     return;
   }
-  const state = getListState(container, options);
+  const state = getListState(container, options, generatedOptions && generatedStateCaches.get(generatedOptions));
+  if (generatedOptions) generatedStateCaches.set(generatedOptions, state);
   const cleanupRecordsNotIn = (
     records: Map<PropertyKey, RowRecord>,
     keep: Pick<ReadonlySet<PropertyKey>, "has">,
@@ -1002,6 +1012,12 @@ const mountResolvedKeyedList = (
     entries.push({ item, index, key });
   }
   const parentScope = syncParentScope(state, scope, options.parentScopeKeys);
+  if (state.initialized && hasSameKeyOrder(entries, state.records)) {
+    for (const entry of entries) {
+      updateRecord(state.records.get(entry.key) as RowRecord, entry.item, entry.index, options, parentScope);
+    }
+    return;
+  }
   const nextRecords = new Map<PropertyKey, RowRecord>();
   const orderedRecords: RowRecord[] = [];
   const createdRecords: RowRecord[] = [];
@@ -1312,4 +1328,6 @@ export const mountGeneratedKeyedList = (
   items: readonly unknown[] | undefined,
   options: GeneratedKeyedListOptions,
   scope: Record<string, unknown> | undefined = options.scope,
-): void => mountResolvedKeyedList(root, path, items, resolveGeneratedOptions(options), scope);
+): void => {
+  mountResolvedKeyedList(root, path, items, resolveGeneratedOptions(options), scope, options);
+};

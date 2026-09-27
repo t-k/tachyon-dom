@@ -1,9 +1,11 @@
 // The reconciliation core both keyed list runtimes share. It used to exist twice, reachable only through a
 // full list mount; now it is one module with its own regressions.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   canAppendWithoutMoving,
+  canReuseListRegion,
   ensureListRegion,
+  hasSameKeyOrder,
   longestIncreasingSubsequencePositions,
   moveBefore,
   parentScopeNames,
@@ -15,6 +17,7 @@ import {
   replaceRegionContent,
   scopedItemFromSnapshot,
   syncParentScope,
+  withListRegionStart,
   type ParentScopeSnapshot,
 } from "../src/runtime/list-core";
 
@@ -133,6 +136,75 @@ describe("keyed list core", () => {
   });
 
   describe("ordering", () => {
+    it("detects unchanged order only when every key matches", () => {
+      const records = new Map<string, unknown>([
+        ["a", {}],
+        ["b", {}],
+      ]);
+      expect(hasSameKeyOrder([{ key: "a" }, { key: "b" }], records)).toBe(true);
+      expect(hasSameKeyOrder([{ key: "b" }, { key: "a" }], records)).toBe(false);
+      expect(hasSameKeyOrder([{ key: "a" }], records)).toBe(false);
+    });
+
+    it("recognizes append only when new keys follow all retained keys", () => {
+      const previous = new Map<string, unknown>([
+        ["a", {}],
+        ["b", {}],
+      ]);
+      const ordered = (keys: string[]) => keys.map((key) => ({ key, nodes: [] }));
+      expect(
+        canAppendWithoutMoving(
+          new Map([
+            ["b", {}],
+            ["c", {}],
+          ]),
+          ordered(["b", "c"]),
+          previous,
+        ),
+      ).toBe(true);
+      expect(
+        canAppendWithoutMoving(
+          new Map([
+            ["c", {}],
+            ["b", {}],
+          ]),
+          ordered(["c", "b"]),
+          previous,
+        ),
+      ).toBe(false);
+      expect(
+        canAppendWithoutMoving(
+          new Map([
+            ["b", {}],
+            ["a", {}],
+          ]),
+          ordered(["b", "a"]),
+          previous,
+        ),
+      ).toBe(false);
+    });
+
+    it("checks append order without materializing key arrays", () => {
+      const previous = new Map<string, unknown>([
+        ["a", {}],
+        ["b", {}],
+      ]);
+      const next = new Map<string, unknown>([
+        ["a", {}],
+        ["b", {}],
+        ["c", {}],
+      ]);
+      const ordered = ["a", "b", "c"].map((key) => ({ key, nodes: [] }));
+      const from = vi.spyOn(Array, "from");
+
+      const appendOnly = canAppendWithoutMoving(next, ordered, previous);
+      const arrayMaterializations = from.mock.calls.length;
+      from.mockRestore();
+
+      expect(appendOnly).toBe(true);
+      expect(arrayMaterializations).toBe(0);
+    });
+
     it("keeps the longest increasing run and skips the positions marked as new", () => {
       // The positions come back from the last anchor to the first, so they are sorted before comparing.
       expect([...longestIncreasingSubsequencePositions([0, 1, 2, 3])].sort()).toEqual([0, 1, 2, 3]);
@@ -333,6 +405,36 @@ describe("keyed list core", () => {
       // A retained row that changed order, and a new row in front of the retained ones, both need positioning.
       expect(canAppendWithoutMoving(next(["b", "a"]), rows(["b", "a"]), previous)).toBe(false);
       expect(canAppendWithoutMoving(next(["c", "a", "b"]), rows(["c", "a", "b"]), previous)).toBe(false);
+    });
+  });
+
+  describe("adopted regions", () => {
+    it("reuses an attached marker pair only for its current container and explicit boundary", () => {
+      const container = document.createElement("ul");
+      const markers = ensureListRegion(container, undefined);
+      expect(canReuseListRegion(container, markers)).toBe(true);
+      expect(canReuseListRegion(document.createElement("ul"), markers)).toBe(false);
+      const otherStart = document.createComment("tachyon-for");
+      container.insertBefore(otherStart, markers.start);
+      expect(withListRegionStart(otherStart, () => canReuseListRegion(container, markers))).toBe(false);
+      markers.end.remove();
+      expect(canReuseListRegion(container, markers)).toBe(false);
+    });
+
+    it("keeps matching nodes attached and removes only extra server nodes", () => {
+      const container = document.createElement("ul");
+      const markers = ensureListRegion(container, undefined);
+      const first = document.createElement("li");
+      const second = document.createElement("li");
+      const extra = document.createElement("li");
+      container.insertBefore(first, markers.end);
+      container.insertBefore(second, markers.end);
+      container.insertBefore(extra, markers.end);
+      const insert = vi.spyOn(container, "insertBefore");
+      replaceRegionContent(markers, [first, second]);
+      expect(insert).not.toHaveBeenCalled();
+      expect(Array.from(container.children)).toEqual([first, second]);
+      insert.mockRestore();
     });
   });
 

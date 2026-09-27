@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanupTextKeyedList, mountGeneratedTextKeyedList, mountTextKeyedList } from "../src/runtime/list-text";
 import { createSignal, effect, onCleanup } from "../src/runtime/signal";
 
@@ -12,6 +12,132 @@ afterEach(() => {
 });
 
 describe("mountTextKeyedList", () => {
+  it("reuses a row text target across changed-value updates", () => {
+    const root = document.createElement("ul");
+    const options = {
+      signature: "cached-row-text-target",
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "row",
+      templateHtml: `<li><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0, 0],
+          read: (scope: Record<string, unknown>) => (scope.row as { label: string }).label,
+        },
+      ],
+    };
+    mountGeneratedTextKeyedList(root, [], [{ id: "a", label: "A" }], options);
+    const row = root.querySelector("li");
+    if (!row) throw new Error("Missing row.");
+    const firstChild = vi.spyOn(row, "firstChild", "get");
+
+    mountGeneratedTextKeyedList(root, [], [{ id: "a", label: "B" }], options);
+
+    expect(root.textContent).toBe("B");
+    expect(firstChild).not.toHaveBeenCalled();
+    firstChild.mockRestore();
+  });
+
+  it("reuses the generated list boundary on a warm update", () => {
+    const root = document.createElement("ul");
+    const options = {
+      signature: "cached-boundary",
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "row",
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          read: (scope: Record<string, unknown>) => (scope.row as { label: string }).label,
+        },
+      ],
+    };
+    mountGeneratedTextKeyedList(root, [], [{ id: "a", label: "A" }], options);
+    const firstChild = vi.spyOn(root, "firstChild", "get");
+
+    mountGeneratedTextKeyedList(root, [], [{ id: "a", label: "B" }], options);
+
+    expect(root.textContent).toBe("B");
+    expect(firstChild).not.toHaveBeenCalled();
+    firstChild.mockRestore();
+  });
+
+  it("does not build a new reconciliation map when keyed order is unchanged", () => {
+    const root = document.createElement("ul");
+    const options = {
+      signature: "same-order-map",
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "row",
+      templateHtml: `<li> </li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [0],
+          read: (scope: Record<string, unknown>) => (scope.row as { label: string }).label,
+        },
+      ],
+    };
+    mountGeneratedTextKeyedList(root, [], [{ id: "a", label: "A" }], options);
+    const originalMap = globalThis.Map;
+    let mapsCreated = 0;
+    class CountingMap<K, V> extends originalMap<K, V> {
+      constructor(entries?: Iterable<readonly [K, V]> | null) {
+        super(entries);
+        mapsCreated++;
+      }
+    }
+    globalThis.Map = CountingMap as MapConstructor;
+    try {
+      mountGeneratedTextKeyedList(root, [], [{ id: "a", label: "A" }], options);
+    } finally {
+      globalThis.Map = originalMap;
+    }
+
+    expect(root.textContent).toBe("A");
+    expect(mapsCreated).toBe(0);
+  });
+
+  it("adopts matching SSR rows without cloning or detaching their elements", () => {
+    document.body.innerHTML = `<ul id="items"><li><input value=""><span>A</span></li></ul>`;
+    const root = document.querySelector("#items");
+    const row = root?.querySelector("li");
+    const input = row?.querySelector("input");
+    if (!(root instanceof HTMLElement) || !row || !input) throw new Error("Missing SSR row.");
+    input.value = "typed";
+    input.focus();
+    const remove = vi.spyOn(row, "remove");
+    const cloneNode = vi.spyOn(Node.prototype, "cloneNode");
+    const options = {
+      signature: "text-ssr-adoption-without-detach",
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "row",
+      templateHtml: `<li><input value=""><span> </span></li>`,
+      bindings: [
+        {
+          kind: "text" as const,
+          path: [1, 0],
+          read: (scope: Record<string, unknown>) => (scope.row as { label: string }).label,
+        },
+      ],
+    };
+
+    mountGeneratedTextKeyedList(root, [], [{ id: "a", label: "A" }], options);
+
+    expect(root.querySelector("li")).toBe(row);
+    expect(cloneNode).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect(input.value).toBe("typed");
+    expect(document.activeElement).toBe(input);
+    cloneNode.mockRestore();
+    remove.mockRestore();
+  });
+
   // The parent scope is compared once per update, not once per row.
   it("reads the parent scope once per update instead of once per row", () => {
     const root = document.createElement("ul");
