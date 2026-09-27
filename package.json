@@ -200,6 +200,10 @@
       "types": "./dist/runtime/signal.d.ts",
       "import": "./dist/runtime/signal.js"
     },
+    "./runtime/resource-boundary": {
+      "types": "./dist/runtime/resource-boundary.d.ts",
+      "import": "./dist/runtime/resource-boundary.js"
+    },
     "./runtime/store": {
       "types": "./dist/runtime/store.d.ts",
       "import": "./dist/runtime/store.js"
@@ -710,6 +714,14 @@
         "@size-limit/esbuild"
       ],
       "limit": "8 KB"
+    },
+    {
+      "name": "runtime/resource-boundary",
+      "path": "dist/runtime/resource-boundary.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
     },
     {
       "name": "runtime/store",

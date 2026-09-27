@@ -78,8 +78,10 @@ describe("Inspector report", () => {
     const report = createInspectorReport(diagnostics, { templates: [{ templateId: "list.td", explanation }] });
 
     expect(report.static.templates).toEqual([{ templateId: "list.td", explanation }]);
-    explanation.regions[0].path[0] = 9;
-    explanation.regions[0].reasons[0] = "changed";
+    const region = explanation.regions[0];
+    if (!region) throw new Error("Missing explanation region.");
+    region.path[0] = 9;
+    region.reasons[0] = "changed";
     explanation.runtimeImports[0] = "changed";
     explanation.hydrationDiagnostics[0] = "changed";
     expect(report.static.templates[0]?.explanation).toEqual({

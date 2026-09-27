@@ -820,6 +820,8 @@ export type Resource<T> = {
   data: Accessor<T | undefined>;
   error: Accessor<unknown | undefined>;
   loading: Accessor<boolean>;
+  hasValue: Accessor<boolean>;
+  hasError: Accessor<boolean>;
   refetch: () => Promise<T | undefined>;
   refetchOutcome: () => Promise<ResourceOutcome<T>>;
   dispose: () => void;
@@ -838,6 +840,8 @@ export const createResource = <Source, T>(
   const data = createSignal<T | undefined>(undefined);
   const error = createSignal<unknown | undefined>(undefined);
   const loading = createSignal(!disposed);
+  const hasValue = createSignal(false);
+  const hasError = createSignal(false);
   let currentOutcome: Promise<ResourceOutcome<T>> | undefined;
   let version = 0;
   let controller: AbortController | undefined;
@@ -885,6 +889,7 @@ export const createResource = <Source, T>(
     runStateUpdate(() => {
       loading.set(true);
       error.set(undefined);
+      hasError.set(false);
     });
     previousCancel?.("superseded");
     previousController?.abort();
@@ -911,6 +916,8 @@ export const createResource = <Source, T>(
                 data.set(result);
                 error.set(undefined);
                 loading.set(false);
+                hasValue.set(true);
+                hasError.set(false);
               });
             } catch (error) {
               notificationError = error;
@@ -931,6 +938,7 @@ export const createResource = <Source, T>(
               batch(() => {
                 error.set(reason);
                 loading.set(false);
+                hasError.set(true);
               });
             } catch (error) {
               notificationError = error;
@@ -965,6 +973,8 @@ export const createResource = <Source, T>(
     data,
     error,
     loading,
+    hasValue,
+    hasError,
     refetch: run,
     refetchOutcome: runOutcome,
     dispose: () => {

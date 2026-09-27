@@ -268,7 +268,7 @@ The short rules for predicting reactive behavior are:
 
 Effect callbacks are synchronous. A returned Promise is not a cleanup and asynchronous work must own its `AbortController` or other cleanup synchronously, before the callback returns. A rejection from an async callback is observed by the runtime and delivered to the nearest reactive error owner; an async callback should still be avoided when a synchronous effect plus an explicit task is sufficient. Calling `onCleanup()` after an `await` has no active run owner and does not attach that cleanup to the earlier run; it returns `false` in that case. Use `onCleanup()` before starting the task and check its abort signal in the continuation.
 
-`createResource()` ties an async loader to a source accessor and exposes `data`, `error`, `loading`, `refetch`, `refetchOutcome`, and `dispose`. A plain function passed as `source` is data; only a branded `Accessor` or `createMemo()` is tracked as a source. To combine multiple signals, create a memo explicitly:
+`createResource()` ties an async loader to a source accessor and exposes `data`, `error`, `loading`, `hasValue`, `hasError`, `refetch`, `refetchOutcome`, and `dispose`. `hasValue` distinguishes a successful `undefined` from an initial pending state, and `hasError` distinguishes a rejection with `undefined` from no error. Both flags preserve the last successful value through refetch. A plain function passed as `source` is data; only a branded `Accessor` or `createMemo()` is tracked as a source. To combine multiple signals, create a memo explicitly:
 
 ```ts
 const query = createMemo(() => `${page()}::${filter()}`);
@@ -276,6 +276,8 @@ const resource = createResource(query, (key, { signal }) => fetchPage(key, signa
 ```
 
 `refetchOutcome()` distinguishes `{ status: "success", data }`, `{ status: "error", error }`, and `{ status: "cancelled", reason }`. Cancellation covers superseded and disposed work, including fetchers that ignore `AbortSignal`. The legacy `refetch()` method remains a compatibility wrapper that resolves data for success and `undefined` for error or cancellation. Only the newest generation may update the declarative resource state.
+
+`createResourceBoundary(root, source, fetcher, views)` connects one owned resource to a client DOM region. The `pending`, `success`, and `error` callbacks each return one element. The first result replaces pending content; `error` receives a retry function. On refetch, the last successful element remains mounted and the optional `refreshing` element is appended until the new result arrives. A refetch failure also keeps the last successful element and appends the error element. Replacing a view or disposing the boundary releases effects and `onCleanup()` registrations created by that view. Disposing the boundary aborts its request; this ownership model is for a resource created by the boundary, not a cache shared with other consumers. The boundary owns all children of `root` and is client-mount only; SSR state handoff and hydration are separate future contracts.
 
 `createStore()` is shallow. It copies the initial top-level properties and tracks reads and writes by top-level property; nested object mutation is not observed. Replace the top-level value or put a signal at the nested field when nested updates are needed:
 
