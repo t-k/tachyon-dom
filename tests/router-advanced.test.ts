@@ -367,6 +367,24 @@ describe("advanced router features", () => {
       { id: "user", path: "/users/:id" },
     ] as const);
     expectTypeOf<Parameters<typeof href>[0]>().toEqualTypeOf<"home" | "user">();
+    expectTypeOf<Parameters<typeof href<"user">>>().toEqualTypeOf<[id: "user", params: { id: string }]>();
+    expectTypeOf<Parameters<typeof href<"home">>>().toEqualTypeOf<[
+      id: "home",
+      params?: Record<string, never>,
+    ]>();
+    expect(href("home", {})).toBe("/");
+    const invalidCalls = () => {
+      const maybeId: "home" | "user" = Math.random() > 0.5 ? "home" : "user";
+      // @ts-expect-error A union route ID cannot omit params required by one member.
+      href(maybeId);
+      // @ts-expect-error Dynamic route params are required.
+      href("user");
+      // @ts-expect-error Extra route params are rejected.
+      href("user", { id: "42", extra: "unused" });
+      // @ts-expect-error A static route has no params.
+      href("home", { id: "42" });
+    };
+    expectTypeOf(invalidCalls).toBeFunction();
   });
 
   it("short-circuits redirect/json/escaped html route responses", async () => {

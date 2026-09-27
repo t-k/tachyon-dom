@@ -8,6 +8,8 @@ import { closeAsyncIterable, composeSingleOutlet, type SingleOutletSegments } fr
 
 export { fragmentDocument, htmlDocument } from "./router-document.js";
 export type { HtmlDocumentOptions, RouteDocumentComposer, RouteDocumentMetadata } from "./router-document.js";
+export { createSearchParamsSchema, queryInteger, queryString, queryStringList } from "./router-query.js";
+export type { IntegerQueryOptions, QueryField, SearchParamsSchema } from "./router-query.js";
 
 export type RouteParams = Record<string, string>;
 
@@ -880,10 +882,31 @@ export const hrefForRoute = (
     .join("/");
 };
 
+type ManifestPathForId<
+  Manifest extends readonly Pick<RouteManifestEntry, "id" | "path">[],
+  Id extends Manifest[number]["id"],
+> = [Extract<Manifest[number], { readonly id: Id }>] extends [never]
+  ? Manifest[number]["path"]
+  : Extract<Manifest[number], { readonly id: Id }>["path"];
+
+type HrefBuilderParams<
+  Manifest extends readonly Pick<RouteManifestEntry, "id" | "path">[],
+  Id extends Manifest[number]["id"],
+> = string extends ManifestPathForId<Manifest, Id>
+  ? [params?: RouteParams]
+  : keyof ParamsForPath<ManifestPathForId<Manifest, Id>> extends never
+    ? [params?: Record<string, never>]
+    : [params: ParamsForPath<ManifestPathForId<Manifest, Id>>];
+
+type HrefBuilderArguments<
+  Manifest extends readonly Pick<RouteManifestEntry, "id" | "path">[],
+  Id extends Manifest[number]["id"],
+> = Id extends Manifest[number]["id"] ? [id: Id, ...args: HrefBuilderParams<Manifest, Id>] : never;
+
 export const createHrefBuilder =
-  <Manifest extends readonly Pick<RouteManifestEntry, "id" | "path">[]>(manifest: Manifest) =>
-  <Id extends Manifest[number]["id"]>(id: Id, params: RouteParams = {}): string =>
-    hrefForRoute(manifest, String(id), params);
+  <const Manifest extends readonly Pick<RouteManifestEntry, "id" | "path">[]>(manifest: Manifest) =>
+  <Id extends Manifest[number]["id"]>(...args: HrefBuilderArguments<Manifest, Id>): string =>
+    hrefForRoute(manifest, String(args[0]), args[1] ?? {});
 
 export const createRoutePreloadPlan = (manifest: RouteBuildManifest, routeId: string): RoutePreloadEntry[] =>
   (manifest.assets[routeId] ?? []).map((href) => {

@@ -380,7 +380,23 @@ Single files can also use `/// <reference types="tachyon-dom/td-modules" />`. Th
 
 `createRouteBuildManifest(routes, { buildId, assets })` creates a route build manifest containing route paths, per-route assets, and generated route types.
 
-`createHrefBuilder(manifest)` and `hrefForRoute(manifest, id, params)` build URLs from route IDs and params. `createRoutePreloadPlan(manifest, routeId)` converts route assets into preload/modulepreload/prefetch entries for route-aware preloading.
+`createHrefBuilder(manifest)` and `hrefForRoute(manifest, id, params)` build URLs from route IDs and params. For a literal manifest, `createHrefBuilder()` requires the parameters named by each route path and rejects extra parameters in TypeScript. A runtime manifest with `string` paths retains the flexible `RouteParams` signature. `createRoutePreloadPlan(manifest, routeId)` converts route assets into preload/modulepreload/prefetch entries for route-aware preloading.
+
+Use `createSearchParamsSchema()` to parse, validate, and generate query strings from one field definition. Scalar fields reject duplicate values; integer fields reject invalid or out-of-range numbers. Unknown query keys are ignored by `parse()` and preserved by `href()` when updating an existing URL. Defaults are omitted from generated URLs.
+
+```ts
+import { createHrefBuilder, createSearchParamsSchema, queryInteger, queryString, queryStringList } from "tachyon-dom/router";
+
+const href = createHrefBuilder([{ id: "user", path: "/users/:id" }] as const);
+const search = createSearchParamsSchema({
+  page: queryInteger({ defaultValue: 1, min: 1 }),
+  term: queryString(""),
+  tags: queryStringList(),
+});
+
+const link = search.href(href("user", { id: "a b" }), { page: 2, term: "Ada", tags: ["team"] });
+const filters = search.parse(new URL(`https://example.com${link}`));
+```
 
 The CLI can write file-route manifests:
 
