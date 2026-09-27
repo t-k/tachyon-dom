@@ -2,6 +2,7 @@
 import { access, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkTachyonAccessibility, formatAccessibilityDiagnostic } from "./accessibility.js";
 import { generateTachyonModuleTypes, generateTemplateTypes, pagesFromRouteFiles } from "./app.js";
 import {
   explainCompiledTemplate,
@@ -82,9 +83,16 @@ export type CliExplainOptions = {
   format: "text" | "json";
 };
 
+export type CliAccessibilityOptions = {
+  command: "a11y";
+  input: string;
+  format: "text" | "json";
+};
+
 export type CliOptions =
   | CliCompileOptions
   | CliExplainOptions
+  | CliAccessibilityOptions
   | CliRoutesOptions
   | CliServerOptions
   | CliAddPageOptions
@@ -94,10 +102,11 @@ export type CliOptions =
   | CliLanguageServerOptions;
 
 const usage =
-  "Usage: tachyon-dom <compile|explain|routes|dev|build|preview|add|typegen|typecheck|init|language-server>. Use compile for templates, explain for the runtime modules and hydration constraints a template compiles to, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, typecheck for script/template TypeScript diagnostics, init for starters, and language-server for editor diagnostics.";
+  "Usage: tachyon-dom <compile|explain|a11y|routes|dev|build|preview|add|typegen|typecheck|init|language-server>. Use compile for templates, explain for runtime selection, a11y for static accessibility findings, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, typecheck for TypeScript diagnostics, init for starters, and language-server for editor diagnostics.";
 
 const commandUsage: Record<string, string> = {
   add: "Usage: tachyon-dom add page <name> [--routes-dir src/routes] [--force]. Existing files are preserved unless --force is explicit.",
+  a11y: "Usage: tachyon-dom a11y <input> [--json]",
   build: "Usage: tachyon-dom build [--host 127.0.0.1] [--port 4173]",
   compile:
     "Usage: tachyon-dom compile <input> [--target client|server|stream] [--out file] [--reactive] [--no-sourcemap]",
@@ -183,6 +192,16 @@ const parseCompileArgs = (input: string, rest: readonly string[]): Result<CliCom
 const parseExplainArgs = (input: string, rest: readonly string[]): Result<CliExplainOptions, string> => {
   if (!input) return err(commandUsage.explain as string);
   const options: CliExplainOptions = { command: "explain", input, format: "text" };
+  for (const arg of rest) {
+    if (arg === "--json") options.format = "json";
+    else return err(`Unknown argument: ${arg}`);
+  }
+  return ok(options);
+};
+
+const parseAccessibilityArgs = (input: string, rest: readonly string[]): Result<CliAccessibilityOptions, string> => {
+  if (!input) return err(commandUsage.a11y as string);
+  const options: CliAccessibilityOptions = { command: "a11y", input, format: "text" };
   for (const arg of rest) {
     if (arg === "--json") options.format = "json";
     else return err(`Unknown argument: ${arg}`);
@@ -345,6 +364,9 @@ export const parseArgs = (argv: readonly string[]): Result<CliOptions, string> =
   if (command === "explain") {
     return parseExplainArgs(input ?? "", rest);
   }
+  if (command === "a11y") {
+    return parseAccessibilityArgs(input ?? "", rest);
+  }
   if (command === "routes") {
     return parseRoutesArgs(input ?? "", rest);
   }
@@ -428,6 +450,21 @@ export const explainFile = async (options: Omit<CliExplainOptions, "command">): 
   const explanation = explainCompiledTemplate(result.value.template);
   return ok(
     options.format === "json" ? `${JSON.stringify(explanation, null, 2)}\n` : formatTemplateExplanation(explanation),
+  );
+};
+
+export const accessibilityFile = async (
+  options: Omit<CliAccessibilityOptions, "command">,
+): Promise<Result<string, string>> => {
+  const source = await readFile(options.input, "utf8");
+  const result = checkTachyonAccessibility(source);
+  if (!result.ok) return err(formatDiagnostic(result.error, options.input));
+  return ok(
+    options.format === "json"
+      ? `${JSON.stringify(result.value, null, 2)}\n`
+      : result.value.length > 0
+        ? `${result.value.map((finding) => formatAccessibilityDiagnostic(finding, options.input)).join("\n")}\n`
+        : "No static accessibility findings.\n",
   );
 };
 
@@ -910,6 +947,9 @@ export const runCli = async (
       break;
     case "explain":
       result = await explainFile(parsed.value);
+      break;
+    case "a11y":
+      result = await accessibilityFile(parsed.value);
       break;
     case "routes":
       result = await buildRouteManifestFile({

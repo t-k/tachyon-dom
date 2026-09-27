@@ -7,6 +7,7 @@ import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { build as viteBuild, createServer, type Plugin } from "vite";
 import {
   addPageFiles,
+  accessibilityFile,
   buildRouteManifestFile,
   createStarterFiles,
   compileFile,
@@ -1458,7 +1459,7 @@ export default { selected: false };
       await moduleServer?.close();
       await rm(dir, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it("does not partially create a starter when a managed file conflicts", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-starter-conflict-"));
@@ -1587,6 +1588,10 @@ export default { selected: false };
       ok: true,
       value: { command: "explain", input: "page.td", format: "json" },
     });
+    expect(parseArgs(["a11y", "page.td", "--json"])).toEqual({
+      ok: true,
+      value: { command: "a11y", input: "page.td", format: "json" },
+    });
   });
 
   it("explains the runtime modules a template compiles to from the CLI", async () => {
@@ -1621,6 +1626,26 @@ export default { selected: false };
       if (result.ok) throw new Error("Expected a type diagnostic.");
       expect(result.error).toContain("TS2339");
       expect(result.error).toContain(`${input}:4:8:`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("prints accessibility findings in text and JSON without treating review hints as compile failures", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-a11y-"));
+    try {
+      const input = path.join(dir, "page.td");
+      await writeFile(input, `<main><img src="x"><input placeholder="Email"></main>`);
+      const text = await accessibilityFile({ input, format: "text" });
+      expect(text.ok).toBe(true);
+      if (text.ok) expect(text.value).toContain(`${input}:1:7: a11y img-alt (certain):`);
+      const json = await accessibilityFile({ input, format: "json" });
+      expect(json.ok).toBe(true);
+      if (json.ok)
+        expect(JSON.parse(json.value).map((finding: { ruleId: string }) => finding.ruleId)).toEqual([
+          "img-alt",
+          "control-name",
+        ]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

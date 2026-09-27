@@ -10,6 +10,7 @@ import type {
   WorkspaceEdit,
 } from "vscode-languageserver/node";
 import { fileURLToPath } from "node:url";
+import { checkTachyonAccessibility, type AccessibilityDiagnostic } from "./accessibility.js";
 import { diagnoseTachyonSfc } from "./diagnostics.js";
 import { requireOptionalPeer } from "./optional-peer.js";
 import { checkTachyonTemplateTypes, type TemplateTypeDiagnostic } from "./template-typecheck.js";
@@ -67,7 +68,11 @@ export const diagnosticsForTachyonDocument = (text: string, fileName?: string): 
   if (result.ok) {
     const typeResult = checkTachyonTemplateTypes(text, fileName ? { fileName: fileNameForDocumentUri(fileName) } : {});
     if (!typeResult.ok) return [];
-    return typeResult.value.map((diagnostic) => lspDiagnosticForTypeDiagnostic(diagnostic));
+    const accessibility = checkTachyonAccessibility(text);
+    return [
+      ...typeResult.value.map((diagnostic) => lspDiagnosticForTypeDiagnostic(diagnostic)),
+      ...(accessibility.ok ? accessibility.value.map(lspDiagnosticForAccessibility) : []),
+    ];
   }
   const diagnostic = result.error;
   const line = Math.max(0, diagnostic.line - 1);
@@ -86,6 +91,17 @@ export const diagnosticsForTachyonDocument = (text: string, fileName?: string): 
     },
   ];
 };
+
+const lspDiagnosticForAccessibility = (diagnostic: AccessibilityDiagnostic): Diagnostic => ({
+  message: diagnostic.message,
+  range: {
+    start: { line: Math.max(0, diagnostic.line - 1), character: Math.max(0, diagnostic.column - 1) },
+    end: { line: Math.max(0, diagnostic.endLine - 1), character: Math.max(0, diagnostic.endColumn - 1) },
+  },
+  severity: diagnostic.confidence === "certain" ? 2 : 3,
+  code: diagnostic.ruleId,
+  source: "tachyon-dom/a11y",
+});
 
 const lspDiagnosticForTypeDiagnostic = (diagnostic: TemplateTypeDiagnostic): Diagnostic => ({
   message: diagnostic.message,

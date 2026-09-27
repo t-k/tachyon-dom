@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "concurrency": 2,
+  "incremental": false,
+  "mutate": ["src/accessibility.ts"],
+  "plugins": ["./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"],
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": { "fileName": "reports/mutation/accessibility/mutation.json" },
+  "testRunner": "vitest",
+  "thresholds": { "high": 80, "low": 60, "break": null },
+  "vitest": { "configFile": "vitest.accessibility-mutation.config.ts", "related": false },
+  "ignorePatterns": ["docs.local", "tests/browser/generated", "test-results", "benchmark", ".worktree"]
+}

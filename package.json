@@ -65,6 +65,10 @@
       "types": "./dist/diagnostics.d.ts",
       "import": "./dist/diagnostics.js"
     },
+    "./accessibility": {
+      "types": "./dist/accessibility.d.ts",
+      "import": "./dist/accessibility.js"
+    },
     "./inspector": {
       "types": "./dist/inspector.d.ts",
       "import": "./dist/inspector.js"
@@ -462,6 +466,14 @@
         "@size-limit/esbuild"
       ],
       "limit": "4 KB"
+    },
+    {
+      "name": "accessibility",
+      "path": "dist/accessibility.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "6 KB"
     },
     {
       "name": "inspector",
