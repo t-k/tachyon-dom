@@ -95,6 +95,22 @@ export const mountMemorySample = (): NodeCounts => {
   return countNodes();
 };
 
+export const mountAllocationSample = (): void => {
+  if (!memoryDriver) throw new Error("Allocation sample is not prepared.");
+  memoryDriver.replace(createMemoryItems());
+};
+
+export const runAllocationNoChange = (): void => {
+  if (!memoryDriver) throw new Error("Allocation sample is not mounted.");
+  memoryDriver.noChange();
+};
+
+export const verifyAllocationSample = (): void => {
+  if (!memoryDriver || memoryDriver.rows().length !== memoryItemCount) {
+    throw new Error("Allocation sample rendered row count differs from the model.");
+  }
+};
+
 export const disposeMemorySample = (): NodeCounts => {
   if (!memoryDriver) throw new Error("Memory sample is not mounted.");
   memoryDriver.dispose();

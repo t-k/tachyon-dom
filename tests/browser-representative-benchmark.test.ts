@@ -125,4 +125,28 @@ describe("production browser representative benchmark", () => {
     expect(result.paths["mixed-template"].inputDiagnostic?.playwrightActionMs).toBeGreaterThanOrEqual(0);
     expect(result.paths["keyed-rows"].inputDiagnostic).toBeUndefined();
   }, 60_000);
+
+  it("samples mount and unchanged-update allocations outside the timed samples", async () => {
+    const allocationDirectory = await mkdtemp(path.join(tmpdir(), "tachyon-template-allocation-"));
+    try {
+      const result = await runBrowserRepresentativeBenchmark({
+        iterations: 1,
+        warmup: 0,
+        itemCount: 100,
+        childCount: 1,
+        allocationDiagnostics: true,
+        allocationDirectory,
+      });
+
+      for (const pathResult of Object.values(result.paths)) {
+        expect(pathResult.samples).toHaveLength(1);
+        expect(pathResult.allocation?.contract).toBe("cdp-sampled-mount-and-unchanged-update");
+        expect(pathResult.allocation?.mountSampledBytes).toBeGreaterThanOrEqual(0);
+        expect(pathResult.allocation?.noChangeSampledBytes).toBeGreaterThanOrEqual(0);
+        expect(JSON.parse(await readFile(pathResult.allocation?.mountProfilePath ?? "", "utf8")).head).toBeDefined();
+      }
+    } finally {
+      await rm(allocationDirectory, { recursive: true, force: true });
+    }
+  }, 60_000);
 });

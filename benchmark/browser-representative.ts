@@ -22,6 +22,8 @@ export type BrowserRepresentativeOptions = {
   traceDiagnostics?: boolean;
   traceDirectory?: string;
   interactionDiagnostics?: boolean;
+  allocationDiagnostics?: boolean;
+  allocationDirectory?: string;
 };
 
 type BrowserNodeCounts = { elements: number; text: number; comments: number };
@@ -114,6 +116,14 @@ export type BrowserRepresentativeResult = {
         eventTimingSupported: boolean;
         eventTiming: { inputDelayMs: number; processingMs: number; presentationDelayMs: number } | null;
       };
+      allocation?: {
+        contract: "cdp-sampled-mount-and-unchanged-update";
+        samplingIntervalBytes: number;
+        mountSampledBytes: number;
+        noChangeSampledBytes: number;
+        mountProfilePath: string;
+        noChangeProfilePath: string;
+      };
     }
   >;
 };
@@ -135,6 +145,9 @@ const operationNames = [
   "childEmpty",
   "dispose",
 ] as const;
+type AllocationNode = { selfSize: number; children?: AllocationNode[] };
+const sampledBytes = (node: AllocationNode): number =>
+  node.selfSize + (node.children ?? []).reduce((total, child) => total + sampledBytes(child), 0);
 
 export const runBrowserRepresentativeBenchmark = async (
   options: BrowserRepresentativeOptions,
@@ -374,6 +387,60 @@ export const runBrowserRepresentativeBenchmark = async (
           await page.close();
         }
       }
+      let allocation: BrowserRepresentativeResult["paths"][typeof pathName]["allocation"];
+      if (options.allocationDiagnostics) {
+        const page = await browser.newPage();
+        const session = await page.context().newCDPSession(page);
+        try {
+          await page.setContent("<table><tbody></tbody></table>");
+          await page.addScriptTag({ content: pageCode });
+          const invoke = (name: string, arg?: unknown): Promise<unknown> =>
+            page.evaluate(
+              new Function("arg", `return globalThis.__tachyonBrowserRepresentativePage.${name}(arg)`) as (
+                arg: unknown,
+              ) => Promise<unknown> | unknown,
+              arg,
+            );
+          await invoke("prepareMemorySample", {
+            pathName,
+            itemCount: options.itemCount,
+            childCount: options.childCount,
+            bundles,
+          });
+          const samplingIntervalBytes = 8192;
+          const sampleOperation = async (name: string): Promise<{ profile: unknown; bytes: number }> => {
+            const samplingOptions = { samplingInterval: samplingIntervalBytes, includeObjectsCollected: true };
+            await session.send("HeapProfiler.startSampling", samplingOptions);
+            await invoke(name);
+            const { profile } = await session.send("HeapProfiler.stopSampling");
+            await invoke("verifyAllocationSample");
+            return { profile, bytes: sampledBytes(profile.head as AllocationNode) };
+          };
+          const mount = await sampleOperation("mountAllocationSample");
+          const noChange = await sampleOperation("runAllocationNoChange");
+          await invoke("disposeMemorySample");
+          await invoke("releaseMemorySample");
+          const directory =
+            options.allocationDirectory ?? path.join(projectRoot, "benchmark/browser-feature-results/allocations");
+          await mkdir(directory, { recursive: true });
+          const identity = `template-allocation-${pathName}-${randomUUID()}`;
+          const mountProfilePath = path.join(directory, `${identity}-mount.json`);
+          const noChangeProfilePath = path.join(directory, `${identity}-no-change.json`);
+          await writeFile(mountProfilePath, `${JSON.stringify(mount.profile)}\n`);
+          await writeFile(noChangeProfilePath, `${JSON.stringify(noChange.profile)}\n`);
+          allocation = {
+            contract: "cdp-sampled-mount-and-unchanged-update",
+            samplingIntervalBytes,
+            mountSampledBytes: mount.bytes,
+            noChangeSampledBytes: noChange.bytes,
+            mountProfilePath,
+            noChangeProfilePath,
+          };
+        } finally {
+          await session.detach();
+          await page.close();
+        }
+      }
       paths[pathName] = {
         bundleBrotliBytes:
           brotliCompressSync(Buffer.from(driverCode)).byteLength +
@@ -383,6 +450,7 @@ export const runBrowserRepresentativeBenchmark = async (
         ...(memory ? { memory } : {}),
         ...(trace ? { trace } : {}),
         ...(inputDiagnostic ? { inputDiagnostic } : {}),
+        ...(allocation ? { allocation } : {}),
       };
     }
     return {
@@ -430,6 +498,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         "--trace",
         "--trace-directory",
         "--interaction",
+        "--allocations",
+        "--allocation-directory",
         "--output",
       ].includes(key)
     ) {
@@ -437,6 +507,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     }
   }
   const traceDirectory = values.get("--trace-directory");
+  const allocationDirectory = values.get("--allocation-directory");
   const options = {
     iterations: Number(values.get("--iterations") ?? 5),
     warmup: Number(values.get("--warmup") ?? 2),
@@ -447,6 +518,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     counterDiagnostics: values.get("--counters") === "true",
     traceDiagnostics: values.get("--trace") === "true",
     interactionDiagnostics: values.get("--interaction") === "true",
+    allocationDiagnostics: values.get("--allocations") === "true",
+    ...(allocationDirectory ? { allocationDirectory } : {}),
     ...(traceDirectory ? { traceDirectory } : {}),
   };
   const result = await runBrowserRepresentativeBenchmark(options);
