@@ -1886,10 +1886,11 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number], detai
     fields.push(`key: ${JSON.stringify(binding.key)}`);
     if (binding.updatePolicy) fields.push(`updatePolicy: ${JSON.stringify(binding.updatePolicy)}`);
     if (binding.region) fields.push(`region: ${JSON.stringify(binding.region)}`);
-    fields.push(`stores: ${serializeStoreDefinitions(binding.stores ?? [])}`);
-    fields.push(`hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries ?? [])}`);
+    if (binding.stores?.length) fields.push(`stores: ${serializeStoreDefinitions(binding.stores)}`);
+    if (binding.hydrationBoundaries?.length)
+      fields.push(`hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries)}`);
     fields.push(...nestedHydrationRuntimeField(binding));
-    fields.push(`components: ${serializeComponentBoundaries(binding.components ?? [])}`);
+    if (binding.components?.length) fields.push(`components: ${serializeComponentBoundaries(binding.components)}`);
     fields.push(
       itemKeyExpression
         ? `keyReadItem: (${binding.itemName}) => ${itemKeyExpression}`
@@ -1903,10 +1904,11 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number], detai
     fields.push(`read: (scope) => ${bindingReadExpression(binding.test, aliases)}`);
     fields.push(`mount: ${runtimeNames.mountGeneratedConditional}`);
     fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
-    fields.push(`stores: ${serializeStoreDefinitions(binding.stores ?? [])}`);
-    fields.push(`hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries ?? [])}`);
+    if (binding.stores?.length) fields.push(`stores: ${serializeStoreDefinitions(binding.stores)}`);
+    if (binding.hydrationBoundaries?.length)
+      fields.push(`hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries)}`);
     fields.push(...nestedHydrationRuntimeField(binding));
-    fields.push(`components: ${serializeComponentBoundaries(binding.components ?? [])}`);
+    if (binding.components?.length) fields.push(`components: ${serializeComponentBoundaries(binding.components)}`);
     fields.push(`bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}]`);
   }
   return `{ ${fields.join(", ")} }`;
@@ -2115,10 +2117,12 @@ const emitListBinding = (
     ...parentScopeKeysField(binding),
     ...(binding.updatePolicy ? [`    updatePolicy: ${JSON.stringify(binding.updatePolicy)},`] : []),
     ...(binding.region ? [`    region: ${JSON.stringify(binding.region)},`] : []),
-    `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
-    `    hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries ?? [])},`,
+    ...(binding.stores?.length ? [`    stores: ${serializeStoreDefinitions(binding.stores)},`] : []),
+    ...(binding.hydrationBoundaries?.length
+      ? [`    hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries)},`]
+      : []),
     ...(isTextOnlyList(binding) ? [] : nestedHydrationRuntimeField(binding).map((field) => `    ${field},`)),
-    `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
+    ...(binding.components?.length ? [`    components: ${serializeComponentBoundaries(binding.components)},`] : []),
     `    scope: ${sourceName},`,
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     ...(isTextOnlyList(binding)
@@ -2158,10 +2162,12 @@ const emitConditionalBinding = (
     ...(useCore
       ? generatedBranchBindingFields(binding)
       : [
-          `    stores: ${serializeStoreDefinitions(binding.stores ?? [])},`,
-          `    hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries ?? [])},`,
+          ...(binding.stores?.length ? [`    stores: ${serializeStoreDefinitions(binding.stores)},`] : []),
+          ...(binding.hydrationBoundaries?.length
+            ? [`    hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries)},`]
+            : []),
           ...nestedHydrationRuntimeField(binding).map((field) => `    ${field},`),
-          `    components: ${serializeComponentBoundaries(binding.components ?? [])},`,
+          ...(binding.components?.length ? [`    components: ${serializeComponentBoundaries(binding.components)},`] : []),
           `    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}],`,
         ]),
     `  };`,
