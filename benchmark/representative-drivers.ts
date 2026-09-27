@@ -97,6 +97,23 @@ export const createKeyedRowsDriver = (tbody: HTMLTableSectionElement): ListDrive
       current = items.map((item, index) => (index % 5 === 0 ? { ...item, label: `${item.label} !` } : item));
       rebindAll(current);
     },
+    noChange: () => {
+      current = [...current];
+      rebindAll(current);
+    },
+    sparseUpdate: (percent, mutable) => {
+      const stride = 100 / percent;
+      if (mutable) {
+        for (let index = 0; index < current.length; index += stride) {
+          const item = current[index];
+          if (item) item.label += " *";
+        }
+        current = [...current];
+      } else {
+        current = current.map((item, index) => (index % stride === 0 ? { ...item, label: `${item.label} *` } : item));
+      }
+      rebindAll(current);
+    },
     swap: () => {
       const last = driver.length() - 2;
       if (last < 2) return;

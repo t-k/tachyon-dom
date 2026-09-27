@@ -37,6 +37,19 @@ export const createGeneratedTemplateDriver = (
     append: (items) => replace([...current, ...items]),
     partialUpdate: (items) =>
       replace(items.map((item, index) => (index % 5 === 0 ? { ...item, label: `${item.label} !` } : item))),
+    noChange: () => replace([...current]),
+    sparseUpdate: (percent, mutable) => {
+      const stride = 100 / percent;
+      if (mutable) {
+        for (let index = 0; index < current.length; index += stride) {
+          const item = current[index];
+          if (item) item.label += " *";
+        }
+        replace([...current]);
+      } else {
+        replace(current.map((item, index) => (index % stride === 0 ? { ...item, label: `${item.label} *` } : item)));
+      }
+    },
     swap: () => {
       const next = [...current];
       const last = next.length - 2;

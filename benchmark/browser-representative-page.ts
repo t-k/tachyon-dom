@@ -1,4 +1,8 @@
-import type { GeneratedClientModule } from "./generated-template-driver.js";
+import type {
+  GeneratedClientModule,
+  GeneratedTemplateDriver,
+  GeneratedTemplateItem,
+} from "./generated-template-driver.js";
 import type { BrowserRepresentativeSample } from "./browser-representative.js";
 
 type BrowserSampleArgs = {
@@ -8,21 +12,101 @@ type BrowserSampleArgs = {
   bundles: { driverCode: string; textCode: string; mixedCode: string };
 };
 
+const importBundle = async (code: string) => {
+  const url = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+  try {
+    const nativeImport = new Function("url", "return import(url)") as (url: string) => Promise<unknown>;
+    return await nativeImport(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+};
+
+type NodeCounts = { elements: number; text: number; comments: number };
+
+const countNodes = (): NodeCounts => {
+  const counts = { elements: 0, text: 0, comments: 0 };
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ALL);
+  for (let node: Node | null = walker.currentNode; node; node = walker.nextNode()) {
+    if (node.nodeType === Node.ELEMENT_NODE) counts.elements++;
+    else if (node.nodeType === Node.TEXT_NODE) counts.text++;
+    else if (node.nodeType === Node.COMMENT_NODE) counts.comments++;
+  }
+  return counts;
+};
+
+let memoryDriver: GeneratedTemplateDriver | undefined;
+let memoryItemCount = 0;
+let memoryChildCount = 0;
+
+const createMemoryItems = (): GeneratedTemplateItem[] =>
+  Array.from({ length: memoryItemCount }, (_, index) => ({
+    id: index,
+    label: `Row ${index}`,
+    selected: false,
+    tags: Array.from({ length: memoryChildCount }, (_, tagIndex) => ({
+      id: index * 100 + tagIndex,
+      name: `tag ${index}.${tagIndex}`,
+    })),
+    onClick: () => undefined,
+  }));
+
+export const prepareMemorySample = async ({
+  pathName,
+  itemCount,
+  childCount,
+  bundles,
+}: BrowserSampleArgs): Promise<NodeCounts> => {
+  const drivers = (await importBundle(bundles.driverCode)) as typeof import("./representative-drivers.js") &
+    typeof import("./generated-representative-driver.js");
+  const module =
+    pathName === "keyed-rows"
+      ? undefined
+      : ((await importBundle(
+          pathName === "text-template" ? bundles.textCode : bundles.mixedCode,
+        )) as GeneratedClientModule);
+  const tbody = document.querySelector("tbody");
+  if (!(tbody instanceof HTMLTableSectionElement)) throw new Error("Missing benchmark table body.");
+  memoryDriver =
+    pathName === "keyed-rows"
+      ? drivers.createKeyedRowsDriver(tbody)
+      : drivers.createGeneratedTemplateDriver(tbody, module as GeneratedClientModule);
+  memoryItemCount = itemCount;
+  memoryChildCount = childCount;
+  return countNodes();
+};
+
+export const mountMemorySample = (): NodeCounts => {
+  if (!memoryDriver) throw new Error("Memory sample is not prepared.");
+  memoryDriver.replace(createMemoryItems());
+  return countNodes();
+};
+
+export const disposeMemorySample = (): NodeCounts => {
+  if (!memoryDriver) throw new Error("Memory sample is not mounted.");
+  memoryDriver.dispose();
+  return countNodes();
+};
+
+export const repeatMemoryCycles = (additionalCycles: number): NodeCounts => {
+  if (!memoryDriver) throw new Error("Memory sample is not prepared.");
+  for (let cycle = 0; cycle < additionalCycles; cycle++) {
+    memoryDriver.replace(createMemoryItems());
+    memoryDriver.dispose();
+  }
+  return countNodes();
+};
+
+export const releaseMemorySample = (): void => {
+  memoryDriver = undefined;
+};
+
 export const runSample = async ({
   pathName,
   itemCount,
   childCount,
   bundles,
 }: BrowserSampleArgs): Promise<BrowserRepresentativeSample> => {
-  const importBundle = async (code: string) => {
-    const url = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
-    try {
-      const nativeImport = new Function("url", "return import(url)") as (url: string) => Promise<unknown>;
-      return await nativeImport(url);
-    } finally {
-      URL.revokeObjectURL(url);
-    }
-  };
   const importStarted = performance.now();
   const drivers = (await importBundle(bundles.driverCode)) as typeof import("./representative-drivers.js") &
     typeof import("./generated-representative-driver.js");
@@ -109,6 +193,11 @@ export const runSample = async ({
   const create = await measure(() => driver.replace(initial));
   const append = await measure(() => driver.append(appended));
   const partialUpdate = await measure(() => driver.partialUpdate([...initial, ...appended]));
+  const noChange = await measure(() => driver.noChange());
+  const sparseOnePercent = await measure(() => driver.sparseUpdate(1, false));
+  const sparseTenPercent = await measure(() => driver.sparseUpdate(10, false));
+  const fullValueUpdate = await measure(() => driver.sparseUpdate(100, false));
+  const mutableOnePercent = await measure(() => driver.sparseUpdate(1, true));
   const swap = await measure(() => driver.swap());
   const remove = await measure(() => driver.remove());
   const childReorder = await measure(() => driver.reorderChildren());
@@ -136,6 +225,11 @@ export const runSample = async ({
     create,
     append,
     partialUpdate,
+    noChange,
+    sparseOnePercent,
+    sparseTenPercent,
+    fullValueUpdate,
+    mutableOnePercent,
     swap,
     remove,
     childReorder,
