@@ -12,6 +12,7 @@ type BrowserSampleArgs = {
   childCount: number;
   bundles: { driverCode: string; textCode: string; mixedCode: string };
   counterDiagnostics?: boolean;
+  traceDiagnostics?: boolean;
 };
 
 const importBundle = async (code: string) => {
@@ -109,6 +110,7 @@ export const runSample = async ({
   childCount,
   bundles,
   counterDiagnostics,
+  traceDiagnostics,
 }: BrowserSampleArgs): Promise<BrowserRepresentativeSample> => {
   const importStarted = performance.now();
   const drivers = (await importBundle(bundles.driverCode)) as typeof import("./representative-drivers.js") &
@@ -162,16 +164,19 @@ export const runSample = async ({
       ...(globalThis as typeof globalThis & { __tachyonPerformanceCounters?: Record<string, number> })
         .__tachyonPerformanceCounters,
     }) as Partial<Record<PerformanceCounterName, number>>;
-  const measure = async (run: () => void) => {
+  const measure = async (name: string, run: () => void) => {
     const before = snapshot();
     const beforeCounters = counterDiagnostics ? counters() : undefined;
+    if (traceDiagnostics) performance.mark(`tachyon:${name}:start`);
     const started = performance.now();
     run();
     const syncUpdateMs = performance.now() - started;
+    if (traceDiagnostics) performance.mark(`tachyon:${name}:sync`);
     const afterCounters = counterDiagnostics ? counters() : undefined;
     await frame();
     await frame();
     const settledUpdateMs = performance.now() - started;
+    if (traceDiagnostics) performance.mark(`tachyon:${name}:settled`);
     const after = snapshot();
     const rows = driver.rows();
     if (rows.length !== driver.current().length) throw new Error("Rendered row count differs from the model.");
@@ -210,18 +215,18 @@ export const runSample = async ({
         : {}),
     };
   };
-  const create = await measure(() => driver.replace(initial));
-  const append = await measure(() => driver.append(appended));
-  const partialUpdate = await measure(() => driver.partialUpdate([...initial, ...appended]));
-  const noChange = await measure(() => driver.noChange());
-  const sparseOnePercent = await measure(() => driver.sparseUpdate(1, false));
-  const sparseTenPercent = await measure(() => driver.sparseUpdate(10, false));
-  const fullValueUpdate = await measure(() => driver.sparseUpdate(100, false));
-  const mutableOnePercent = await measure(() => driver.sparseUpdate(1, true));
-  const swap = await measure(() => driver.swap());
-  const remove = await measure(() => driver.remove());
-  const childReorder = await measure(() => driver.reorderChildren());
-  const childEmpty = await measure(() => driver.emptyChildren());
+  const create = await measure("create", () => driver.replace(initial));
+  const append = await measure("append", () => driver.append(appended));
+  const partialUpdate = await measure("partialUpdate", () => driver.partialUpdate([...initial, ...appended]));
+  const noChange = await measure("noChange", () => driver.noChange());
+  const sparseOnePercent = await measure("sparseOnePercent", () => driver.sparseUpdate(1, false));
+  const sparseTenPercent = await measure("sparseTenPercent", () => driver.sparseUpdate(10, false));
+  const fullValueUpdate = await measure("fullValueUpdate", () => driver.sparseUpdate(100, false));
+  const mutableOnePercent = await measure("mutableOnePercent", () => driver.sparseUpdate(1, true));
+  const swap = await measure("swap", () => driver.swap());
+  const remove = await measure("remove", () => driver.remove());
+  const childReorder = await measure("childReorder", () => driver.reorderChildren());
+  const childEmpty = await measure("childEmpty", () => driver.emptyChildren());
   let interaction;
   if (pathName !== "text-template") {
     driver.typeInto(1, "typed");
@@ -237,7 +242,7 @@ export const runSample = async ({
   }
   const detachedRow = driver.rows()[1];
   const clicksBeforeDispose = clickCount;
-  const dispose = await measure(() => driver.dispose());
+  const dispose = await measure("dispose", () => driver.dispose());
   detachedRow?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
   if (interaction) interaction.handlerRunsAfterDispose = clickCount - clicksBeforeDispose;
   return {

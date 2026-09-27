@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { runBrowserRepresentativeBenchmark } from "../benchmark/browser-representative";
 
 describe("production browser representative benchmark", () => {
@@ -73,5 +76,32 @@ describe("production browser representative benchmark", () => {
     expect(result.paths["mixed-template"].samples[0]?.create.counters?.bindingEvaluations).toBeGreaterThan(0);
     expect(result.paths["mixed-template"].samples[0]?.remove.counters?.rowsRemoved).toBeGreaterThan(0);
     expect(result.paths["keyed-rows"].samples[0]?.create.counters?.rowsVisited ?? 0).toBe(0);
+  }, 60_000);
+
+  it("captures main-thread task, style/layout, and paint events in an unscored trace run", async () => {
+    const traceDirectory = await mkdtemp(path.join(tmpdir(), "tachyon-template-trace-"));
+    try {
+      const result = await runBrowserRepresentativeBenchmark({
+        iterations: 1,
+        warmup: 0,
+        itemCount: 8,
+        childCount: 1,
+        traceDiagnostics: true,
+        traceDirectory,
+      });
+      for (const pathResult of Object.values(result.paths)) {
+        expect(pathResult.samples).toHaveLength(1);
+        expect(pathResult.trace?.contract).toBe("unscored-cdp-main-thread-event-union");
+        expect(pathResult.trace?.operations.noChange.mainThreadTaskMs).toBeGreaterThanOrEqual(0);
+        expect(pathResult.trace?.operations.noChange.scriptEventMs).toBeGreaterThanOrEqual(0);
+        expect(pathResult.trace?.operations.noChange.styleLayoutMs).toBeGreaterThanOrEqual(0);
+        expect(pathResult.trace?.operations.noChange.paintMs).toBeGreaterThanOrEqual(0);
+        expect((await readFile(pathResult.trace?.artifactPath ?? "", "utf8")).includes("tachyon:noChange:start")).toBe(
+          true,
+        );
+      }
+    } finally {
+      await rm(traceDirectory, { recursive: true, force: true });
+    }
   }, 60_000);
 });

@@ -9,6 +9,7 @@ import { build, version as esbuildVersion } from "esbuild";
 import { chromium } from "playwright";
 import { loadRepresentativeGeneratedModules } from "./generated-template-driver.js";
 import type { PerformanceCounterName } from "../src/runtime/performance-counters.js";
+import { summarizeBrowserTrace, type BrowserTraceEvent, type BrowserTraceOperation } from "./browser-trace-summary.js";
 
 export type BrowserRepresentativeOptions = {
   iterations: number;
@@ -18,6 +19,8 @@ export type BrowserRepresentativeOptions = {
   memoryDiagnostics?: boolean;
   memoryCycles?: number;
   counterDiagnostics?: boolean;
+  traceDiagnostics?: boolean;
+  traceDirectory?: string;
 };
 
 type BrowserNodeCounts = { elements: number; text: number; comments: number };
@@ -92,12 +95,35 @@ export type BrowserRepresentativeResult = {
       bundleSha256: string;
       samples: BrowserRepresentativeSample[];
       memory?: BrowserMemoryDiagnostic;
+      trace?: {
+        contract: "unscored-cdp-main-thread-event-union";
+        artifactPath: string;
+        operations: Record<
+          Exclude<keyof BrowserRepresentativeSample, "coldImportMs" | "interaction">,
+          BrowserTraceOperation
+        >;
+      };
     }
   >;
 };
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const pathNames = ["keyed-rows", "text-template", "mixed-template"] as const;
+const operationNames = [
+  "create",
+  "append",
+  "partialUpdate",
+  "noChange",
+  "sparseOnePercent",
+  "sparseTenPercent",
+  "fullValueUpdate",
+  "mutableOnePercent",
+  "swap",
+  "remove",
+  "childReorder",
+  "childEmpty",
+  "dispose",
+] as const;
 
 export const runBrowserRepresentativeBenchmark = async (
   options: BrowserRepresentativeOptions,
@@ -170,6 +196,7 @@ export const runBrowserRepresentativeBenchmark = async (
             childCount: number;
             bundles: typeof bundles;
             counterDiagnostics: boolean;
+            traceDiagnostics?: boolean;
           }) => Promise<BrowserRepresentativeSample>;
           const sample = await page.evaluate(runSample, {
             pathName,
@@ -177,6 +204,7 @@ export const runBrowserRepresentativeBenchmark = async (
             childCount: options.childCount,
             bundles,
             counterDiagnostics: options.counterDiagnostics === true,
+            traceDiagnostics: false,
           });
           if (run >= options.warmup) samples.push(sample);
         } finally {
@@ -185,6 +213,67 @@ export const runBrowserRepresentativeBenchmark = async (
       }
       const driverCode = bundles.driverCode;
       const templateCode = pathName === "keyed-rows" ? "" : generated[pathName].productionBundledCode;
+      let trace: BrowserRepresentativeResult["paths"][typeof pathName]["trace"];
+      if (options.traceDiagnostics) {
+        const page = await browser.newPage();
+        const session = await page.context().newCDPSession(page);
+        try {
+          await page.setContent("<table><tbody></tbody></table>");
+          await page.addScriptTag({ content: pageCode });
+          const traceComplete = new Promise<string>((resolve, reject) => {
+            session.once("Tracing.tracingComplete", (event) => {
+              if (event.stream) resolve(event.stream);
+              else reject(new Error("Chromium tracing returned no stream."));
+            });
+          });
+          await session.send("Tracing.start", {
+            categories: "devtools.timeline,disabled-by-default-devtools.timeline,blink,blink.user_timing,cc,v8",
+            transferMode: "ReturnAsStream",
+          });
+          let sampleError: unknown;
+          try {
+            await page.evaluate(
+              new Function("arg", "return globalThis.__tachyonBrowserRepresentativePage.runSample(arg)") as (
+                arg: unknown,
+              ) => Promise<unknown>,
+              {
+                pathName,
+                itemCount: options.itemCount,
+                childCount: options.childCount,
+                bundles,
+                traceDiagnostics: true,
+              },
+            );
+          } catch (error) {
+            sampleError = error;
+          }
+          await session.send("Tracing.end");
+          const stream = await traceComplete;
+          let rawTrace = "";
+          for (;;) {
+            const chunk = await session.send("IO.read", { handle: stream });
+            rawTrace += chunk.data;
+            if (chunk.eof) break;
+          }
+          await session.send("IO.close", { handle: stream });
+          if (sampleError) throw sampleError;
+          const artifactPath = path.join(
+            options.traceDirectory ?? path.join(projectRoot, "benchmark/browser-feature-results"),
+            `template-trace-${pathName}-${randomUUID()}.json`,
+          );
+          await mkdir(path.dirname(artifactPath), { recursive: true });
+          await writeFile(artifactPath, rawTrace);
+          const events = (JSON.parse(rawTrace) as { traceEvents: BrowserTraceEvent[] }).traceEvents;
+          trace = {
+            contract: "unscored-cdp-main-thread-event-union",
+            artifactPath,
+            operations: summarizeBrowserTrace(events, operationNames),
+          };
+        } finally {
+          await session.detach();
+          await page.close();
+        }
+      }
       let memory: BrowserMemoryDiagnostic | undefined;
       if (options.memoryDiagnostics) {
         const page = await browser.newPage();
@@ -255,6 +344,7 @@ export const runBrowserRepresentativeBenchmark = async (
         bundleSha256: createHash("sha256").update(driverCode).update(templateCode).digest("hex"),
         samples,
         ...(memory ? { memory } : {}),
+        ...(trace ? { trace } : {}),
       };
     }
     return {
@@ -299,12 +389,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         "--memory",
         "--memory-cycles",
         "--counters",
+        "--trace",
+        "--trace-directory",
         "--output",
       ].includes(key)
     ) {
       throw new Error(`Unknown argument: ${key}`);
     }
   }
+  const traceDirectory = values.get("--trace-directory");
   const options = {
     iterations: Number(values.get("--iterations") ?? 5),
     warmup: Number(values.get("--warmup") ?? 2),
@@ -313,6 +406,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     memoryDiagnostics: values.get("--memory") === "true",
     memoryCycles: Number(values.get("--memory-cycles") ?? 1),
     counterDiagnostics: values.get("--counters") === "true",
+    traceDiagnostics: values.get("--trace") === "true",
+    ...(traceDirectory ? { traceDirectory } : {}),
   };
   const result = await runBrowserRepresentativeBenchmark(options);
   const output = values.get("--output");
