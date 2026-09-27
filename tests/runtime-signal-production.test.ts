@@ -42,6 +42,7 @@ ${source.replace(marker, `${marker}\n  __allocations += 1;`)}`;
 describe("production signal runtime", () => {
   it("counts effect callbacks, memo recomputations, and actual subscription changes in counter builds", async () => {
     const host = globalThis as typeof globalThis & { __tachyonPerformanceCounters?: Record<string, number> };
+    const counters = () => host.__tachyonPerformanceCounters;
     delete host.__tachyonPerformanceCounters;
     try {
       const api = await instrumentedModule("counter");
@@ -51,11 +52,11 @@ describe("production signal runtime", () => {
       const dispose = api.effect(() => seen.push(doubled()));
       source.set(2);
       expect(seen).toEqual([2, 4]);
-      expect(host.__tachyonPerformanceCounters?.effectRuns).toBe(2);
-      expect(host.__tachyonPerformanceCounters?.memoRecomputes).toBe(1);
-      expect(host.__tachyonPerformanceCounters?.subscriptionAdds).toBeGreaterThanOrEqual(3);
+      expect(counters()?.effectRuns).toBe(2);
+      expect(counters()?.memoRecomputes).toBe(1);
+      expect(counters()?.subscriptionAdds).toBeGreaterThanOrEqual(3);
       dispose();
-      expect(host.__tachyonPerformanceCounters?.subscriptionRemoves).toBeGreaterThanOrEqual(2);
+      expect(counters()?.subscriptionRemoves).toBeGreaterThanOrEqual(2);
     } finally {
       delete host.__tachyonPerformanceCounters;
     }
