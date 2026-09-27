@@ -15,13 +15,12 @@ let nextId = 1;
 
 export const mount = (root: ParentNode = document) => {
   const tbody = root.querySelector("#tbody") as HTMLTableSectionElement;
-  const list = createKeyedRows<string, { id: Text; label: Text }>({
+  const list = createKeyedRows<string>({
     tbody,
     row: '<tr><td class="col-md-1"> </td><td class="col-md-4"><a> </a></td><td class="col-md-1"><a><span class="glyphicon glyphicon-remove" aria-hidden="true"></span></a></td><td class="col-md-6"></td></tr>',
-    prepare: (row) => ({ id: row.firstChild!.firstChild as Text, label: labelText(row) }),
-    bind: (_row, text, _index, prepared) => {
-      prepared.id.data = String(nextId++);
-      prepared.label.data = text;
+    bind: (row, text) => {
+      (row.firstChild!.firstChild as Text).data = String(nextId++);
+      labelText(row).data = text;
     },
     selectedClass: "danger",
   });
