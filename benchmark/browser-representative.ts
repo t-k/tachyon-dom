@@ -21,6 +21,7 @@ export type BrowserRepresentativeOptions = {
   counterDiagnostics?: boolean;
   traceDiagnostics?: boolean;
   traceDirectory?: string;
+  interactionDiagnostics?: boolean;
 };
 
 type BrowserNodeCounts = { elements: number; text: number; comments: number };
@@ -102,6 +103,16 @@ export type BrowserRepresentativeResult = {
           Exclude<keyof BrowserRepresentativeSample, "coldImportMs" | "interaction">,
           BrowserTraceOperation
         >;
+      };
+      inputDiagnostic?: {
+        contract: "playwright-input-event-to-two-frames";
+        playwrightActionMs: number;
+        eventToTwoFramesMs: number;
+        inputTrusted: boolean;
+        inputValue: string;
+        modelLabel: string;
+        eventTimingSupported: boolean;
+        eventTiming: { inputDelayMs: number; processingMs: number; presentationDelayMs: number } | null;
       };
     }
   >;
@@ -337,6 +348,32 @@ export const runBrowserRepresentativeBenchmark = async (
           await page.close();
         }
       }
+      let inputDiagnostic: BrowserRepresentativeResult["paths"][typeof pathName]["inputDiagnostic"];
+      if (options.interactionDiagnostics && pathName === "mixed-template") {
+        const page = await browser.newPage();
+        try {
+          await page.setContent("<table><tbody></tbody></table>");
+          await page.addScriptTag({ content: pageCode });
+          await page.evaluate(
+            new Function(
+              "arg",
+              "return globalThis.__tachyonBrowserRepresentativePage.prepareInteractionSample(arg)",
+            ) as (arg: unknown) => Promise<void>,
+            { pathName, itemCount: options.itemCount, childCount: options.childCount, bundles },
+          );
+          const actionStarted = performance.now();
+          await page.locator("tbody input").nth(1).fill("typed");
+          const playwrightActionMs = performance.now() - actionStarted;
+          const detail = await page.evaluate(
+            new Function(
+              "return globalThis.__tachyonBrowserRepresentativePage.finishInteractionSample()",
+            ) as () => Promise<Omit<NonNullable<typeof inputDiagnostic>, "contract" | "playwrightActionMs">>,
+          );
+          inputDiagnostic = { contract: "playwright-input-event-to-two-frames", playwrightActionMs, ...detail };
+        } finally {
+          await page.close();
+        }
+      }
       paths[pathName] = {
         bundleBrotliBytes:
           brotliCompressSync(Buffer.from(driverCode)).byteLength +
@@ -345,6 +382,7 @@ export const runBrowserRepresentativeBenchmark = async (
         samples,
         ...(memory ? { memory } : {}),
         ...(trace ? { trace } : {}),
+        ...(inputDiagnostic ? { inputDiagnostic } : {}),
       };
     }
     return {
@@ -391,6 +429,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         "--counters",
         "--trace",
         "--trace-directory",
+        "--interaction",
         "--output",
       ].includes(key)
     ) {
@@ -407,6 +446,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     memoryCycles: Number(values.get("--memory-cycles") ?? 1),
     counterDiagnostics: values.get("--counters") === "true",
     traceDiagnostics: values.get("--trace") === "true",
+    interactionDiagnostics: values.get("--interaction") === "true",
     ...(traceDirectory ? { traceDirectory } : {}),
   };
   const result = await runBrowserRepresentativeBenchmark(options);

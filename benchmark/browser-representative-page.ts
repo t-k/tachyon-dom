@@ -41,6 +41,16 @@ const countNodes = (): NodeCounts => {
 let memoryDriver: GeneratedTemplateDriver | undefined;
 let memoryItemCount = 0;
 let memoryChildCount = 0;
+let inputEventStart: number | undefined;
+let inputTrusted: boolean | undefined;
+let inputTimingObserver: PerformanceObserver | undefined;
+let inputTimingEntries: Array<{
+  name: string;
+  startTime: number;
+  duration: number;
+  processingStart: number;
+  processingEnd: number;
+}> = [];
 
 const createMemoryItems = (): GeneratedTemplateItem[] =>
   Array.from({ length: memoryItemCount }, (_, index) => ({
@@ -102,6 +112,73 @@ export const repeatMemoryCycles = (additionalCycles: number): NodeCounts => {
 
 export const releaseMemorySample = (): void => {
   memoryDriver = undefined;
+};
+
+export const prepareInteractionSample = async (args: BrowserSampleArgs): Promise<void> => {
+  await prepareMemorySample(args);
+  mountMemorySample();
+  const input = document.querySelectorAll("tbody input")[1];
+  if (!(input instanceof HTMLInputElement)) throw new Error("Missing interactive row input.");
+  inputEventStart = undefined;
+  inputTrusted = undefined;
+  inputTimingEntries = [];
+  input.addEventListener(
+    "input",
+    (event) => {
+      inputEventStart = performance.now();
+      inputTrusted = event.isTrusted;
+    },
+    { capture: true, once: true },
+  );
+  if (PerformanceObserver.supportedEntryTypes.includes("event")) {
+    inputTimingObserver = new PerformanceObserver((list) => {
+      inputTimingEntries.push(...(list.getEntries() as typeof inputTimingEntries));
+    });
+    inputTimingObserver.observe({ type: "event", buffered: true, durationThreshold: 16 } as PerformanceObserverInit);
+  }
+};
+
+export const finishInteractionSample = async (): Promise<{
+  eventToTwoFramesMs: number;
+  inputTrusted: boolean;
+  inputValue: string;
+  modelLabel: string;
+  eventTimingSupported: boolean;
+  eventTiming: { inputDelayMs: number; processingMs: number; presentationDelayMs: number } | null;
+}> => {
+  if (!memoryDriver || inputEventStart === undefined || inputTrusted === undefined) {
+    throw new Error("A trusted input event was not captured.");
+  }
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const eventToTwoFramesMs = performance.now() - inputEventStart;
+  inputTimingEntries.push(...((inputTimingObserver?.takeRecords() ?? []) as typeof inputTimingEntries));
+  const entry = inputTimingEntries.filter((candidate) => candidate.name === "input").at(-1);
+  const eventTiming = entry
+    ? {
+        inputDelayMs: entry.processingStart - entry.startTime,
+        processingMs: entry.processingEnd - entry.processingStart,
+        presentationDelayMs: Math.max(0, entry.duration - (entry.processingEnd - entry.startTime)),
+      }
+    : null;
+  const modelLabel = memoryDriver.current()[1]?.label ?? "";
+  const inputValue = memoryDriver.inputValue(1);
+  const result = {
+    eventToTwoFramesMs,
+    inputTrusted,
+    inputValue,
+    modelLabel,
+    eventTimingSupported: PerformanceObserver.supportedEntryTypes.includes("event"),
+    eventTiming,
+  };
+  inputTimingObserver?.disconnect();
+  inputTimingObserver = undefined;
+  disposeMemorySample();
+  releaseMemorySample();
+  if (inputValue !== "typed" || modelLabel !== "typed") {
+    throw new Error(`Live input and model disagree after real input: ${JSON.stringify(result)}`);
+  }
+  return result;
 };
 
 export const runSample = async ({

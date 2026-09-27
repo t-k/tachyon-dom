@@ -104,4 +104,25 @@ describe("production browser representative benchmark", () => {
       await rm(traceDirectory, { recursive: true, force: true });
     }
   }, 60_000);
+
+  it("measures a real Playwright input event outside the scored samples", async () => {
+    const result = await runBrowserRepresentativeBenchmark({
+      iterations: 1,
+      warmup: 0,
+      itemCount: 8,
+      childCount: 1,
+      interactionDiagnostics: true,
+    });
+
+    expect(result.paths["mixed-template"].samples).toHaveLength(1);
+    expect(result.paths["mixed-template"].inputDiagnostic).toMatchObject({
+      contract: "playwright-input-event-to-two-frames",
+      inputTrusted: true,
+      inputValue: "typed",
+      modelLabel: "typed",
+    });
+    expect(result.paths["mixed-template"].inputDiagnostic?.eventToTwoFramesMs).toBeGreaterThanOrEqual(0);
+    expect(result.paths["mixed-template"].inputDiagnostic?.playwrightActionMs).toBeGreaterThanOrEqual(0);
+    expect(result.paths["keyed-rows"].inputDiagnostic).toBeUndefined();
+  }, 60_000);
 });
