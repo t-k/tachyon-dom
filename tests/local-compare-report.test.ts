@@ -96,6 +96,14 @@ describe("local compare report", () => {
     expect(relativeStandardDeviation([10, 10, 10])).toBe(0);
   });
 
+  it("keeps synchronous samples separate from the settled ranking values", () => {
+    const summary = summarizeScenario("partialUpdate", "partial update", "tachyon-dom", [17, 18, 19], [1, 2, 3]);
+
+    expect(summary.values).toEqual([17, 18, 19]);
+    expect(summary.syncUpdateMs).toEqual([1, 2, 3]);
+    expect(summary.syncUpdateTrimmedMeanMs).toBe(2);
+  });
+
   it("compares Tachyon DOM against the vanillajs-lite baseline", () => {
     const baseline = summarizeScenario("createRows", "create rows", "vanillajs-lite-keyed", [10, 12, 14]);
     const candidate = summarizeScenario("createRows", "create rows", "tachyon-dom", [15, 18, 21]);

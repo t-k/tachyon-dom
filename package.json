@@ -238,6 +238,7 @@
     "bench:stream-backpressure": "tsx benchmark/streaming-backpressure.ts",
     "bench:html-minification": "tsx benchmark/html-minification.ts",
     "bench:template-representative": "tsx benchmark/template-representative.ts",
+    "bench:template-browser": "tsx benchmark/browser-representative.ts",
     "bench:generated-text-list-adapter": "tsx benchmark/generated-text-list-adapter.ts",
     "bench:conditional-representative": "tsx benchmark/conditional-representative.ts",
     "bench:representation-evaluation": "tsx benchmark/representation-evaluation.ts",

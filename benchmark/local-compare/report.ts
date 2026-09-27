@@ -5,6 +5,9 @@ export type ScenarioSummary = {
   label: string;
   implementation: ImplementationName;
   values: readonly number[];
+  /** Supplemental synchronous call duration; ranking still uses the settled values. */
+  syncUpdateMs?: readonly number[];
+  syncUpdateTrimmedMeanMs?: number;
   mean: number;
   median: number;
   trimmedMean: number;
@@ -163,11 +166,13 @@ export const summarizeScenario = (
   label: string,
   implementation: ImplementationName,
   values: readonly number[],
+  syncUpdateMs?: readonly number[],
 ): ScenarioSummary => ({
   id,
   label,
   implementation,
   values,
+  ...(syncUpdateMs ? { syncUpdateMs, syncUpdateTrimmedMeanMs: trimmedMean(syncUpdateMs) } : {}),
   mean: mean(values),
   median: median(values),
   trimmedMean: trimmedMean(values),
@@ -233,9 +238,7 @@ export const geomeanComparison = (rows: readonly ComparisonRow[]): GeomeanCompar
     meanGeomeanRatio: geomean(rows.map((row) => row.ratio)),
     medianGeomeanRatio: geomean(rows.map((row) => row.candidateMedian / row.baselineMedian)),
     trimmedGeomeanRatio: geomean(rows.map((row) => row.trimmedRatio)),
-    losses: rows
-      .filter((row) => row.trimmedRatio > 1)
-      .map((row) => `${row.label} ${row.trimmedRatio.toFixed(3)}x`),
+    losses: rows.filter((row) => row.trimmedRatio > 1).map((row) => `${row.label} ${row.trimmedRatio.toFixed(3)}x`),
   };
 };
 
@@ -378,7 +381,9 @@ export const formatScenarioMatrixTable = (
     lines.push(
       `| ${row.label} | ${implementations
         .map((implementation) => formatMilliseconds(row.trimmedMeans[implementation] ?? Number.NaN))
-        .join(" | ")} | ${row.candidateTrimmedRatioToFastest.toFixed(3)}x | ${formatUnsignedPercent(row.relativeStandardDeviations[candidate] ?? Number.NaN)} |`,
+        .join(
+          " | ",
+        )} | ${row.candidateTrimmedRatioToFastest.toFixed(3)}x | ${formatUnsignedPercent(row.relativeStandardDeviations[candidate] ?? Number.NaN)} |`,
     );
   }
   return lines.join("\n");

@@ -10,6 +10,14 @@ The canonical local run uses a production Vite build, two warmups, seven measure
 
 This comparison follows the row-operation model used by `js-framework-benchmark`, but it uses this repository's local runner and fixtures rather than the upstream official driver. Treat results as measurements of the recorded machine and revision, not as universal rankings.
 
+The local comparison's ranked `values` remain the click plus two `requestAnimationFrame` callbacks. Each summary also records `syncUpdateMs` as the duration of the synchronous click call. An implementation that schedules DOM work after the call returns must not be compared by this supplemental number alone. Trace capture runs as a separate unscored sample. The auxiliary DOM count is an element count; its heap reading is a current heap snapshot without forced garbage collection.
+
+## Production browser benchmark for generated templates
+
+Run `pnpm bench:template-browser -- --iterations 5 --warmup 2 --item-count 1000 --child-count 2 --output benchmark/browser-feature-results/template-browser.json`. This compiles the representative `.td` text and mixed templates into minified production browser bundles, runs them in Chromium beside the low-level `keyed-rows` path, and checks row counts and keyed node identity. Each sample uses a fresh page. `coldImportMs` measures importing the bundles, `create.syncUpdateMs` measures first mount, and `partialUpdate.syncUpdateMs` measures an update on that mounted list. The `settledUpdateMs` fields include two frame callbacks and are not paint completion times. Samples with detailed browser tracing are not included in this suite.
+
+The existing `pnpm bench:template-representative` remains a JSDOM regression fixture with broader oracle checks. Browser results are local evidence until paired base/head runs on a stable host confirm a change; the output does not represent page-wide INP.
+
 New benchmark result files use schema version 2. Each result contains a benchmark and contract identifier, the lossless process argument vector, a display command, working directory, capture time, Git commit and dirty state, a working-tree hash, Node and operating-system details, CPU and host identity, and benchmark-specific dependency or browser versions. Workload controls and measurements are separate fields so comparison tools can validate controls before interpreting numbers.
 
 Comparisons fail closed when required workload or environment fields differ. Source revision differences must be explicitly allowed and remain visible as intentional differences in the comparison report. Legacy files without the provenance envelope remain unchanged and readable as historical records, but they must not be used for authoritative rankings or before-and-after claims.

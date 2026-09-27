@@ -9,6 +9,7 @@ import solid from "vite-plugin-solid";
 import { build, createServer, preview, type PreviewServer, type ViteDevServer } from "vite";
 import { err, ok, type Result } from "../../src/result";
 import { collectBenchmarkProvenance, collectDependencyVersions } from "../provenance";
+import { browserScenarioScript } from "./scenario-script";
 import { attachArtifactManifest } from "../shared/artifact-manifest";
 import {
   buildAuxiliaryMetricMatrix,
@@ -109,10 +110,7 @@ const implementations: readonly Implementation[] = [
     name: "tachyon-dom",
     title: "Tachyon DOM",
     path: "/benchmark/js-framework-benchmark/",
-    sourcePaths: [
-      "benchmark/js-framework-benchmark/index.html",
-      "benchmark/js-framework-benchmark/src/main.ts",
-    ],
+    sourcePaths: ["benchmark/js-framework-benchmark/index.html", "benchmark/js-framework-benchmark/src/main.ts"],
     entrySourcePaths: ["benchmark/js-framework-benchmark/src/main.ts"],
   },
 ];
@@ -132,32 +130,34 @@ const scenarios: readonly Scenario[] = [
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "../..");
 const mreactRoot = path.resolve(projectRoot, "../mreact");
-const mreactPackageAliases = existsSync(path.join(mreactRoot, "packages")) ? [
-  {
-    find: /^@reckona\/mreact-reactive-core$/,
-    replacement: path.join(mreactRoot, "packages/reactive-core/src/index.ts"),
-  },
-  {
-    find: /^@reckona\/mreact-reactive-core\/(.+)$/,
-    replacement: `${path.join(mreactRoot, "packages/reactive-core/src")}/$1.ts`,
-  },
-  {
-    find: /^@reckona\/mreact-reactive-dom$/,
-    replacement: path.join(mreactRoot, "packages/reactive-dom/src/index.ts"),
-  },
-  {
-    find: /^@reckona\/mreact-reactive-dom\/(.+)$/,
-    replacement: `${path.join(mreactRoot, "packages/reactive-dom/src")}/$1.ts`,
-  },
-  {
-    find: /^@reckona\/mreact-shared$/,
-    replacement: path.join(mreactRoot, "packages/shared/src/index.ts"),
-  },
-  {
-    find: /^@reckona\/mreact-shared\/(.+)$/,
-    replacement: `${path.join(mreactRoot, "packages/shared/src")}/$1.ts`,
-  },
-] : [];
+const mreactPackageAliases = existsSync(path.join(mreactRoot, "packages"))
+  ? [
+      {
+        find: /^@reckona\/mreact-reactive-core$/,
+        replacement: path.join(mreactRoot, "packages/reactive-core/src/index.ts"),
+      },
+      {
+        find: /^@reckona\/mreact-reactive-core\/(.+)$/,
+        replacement: `${path.join(mreactRoot, "packages/reactive-core/src")}/$1.ts`,
+      },
+      {
+        find: /^@reckona\/mreact-reactive-dom$/,
+        replacement: path.join(mreactRoot, "packages/reactive-dom/src/index.ts"),
+      },
+      {
+        find: /^@reckona\/mreact-reactive-dom\/(.+)$/,
+        replacement: `${path.join(mreactRoot, "packages/reactive-dom/src")}/$1.ts`,
+      },
+      {
+        find: /^@reckona\/mreact-shared$/,
+        replacement: path.join(mreactRoot, "packages/shared/src/index.ts"),
+      },
+      {
+        find: /^@reckona\/mreact-shared\/(.+)$/,
+        replacement: `${path.join(mreactRoot, "packages/shared/src")}/$1.ts`,
+      },
+    ]
+  : [];
 const benchmarkPlugins = () => [solid(), marko({ linked: false })];
 
 const parsePositiveInteger = (value: string, name: string): Result<number, string> => {
@@ -443,78 +443,9 @@ const clickInPage = async (page: Page, selector: string): Promise<void> => {
   await settlePage(page);
 };
 
-const browserScenarioScript = String.raw`
-window.__runLocalBenchmarkScenario = async (id) => {
-  const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
-  const settle = async () => {
-    await frame();
-    await frame();
-  };
-  const click = (selector) => {
-    const element = document.querySelector(selector);
-    if (!element) {
-      throw new Error("Missing selector: " + selector);
-    }
-    if (element instanceof HTMLElement) {
-      element.click();
-    } else {
-      element.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-    }
-  };
-  const assertForeground = () => {
-    const entries = performance.getEntriesByType("visibility-state");
-    const firstEntry = entries[0];
-    if (document.visibilityState === "hidden" || firstEntry?.name === "hidden") {
-      throw new Error("The benchmark page is hidden; foreground the browser or run headless.");
-    }
-  };
-  const actionFor = (action) => {
-    const selectors = {
-      run: "#run",
-      runlots: "#runlots",
-      add: "#add",
-      update: "#update",
-      clear: "#clear",
-      swaprows: "#swaprows",
-      select: "#tbody tr:nth-child(2) td:nth-child(2) a",
-      remove: "#tbody tr:nth-child(2) td:nth-child(3) span",
-    };
-    const selector = selectors[action];
-    if (!selector) {
-      throw new Error("Unknown action: " + action);
-    }
-    return selector;
-  };
-  const plans = {
-    createRows: { setup: ["clear"], measure: "run" },
-    replaceAllRows: { setup: ["run"], measure: "run" },
-    partialUpdate: { setup: ["run"], measure: "update" },
-    selectRow: { setup: ["run"], measure: "select" },
-    swapRows: { setup: ["run"], measure: "swaprows" },
-    removeRow: { setup: ["run"], measure: "remove" },
-    createManyRows: { setup: ["clear"], measure: "runlots" },
-    appendRows: { setup: ["run"], measure: "add" },
-    clearRows: { setup: ["run"], measure: "clear" },
-  };
-  const plan = plans[id];
-  if (!plan) {
-    throw new Error("Unknown scenario: " + id);
-  }
+type ScenarioTiming = { syncUpdateMs: number; settledUpdateMs: number };
 
-  assertForeground();
-  for (const action of plan.setup) {
-    click(actionFor(action));
-    await settle();
-  }
-
-  const start = performance.now();
-  click(actionFor(plan.measure));
-  await settle();
-  return performance.now() - start;
-};
-`;
-
-const runBrowserScenario = async (page: Page, url: string, scenarioId: string): Promise<number> => {
+const runBrowserScenario = async (page: Page, url: string, scenarioId: string): Promise<ScenarioTiming> => {
   await page.goto(url, { waitUntil: "networkidle" });
   await page.waitForSelector("#run");
   await page.addScriptTag({ content: browserScenarioScript });
@@ -546,11 +477,7 @@ const readCdpStream = async (session: CDPSession, stream: string): Promise<strin
   return data;
 };
 
-const captureChromeTrace = async (
-  page: Page,
-  runScenario: () => Promise<number>,
-  outputPath: string,
-): Promise<number> => {
+const captureChromeTrace = async <T>(page: Page, runScenario: () => Promise<T>, outputPath: string): Promise<T> => {
   const session = await page.context().newCDPSession(page);
   await mkdir(path.dirname(outputPath), { recursive: true });
   try {
@@ -591,25 +518,23 @@ const measureImplementation = async (
   try {
     for (const scenario of measuredScenarios) {
       const values: number[] = [];
+      const syncUpdateMs: number[] = [];
       const totalRuns = options.warmup + options.iterations;
       for (let run = 0; run < totalRuns; run++) {
-        const shouldTrace =
-          run === options.warmup &&
-          options.traceImplementation === implementation.name &&
-          options.traceScenario === scenario.id;
-        const runScenario = () => runBrowserScenario(page, `${baseUrl}${implementation.path}`, scenario.id);
-        const value = shouldTrace
-          ? await captureChromeTrace(
-              page,
-              runScenario,
-              path.resolve(projectRoot, options.traceOutput ?? defaultTracePath(implementation.name, scenario.id)),
-            )
-          : await runScenario();
+        const value = await runBrowserScenario(page, `${baseUrl}${implementation.path}`, scenario.id);
         if (run >= options.warmup) {
-          values.push(value);
+          values.push(value.settledUpdateMs);
+          syncUpdateMs.push(value.syncUpdateMs);
         }
       }
-      summaries.push(summarizeScenario(scenario.id, scenario.label, implementation.name, values));
+      if (options.traceImplementation === implementation.name && options.traceScenario === scenario.id) {
+        await captureChromeTrace(
+          page,
+          () => runBrowserScenario(page, `${baseUrl}${implementation.path}`, scenario.id),
+          path.resolve(projectRoot, options.traceOutput ?? defaultTracePath(implementation.name, scenario.id)),
+        );
+      }
+      summaries.push(summarizeScenario(scenario.id, scenario.label, implementation.name, values, syncUpdateMs));
     }
   } finally {
     await page.close();
@@ -685,14 +610,20 @@ const measureAuxiliaryMetrics = async (
 
     return [
       summarizeAuxiliaryMetric("startup", "startup load + 2 frames", "ms", implementation.name, startupMs),
-      summarizeAuxiliaryMetric("readyHeap", "ready JS heap", "mb", implementation.name, readyHeapMb),
-      summarizeAuxiliaryMetric("runHeap", "1k rows JS heap", "mb", implementation.name, runHeapMb),
-      summarizeAuxiliaryMetric("runClearHeap", "run/clear 5x JS heap", "mb", implementation.name, runClearHeapMb),
-      summarizeAuxiliaryMetric("readyDomNodes", "ready DOM nodes", "count", implementation.name, readyDomNodes),
-      summarizeAuxiliaryMetric("runDomNodes", "1k rows DOM nodes", "count", implementation.name, runDomNodes),
+      summarizeAuxiliaryMetric("readyHeap", "ready JS heap snapshot (no GC)", "mb", implementation.name, readyHeapMb),
+      summarizeAuxiliaryMetric("runHeap", "1k rows JS heap snapshot (no GC)", "mb", implementation.name, runHeapMb),
+      summarizeAuxiliaryMetric(
+        "runClearHeap",
+        "run/clear 5x JS heap snapshot (no GC)",
+        "mb",
+        implementation.name,
+        runClearHeapMb,
+      ),
+      summarizeAuxiliaryMetric("readyDomNodes", "ready DOM elements", "count", implementation.name, readyDomNodes),
+      summarizeAuxiliaryMetric("runDomNodes", "1k rows DOM elements", "count", implementation.name, runDomNodes),
       summarizeAuxiliaryMetric(
         "runClearDomNodes",
-        "run/clear 5x DOM nodes",
+        "run/clear 5x DOM elements",
         "count",
         implementation.name,
         runClearDomNodes,
@@ -750,6 +681,12 @@ const writeResults = async (
         iterations: options.iterations,
         warmup: options.warmup,
         serveMode: options.serveMode,
+        timingContract: {
+          ranking: "settledUpdateMs includes two requestAnimationFrame callbacks",
+          supplemental: "syncUpdateMs measures the synchronous click call; asynchronous DOM completion is not implied",
+          warmup: "Each sample navigates and mounts a fresh page",
+          trace: "A separate unscored run follows measured samples",
+        },
         operationStatistic: "trimmedMean",
         trimFraction: 0.2,
         baseline: "vanillajs-lite-keyed",
@@ -771,10 +708,7 @@ const writeResults = async (
       processStartedAt: new Date(Date.now() - process.uptime() * 1_000).toISOString(),
     },
   );
-  await writeFile(
-    outputPath,
-    `${JSON.stringify(artifact, null, 2)}\n`,
-  );
+  await writeFile(outputPath, `${JSON.stringify(artifact, null, 2)}\n`);
   return outputPath;
 };
 
