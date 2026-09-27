@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import os from "node:os";
 import { mkdir, writeFile } from "node:fs/promises";
 import { brotliCompressSync } from "node:zlib";
@@ -67,6 +67,8 @@ export type BrowserRepresentativeSample = {
 };
 
 export type BrowserRepresentativeResult = {
+  runId: string;
+  capturedAt: string;
   measurementMode: "production-browser";
   sampleContract: "fresh-page-cold-import-first-mount-and-warm-operations";
   controls: BrowserRepresentativeOptions;
@@ -250,6 +252,8 @@ export const runBrowserRepresentativeBenchmark = async (
       };
     }
     return {
+      runId: randomUUID(),
+      capturedAt: new Date().toISOString(),
       measurementMode: "production-browser",
       sampleContract: "fresh-page-cold-import-first-mount-and-warm-operations",
       controls: options,

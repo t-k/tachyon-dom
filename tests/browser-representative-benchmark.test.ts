@@ -7,6 +7,7 @@ describe("production browser representative benchmark", () => {
     const result = await runBrowserRepresentativeBenchmark({ iterations: 1, warmup: 0, itemCount: 8, childCount: 2 });
 
     expect(Object.keys(result.paths)).toEqual(["keyed-rows", "text-template", "mixed-template"]);
+    expect(result.runId).toMatch(/^[a-f0-9-]{36}$/);
     expect(result.controls).toEqual({ iterations: 1, warmup: 0, itemCount: 8, childCount: 2 });
     expect(result.provenance.commit).toMatch(/^[a-f0-9]{40}$/);
     for (const path of Object.values(result.paths)) {

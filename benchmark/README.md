@@ -20,6 +20,8 @@ The existing `pnpm bench:template-representative` remains a JSDOM regression fix
 
 The browser report records workload controls, bundle hashes, Git state, Node, CPU, esbuild, and Chromium versions. Compare base and head as separate processes with the same controls and host. Individual operations in one process are correlated samples, not independent trials.
 
+Run `pnpm bench:template-browser:compare -- --pair base-1.json head-1.json --pair base-2.json head-2.json` on clean reports from the same host and browser. Each process contributes one ratio per operation; fewer than five pairs remain inconclusive. The comparison rejects changed controls, environment, bundle contents within a revision, dirty results, and reused process IDs. Use `--allow-dirty-smoke` only for local smoke artifacts.
+
 Add `--memory true --memory-cycles 50` to run a separate diagnostic page per path. It records Chromium heap usage after forced GC at import, mount, first dispose, and repeated dispose, plus live Element, Text, and Comment counts. GC and node counting occur outside the timed samples. The heap deltas and bytes per row are estimates; they do not measure allocation volume or prove the absence of detached retained nodes.
 
 New benchmark result files use schema version 2. Each result contains a benchmark and contract identifier, the lossless process argument vector, a display command, working directory, capture time, Git commit and dirty state, a working-tree hash, Node and operating-system details, CPU and host identity, and benchmark-specific dependency or browser versions. Workload controls and measurements are separate fields so comparison tools can validate controls before interpreting numbers.
