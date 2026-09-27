@@ -11,6 +11,7 @@ import {
   buildRouteManifestFile,
   createStarterFiles,
   compileFile,
+  codePreviewFile,
   generateTemplateTypesFile,
   isCliEntrypoint,
   normalizeCliArgv,
@@ -1592,6 +1593,18 @@ export default { selected: false };
       ok: true,
       value: { command: "a11y", input: "page.td", format: "json" },
     });
+    expect(parseArgs(["code-preview", "page.td", "--out", "report.html"])).toEqual({
+      ok: true,
+      value: { command: "code-preview", input: "page.td", format: "html", output: "report.html" },
+    });
+    expect(parseArgs(["code-preview", "page.td", "--json"])).toEqual({
+      ok: true,
+      value: { command: "code-preview", input: "page.td", format: "json" },
+    });
+    expect(parseArgs(["code-preview", "page.td", "--out"])).toEqual({
+      ok: false,
+      error: "--out requires a file path.",
+    });
   });
 
   it("explains the runtime modules a template compiles to from the CLI", async () => {
@@ -1608,6 +1621,58 @@ export default { selected: false };
       const json = await explainFile({ input, format: "json" });
       expect(json.ok).toBe(true);
       if (json.ok) expect(JSON.parse(json.value).regions[0].runtime).toBe("tachyon-dom/runtime/list");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writes an HTML code preview and exposes the same data as JSON", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-code-preview-"));
+    try {
+      const input = path.join(dir, "page.td");
+      const output = path.join(dir, "report.html");
+      await writeFile(input, `<ul><for each={rows} key={row.id}><li>{row.name}</li></for></ul>`);
+
+      const html = await codePreviewFile({ input, output, format: "html" });
+      expect(html.ok).toBe(true);
+      if (html.ok) {
+        expect(await readFile(output, "utf8")).toBe(html.value);
+        expect(html.value).toContain("Source (.td)");
+        expect(html.value).toContain("tachyon-dom/runtime/list-text");
+      }
+      expect(await runCli(["code-preview", input, "--out", output])).toBe(0);
+      expect(await readFile(output, "utf8")).toContain("Generated JavaScript");
+
+      const json = await codePreviewFile({ input, format: "json" });
+      expect(json.ok).toBe(true);
+      if (json.ok) {
+        const report = JSON.parse(json.value);
+        expect(report.version).toBe(1);
+        expect(report.source).toContain("<for each={rows}");
+        expect(report.generatedJavaScript).toContain("mountGeneratedTextKeyedList");
+        expect(report.generatedJavaScriptBytes.brotli).toBeGreaterThan(0);
+        const generated = ts.createSourceFile(
+          "preview.js",
+          report.generatedJavaScript,
+          ts.ScriptTarget.Latest,
+          true,
+          ts.ScriptKind.JS,
+        );
+        const imports = [
+          ...new Set(
+            generated.statements.flatMap((statement) =>
+              ts.isImportDeclaration(statement) &&
+              ts.isStringLiteral(statement.moduleSpecifier) &&
+              statement.moduleSpecifier.text.startsWith("tachyon-dom/runtime/")
+                ? [statement.moduleSpecifier.text]
+                : [],
+            ),
+          ),
+        ];
+        expect(report.explanation.runtimeImports).toEqual(imports);
+        expect(imports).toContain("tachyon-dom/runtime/list-text");
+        expect(imports).toContain("tachyon-dom/runtime/component");
+      }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

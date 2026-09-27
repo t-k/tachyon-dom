@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "concurrency": 2,
+  "incremental": false,
+  "mutate": ["src/code-preview.ts:17:0-77:0"],
+  "plugins": ["./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"],
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": { "fileName": "reports/mutation/code-preview/mutation.json" },
+  "testRunner": "vitest",
+  "thresholds": { "high": 80, "low": 60, "break": null },
+  "vitest": { "configFile": "vitest.code-preview-mutation.config.ts", "related": false },
+  "ignorePatterns": ["docs.local", "tests/browser/generated", "test-results", "benchmark", ".worktree"]
+}

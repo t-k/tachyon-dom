@@ -3,6 +3,7 @@ import { access, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkTachyonAccessibility, formatAccessibilityDiagnostic } from "./accessibility.js";
+import { createCodePreviewReport, renderCodePreviewHtml } from "./code-preview.js";
 import { generateTachyonModuleTypes, generateTemplateTypes, pagesFromRouteFiles } from "./app.js";
 import {
   explainCompiledTemplate,
@@ -11,6 +12,8 @@ import {
   generateServerModule,
   generateServerStreamModule,
 } from "./compiler/index.js";
+import type { TemplateExplanation } from "./compiler/explain.js";
+import type { CompiledTemplate } from "./compiler/types.js";
 import {
   generateScriptOnlyModule,
   generateSfcComponentExport,
@@ -89,10 +92,18 @@ export type CliAccessibilityOptions = {
   format: "text" | "json";
 };
 
+export type CliCodePreviewOptions = {
+  command: "code-preview";
+  input: string;
+  output?: string;
+  format: "html" | "json";
+};
+
 export type CliOptions =
   | CliCompileOptions
   | CliExplainOptions
   | CliAccessibilityOptions
+  | CliCodePreviewOptions
   | CliRoutesOptions
   | CliServerOptions
   | CliAddPageOptions
@@ -102,12 +113,13 @@ export type CliOptions =
   | CliLanguageServerOptions;
 
 const usage =
-  "Usage: tachyon-dom <compile|explain|a11y|routes|dev|build|preview|add|typegen|typecheck|init|language-server>. Use compile for templates, explain for runtime selection, a11y for static accessibility findings, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, typecheck for TypeScript diagnostics, init for starters, and language-server for editor diagnostics.";
+  "Usage: tachyon-dom <compile|explain|code-preview|a11y|routes|dev|build|preview|add|typegen|typecheck|init|language-server>. Use compile for templates, explain for runtime selection, code-preview for source and generated JavaScript, a11y for static accessibility findings, routes for file-route manifests, dev/build/preview with Vite, add for route files, typegen for template scopes, typecheck for TypeScript diagnostics, init for starters, and language-server for editor diagnostics.";
 
 const commandUsage: Record<string, string> = {
   add: "Usage: tachyon-dom add page <name> [--routes-dir src/routes] [--force]. Existing files are preserved unless --force is explicit.",
   a11y: "Usage: tachyon-dom a11y <input> [--json]",
   build: "Usage: tachyon-dom build [--host 127.0.0.1] [--port 4173]",
+  "code-preview": "Usage: tachyon-dom code-preview <input> [--out report.html] [--json]",
   compile:
     "Usage: tachyon-dom compile <input> [--target client|server|stream] [--out file] [--reactive] [--no-sourcemap]",
   dev: "Usage: tachyon-dom dev [--host 127.0.0.1] [--port 5173]",
@@ -205,6 +217,21 @@ const parseAccessibilityArgs = (input: string, rest: readonly string[]): Result<
   for (const arg of rest) {
     if (arg === "--json") options.format = "json";
     else return err(`Unknown argument: ${arg}`);
+  }
+  return ok(options);
+};
+
+const parseCodePreviewArgs = (input: string, rest: readonly string[]): Result<CliCodePreviewOptions, string> => {
+  if (!input) return err(commandUsage["code-preview"] as string);
+  const options: CliCodePreviewOptions = { command: "code-preview", input, format: "html" };
+  for (let index = 0; index < rest.length; index++) {
+    const arg = rest[index];
+    if (arg === "--json") options.format = "json";
+    else if (arg === "--out") {
+      const output = rest[++index];
+      if (!output) return err("--out requires a file path.");
+      options.output = output;
+    } else return err(`Unknown argument: ${arg}`);
   }
   return ok(options);
 };
@@ -367,6 +394,9 @@ export const parseArgs = (argv: readonly string[]): Result<CliOptions, string> =
   if (command === "a11y") {
     return parseAccessibilityArgs(input ?? "", rest);
   }
+  if (command === "code-preview") {
+    return parseCodePreviewArgs(input ?? "", rest);
+  }
   if (command === "routes") {
     return parseRoutesArgs(input ?? "", rest);
   }
@@ -394,38 +424,49 @@ export const parseArgs = (argv: readonly string[]): Result<CliOptions, string> =
   return err(usage);
 };
 
-export const compileFile = async (options: Omit<CliCompileOptions, "command">): Promise<Result<string, string>> => {
-  const source = await readFile(options.input, "utf8");
-  const result = diagnoseTachyonSfc(source, { target: options.target });
+const compileSfcSource = (
+  source: string,
+  input: string,
+  target: CliCompileOptions["target"],
+  reactive: boolean,
+): Result<{ code: string; template?: CompiledTemplate }, string> => {
+  const result = diagnoseTachyonSfc(source, { target });
   if (!result.ok) {
-    return err(formatDiagnostic(result.error, options.input));
+    return err(formatDiagnostic(result.error, input));
   }
   // Generated entries normalize an omitted scope to `{}`, which keeps every
   // setup binding; emitting the narrowed return here would only add bytes.
   const script = transformSfcScript(result.value.descriptor.script);
   if (!script.ok) {
-    return err(formatDiagnostic(diagnosticFromCompilerError(source, script.error), options.input));
+    return err(formatDiagnostic(diagnosticFromCompilerError(source, script.error), input));
   }
   const code = result.value.scriptOnly
-    ? generateScriptOnlyModule(options.target)
-    : options.target === "server"
+    ? generateScriptOnlyModule(target)
+    : target === "server"
       ? generateServerModule(
           result.value.template,
           script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {},
         )
-      : options.target === "stream"
+      : target === "stream"
         ? generateServerStreamModule(
             result.value.template,
             script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {},
           )
         : generateClientModule(result.value.template, {
-            reactive: options.reactive,
+            reactive,
             ...(script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {}),
           });
-  const moduleCode = `${script.value.code}${code}${result.value.scriptOnly || hasSfcComponentBinding(result.value.descriptor.script) ? "" : generateSfcComponentExport(options.target)}`;
+  const moduleCode = `${script.value.code}${code}${result.value.scriptOnly || hasSfcComponentBinding(result.value.descriptor.script) ? "" : generateSfcComponentExport(target)}`;
+  return ok({ code: moduleCode, ...(result.value.scriptOnly ? {} : { template: result.value.template }) });
+};
+
+export const compileFile = async (options: Omit<CliCompileOptions, "command">): Promise<Result<string, string>> => {
+  const source = await readFile(options.input, "utf8");
+  const compiled = compileSfcSource(source, options.input, options.target, options.reactive);
+  if (!compiled.ok) return compiled;
   const output = options.sourcemap
-    ? appendInlineSourceMap(moduleCode, createSourceMap(source, options.input, options.output))
-    : moduleCode;
+    ? appendInlineSourceMap(compiled.value.code, createSourceMap(source, options.input, options.output))
+    : compiled.value.code;
   if (options.output) {
     await writeFile(options.output, output);
   }
@@ -466,6 +507,21 @@ export const accessibilityFile = async (
         ? `${result.value.map((finding) => formatAccessibilityDiagnostic(finding, options.input)).join("\n")}\n`
         : "No static accessibility findings.\n",
   );
+};
+
+export const codePreviewFile = async (
+  options: Omit<CliCodePreviewOptions, "command">,
+): Promise<Result<string, string>> => {
+  const source = await readFile(options.input, "utf8");
+  const compiled = compileSfcSource(source, options.input, "client", false);
+  if (!compiled.ok) return compiled;
+  const explanation: TemplateExplanation = compiled.value.template
+    ? explainCompiledTemplate(compiled.value.template)
+    : { regions: [], runtimeImports: [], hydrationDiagnostics: [] };
+  const report = createCodePreviewReport(options.input, source, compiled.value.code, explanation);
+  const output = options.format === "json" ? `${JSON.stringify(report, null, 2)}\n` : renderCodePreviewHtml(report);
+  if (options.output) await writeFile(options.output, output);
+  return ok(output);
 };
 
 export const typecheckFile = async (options: Omit<CliTypecheckOptions, "command">): Promise<Result<string, string>> => {
@@ -950,6 +1006,9 @@ export const runCli = async (
       break;
     case "a11y":
       result = await accessibilityFile(parsed.value);
+      break;
+    case "code-preview":
+      result = await codePreviewFile(parsed.value);
       break;
     case "routes":
       result = await buildRouteManifestFile({
