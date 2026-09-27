@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 
 type SignalModule = {
   createSignal: <T>(initial: T) => { (): T; set: (value: T) => void };
+  createMemo: <T>(fn: () => T) => () => T;
   effect: (fn: () => unknown) => () => void;
   createRoot: <T>(fn: (dispose: () => void) => T) => T;
   createReactiveErrorScope: (handle: (error: unknown) => void) => {
@@ -18,7 +19,7 @@ type SignalModule = {
   __ownerAllocations: () => number;
 };
 
-const instrumentedModule = async (production: boolean): Promise<SignalModule> => {
+const instrumentedModule = async (production: boolean | "counter"): Promise<SignalModule> => {
   const source = await readFile("src/runtime/signal.ts", "utf8");
   const marker = "const createOwner = (): Owner => {";
   expect(source.split(marker)).toHaveLength(2);
@@ -32,13 +33,34 @@ ${source.replace(marker, `${marker}\n  __allocations += 1;`)}`;
     logLevel: "silent",
     platform: "browser",
     write: false,
-    define: { __TACHYON_PRODUCTION__: String(production) },
+    define: { __TACHYON_PRODUCTION__: production === "counter" ? '"counter"' : String(production) },
   });
   const encoded = Buffer.from(result.outputFiles![0]!.contents).toString("base64");
   return (await import(`data:text/javascript;base64,${encoded}`)) as SignalModule;
 };
 
 describe("production signal runtime", () => {
+  it("counts effect callbacks, memo recomputations, and actual subscription changes in counter builds", async () => {
+    const host = globalThis as typeof globalThis & { __tachyonPerformanceCounters?: Record<string, number> };
+    delete host.__tachyonPerformanceCounters;
+    try {
+      const api = await instrumentedModule("counter");
+      const source = api.createSignal(1);
+      const doubled = api.createMemo(() => source() * 2);
+      const seen: number[] = [];
+      const dispose = api.effect(() => seen.push(doubled()));
+      source.set(2);
+      expect(seen).toEqual([2, 4]);
+      expect(host.__tachyonPerformanceCounters?.effectRuns).toBe(2);
+      expect(host.__tachyonPerformanceCounters?.memoRecomputes).toBe(1);
+      expect(host.__tachyonPerformanceCounters?.subscriptionAdds).toBeGreaterThanOrEqual(3);
+      dispose();
+      expect(host.__tachyonPerformanceCounters?.subscriptionRemoves).toBeGreaterThanOrEqual(2);
+    } finally {
+      delete host.__tachyonPerformanceCounters;
+    }
+  });
+
   it("reuses an empty run owner and keeps allocating one per run in development", async () => {
     const runs = 200;
     const allocationsFor = async (production: boolean) => {

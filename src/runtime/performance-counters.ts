@@ -10,6 +10,10 @@ export type PerformanceCounterName =
   | "structuralNodesVisited"
   | "bindingEvaluations"
   | "equalitySkips"
+  | "effectRuns"
+  | "memoRecomputes"
+  | "subscriptionAdds"
+  | "subscriptionRemoves"
   | "adoptedElements"
   | "topLevelCloneCalls";
 

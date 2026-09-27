@@ -1,6 +1,13 @@
 type SubscriberSet = Set<EffectRunner>;
 
-declare const __TACHYON_PRODUCTION__: boolean;
+declare const __TACHYON_PRODUCTION__: boolean | "counter";
+
+type ReactiveCounterName = "effectRuns" | "memoRecomputes" | "subscriptionAdds" | "subscriptionRemoves";
+const countReactivePerformance = (name: ReactiveCounterName): void => {
+  const host = globalThis as typeof globalThis & { __tachyonPerformanceCounters?: Record<string, number> };
+  const counters = (host.__tachyonPerformanceCounters ??= {});
+  counters[name] = (counters[name] ?? 0) + 1;
+};
 
 // Production browser builds define this flag so lifecycle diagnostics disappear from the hot path.
 const lifecycleDiagnosticsEnabled = typeof __TACHYON_PRODUCTION__ === "undefined" || __TACHYON_PRODUCTION__ === false;
@@ -318,6 +325,8 @@ const cleanup = (runner: EffectRunner, createNextRunOwner: boolean): void => {
   runner.children.clear();
   for (const dependency of runner.dependencies) {
     if (dependency.delete(runner)) {
+      if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+        countReactivePerformance("subscriptionRemoves");
       if (lifecycleDiagnosticsEnabled) runtimeLifecycleHooks?.subscriptionChanged?.(-1);
     }
   }
@@ -370,6 +379,8 @@ const track = (subscribers: SubscriberSet): void => {
     if (!subscribers.has(activeEffect)) {
       subscribers.add(activeEffect);
       activeEffect.dependencies.add(subscribers);
+      if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+        countReactivePerformance("subscriptionAdds");
       if (lifecycleDiagnosticsEnabled) runtimeLifecycleHooks?.subscriptionChanged?.(1);
     }
   }
@@ -730,6 +741,13 @@ const createEffectRunner = (fn: EffectCallback, computed: boolean): EffectRunner
       let callbackError: unknown;
       let callbackFailed = false;
       try {
+        if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter") {
+          if (computed) {
+            if (runner.generation > 1) countReactivePerformance("memoRecomputes");
+          } else {
+            countReactivePerformance("effectRuns");
+          }
+        }
         const returned = fn();
         if (typeof returned === "function") {
           const registration = registerCleanup(runOwner, returned as () => void);

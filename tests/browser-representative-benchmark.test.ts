@@ -73,6 +73,9 @@ describe("production browser representative benchmark", () => {
     expect(result.paths["text-template"].samples[0]?.noChange.counters?.rowsCreated ?? 0).toBe(0);
     expect(result.paths["text-template"].samples[0]?.noChange.counters?.structuralNodesVisited ?? 0).toBe(0);
     expect(result.paths["text-template"].samples[0]?.sparseOnePercent.counters?.targetResolutions ?? 0).toBe(0);
+    expect(result.paths["text-template"].samples[0]?.noChange.counters?.effectRuns).toBeGreaterThan(0);
+    expect(result.paths["text-template"].samples[0]?.noChange.counters?.subscriptionAdds).toBeGreaterThan(0);
+    expect(result.paths["text-template"].samples[0]?.noChange.counters?.subscriptionRemoves).toBeGreaterThan(0);
     expect(result.paths["mixed-template"].samples[0]?.create.counters?.bindingEvaluations).toBeGreaterThan(0);
     expect(result.paths["mixed-template"].samples[0]?.remove.counters?.rowsRemoved).toBeGreaterThan(0);
     expect(result.paths["keyed-rows"].samples[0]?.create.counters?.rowsVisited ?? 0).toBe(0);
