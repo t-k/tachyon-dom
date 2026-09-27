@@ -51,7 +51,13 @@ export const createInspectorReport = (
     snapshot: { ...diagnostics.snapshot() },
     liveBindings: diagnostics.liveBindings().map((binding) => ({ ...binding, path: [...binding.path] })),
     ...(options.includeLifecycleEvents
-      ? { lifecycleEvents: diagnostics.events().map((event) => ({ ...event, snapshot: { ...event.snapshot } })) }
+      ? {
+          lifecycleEvents: diagnostics.events().map((event) => ({
+            ...event,
+            snapshot: { ...event.snapshot },
+            ...(event.triggerSourceIds ? { triggerSourceIds: [...event.triggerSourceIds] } : {}),
+          })),
+        }
       : {}),
   },
 });

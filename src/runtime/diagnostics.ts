@@ -13,12 +13,14 @@ export type RuntimeDiagnosticsEvent = {
     | "owner-disposed"
     | "effect-created"
     | "effect-disposed"
+    | "effect-ran"
     | "subscription-changed"
     | "cleanup-changed";
   snapshot: RuntimeDiagnosticsSnapshot;
   ownerId?: number;
   effectId?: number;
   delta?: 1 | -1;
+  triggerSourceIds?: readonly number[];
 };
 
 export type TemplateBindingLocation = {
@@ -35,6 +37,7 @@ export type TemplateBindingLocation = {
 
 export type RuntimeDiagnosticsOptions = {
   bindings?: readonly TemplateBindingLocation[];
+  traceUpdates?: boolean;
   onEvent?: (event: RuntimeDiagnosticsEvent) => void;
 };
 
@@ -78,19 +81,28 @@ const locationFor = (
 const collectors = new Set<{
   events: RuntimeDiagnosticsEvent[];
   onEvent: ((event: RuntimeDiagnosticsEvent) => void) | undefined;
+  traceUpdates: boolean;
 }>();
+let tracingCollectors = 0;
 
 const snapshotCopy = (): RuntimeDiagnosticsSnapshot => ({ ...snapshot });
 
 const emit = (
   type: RuntimeDiagnosticsEvent["type"],
-  details: { ownerId?: number; effectId?: number; delta?: 1 | -1 } = {},
+  details: { ownerId?: number; effectId?: number; delta?: 1 | -1; triggerSourceIds?: readonly number[] } = {},
+  traceOnly = false,
 ): void => {
   const event: RuntimeDiagnosticsEvent = { type, snapshot: snapshotCopy(), ...details };
   for (const collector of Array.from(collectors)) {
-    collector.events.push(event);
+    if (traceOnly && !collector.traceUpdates) continue;
+    const observedEvent: RuntimeDiagnosticsEvent = {
+      ...event,
+      snapshot: { ...event.snapshot },
+      ...(event.triggerSourceIds ? { triggerSourceIds: [...event.triggerSourceIds] } : {}),
+    };
+    collector.events.push(observedEvent);
     try {
-      collector.onEvent?.(event);
+      collector.onEvent?.(observedEvent);
     } catch {
       // Diagnostics callbacks must never change runtime behavior.
     }
@@ -98,6 +110,10 @@ const emit = (
 };
 
 const lifecycleHooks: RuntimeLifecycleHooks = {
+  traceUpdatesEnabled: () => tracingCollectors > 0,
+  effectRan: (effectId, triggerSourceIds) => {
+    if (tracingCollectors > 0) emit("effect-ran", { effectId, triggerSourceIds: [...triggerSourceIds] }, true);
+  },
   templateBindingsRegistered: (templateId, revision, bindings) => {
     const key = templateKey(templateId, revision);
     if (registeredTemplates.has(key)) return;
@@ -155,8 +171,13 @@ setRuntimeLifecycleHooks(lifecycleHooks);
 export const getRuntimeDiagnosticsSnapshot = (): RuntimeDiagnosticsSnapshot => snapshotCopy();
 
 export const createRuntimeDiagnostics = (options: RuntimeDiagnosticsOptions = {}): RuntimeDiagnostics => {
-  const collector = { events: [] as RuntimeDiagnosticsEvent[], onEvent: options.onEvent };
+  const collector = {
+    events: [] as RuntimeDiagnosticsEvent[],
+    onEvent: options.onEvent,
+    traceUpdates: options.traceUpdates === true,
+  };
   collectors.add(collector);
+  if (collector.traceUpdates) tracingCollectors++;
   const bindingLocations = [...(options.bindings ?? [])];
   const bindingsForOwner = (ownerId: number): TemplateBindingLocation[] => {
     const results: TemplateBindingLocation[] = [];
@@ -196,6 +217,7 @@ export const createRuntimeDiagnostics = (options: RuntimeDiagnosticsOptions = {}
       if (disposed) return;
       disposed = true;
       collectors.delete(collector);
+      if (collector.traceUpdates) tracingCollectors--;
     },
   };
 };

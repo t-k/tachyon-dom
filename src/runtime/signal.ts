@@ -34,6 +34,10 @@ type EffectRunner = {
   dirty: boolean;
   /** For a memo: the memo runners it read during its last run, pulled first when the memo is checked. */
   memoDependencies: Set<EffectRunner> | undefined;
+  pendingTriggerSourceIds?: Set<number> | undefined;
+  runningTriggerSourceIds?: Set<number> | undefined;
+  lastChangedTriggerGeneration?: number | undefined;
+  lastChangedTriggerSourceIds?: readonly number[] | undefined;
   run: () => void;
 };
 
@@ -70,6 +74,8 @@ export type RuntimeLifecycleHooks = {
   effectDisposed?: (id: number) => void;
   subscriptionChanged?: (delta: 1 | -1) => void;
   cleanupChanged?: (delta: 1 | -1) => void;
+  traceUpdatesEnabled?: () => boolean;
+  effectRan?: (id: number, triggerSourceIds: readonly number[]) => void;
 };
 
 type CleanupRegistration = {
@@ -88,9 +94,11 @@ let currentEffectOwner: Owner | undefined;
 let currentErrorOwner: ReactiveErrorOwner | undefined;
 let batchDepth = 0;
 let flushing = false;
+let diagnosticsObservationDepth = 0;
 let runtimeLifecycleHooks: RuntimeLifecycleHooks | undefined;
 let nextOwnerId = 0;
 let nextEffectId = 0;
+let nextTraceSourceId = 0;
 /** Development-only: the template binding currently being installed. */
 let currentBindingLocation: string | undefined;
 
@@ -437,7 +445,7 @@ const flushPendingEffects = (): void => {
 };
 
 const scheduleFlush = (): void => {
-  if (batchDepth === 0 && !activeEffect) {
+  if (batchDepth === 0 && !activeEffect && (!lifecycleDiagnosticsEnabled || diagnosticsObservationDepth === 0)) {
     flushPendingEffects();
   }
 };
@@ -446,6 +454,16 @@ const scheduleFlush = (): void => {
 // separate pending sets and runs no user code, no cleanup, and no diagnostic hook, so nothing can subscribe or
 // unsubscribe before the walk finishes; scheduleFlush runs the queued effects afterwards. Adding any synchronous
 // callback to this loop would reintroduce the need for a snapshot.
+const traceSubscribers = (subscribers: SubscriberSet, triggerSourceIds: number | readonly number[]): void => {
+  if (!lifecycleDiagnosticsEnabled) return;
+  for (const subscriber of subscribers) {
+    if (subscriber.disposed) continue;
+    const pending = (subscriber.pendingTriggerSourceIds ??= new Set());
+    if (typeof triggerSourceIds === "number") pending.add(triggerSourceIds);
+    else for (const sourceId of triggerSourceIds) pending.add(sourceId);
+  }
+};
+
 const notify = (subscribers: SubscriberSet): void => {
   for (const subscriber of subscribers) {
     if (!subscriber.disposed) {
@@ -544,6 +562,7 @@ export const batch = <T>(fn: () => T): T => {
 
 export const createSignal = <T>(initial: T): Signal<T> => {
   let current = initial;
+  let traceSourceId: number | undefined;
   const subscribers: SubscriberSet = new Set();
   const signal = (() => {
     track(subscribers);
@@ -555,6 +574,8 @@ export const createSignal = <T>(initial: T): Signal<T> => {
       return;
     }
     current = value;
+    if (lifecycleDiagnosticsEnabled && runtimeLifecycleHooks?.traceUpdatesEnabled?.() === true)
+      traceSubscribers(subscribers, (traceSourceId ??= ++nextTraceSourceId));
     notify(subscribers);
   };
   signal.update = (updater) => signal.set(updater(current));
@@ -586,24 +607,48 @@ export const createMemo = <T>(fn: () => T): Accessor<T> => {
   const subscribers: SubscriberSet = new Set();
   let current: T | undefined;
   let failure: { error: unknown } | undefined;
-  const runner = createEffectRunner(() => {
+  let runner: EffectRunner | undefined;
+  const notifyChange = (): void => {
+    if (lifecycleDiagnosticsEnabled && runner?.runningTriggerSourceIds?.size) {
+      const sourceIds = [...runner.runningTriggerSourceIds];
+      runner.lastChangedTriggerGeneration = runner.generation;
+      runner.lastChangedTriggerSourceIds = sourceIds;
+      traceSubscribers(subscribers, sourceIds);
+    }
+    notify(subscribers);
+  };
+  runner = createEffectRunner(() => {
     let next: T;
     try {
       next = fn();
     } catch (error) {
       failure = { error };
-      notify(subscribers);
+      notifyChange();
       throw error;
     }
     const changed = failure !== undefined || !Object.is(current, next);
     failure = undefined;
     current = next;
-    if (changed) notify(subscribers);
+    if (changed) {
+      notifyChange();
+    }
   }, true);
   if (runner) runner.dependents = subscribers;
   const memo = (() => {
     if (runner) {
+      const previousGeneration = lifecycleDiagnosticsEnabled ? runner.generation : 0;
       pullComputed(runner);
+      if (
+        lifecycleDiagnosticsEnabled &&
+        activeEffect &&
+        activeEffect !== runner &&
+        runner.generation !== previousGeneration &&
+        runner.lastChangedTriggerGeneration === runner.generation &&
+        runner.lastChangedTriggerSourceIds
+      ) {
+        const causes = (activeEffect.runningTriggerSourceIds ??= new Set());
+        for (const sourceId of runner.lastChangedTriggerSourceIds) causes.add(sourceId);
+      }
       if (activeEffect?.computed && !activeEffect.disposed) (activeEffect.memoDependencies ??= new Set()).add(runner);
     }
     track(subscribers);
@@ -617,6 +662,7 @@ export const createMemo = <T>(fn: () => T): Accessor<T> => {
 export const createStore = <T extends Record<PropertyKey, unknown>>(initial: T): T => {
   const values = { ...initial } as Record<PropertyKey, unknown>;
   const subscribers = new Map<PropertyKey, SubscriberSet>();
+  const traceSourceIds = new Map<PropertyKey, number>();
   const subscribersFor = (property: PropertyKey): SubscriberSet => {
     let set = subscribers.get(property);
     if (!set) {
@@ -644,7 +690,17 @@ export const createStore = <T extends Record<PropertyKey, unknown>>(initial: T):
       const didSet = Reflect.set(target, property, value, receiver);
       if (didSet) {
         const propertySubscribers = subscribers.get(property);
-        if (propertySubscribers) notify(propertySubscribers);
+        if (propertySubscribers) {
+          if (lifecycleDiagnosticsEnabled && runtimeLifecycleHooks?.traceUpdatesEnabled?.() === true) {
+            let traceSourceId = traceSourceIds.get(property);
+            if (traceSourceId === undefined) {
+              traceSourceId = ++nextTraceSourceId;
+              traceSourceIds.set(property, traceSourceId);
+            }
+            traceSubscribers(propertySubscribers, traceSourceId);
+          }
+          notify(propertySubscribers);
+        }
       }
       return didSet;
     },
@@ -712,6 +768,8 @@ const createEffectRunner = (fn: EffectCallback, computed: boolean): EffectRunner
         return;
       }
       runner.generation += 1;
+      const triggerSourceIds = lifecycleDiagnosticsEnabled ? runner.pendingTriggerSourceIds : undefined;
+      if (lifecycleDiagnosticsEnabled) runner.pendingTriggerSourceIds = undefined;
       let cleanupError: unknown;
       let cleanupFailed = false;
       try {
@@ -724,6 +782,7 @@ const createEffectRunner = (fn: EffectCallback, computed: boolean): EffectRunner
         if (cleanupFailed) throw cleanupError;
         return;
       }
+      if (lifecycleDiagnosticsEnabled) runner.runningTriggerSourceIds = triggerSourceIds;
       const previous = activeEffect;
       const previousOwner = currentOwner;
       const previousEffectOwner = currentEffectOwner;
@@ -766,11 +825,38 @@ const createEffectRunner = (fn: EffectCallback, computed: boolean): EffectRunner
         callbackError = error;
         callbackFailed = true;
       } finally {
+        const completedSourceIds = lifecycleDiagnosticsEnabled ? runner.runningTriggerSourceIds : undefined;
+        if (lifecycleDiagnosticsEnabled) runner.runningTriggerSourceIds = undefined;
         activeEffect = previous;
         currentOwner = previousOwner;
         currentEffectOwner = previousEffectOwner;
         currentErrorOwner = previousErrorOwner;
         if (lifecycleDiagnosticsEnabled) currentBindingLocation = previousBindingLocation;
+        if (lifecycleDiagnosticsEnabled && runner.id !== undefined && runner.generation > 1 && completedSourceIds?.size) {
+          const enclosingEffect = activeEffect;
+          const enclosingOwner = currentOwner;
+          const enclosingEffectOwner = currentEffectOwner;
+          const enclosingErrorOwner = currentErrorOwner;
+          const enclosingBindingLocation = currentBindingLocation;
+          activeEffect = undefined;
+          currentOwner = undefined;
+          currentEffectOwner = undefined;
+          currentErrorOwner = undefined;
+          currentBindingLocation = undefined;
+          diagnosticsObservationDepth++;
+          try {
+            runtimeLifecycleHooks?.effectRan?.(runner.id, [...completedSourceIds]);
+          } catch {
+            // Diagnostic hooks must never change the result of an effect.
+          } finally {
+            diagnosticsObservationDepth--;
+            activeEffect = enclosingEffect;
+            currentOwner = enclosingOwner;
+            currentEffectOwner = enclosingEffectOwner;
+            currentErrorOwner = enclosingErrorOwner;
+            currentBindingLocation = enclosingBindingLocation;
+          }
+        }
         if (!previous) {
           scheduleFlush();
         }
