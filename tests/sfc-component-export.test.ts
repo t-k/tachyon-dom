@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -127,17 +127,27 @@ Card.mount(root, { label: "ok", extra: true });`,
     const plugin = tachyonDom({ reactive: true, declarationOutput: false });
     const transform = plugin.transform;
     if (typeof transform !== "function") throw new Error("Missing transform hook.");
-    const context = { error(message: string): never { throw new Error(message); } } as never;
+    const context = {
+      error(message: string): never {
+        throw new Error(message);
+      },
+    } as never;
     const code = async (id: string): Promise<string> => {
       const result = await transform.call(context, source, id);
       return typeof result === "object" && result !== null && "code" in result ? String(result.code) : "";
     };
-    expect(await code("/src/Card.td?client")).toContain("export const component = /* @__PURE__ */ __tachyonCreateTemplateComponent(");
+    expect(await code("/src/Card.td?client")).toContain(
+      "export const component = /* @__PURE__ */ __tachyonCreateTemplateComponent(",
+    );
     expect(await code("/src/Card.td?server")).toContain("export const component = { render };");
     expect(await code("/src/Card.td?stream")).toContain("export const component = { stream };");
     expect(await code("/src/Card.td?client&hydrate-only")).not.toContain("export const component =");
     expect(await code("/src/Card.td?client&mount-only")).not.toContain("export const component =");
-    const scriptOnly = await transform.call(context, '<script setup lang="ts">const value = 1;</script>', "/src/Only.td?client");
+    const scriptOnly = await transform.call(
+      context,
+      '<script setup lang="ts">const value = 1;</script>',
+      "/src/Only.td?client",
+    );
     expect(String(scriptOnly && typeof scriptOnly === "object" ? scriptOnly.code : scriptOnly)).not.toContain(
       "export const component =",
     );
@@ -209,6 +219,7 @@ Card.mount(root, { label: "ok", extra: true });`,
   });
 
   it("mounts independent generated instances, retains local state on prop updates, and hydrates SSR DOM", async () => {
+    await mkdir(path.join(process.cwd(), ".codex"), { recursive: true });
     const dir = await mkdtemp(path.join(process.cwd(), ".codex", "component-export-"));
     try {
       const input = path.join(dir, "Counter.td");

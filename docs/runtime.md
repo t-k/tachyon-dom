@@ -26,20 +26,18 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 Browser feature bundles have independent minified and Brotli budgets. Checks reject compiler, server, TypeScript, parse5, and language-server inputs. After building, run `pnpm update:runtime-sizes` to refresh the measurement JSON and this table together; review any budget changes separately. CI runs `pnpm check:runtime-sizes` to reject stale measurements or documentation. The conditional budget allows approximately 3% over the baseline recorded when the budget was tightened; budgets never increase automatically.
 
 <!-- browser-feature-sizes:start -->
-
 Browser feature measurements (bytes):
 
-| Fixture                     | Minified | Brotli |
-| --------------------------- | -------: | -----: |
-| runtime/list                |    16586 |   5902 |
-| runtime/generic-list        |    21842 |   7430 |
-| runtime/form                |     2997 |   1210 |
-| runtime/conditional         |     9990 |   3508 |
-| runtime/generic-conditional |    15994 |   5362 |
-| runtime/router              |    18819 |   6321 |
+| Fixture | Minified | Brotli |
+| --- | ---: | ---: |
+| runtime/list | 16554 | 5892 |
+| runtime/generic-list | 21821 | 7417 |
+| runtime/form | 2997 | 1192 |
+| runtime/conditional | 9992 | 3511 |
+| runtime/generic-conditional | 15971 | 5353 |
+| runtime/router | 18819 | 6321 |
 
 Source: [measurement JSON](../scripts/browser-feature-sizes.json). It records the commit, dirty state, input hashes, Node/esbuild versions, production define, minification, and Brotli conditions. `pnpm check:runtime-sizes` compares the input hashes, the byte counts, and the conditions needed to reproduce them: esbuild version, production define, minification, compression, and the Node major version that CI pins. The commit and dirty state are recorded for traceability but are not compared. CI uploads fresh reports as the browser-feature-measurements artifact. These feature fixtures differ from the client bundle attribution fixtures and Quick Example.
-
 <!-- browser-feature-sizes:end -->
 
 ## Mount and Hydrate Entrypoints

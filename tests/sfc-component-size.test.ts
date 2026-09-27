@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { brotliCompressSync } from "node:zlib";
 import { build } from "esbuild";
@@ -7,6 +7,7 @@ import { expect, it } from "vitest";
 import { compileFile } from "../src/cli";
 
 it("removes the component runtime when the named .td export is unused", async () => {
+  await mkdir(path.join(process.cwd(), ".codex"), { recursive: true });
   const dir = await mkdtemp(path.join(process.cwd(), ".codex", "component-size-test-"));
   try {
     const input = path.join(dir, "Card.td");
@@ -14,7 +15,9 @@ it("removes the component runtime when the named .td export is unused", async ()
     const compiled = await compileFile({ input, target: "client", reactive: true, sourcemap: false });
     expect(compiled.ok).toBe(true);
     if (!compiled.ok) return;
-    const exportStart = compiled.value.indexOf("import { createTemplateComponent as __tachyonCreateTemplateComponent }");
+    const exportStart = compiled.value.indexOf(
+      "import { createTemplateComponent as __tachyonCreateTemplateComponent }",
+    );
     expect(exportStart).toBeGreaterThan(0);
     const module = path.join(dir, "generated.mjs");
     const entry = path.join(dir, "entry.mjs");
