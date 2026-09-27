@@ -16,7 +16,7 @@
     "maxBrotliBytes": 941
   },
   "text-only-list": {
-    "maxMinifiedBytes": 15909,
+    "maxMinifiedBytes": 16098,
     "maxBrotliBytes": 5759
   },
   "minimal-if": {
@@ -24,19 +24,19 @@
     "maxBrotliBytes": 4582
   },
   "composite-quick-example": {
-    "maxMinifiedBytes": 17294,
-    "maxBrotliBytes": 6001
+    "maxMinifiedBytes": 17484,
+    "maxBrotliBytes": 6019
   },
   "one-template-page": {
-    "maxMinifiedBytes": 32870,
-    "maxBrotliBytes": 10418
+    "maxMinifiedBytes": 33059,
+    "maxBrotliBytes": 10459
   },
   "thirty-template-page": {
     "maxMinifiedBytes": 66852,
     "maxBrotliBytes": 10650
   },
   "varied-template-page": {
-    "maxMinifiedBytes": 50696,
-    "maxBrotliBytes": 14592
+    "maxMinifiedBytes": 50775,
+    "maxBrotliBytes": 14675
   }
 }

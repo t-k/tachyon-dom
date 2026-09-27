@@ -29,8 +29,8 @@ Browser feature measurements (bytes):
 
 | Fixture | Minified | Brotli |
 | --- | ---: | ---: |
-| runtime/list | 16245 | 5808 |
-| runtime/generic-list | 21439 | 7331 |
+| runtime/list | 16435 | 5860 |
+| runtime/generic-list | 21629 | 7382 |
 | runtime/form | 2997 | 1210 |
 | runtime/conditional | 9990 | 3511 |
 | runtime/generic-conditional | 15994 | 5363 |
