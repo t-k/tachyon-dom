@@ -7,6 +7,7 @@ Tachyon DOM runtime modules are split so compiler output imports only what it us
 - `runtime/attr`: dynamic attributes, styles, and refs.
 - `runtime/form`: `bind:value`, `bind:checked`, validation, and progressive form helpers.
 - `runtime/enhancement`: small progressive enhancement registry for SSR markup that opts in with `data-td-enhance`.
+- `runtime/external-dom`: reactive lifecycle ownership for DOM children managed by a chart, map, editor, or another external adapter.
 - `runtime/event`: direct event listener binding.
 - `runtime/list`: keyed list mounting, reuse, move, multi-root item support, row-local stores/components/hydration boundaries, and precomputed binding plans that avoid rebuilding per-row binding subsets.
 - `runtime/list-path`: retained for compatibility with previously generated modules. Since every `<for>` region is delimited by markers, sibling paths no longer shift around rows and the compiler no longer imports this module; its offset is always zero. It is a removal candidate for the next major release.
@@ -67,6 +68,25 @@ instance.dispose();
 ```
 
 The renderer is supplied by the application or compiler output and is responsible for escaping or sanitizing any user-controlled values. The component interface does not make arbitrary HTML trusted.
+
+## External DOM Adapters
+
+`attachExternalDom(element, options, adapter, mode)` gives an adapter ownership of one element's children. The options accessor is tracked; the adapter's `mount()` runs once and its returned `update(nextOptions)` runs when the accessor changes. `dispose()` runs once when the handle or its parent reactive owner is disposed. The adapter runs outside dependency tracking, so signals it reads internally do not cause additional updates. Keep Tachyon bindings outside the adapter-owned children.
+
+```ts
+import { attachExternalDom, createSignal } from "tachyon-dom";
+
+const data = createSignal([1, 2, 3]);
+const handle = attachExternalDom(canvasContainer, data, {
+  mount(element, initialData) {
+    const chart = createChart(element, initialData);
+    return { update: (nextData) => chart.update(nextData), dispose: () => chart.destroy() };
+  },
+});
+handle.dispose();
+```
+
+For SSR markup, pass `"hydrate"` and implement `adapter.hydrate(element, options)` to validate and adopt the existing children. Hydration without that method throws before changing the DOM. Tachyon does not inspect or rewrite adapter-owned children; the adapter defines which server markup is valid. This API does not add a `.td` directive or automatically exclude a subtree from generated bindings.
 
 `runtime/keyed-rows` rejects invalid numeric controls before changing the DOM. `chunks`, generated-row `count`, and update `stride` must be positive finite integers. Zero, negative values, fractions, `NaN`, and infinities throw a `TypeError` that names the invalid parameter. Empty arrays remain valid for `replace([])` and `append([])` because those methods do not accept a generated-row count.
 

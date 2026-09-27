@@ -144,6 +144,10 @@
       "types": "./dist/runtime/enhancement.d.ts",
       "import": "./dist/runtime/enhancement.js"
     },
+    "./runtime/external-dom": {
+      "types": "./dist/runtime/external-dom.d.ts",
+      "import": "./dist/runtime/external-dom.js"
+    },
     "./runtime/error-boundary": {
       "types": "./dist/runtime/error-boundary.d.ts",
       "import": "./dist/runtime/error-boundary.js"
@@ -598,6 +602,14 @@
     {
       "name": "runtime/enhancement",
       "path": "dist/runtime/enhancement.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
+    },
+    {
+      "name": "runtime/external-dom",
+      "path": "dist/runtime/external-dom.js",
       "disablePlugins": [
         "@size-limit/esbuild"
       ],

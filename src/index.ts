@@ -1,6 +1,8 @@
 import { err, ok } from "./result.js";
 export { enhanceForm, validateFormData, writeModelValue } from "./runtime/form.js";
 export { cleanupEnhancements, createEnhancementRegistry, enhance, registerEnhancement } from "./runtime/enhancement.js";
+export { attachExternalDom } from "./runtime/external-dom.js";
+export type { ExternalDomAdapter, ExternalDomHandle, ExternalDomInstance } from "./runtime/external-dom.js";
 export { createClientRouter, defineClientRoute } from "./runtime/router.js";
 export {
   createHydrationBoundary,
