@@ -755,6 +755,44 @@ export const generateScriptOnlyModule = (target: "client" | "server" | "stream")
   ].join("\n");
 };
 
+/** Generates the importable component value only for complete template modules. */
+export const generateSfcComponentExport = (
+  target: "client" | "server" | "stream",
+  lazyHydration = false,
+): string => {
+  if (target === "server") return "export const component = { render };\n";
+  if (target === "stream") return "export const component = { stream };\n";
+  return [
+    'import { createTemplateComponent as __tachyonCreateTemplateComponent } from "tachyon-dom/runtime/component";',
+    "export const component = /* @__PURE__ */ __tachyonCreateTemplateComponent({",
+    `  client: { templateHtml, hydrationBoundaries, hydrationDynamicAttributes, hydrationDynamicRegions, bind${lazyHydration ? ", hydrate, hydrationChunks" : ""} },`,
+    "});",
+    "",
+  ].join("\n");
+};
+
+export const hasSfcPropsType = (script: TachyonSfcScript | undefined): boolean => {
+  if (!script) return false;
+  return sourceFileFor(script.content, script).statements.some(
+    (statement) =>
+      (ts.isTypeAliasDeclaration(statement) || ts.isInterfaceDeclaration(statement)) && statement.name.text === "Props",
+  );
+};
+
+/** A module-level component binding or export keeps its existing meaning. */
+export const hasSfcComponentBinding = (script: TachyonSfcScript | undefined): boolean => {
+  if (!script || isSfcSetupScript(script)) return false;
+  if (topLevelBindings(script).includes("component")) return true;
+  return sourceFileFor(script.content, script).statements.some(
+    (statement) =>
+      ts.isExportDeclaration(statement) &&
+      statement.exportClause &&
+      ((ts.isNamedExports(statement.exportClause) &&
+        statement.exportClause.elements.some((specifier) => specifier.name.text === "component")) ||
+        (ts.isNamespaceExport(statement.exportClause) && statement.exportClause.name.text === "component")),
+  );
+};
+
 /** Unknown callable values may observe the complete scope when invoked as scope.name(). */
 const canNarrowSetupScope = (script: TachyonSfcScript, exposed: ReadonlySet<string>): boolean => {
   const source = sourceFileFor(script.content, script);

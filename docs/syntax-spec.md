@@ -106,7 +106,7 @@ Tachyon DOM has two things that are both called "component". They are different,
 | `<component name="Name">…</component>` | An inline scope boundary inside one template. It declares local prop names and local `<store>` state for its subtree and emits no wrapper element.        | Template syntax             |
 | `createTemplateComponent({ … })`       | A reusable unit defined in code: typed props, independent reactive scope per instance, `mount`, `hydrate`, `update`, `dispose`, SSR and stream renderers. | Runtime API (`tachyon-dom`) |
 
-`<component name="Panel">` does not call a `Panel` defined elsewhere. The `name` is a label for diagnostics and generated metadata; the subtree is compiled in place. Think of it as `let` for template scope, not as a function call. To reuse UI across files, define it once with `createTemplateComponent()` and mount or render that instance; the compiler may still emit transparent boundaries inside it, but those are an implementation detail.
+`<component name="Panel">` does not call a `Panel` defined elsewhere. The `name` is a label for diagnostics and generated metadata; the subtree is compiled in place. Think of it as `let` for template scope, not as a function call. To reuse UI across files, import the generated named `component` from another `.td` module or define one with `createTemplateComponent()`, then mount or render that instance. An imported `<Panel />` tag is not yet a component call; the compiler treats it as an element. The compiler may still emit transparent boundaries inside a reusable component, but those are an implementation detail.
 
 `<component>` does not emit a wrapper element. A component must currently have exactly one renderable root child.
 

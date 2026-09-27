@@ -10,7 +10,12 @@ import {
   generateServerModule,
   generateServerStreamModule,
 } from "./compiler/index.js";
-import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
+import {
+  generateScriptOnlyModule,
+  generateSfcComponentExport,
+  hasSfcComponentBinding,
+  transformSfcScript,
+} from "./compiler/sfc.js";
 import { diagnoseTachyonSfc, diagnosticFromCompilerError, formatDiagnostic } from "./diagnostics.js";
 import { scanFileRoutes } from "./router-node.js";
 import { appendInlineSourceMap, createSourceMap } from "./source-map.js";
@@ -395,7 +400,7 @@ export const compileFile = async (options: Omit<CliCompileOptions, "command">): 
             reactive: options.reactive,
             ...(script.value.defaultScopeName ? { defaultScopeName: script.value.defaultScopeName } : {}),
           });
-  const moduleCode = `${script.value.code}${code}`;
+  const moduleCode = `${script.value.code}${code}${result.value.scriptOnly || hasSfcComponentBinding(result.value.descriptor.script) ? "" : generateSfcComponentExport(options.target)}`;
   const output = options.sourcemap
     ? appendInlineSourceMap(moduleCode, createSourceMap(source, options.input, options.output))
     : moduleCode;

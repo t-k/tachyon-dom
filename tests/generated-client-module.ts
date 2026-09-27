@@ -1,5 +1,6 @@
 import * as attrRuntime from "../src/runtime/attr";
 import * as classRuntime from "../src/runtime/class";
+import * as componentRuntime from "../src/runtime/component";
 import * as conditionalRuntime from "../src/runtime/conditional";
 import * as conditionalCoreRuntime from "../src/runtime/conditional-core";
 import * as eventRuntime from "../src/runtime/event";
@@ -16,6 +17,7 @@ import * as textRuntime from "../src/runtime/text";
 const runtimeModules: Record<string, Record<string, unknown>> = {
   "tachyon-dom/runtime/attr": attrRuntime,
   "tachyon-dom/runtime/class": classRuntime,
+  "tachyon-dom/runtime/component": componentRuntime,
   "tachyon-dom/runtime/conditional": conditionalRuntime,
   "tachyon-dom/runtime/conditional-core": conditionalCoreRuntime,
   "tachyon-dom/runtime/event": eventRuntime,

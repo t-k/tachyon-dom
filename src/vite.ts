@@ -15,7 +15,12 @@ import {
   type TachyonAppDefinition,
 } from "./app.js";
 import { resolveHtmlWhitespacePolicy, type HtmlWhitespacePolicy } from "./html-whitespace.js";
-import { generateScriptOnlyModule, transformSfcScript } from "./compiler/sfc.js";
+import {
+  generateScriptOnlyModule,
+  generateSfcComponentExport,
+  hasSfcComponentBinding,
+  transformSfcScript,
+} from "./compiler/sfc.js";
 import { generateClientModule, generateServerModule, generateServerStreamModule } from "./compiler/index.js";
 import type { TemplateWhitespacePolicy } from "./compiler/types.js";
 import { diagnoseTachyonSfc, diagnosticFromCompilerError, formatDiagnostic } from "./diagnostics.js";
@@ -547,7 +552,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         hydrateOnly,
         mountOnly,
         instrumentation,
-      )}`;
+      )}${result.value.scriptOnly || hydrationBoundaryId !== undefined || hydrateOnly || mountOnly || hasSfcComponentBinding(result.value.descriptor.script) ? "" : generateSfcComponentExport(resolvedTarget, hydrationChunkImports !== undefined)}`;
       const emitSourceMap = shouldEmitSourceMap({
         sourcemap: options.sourcemap,
         productionSourceMap: options.productionSourceMap,

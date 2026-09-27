@@ -1,5 +1,11 @@
 import { compileServerTemplate } from "./compiler/index.js";
-import { compileTachyonSfc, extractStaticSfcScope, generateSfcScriptDeclarations } from "./compiler/sfc.js";
+import {
+  compileTachyonSfc,
+  extractStaticSfcScope,
+  generateSfcScriptDeclarations,
+  hasSfcComponentBinding,
+  hasSfcPropsType,
+} from "./compiler/sfc.js";
 import { escapeHtml } from "./html-escape.js";
 import type { ClientBinding, CompiledTemplate, TemplateWhitespacePolicy } from "./compiler/types.js";
 import { err, ok, type Result } from "./result.js";
@@ -475,7 +481,15 @@ export const generateTachyonModuleTypes = (
   const scopeType = hasNamedScope
     ? `type __TachyonAssertScope<T extends __TachyonRequiredScope> = T;\nexport type ${typeName} = __TachyonAssertScope<ReturnType<typeof scope>>;`
     : `export type ${typeName} = __TachyonRequiredScope;`;
+  const propsType = hasSfcPropsType(result.value.descriptor.script) ? "Props" : typeName;
+  const generatedComponent = !result.value.scriptOnly && !hasSfcComponentBinding(result.value.descriptor.script);
   const templateExports = [
+    ...(generatedComponent
+      ? [
+          `type __TachyonComponentInstance<Props extends object> = { root: Element; disposed: () => boolean; dispose: () => void; update: (props: Props) => void };`,
+          `type __TachyonComponent<Props extends object> = { client: unknown; mount: (root: Element, props: Props) => __TachyonComponentInstance<Props>; hydrate: (root: Element, props: Props) => { ok: true; value: __TachyonComponentInstance<Props> } | { ok: false; error: { message: string } }; render: (props: Props) => string; stream: (props: Props) => AsyncIterable<string> };`,
+        ]
+      : []),
     `type __TachyonHydrationDynamicAttribute = { path: readonly number[]; name: string; kind?: "value" | "token" };`,
     `type __TachyonHydrationDynamicRegion = { path: readonly number[]; index: number; kind: "list" | "conditional" };`,
     `export declare const templateHtml: string;`,
@@ -485,6 +499,7 @@ export const generateTachyonModuleTypes = (
     `export declare const hydrationDynamicRegions: readonly __TachyonHydrationDynamicRegion[];`,
     `export declare const componentBoundaries: unknown[];`,
     `export declare const bind: (root: Element, scope: ${typeName}) => void | (() => void);`,
+    ...(generatedComponent ? [`export declare const component: __TachyonComponent<${propsType}>;`] : []),
   ].join("\n");
   return ok(
     [scriptTypes.value, requiredType, scopeType, templateExports].filter((part) => part.length > 0).join("\n\n") + "\n",

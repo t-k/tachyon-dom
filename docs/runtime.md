@@ -69,6 +69,8 @@ instance.dispose();
 
 The renderer is supplied by the application or compiler output and is responsible for escaping or sanitizing any user-controlled values. The component interface does not make arbitrary HTML trusted.
 
+Compiled `.td` modules also export a named `component` with the same client instance API. For example, `import { component as Card } from "./Card.td"` followed by `const instance = Card.mount(container, { title: "Hello" })` creates one owned instance; `instance.update(nextProps)` updates its input without rerunning the child's setup. The generated adjacent `.td.d.ts` uses a top-level `Props` type or interface in the child script when present, and otherwise uses the required template scope as its prop type. A server-target import (`./Card.td?server`) exposes `component.render(props)`; a stream-target import exposes `component.stream(props)`. Import the appropriate target for the runtime in which the renderer executes. The client component's `render()` and `stream()` methods have no renderer and throw if called.
+
 ## External DOM Adapters
 
 `attachExternalDom(element, options, adapter, mode)` gives an adapter ownership of one element's children. The options accessor is tracked; the adapter's `mount()` runs once and its returned `update(nextOptions)` runs when the accessor changes. `dispose()` runs once when the handle or its parent reactive owner is disposed. The adapter runs outside dependency tracking, so signals it reads internally do not cause additional updates. Keep Tachyon bindings outside the adapter-owned children.
