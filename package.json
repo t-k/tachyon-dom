@@ -65,6 +65,10 @@
       "types": "./dist/diagnostics.d.ts",
       "import": "./dist/diagnostics.js"
     },
+    "./inspector": {
+      "types": "./dist/inspector.d.ts",
+      "import": "./dist/inspector.js"
+    },
     "./env": {
       "types": "./dist/env.d.ts",
       "import": "./dist/env.js"
@@ -438,6 +442,14 @@
     {
       "name": "diagnostics",
       "path": "dist/diagnostics.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
+    },
+    {
+      "name": "inspector",
+      "path": "dist/inspector.js",
       "disablePlugins": [
         "@size-limit/esbuild"
       ],
