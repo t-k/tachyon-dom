@@ -121,6 +121,7 @@ type ListState = {
   elementIndices: number[];
   initialized: boolean;
   ownerCleanupDispose: (() => void) | undefined;
+  cachedGeneratedOptions?: GeneratedTextKeyedListOptions;
 };
 
 type CleanupOutcome = { failed: false } | { failed: true; error: unknown };
@@ -229,6 +230,9 @@ const cleanupRecord = (record: RowRecord, preservedNodes?: ReadonlySet<Node>): v
 };
 
 const cleanupListState = (state: ListState): void => {
+  const cachedOptions = state.cachedGeneratedOptions;
+  if (cachedOptions && generatedStateCaches.get(cachedOptions) === state) generatedStateCaches.delete(cachedOptions);
+  delete state.cachedGeneratedOptions;
   state.ownerCleanupDispose?.();
   state.ownerCleanupDispose = undefined;
   let firstError: unknown;
@@ -428,7 +432,14 @@ const mountTextKeyedListResolved = (
   const container = nodeAt(root, path);
   if (!(container instanceof Element)) return;
   const state = getListState(container, options, generatedOptions && generatedStateCaches.get(generatedOptions));
-  if (generatedOptions) generatedStateCaches.set(generatedOptions, state);
+  if (generatedOptions) {
+    const previous = state.cachedGeneratedOptions;
+    if (previous && previous !== generatedOptions && generatedStateCaches.get(previous) === state) {
+      generatedStateCaches.delete(previous);
+    }
+    generatedStateCaches.set(generatedOptions, state);
+    state.cachedGeneratedOptions = generatedOptions;
+  }
   const cleanupRecordsNotIn = (
     records: Map<PropertyKey, RowRecord>,
     keep: Pick<ReadonlySet<PropertyKey>, "has">,

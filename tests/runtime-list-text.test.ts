@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanupTextKeyedList, mountGeneratedTextKeyedList, mountTextKeyedList } from "../src/runtime/list-text";
-import { createSignal, effect, onCleanup } from "../src/runtime/signal";
+import { createRoot, createSignal, effect, onCleanup } from "../src/runtime/signal";
 
 // The runtime wraps rows in its region markers; these assertions are about the rows themselves.
 const rowsHtml = (element: Element): string =>
@@ -12,6 +12,28 @@ afterEach(() => {
 });
 
 describe("mountTextKeyedList", () => {
+  it("releases a generated options boundary cache when its owner is disposed", () => {
+    const root = document.createElement("ul");
+    const options = {
+      signature: "generated-cache-cleanup",
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "row",
+      templateHtml: `<li> </li>`,
+      bindings: [],
+    };
+    const remove = vi.spyOn(WeakMap.prototype, "delete");
+    const dispose = createRoot((disposeRoot) => {
+      mountGeneratedTextKeyedList(root, [], [{ id: "a" }], options);
+      return disposeRoot;
+    });
+
+    dispose();
+
+    expect(remove.mock.calls.some(([key]) => key === options)).toBe(true);
+    remove.mockRestore();
+  });
+
   it("reuses a row text target across changed-value updates", () => {
     const root = document.createElement("ul");
     const options = {

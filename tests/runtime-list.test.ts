@@ -18,6 +18,28 @@ afterEach(() => {
 });
 
 describe("mountKeyedList", () => {
+  it("releases a generated options boundary cache when its owner is disposed", () => {
+    const root = document.createElement("ul");
+    const options = {
+      signature: "generated-general-cache-cleanup",
+      key: "item.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [],
+    };
+    const remove = vi.spyOn(WeakMap.prototype, "delete");
+    const dispose = createRoot((disposeRoot) => {
+      mountGeneratedKeyedList(root, [], [{ id: "a" }], options);
+      return disposeRoot;
+    });
+
+    dispose();
+
+    expect(remove.mock.calls.some(([key]) => key === options)).toBe(true);
+    remove.mockRestore();
+  });
+
   it("reuses the generated list boundary on a warm update", () => {
     const root = document.createElement("ul");
     const options = {
