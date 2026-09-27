@@ -212,6 +212,10 @@
       "types": "./dist/runtime/resource-boundary.d.ts",
       "import": "./dist/runtime/resource-boundary.js"
     },
+    "./runtime/query-client": {
+      "types": "./dist/runtime/query-client.d.ts",
+      "import": "./dist/runtime/query-client.js"
+    },
     "./runtime/store": {
       "types": "./dist/runtime/store.d.ts",
       "import": "./dist/runtime/store.js"
@@ -742,6 +746,14 @@
     {
       "name": "runtime/resource-boundary",
       "path": "dist/runtime/resource-boundary.js",
+      "disablePlugins": [
+        "@size-limit/esbuild"
+      ],
+      "limit": "4 KB"
+    },
+    {
+      "name": "runtime/query-client",
+      "path": "dist/runtime/query-client.js",
       "disablePlugins": [
         "@size-limit/esbuild"
       ],
