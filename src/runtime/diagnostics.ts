@@ -1,4 +1,4 @@
-import { setRuntimeLifecycleHooks, type RuntimeLifecycleHooks } from "./signal.js";
+import { setRuntimeLifecycleHooks, withoutDomWriteAttribution, type RuntimeLifecycleHooks } from "./signal.js";
 
 export type RuntimeDiagnosticsSnapshot = {
   owners: number;
@@ -21,6 +21,8 @@ export type RuntimeDiagnosticsEvent = {
   effectId?: number;
   delta?: 1 | -1;
   triggerSourceIds?: readonly number[];
+  /** Successful managed DOM setter calls during this effect rerun and its preceding cleanup; structural operations are excluded. */
+  domWrites?: number;
 };
 
 export type TemplateBindingLocation = {
@@ -89,7 +91,13 @@ const snapshotCopy = (): RuntimeDiagnosticsSnapshot => ({ ...snapshot });
 
 const emit = (
   type: RuntimeDiagnosticsEvent["type"],
-  details: { ownerId?: number; effectId?: number; delta?: 1 | -1; triggerSourceIds?: readonly number[] } = {},
+  details: {
+    ownerId?: number;
+    effectId?: number;
+    delta?: 1 | -1;
+    triggerSourceIds?: readonly number[];
+    domWrites?: number;
+  } = {},
   traceOnly = false,
 ): void => {
   const event: RuntimeDiagnosticsEvent = { type, snapshot: snapshotCopy(), ...details };
@@ -102,7 +110,7 @@ const emit = (
     };
     collector.events.push(observedEvent);
     try {
-      collector.onEvent?.(observedEvent);
+      if (collector.onEvent) withoutDomWriteAttribution(() => collector.onEvent?.(observedEvent));
     } catch {
       // Diagnostics callbacks must never change runtime behavior.
     }
@@ -111,8 +119,9 @@ const emit = (
 
 const lifecycleHooks: RuntimeLifecycleHooks = {
   traceUpdatesEnabled: () => tracingCollectors > 0,
-  effectRan: (effectId, triggerSourceIds) => {
-    if (tracingCollectors > 0) emit("effect-ran", { effectId, triggerSourceIds: [...triggerSourceIds] }, true);
+  effectRan: (effectId, triggerSourceIds, domWrites) => {
+    if (tracingCollectors > 0)
+      emit("effect-ran", { effectId, triggerSourceIds: [...triggerSourceIds], domWrites }, true);
   },
   templateBindingsRegistered: (templateId, revision, bindings) => {
     const key = templateKey(templateId, revision);

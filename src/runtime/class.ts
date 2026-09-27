@@ -1,3 +1,7 @@
+import { recordDomWrite } from "./signal.js";
+
+declare const __TACHYON_PRODUCTION__: boolean | "counter";
+
 // Self-contained (no module-level helpers): tests serialise this function
 // with toString() and run it inside a real browser page.
 export const elementAt = (root: Node, path: readonly number[]): Element => {
@@ -58,6 +62,7 @@ const applyClassState = (element: Element, state: ManagedClassState): void => {
   const value = Array.from(tokens).join(" ");
   if (value) element.setAttribute("class", value);
   else element.removeAttribute("class");
+  if (typeof __TACHYON_PRODUCTION__ === "undefined" || __TACHYON_PRODUCTION__ === false) recordDomWrite();
 };
 
 export const setClassValue = (element: Element, value: unknown): void => {

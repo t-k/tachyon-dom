@@ -36,6 +36,8 @@ type EffectRunner = {
   memoDependencies: Set<EffectRunner> | undefined;
   pendingTriggerSourceIds?: Set<number> | undefined;
   runningTriggerSourceIds?: Set<number> | undefined;
+  /** Development-only count of successful managed DOM setter calls in this run. */
+  domWrites?: number;
   lastChangedTriggerGeneration?: number | undefined;
   lastChangedTriggerSourceIds?: readonly number[] | undefined;
   run: () => void;
@@ -75,7 +77,7 @@ export type RuntimeLifecycleHooks = {
   subscriptionChanged?: (delta: 1 | -1) => void;
   cleanupChanged?: (delta: 1 | -1) => void;
   traceUpdatesEnabled?: () => boolean;
-  effectRan?: (id: number, triggerSourceIds: readonly number[]) => void;
+  effectRan?: (id: number, triggerSourceIds: readonly number[], domWrites: number) => void;
 };
 
 type CleanupRegistration = {
@@ -101,6 +103,9 @@ let nextEffectId = 0;
 let nextTraceSourceId = 0;
 /** Development-only: the template binding currently being installed. */
 let currentBindingLocation: string | undefined;
+/** Development-only attribution also covers cleanup, which runs before `activeEffect` is installed. */
+let activeDomWriteRunner: EffectRunner | undefined;
+const domWriteRunnerStack: (EffectRunner | undefined)[] = [];
 
 /** Marks the start of a generated binding; returns the previous location for `exitBindingLocation`. */
 export const enterBindingLocation = (location: string): string | undefined => {
@@ -112,6 +117,24 @@ export const enterBindingLocation = (location: string): string | undefined => {
 
 export const exitBindingLocation = (previous: string | undefined): void => {
   if (lifecycleDiagnosticsEnabled) currentBindingLocation = previous;
+};
+
+/** Records one successful managed DOM setter call in the currently running effect. */
+export const recordDomWrite = (): void => {
+  if (!lifecycleDiagnosticsEnabled || runtimeLifecycleHooks?.traceUpdatesEnabled?.() !== true || !activeDomWriteRunner)
+    return;
+  activeDomWriteRunner.domWrites = (activeDomWriteRunner.domWrites ?? 0) + 1;
+};
+
+/** Prevents observer callbacks from contributing their own DOM writes to the effect being observed. */
+export const withoutDomWriteAttribution = <Value>(callback: () => Value): Value => {
+  const previous = activeDomWriteRunner;
+  activeDomWriteRunner = undefined;
+  try {
+    return callback();
+  } finally {
+    activeDomWriteRunner = previous;
+  }
 };
 
 /** Publishes a generated module's binding spans to the installed diagnostics hooks. */
@@ -767,6 +790,11 @@ const createEffectRunner = (fn: EffectCallback, computed: boolean): EffectRunner
       if (runner.disposed) {
         return;
       }
+      if (lifecycleDiagnosticsEnabled) {
+        domWriteRunnerStack.push(activeDomWriteRunner);
+        runner.domWrites = 0;
+        activeDomWriteRunner = runner;
+      }
       runner.generation += 1;
       const triggerSourceIds = lifecycleDiagnosticsEnabled ? runner.pendingTriggerSourceIds : undefined;
       if (lifecycleDiagnosticsEnabled) runner.pendingTriggerSourceIds = undefined;
@@ -779,6 +807,7 @@ const createEffectRunner = (fn: EffectCallback, computed: boolean): EffectRunner
         cleanupFailed = true;
       }
       if (runner.disposed) {
+        if (lifecycleDiagnosticsEnabled) activeDomWriteRunner = domWriteRunnerStack.pop();
         if (cleanupFailed) throw cleanupError;
         return;
       }
@@ -832,20 +861,28 @@ const createEffectRunner = (fn: EffectCallback, computed: boolean): EffectRunner
         currentEffectOwner = previousEffectOwner;
         currentErrorOwner = previousErrorOwner;
         if (lifecycleDiagnosticsEnabled) currentBindingLocation = previousBindingLocation;
-        if (lifecycleDiagnosticsEnabled && runner.id !== undefined && runner.generation > 1 && completedSourceIds?.size) {
+        if (lifecycleDiagnosticsEnabled) activeDomWriteRunner = domWriteRunnerStack.pop();
+        if (
+          lifecycleDiagnosticsEnabled &&
+          runner.id !== undefined &&
+          runner.generation > 1 &&
+          completedSourceIds?.size
+        ) {
           const enclosingEffect = activeEffect;
           const enclosingOwner = currentOwner;
           const enclosingEffectOwner = currentEffectOwner;
           const enclosingErrorOwner = currentErrorOwner;
           const enclosingBindingLocation = currentBindingLocation;
+          const enclosingDomWriteRunner = activeDomWriteRunner;
           activeEffect = undefined;
+          activeDomWriteRunner = undefined;
           currentOwner = undefined;
           currentEffectOwner = undefined;
           currentErrorOwner = undefined;
           currentBindingLocation = undefined;
           diagnosticsObservationDepth++;
           try {
-            runtimeLifecycleHooks?.effectRan?.(runner.id, [...completedSourceIds]);
+            runtimeLifecycleHooks?.effectRan?.(runner.id, [...completedSourceIds], runner.domWrites ?? 0);
           } catch {
             // Diagnostic hooks must never change the result of an effect.
           } finally {
@@ -855,6 +892,7 @@ const createEffectRunner = (fn: EffectCallback, computed: boolean): EffectRunner
             currentEffectOwner = enclosingEffectOwner;
             currentErrorOwner = enclosingErrorOwner;
             currentBindingLocation = enclosingBindingLocation;
+            activeDomWriteRunner = enclosingDomWriteRunner;
           }
         }
         if (!previous) {

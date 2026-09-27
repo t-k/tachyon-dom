@@ -1,13 +1,17 @@
-import { isSignal, type Accessor } from "./signal.js";
+import { isSignal, recordDomWrite, type Accessor } from "./signal.js";
+
+declare const __TACHYON_PRODUCTION__: boolean | "counter";
 
 export type BoundControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 
 export const setControlValue = (element: BoundControl, property: "value" | "checked", value: unknown): void => {
   if (property === "checked" && element instanceof HTMLInputElement) {
     element.checked = Boolean(value);
+    if (typeof __TACHYON_PRODUCTION__ === "undefined" || __TACHYON_PRODUCTION__ === false) recordDomWrite();
     return;
   }
   element.value = value == null ? "" : String(value);
+  if (typeof __TACHYON_PRODUCTION__ === "undefined" || __TACHYON_PRODUCTION__ === false) recordDomWrite();
 };
 
 export const writeModelValue = (target: unknown, value: unknown, fallback: () => void): void => {

@@ -2,16 +2,28 @@
 
 import { chromium, type Browser } from "playwright";
 import { build } from "esbuild";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { compileTemplate, renderServerTemplate } from "../src/compiler";
 import { compileTachyonSfc } from "../src/compiler/sfc";
-import { setText, textAt } from "../src/runtime/text";
+import { textAt } from "../src/runtime/text";
 
 let browser: Browser | undefined;
+let textRuntimeSource = "";
 
 describe("open issue browser regressions", () => {
   beforeAll(async () => {
     browser = await chromium.launch({ headless: true });
+    const bundled = await build({
+      entryPoints: [fileURLToPath(new URL("../src/runtime/text.ts", import.meta.url))],
+      bundle: true,
+      platform: "browser",
+      format: "iife",
+      globalName: "TachyonTextTest",
+      define: { __TACHYON_PRODUCTION__: "true" },
+      write: false,
+    });
+    textRuntimeSource = bundled.outputFiles?.[0]?.text ?? "";
   }, 30_000);
 
   afterAll(async () => {
@@ -28,18 +40,25 @@ describe("open issue browser regressions", () => {
     if (!page) throw new Error("Missing browser page.");
     try {
       await page.setContent(markup);
+      await page.addScriptTag({ content: textRuntimeSource });
       const result = await page.evaluate(
-        ({ path, setTextSource, textAtSource }) => {
-          const resolveText = (0, eval)(`(${textAtSource})`) as typeof textAt;
-          const updateText = (0, eval)(`(${setTextSource})`) as typeof setText;
+        ({ path }) => {
+          const runtime = (
+            globalThis as typeof globalThis & {
+              TachyonTextTest: {
+                textAt: (root: Node, path: readonly number[]) => Text;
+                setText: (text: Text, value: unknown) => void;
+              };
+            }
+          ).TachyonTextTest;
           const root = document.querySelector("p");
           if (!root) throw new Error("Missing browser root.");
-          const text = resolveText(root, path);
+          const text = runtime.textAt(root, path);
           const initial = root.textContent;
-          updateText(text, "Z");
+          runtime.setText(text, "Z");
           return { initial, updated: root.textContent, nodeType: text.nodeType };
         },
-        { path: binding.path, setTextSource: setText.toString(), textAtSource: textAt.toString() },
+        { path: binding.path },
       );
 
       expect(result).toEqual({ initial: "ab", updated: "aZb", nodeType: 3 });

@@ -1,6 +1,9 @@
 import { validateAttributeName } from "../attribute-policy.js";
 import { sanitizeElementUrlAttributes } from "../url-policy.js";
 import { setClassValue } from "./class.js";
+import { recordDomWrite } from "./signal.js";
+
+declare const __TACHYON_PRODUCTION__: boolean | "counter";
 
 const prospectiveAttributes = (element: Element, name: string, value: string): Record<string, string> => {
   const normalizedName = name.toLowerCase();
@@ -37,6 +40,7 @@ export const setAttributeValue = (element: Element, name: string, value: unknown
         // Some readonly DOM properties throw on assignment.
       }
     }
+    if (typeof __TACHYON_PRODUCTION__ === "undefined" || __TACHYON_PRODUCTION__ === false) recordDomWrite();
     return;
   }
   let resolvedValue = value;
@@ -58,6 +62,7 @@ export const setAttributeValue = (element: Element, name: string, value: unknown
       // Some readonly DOM properties throw on assignment.
     }
   }
+  if (typeof __TACHYON_PRODUCTION__ === "undefined" || __TACHYON_PRODUCTION__ === false) recordDomWrite();
 };
 
 export const setStyleValue = (element: Element, name: string, value: unknown): void => {
@@ -65,6 +70,7 @@ export const setStyleValue = (element: Element, name: string, value: unknown): v
     return;
   }
   element.style.setProperty(name, value == null || value === false ? "" : String(value));
+  if (typeof __TACHYON_PRODUCTION__ === "undefined" || __TACHYON_PRODUCTION__ === false) recordDomWrite();
 };
 
 /**

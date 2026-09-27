@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "concurrency": 2,
+  "incremental": false,
+  "mutate": [
+    "src/runtime/signal.ts:123:0-127:0",
+    "src/runtime/signal.ts:130:0-139:0",
+    "src/runtime/signal.ts:793:0-797:0",
+    "src/runtime/signal.ts:810:0-811:0",
+    "src/runtime/signal.ts:864:0-865:0",
+    "src/runtime/signal.ts:876:0-879:0",
+    "src/runtime/signal.ts:885:0-886:0",
+    "src/runtime/signal.ts:895:0-896:0",
+    "src/runtime/diagnostics.ts:113:0-114:0",
+    "src/runtime/diagnostics.ts:122:0-125:0",
+    "src/runtime/text.ts:58:0-59:0",
+    "src/runtime/class.ts:65:0-66:0",
+    "src/runtime/attr.ts:43:0-44:0",
+    "src/runtime/attr.ts:65:0-66:0",
+    "src/runtime/attr.ts:73:0-74:0",
+    "src/runtime/form.ts:10:0-11:0",
+    "src/runtime/form.ts:14:0-15:0"
+  ],
+  "plugins": ["./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"],
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": {
+    "fileName": "reports/mutation/inspector-dom-writes/mutation.json"
+  },
+  "testRunner": "vitest",
+  "thresholds": { "high": 80, "low": 60, "break": null },
+  "vitest": { "configFile": "vitest.inspector-trace-mutation.config.ts", "related": false },
+  "ignorePatterns": ["docs.local", "tests/browser/generated", "test-results", "benchmark", ".worktree"]
+}

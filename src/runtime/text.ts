@@ -1,3 +1,7 @@
+import { recordDomWrite } from "./signal.js";
+
+declare const __TACHYON_PRODUCTION__: boolean | "counter";
+
 // Self-contained (no module-level helpers): tests serialise this function
 // with toString() and run it inside a real browser page.
 export const textAt = (root: Node, path: readonly number[]): Text => {
@@ -51,4 +55,5 @@ export const textAt = (root: Node, path: readonly number[]): Text => {
 
 export const setText = (text: Text, value: unknown): void => {
   text.nodeValue = value == null ? "" : String(value);
+  if (typeof __TACHYON_PRODUCTION__ === "undefined" || __TACHYON_PRODUCTION__ === false) recordDomWrite();
 };
