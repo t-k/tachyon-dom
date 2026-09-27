@@ -3,6 +3,7 @@ import { createSignal, detachFromEffectOwner, effect, onOwnerCleanup, read, type
 import { templateNodeAt } from "../conditional-marker.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { normalizeListKey } from "./key.js";
+import { countPerformance } from "./performance-counters.js";
 import {
   canAppendWithoutMoving,
   canReuseListRegion,
@@ -20,6 +21,8 @@ import {
   type ListRegionMarkers,
   type ParentScopeSnapshot,
 } from "./list-core.js";
+
+declare const __TACHYON_PRODUCTION__: boolean | "counter";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 
@@ -111,6 +114,7 @@ type RowRecord = {
 };
 
 type ListState = {
+  container: Element;
   signature: string;
   options: TextKeyedListRuntimeOptions;
   /** The markers the rows live between. */
@@ -128,7 +132,20 @@ type CleanupOutcome = { failed: false } | { failed: true; error: unknown };
 
 // Keyed by the region start marker rather than the container, so sibling lists in one parent keep their own state.
 const listStates = new WeakMap<Comment, ListState>();
-const generatedStateCaches = new WeakMap<GeneratedTextKeyedListOptions, ListState>();
+const generatedStateCaches = new WeakMap<GeneratedTextKeyedListOptions, Map<Element, ListState>>();
+
+const forgetGeneratedState = (state: ListState, options: GeneratedTextKeyedListOptions): void => {
+  const states = generatedStateCaches.get(options);
+  if (states?.get(state.container) !== state) return;
+  states.delete(state.container);
+  if (states.size === 0) generatedStateCaches.delete(options);
+};
+
+const rememberGeneratedState = (state: ListState, options: GeneratedTextKeyedListOptions): void => {
+  let states = generatedStateCaches.get(options);
+  if (!states) generatedStateCaches.set(options, (states = new Map()));
+  states.set(state.container, state);
+};
 
 const scopedItem = (
   itemName: string,
@@ -141,6 +158,8 @@ const scopedItem = (
 const nodeAt = (root: Node, path: readonly number[]): Node => templateNodeAt(root, path) as Node;
 
 const textAtRecord = (record: RowRecord, path: readonly number[]): Text => {
+  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+    countPerformance("targetResolutions");
   if (record.nodes.length <= 1) return textAt(record.element, path);
   const [firstIndex, ...rest] = path;
   return textAt(record.nodes[firstIndex ?? 0] ?? record.element, rest);
@@ -231,7 +250,7 @@ const cleanupRecord = (record: RowRecord, preservedNodes?: ReadonlySet<Node>): v
 
 const cleanupListState = (state: ListState): void => {
   const cachedOptions = state.cachedGeneratedOptions;
-  if (cachedOptions && generatedStateCaches.get(cachedOptions) === state) generatedStateCaches.delete(cachedOptions);
+  if (cachedOptions) forgetGeneratedState(state, cachedOptions);
   delete state.cachedGeneratedOptions;
   state.ownerCleanupDispose?.();
   state.ownerCleanupDispose = undefined;
@@ -265,6 +284,7 @@ const getListState = (container: Element, options: TextKeyedListRuntimeOptions, 
   const template = document.createElement("template");
   template.innerHTML = options.templateHtml;
   const next: ListState = {
+    container,
     signature,
     options,
     markers,
@@ -293,6 +313,8 @@ const getListState = (container: Element, options: TextKeyedListRuntimeOptions, 
 };
 
 const nodeAtRecord = (record: RowRecord, path: readonly number[]): Node => {
+  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+    countPerformance("targetResolutions");
   if (record.nodes.length <= 1) return nodeAt(record.element, path);
   const [firstIndex, ...rest] = path;
   return nodeAt(record.nodes[firstIndex ?? 0] ?? record.element, rest);
@@ -312,8 +334,14 @@ const bindRow = (record: RowRecord, options: TextKeyedListRuntimeOptions): void 
         record.revision();
         for (let index = 0; index < options.bindings.length; index++) {
           const binding = options.bindings[index] as GeneratedTextBinding;
+          if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+            countPerformance("bindingEvaluations");
           const value = options.readBinding(record.scope, binding);
-          if (Object.is(record.lastValues[index], value)) continue;
+          if (Object.is(record.lastValues[index], value)) {
+            if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+              countPerformance("equalitySkips");
+            continue;
+          }
           record.lastValues[index] = value;
           const target =
             record.targets[index] ??
@@ -329,6 +357,8 @@ const bindRow = (record: RowRecord, options: TextKeyedListRuntimeOptions): void 
 };
 
 const keyFor = (item: unknown, index: number, options: TextKeyedListRuntimeOptions): PropertyKey => {
+  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+    countPerformance("keyReads");
   return normalizeListKey(read(options.readKey(item, index)));
 };
 
@@ -354,6 +384,8 @@ const createRecord = (
   let elementIndex = 0;
   const nodes = Array.from(state.template.content.childNodes, (node) => {
     const adopted = node instanceof Element ? existingElements?.[elementIndex++] : undefined;
+    if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+      countPerformance(adopted ? "adoptedElements" : "topLevelCloneCalls");
     return adopted ?? node.cloneNode(true);
   });
   const element = nodes.find((node): node is Element => node instanceof Element);
@@ -383,6 +415,8 @@ const createRecord = (
     }
     throw error;
   }
+  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+    countPerformance("rowsCreated");
   return record;
 };
 
@@ -431,13 +465,15 @@ const mountTextKeyedListResolved = (
 ): void => {
   const container = nodeAt(root, path);
   if (!(container instanceof Element)) return;
-  const state = getListState(container, options, generatedOptions && generatedStateCaches.get(generatedOptions));
+  const state = getListState(
+    container,
+    options,
+    generatedOptions && generatedStateCaches.get(generatedOptions)?.get(container),
+  );
   if (generatedOptions) {
     const previous = state.cachedGeneratedOptions;
-    if (previous && previous !== generatedOptions && generatedStateCaches.get(previous) === state) {
-      generatedStateCaches.delete(previous);
-    }
-    generatedStateCaches.set(generatedOptions, state);
+    if (previous && previous !== generatedOptions) forgetGeneratedState(state, previous);
+    rememberGeneratedState(state, generatedOptions);
     state.cachedGeneratedOptions = generatedOptions;
   }
   const cleanupRecordsNotIn = (
@@ -448,6 +484,8 @@ const mountTextKeyedListResolved = (
     let failed = false;
     for (const [key, record] of records) {
       if (keep.has(key)) continue;
+      if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+        countPerformance("rowsRemoved");
       try {
         cleanupRecord(record);
       } catch (error) {
@@ -476,6 +514,8 @@ const mountTextKeyedListResolved = (
     seenKeys.add(key);
     entries.push({ item, index, key });
   }
+  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+    countPerformance("rowsVisited", entries.length);
   const parentScope = syncParentScope(state, options.scope, options.parentScopeKeys);
   if (state.initialized && hasSameKeyOrder(entries, state.records)) {
     for (const entry of entries) {

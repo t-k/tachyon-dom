@@ -60,6 +60,28 @@ describe("mountKeyedList", () => {
     firstChild.mockRestore();
   });
 
+  it("keeps a boundary cache per container when generated options are shared", () => {
+    const first = document.createElement("ul");
+    const second = document.createElement("ul");
+    const options = {
+      signature: "shared-general-boundary",
+      key: "item.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "item",
+      templateHtml: `<li> </li>`,
+      bindings: [],
+    };
+    mountGeneratedKeyedList(first, [], [{ id: "a" }], options, {});
+    mountGeneratedKeyedList(second, [], [{ id: "b" }], options, {});
+    const firstChild = vi.spyOn(first, "firstChild", "get");
+
+    mountGeneratedKeyedList(first, [], [{ id: "a" }], options, {});
+
+    expect(first.querySelectorAll("li")).toHaveLength(1);
+    expect(firstChild).not.toHaveBeenCalled();
+    firstChild.mockRestore();
+  });
+
   it("keeps the reconciliation map when keyed order and values are unchanged", () => {
     const root = document.createElement("ul");
     const options = {

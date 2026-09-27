@@ -8,6 +8,7 @@ import { brotliCompressSync } from "node:zlib";
 import { build, version as esbuildVersion } from "esbuild";
 import { chromium } from "playwright";
 import { loadRepresentativeGeneratedModules } from "./generated-template-driver.js";
+import type { PerformanceCounterName } from "../src/runtime/performance-counters.js";
 
 export type BrowserRepresentativeOptions = {
   iterations: number;
@@ -16,6 +17,7 @@ export type BrowserRepresentativeOptions = {
   childCount: number;
   memoryDiagnostics?: boolean;
   memoryCycles?: number;
+  counterDiagnostics?: boolean;
 };
 
 type BrowserNodeCounts = { elements: number; text: number; comments: number };
@@ -41,6 +43,7 @@ export type BrowserOperation = {
   rowCount: number;
   preservedRowIdentities: number;
   preservedChildIdentities: number;
+  counters?: Partial<Record<PerformanceCounterName, number>>;
 };
 
 export type BrowserRepresentativeSample = {
@@ -69,7 +72,7 @@ export type BrowserRepresentativeSample = {
 export type BrowserRepresentativeResult = {
   runId: string;
   capturedAt: string;
-  measurementMode: "production-browser";
+  measurementMode: "production-browser" | "counter-browser";
   sampleContract: "fresh-page-cold-import-first-mount-and-warm-operations";
   controls: BrowserRepresentativeOptions;
   provenance: {
@@ -107,7 +110,8 @@ export const runBrowserRepresentativeBenchmark = async (
   if (options.memoryCycles !== undefined && (!Number.isInteger(options.memoryCycles) || options.memoryCycles < 1)) {
     throw new Error("memoryCycles must be positive.");
   }
-  const generated = await loadRepresentativeGeneratedModules();
+  const productionDefine = options.counterDiagnostics ? '"counter"' : "true";
+  const generated = await loadRepresentativeGeneratedModules(productionDefine);
   const buildDriver = async (entryPoint: string): Promise<string> => {
     const output = await build({
       entryPoints: [path.join(projectRoot, entryPoint)],
@@ -117,7 +121,7 @@ export const runBrowserRepresentativeBenchmark = async (
       platform: "browser",
       target: "es2022",
       minify: true,
-      define: { __TACHYON_PRODUCTION__: "true" },
+      define: { __TACHYON_PRODUCTION__: productionDefine },
     });
     const code = output.outputFiles[0]?.text;
     if (!code) throw new Error(`Representative driver build produced no JavaScript for ${entryPoint}.`);
@@ -165,12 +169,14 @@ export const runBrowserRepresentativeBenchmark = async (
             itemCount: number;
             childCount: number;
             bundles: typeof bundles;
+            counterDiagnostics: boolean;
           }) => Promise<BrowserRepresentativeSample>;
           const sample = await page.evaluate(runSample, {
             pathName,
             itemCount: options.itemCount,
             childCount: options.childCount,
             bundles,
+            counterDiagnostics: options.counterDiagnostics === true,
           });
           if (run >= options.warmup) samples.push(sample);
         } finally {
@@ -254,7 +260,7 @@ export const runBrowserRepresentativeBenchmark = async (
     return {
       runId: randomUUID(),
       capturedAt: new Date().toISOString(),
-      measurementMode: "production-browser",
+      measurementMode: options.counterDiagnostics ? "counter-browser" : "production-browser",
       sampleContract: "fresh-page-cold-import-first-mount-and-warm-operations",
       controls: options,
       provenance: {
@@ -292,6 +298,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
         "--child-count",
         "--memory",
         "--memory-cycles",
+        "--counters",
         "--output",
       ].includes(key)
     ) {
@@ -305,6 +312,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     childCount: Number(values.get("--child-count") ?? 2),
     memoryDiagnostics: values.get("--memory") === "true",
     memoryCycles: Number(values.get("--memory-cycles") ?? 1),
+    counterDiagnostics: values.get("--counters") === "true",
   };
   const result = await runBrowserRepresentativeBenchmark(options);
   const output = values.get("--output");

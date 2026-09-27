@@ -66,7 +66,7 @@ export type GeneratedProductionBuildOptions = {
   platform: "browser";
   target: "es2022";
   minify: true;
-  define: { __TACHYON_PRODUCTION__: "true" };
+  define: { __TACHYON_PRODUCTION__: string };
 };
 
 export type ArtifactSize = {
@@ -123,6 +123,7 @@ const resolveRuntimeImports = (code: string): string =>
 export const loadCandidateModule = async <Module>(
   code: string,
   compileMs = 0,
+  productionDefine = "true",
 ): Promise<{
   module: Module;
   timing: GeneratedModuleLoadTiming;
@@ -175,7 +176,7 @@ export const loadCandidateModule = async <Module>(
       platform: "browser",
       target: "es2022",
       minify: true,
-      define: { __TACHYON_PRODUCTION__: "true" },
+      define: { __TACHYON_PRODUCTION__: productionDefine },
     };
     await execFileAsync(
       process.execPath,
@@ -187,7 +188,7 @@ export const loadCandidateModule = async <Module>(
         "--platform=browser",
         "--target=es2022",
         "--minify",
-        "--define:__TACHYON_PRODUCTION__=true",
+        `--define:__TACHYON_PRODUCTION__=${productionDefine}`,
         `--metafile=${productionMetafilePath}`,
         `--outfile=${production}`,
       ],
@@ -237,9 +238,12 @@ export const generatedClientArtifact = (source: string): { code: string; compile
   return { code, compileMs: performance.now() - compileStarted };
 };
 
-export const loadGeneratedClientModule = async (source: string): Promise<LoadedGeneratedModule> => {
+export const loadGeneratedClientModule = async (
+  source: string,
+  productionDefine = "true",
+): Promise<LoadedGeneratedModule> => {
   const artifact = generatedClientArtifact(source);
-  return loadCandidateModule<GeneratedClientModule>(artifact.code, artifact.compileMs);
+  return loadCandidateModule<GeneratedClientModule>(artifact.code, artifact.compileMs, productionDefine);
 };
 
 export type LoadedRepresentativeModules = {
@@ -247,7 +251,12 @@ export type LoadedRepresentativeModules = {
   "mixed-template": LoadedGeneratedModule;
 };
 
-export const loadRepresentativeGeneratedModules = async (): Promise<LoadedRepresentativeModules> => ({
-  "text-template": await loadGeneratedClientModule(REPRESENTATIVE_TEMPLATE_SOURCES["text-template"]),
-  "mixed-template": await loadGeneratedClientModule(REPRESENTATIVE_TEMPLATE_SOURCES["mixed-template"]),
+export const loadRepresentativeGeneratedModules = async (
+  productionDefine = "true",
+): Promise<LoadedRepresentativeModules> => ({
+  "text-template": await loadGeneratedClientModule(REPRESENTATIVE_TEMPLATE_SOURCES["text-template"], productionDefine),
+  "mixed-template": await loadGeneratedClientModule(
+    REPRESENTATIVE_TEMPLATE_SOURCES["mixed-template"],
+    productionDefine,
+  ),
 });

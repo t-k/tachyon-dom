@@ -4,12 +4,14 @@ import type {
   GeneratedTemplateItem,
 } from "./generated-template-driver.js";
 import type { BrowserRepresentativeSample } from "./browser-representative.js";
+import type { PerformanceCounterName } from "../src/runtime/performance-counters.js";
 
 type BrowserSampleArgs = {
   pathName: "keyed-rows" | "text-template" | "mixed-template";
   itemCount: number;
   childCount: number;
   bundles: { driverCode: string; textCode: string; mixedCode: string };
+  counterDiagnostics?: boolean;
 };
 
 const importBundle = async (code: string) => {
@@ -106,6 +108,7 @@ export const runSample = async ({
   itemCount,
   childCount,
   bundles,
+  counterDiagnostics,
 }: BrowserSampleArgs): Promise<BrowserRepresentativeSample> => {
   const importStarted = performance.now();
   const drivers = (await importBundle(bundles.driverCode)) as typeof import("./representative-drivers.js") &
@@ -154,11 +157,18 @@ export const runSample = async ({
     return { rows, children };
   };
   const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  const counters = () =>
+    ({
+      ...(globalThis as typeof globalThis & { __tachyonPerformanceCounters?: Record<string, number> })
+        .__tachyonPerformanceCounters,
+    }) as Partial<Record<PerformanceCounterName, number>>;
   const measure = async (run: () => void) => {
     const before = snapshot();
+    const beforeCounters = counterDiagnostics ? counters() : undefined;
     const started = performance.now();
     run();
     const syncUpdateMs = performance.now() - started;
+    const afterCounters = counterDiagnostics ? counters() : undefined;
     await frame();
     await frame();
     const settledUpdateMs = performance.now() - started;
@@ -188,6 +198,16 @@ export const runSample = async ({
       rowCount: rows.length,
       preservedRowIdentities: [...after.rows].filter(([key, row]) => before.rows.get(key) === row).length,
       preservedChildIdentities: [...after.children].filter(([key, child]) => before.children.get(key) === child).length,
+      ...(afterCounters
+        ? {
+            counters: Object.fromEntries(
+              Object.entries(afterCounters).map(([key, value]) => [
+                key,
+                value - (beforeCounters?.[key as PerformanceCounterName] ?? 0),
+              ]),
+            ),
+          }
+        : {}),
     };
   };
   const create = await measure(() => driver.replace(initial));

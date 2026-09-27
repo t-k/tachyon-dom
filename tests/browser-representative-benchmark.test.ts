@@ -55,4 +55,23 @@ describe("production browser representative benchmark", () => {
       expect(path.memory?.checkpoints.map((checkpoint) => checkpoint.cycle)).toEqual([1, 2, 3]);
     }
   }, 60_000);
+
+  it("records operation counts in a separate production-policy counter build", async () => {
+    const result = await runBrowserRepresentativeBenchmark({
+      iterations: 1,
+      warmup: 0,
+      itemCount: 8,
+      childCount: 1,
+      counterDiagnostics: true,
+    });
+
+    expect(result.measurementMode).toBe("counter-browser");
+    expect(result.paths["text-template"].samples[0]?.noChange.counters?.rowsVisited).toBe(20);
+    expect(result.paths["text-template"].samples[0]?.noChange.counters?.rowsCreated ?? 0).toBe(0);
+    expect(result.paths["text-template"].samples[0]?.noChange.counters?.structuralNodesVisited ?? 0).toBe(0);
+    expect(result.paths["text-template"].samples[0]?.sparseOnePercent.counters?.targetResolutions ?? 0).toBe(0);
+    expect(result.paths["mixed-template"].samples[0]?.create.counters?.bindingEvaluations).toBeGreaterThan(0);
+    expect(result.paths["mixed-template"].samples[0]?.remove.counters?.rowsRemoved).toBeGreaterThan(0);
+    expect(result.paths["keyed-rows"].samples[0]?.create.counters?.rowsVisited ?? 0).toBe(0);
+  }, 60_000);
 });

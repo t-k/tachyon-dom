@@ -2,11 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyzeRatios, type RatioAnalysis } from "./shared/statistical-authority.js";
-import type {
-  BrowserOperation,
-  BrowserRepresentativeResult,
-  BrowserRepresentativeSample,
-} from "./browser-representative.js";
+import type { BrowserRepresentativeResult, BrowserRepresentativeSample } from "./browser-representative.js";
 
 export type BrowserRepresentativePair = {
   base: BrowserRepresentativeResult;
@@ -146,7 +142,7 @@ export const compareBrowserRepresentativeRuns = (
     const operations = {} as Record<OperationName, OperationMetrics>;
     for (const operation of operationNames) {
       const read =
-        (field: keyof BrowserOperation) =>
+        (field: "syncUpdateMs" | "settledUpdateMs") =>
         (run: BrowserRepresentativeResult): number =>
           mean(run.paths[pathName].samples.map((sample) => sample[operation][field]));
       operations[operation] = {

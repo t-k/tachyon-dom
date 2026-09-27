@@ -18,6 +18,8 @@ Run `pnpm bench:template-browser -- --iterations 5 --warmup 2 --item-count 1000 
 
 The existing `pnpm bench:template-representative` remains a JSDOM regression fixture with broader oracle checks. Browser results are local evidence until paired base/head runs on a stable host confirm a change; the output does not represent page-wide INP.
 
+Run `pnpm bench:template-browser -- --iterations 1 --warmup 0 --item-count 1000 --child-count 2 --counters true --output benchmark/browser-feature-results/template-counters.json` to build the same generated templates with the production runtime policy and integer operation counters. The `counter-browser` result records per-operation deltas for key reads, visited and created rows, DOM target resolution, binding evaluation, equality skips, node moves, and top-level clone calls. Nested lists contribute to these totals. Counter-mode timings are diagnostic only and the base/head timing comparator rejects them. The regular production build removes the counter calls.
+
 The browser report records workload controls, bundle hashes, Git state, Node, CPU, esbuild, and Chromium versions. Compare base and head as separate processes with the same controls and host. Individual operations in one process are correlated samples, not independent trials.
 
 Run `pnpm bench:template-browser:compare -- --pair base-1.json head-1.json --pair base-2.json head-2.json` on clean reports from the same host and browser. Each process contributes one ratio per operation; fewer than five pairs remain inconclusive. The comparison rejects changed controls, environment, bundle contents within a revision, dirty results, and reused process IDs. Use `--allow-dirty-smoke` only for local smoke artifacts.

@@ -14,6 +14,7 @@ import {
 } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtree.js";
 import { normalizeListKey } from "./key.js";
+import { countPerformance } from "./performance-counters.js";
 import {
   canAppendWithoutMoving,
   canReuseListRegion,
@@ -38,6 +39,8 @@ import {
   type CompiledHydrationBoundary,
   type HydrationBoundaryHandle,
 } from "./hydrate.js";
+
+declare const __TACHYON_PRODUCTION__: boolean | "counter";
 
 type ExpressionReader = (scope: Record<string, unknown>) => unknown;
 type ExpressionWriter = (scope: Record<string, unknown>, value: unknown) => void;
@@ -253,6 +256,7 @@ type RowRecord = {
 };
 
 type ListState = {
+  container: Element;
   signature: string;
   descriptor: KeyedListOptions;
   options: ListRuntimeOptions;
@@ -322,7 +326,20 @@ type ListRuntimeOptions = KeyedListOptions & {
 
 // Keyed by the region start marker rather than the container, so sibling lists in one parent keep their own state.
 const listStates = new WeakMap<Comment, ListState>();
-const generatedStateCaches = new WeakMap<GeneratedKeyedListOptions, ListState>();
+const generatedStateCaches = new WeakMap<GeneratedKeyedListOptions, Map<Element, ListState>>();
+
+const forgetGeneratedState = (state: ListState, options: GeneratedKeyedListOptions): void => {
+  const states = generatedStateCaches.get(options);
+  if (states?.get(state.container) !== state) return;
+  states.delete(state.container);
+  if (states.size === 0) generatedStateCaches.delete(options);
+};
+
+const rememberGeneratedState = (state: ListState, options: GeneratedKeyedListOptions): void => {
+  let states = generatedStateCaches.get(options);
+  if (!states) generatedStateCaches.set(options, (states = new Map()));
+  states.set(state.container, state);
+};
 
 const writePath = (scope: Record<string, unknown>, expression: string, value: unknown): void => {
   const parts = expression.split(".");
@@ -442,6 +459,8 @@ const nodeAtIgnoringHydrationMarkers = (root: Node, path: readonly number[]): No
   templateNodeAt(root, path) as Node;
 
 const nodeAtRecord = (record: RowRecord, path: readonly number[]): Node => {
+  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+    countPerformance("targetResolutions");
   if (record.nodes.length <= 1) {
     return nodeAtIgnoringHydrationMarkers(record.element, path);
   }
@@ -529,7 +548,7 @@ const updateListPlans = (state: ListState, options: ListRuntimeOptions): void =>
 
 const cleanupListState = (state: ListState): void => {
   const cachedOptions = state.cachedGeneratedOptions;
-  if (cachedOptions && generatedStateCaches.get(cachedOptions) === state) generatedStateCaches.delete(cachedOptions);
+  if (cachedOptions) forgetGeneratedState(state, cachedOptions);
   delete state.cachedGeneratedOptions;
   state.ownerCleanupDispose?.();
   state.ownerCleanupDispose = undefined;
@@ -575,6 +594,7 @@ const getListState = (container: Element, options: ListRuntimeOptions, cached?: 
     node instanceof Element ? [index] : [],
   );
   const next: ListState = {
+    container,
     signature,
     descriptor: options.descriptor,
     options,
@@ -652,6 +672,8 @@ const cleanupRecord = (record: RowRecord, preserveAdoptedNodes = false): void =>
 
 const shouldApplyValue = (record: RowRecord, index: number, value: unknown): boolean => {
   if (Object.is(record.lastValues[index], value)) {
+    if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+      countPerformance("equalitySkips");
     return false;
   }
   record.lastValues[index] = value;
@@ -665,6 +687,8 @@ const applyRowBinding = (
   binding: Binding,
   index: number,
 ): void => {
+  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+    countPerformance("bindingEvaluations");
   record.revision();
   if (binding.kind === "text") {
     const value = options.readValue(scope, binding);
@@ -692,13 +716,14 @@ const applyRowBinding = (
     const value = options.readValue(scope, { expression: binding.each, read: binding.read }) as
       | readonly unknown[]
       | undefined;
-    const container = nodeAtRecord(record, binding.path);
+    const container = record.targets[index] ?? (record.targets[index] = nodeAtRecord(record, binding.path));
     if (container instanceof Element) {
       options.mountList(binding, container, value, scope);
     }
   } else if (binding.kind === "if") {
     const value = options.readValue(scope, { expression: binding.test, read: binding.read });
-    options.mountBranch(binding, nodeAtRecord(record, binding.path), value, scope);
+    const target = record.targets[index] ?? (record.targets[index] = nodeAtRecord(record, binding.path));
+    options.mountBranch(binding, target, value, scope);
   }
 };
 
@@ -785,7 +810,11 @@ const keyFor = (
   index: number,
   options: ListRuntimeOptions,
   scope: Record<string, unknown> | undefined,
-): PropertyKey => normalizeListKey(read(options.readKey(item, index, scope)));
+): PropertyKey => {
+  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+    countPerformance("keyReads");
+  return normalizeListKey(read(options.readKey(item, index, scope)));
+};
 
 const isProductionEnvironment = (): boolean => typeof process !== "undefined" && process.env.NODE_ENV === "production";
 
@@ -811,6 +840,8 @@ const createRecord = (
   let elementIndex = 0;
   const nodes = Array.from(state.template.content.childNodes, (node) => {
     const adopted = node instanceof Element ? existingElements?.[elementIndex++] : undefined;
+    if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+      countPerformance(adopted ? "adoptedElements" : "topLevelCloneCalls");
     return adopted ?? node.cloneNode(true);
   });
   const element = nodes.find((node): node is Element => node instanceof Element);
@@ -911,6 +942,8 @@ const createRecord = (
         ? state.bindingPlan
         : bindingPlanFromEntries(state.bindingPlan.all.filter(({ binding }) => !deferredBindings.has(binding)));
     bindRow(record, options, eagerPlan, record.cleanups);
+    if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+      countPerformance("rowsCreated");
     return record;
   } catch (error) {
     try {
@@ -977,13 +1010,15 @@ const mountResolvedKeyedList = (
   if (!(container instanceof Element)) {
     return;
   }
-  const state = getListState(container, options, generatedOptions && generatedStateCaches.get(generatedOptions));
+  const state = getListState(
+    container,
+    options,
+    generatedOptions && generatedStateCaches.get(generatedOptions)?.get(container),
+  );
   if (generatedOptions) {
     const previous = state.cachedGeneratedOptions;
-    if (previous && previous !== generatedOptions && generatedStateCaches.get(previous) === state) {
-      generatedStateCaches.delete(previous);
-    }
-    generatedStateCaches.set(generatedOptions, state);
+    if (previous && previous !== generatedOptions) forgetGeneratedState(state, previous);
+    rememberGeneratedState(state, generatedOptions);
     state.cachedGeneratedOptions = generatedOptions;
   }
   const cleanupRecordsNotIn = (
@@ -994,6 +1029,8 @@ const mountResolvedKeyedList = (
     let failed = false;
     for (const [key, record] of records) {
       if (keep.has(key)) continue;
+      if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+        countPerformance("rowsRemoved");
       try {
         cleanupRecord(record);
       } catch (error) {
@@ -1022,6 +1059,8 @@ const mountResolvedKeyedList = (
     seenKeys.add(key);
     entries.push({ item, index, key });
   }
+  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+    countPerformance("rowsVisited", entries.length);
   const parentScope = syncParentScope(state, scope, options.parentScopeKeys);
   if (state.initialized && hasSameKeyOrder(entries, state.records)) {
     for (const entry of entries) {

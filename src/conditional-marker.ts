@@ -1,3 +1,7 @@
+import { countPerformance } from "./runtime/performance-counters.js";
+
+declare const __TACHYON_PRODUCTION__: boolean | "counter";
+
 /**
  * Comment markers that delimit an `<if>` region. The client template and the server renderers emit the same
  * pair, so the region's nodes are exactly the siblings between the two comments in either DOM: whitespace text
@@ -41,6 +45,8 @@ const regionEnd = (
 ): Comment | undefined => {
   let depth = 0;
   for (let node = start.nextSibling; node && node !== bound; node = node.nextSibling) {
+    if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+      countPerformance("structuralNodesVisited");
     if (isStart(node)) depth++;
     else if (isEnd(node)) {
       if (depth === 0) return node as Comment;
@@ -70,6 +76,8 @@ export const listRegionStartBetween = (first: Node | null, end: Node | null, ind
   let depth = 0;
   let ordinal = 0;
   for (let node: Node | null = first; node && node !== end; node = node.nextSibling) {
+    if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+      countPerformance("structuralNodesVisited");
     if (isInsertionStartMarker(node)) {
       // Server-inserted content is never the parent's: whatever regions it holds are skipped as a whole. An
       // unterminated insertion cannot be skipped safely, so nothing after it is claimed either.
@@ -201,6 +209,8 @@ export const templateNodeAt = (root: Node, path: readonly number[]): Node | unde
     let cursor = 0;
     let next: Node | undefined;
     for (let child: ChildNode | null = current?.firstChild ?? null; child; child = child.nextSibling) {
+      if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+        countPerformance("structuralNodesVisited");
       const list = isListStartMarker(child);
       const opaqueEnd = list ? undefined : opaqueRegionEnd(child);
       if (!list && !opaqueEnd && isPathInvisibleNode(child)) continue;

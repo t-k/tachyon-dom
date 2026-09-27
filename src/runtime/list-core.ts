@@ -1,4 +1,7 @@
 import { listEndMarkerValue, listRegionEnd, listRegionStartAt, listStartMarkerValue } from "../conditional-marker.js";
+import { countPerformance } from "./performance-counters.js";
+
+declare const __TACHYON_PRODUCTION__: boolean | "counter";
 
 /**
  * The reconciliation core both keyed list runtimes share.
@@ -105,6 +108,8 @@ export const scopedItemFromSnapshot = (
 };
 
 export const moveBefore = (container: Element, node: Node, before: Node | null): void => {
+  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+    countPerformance("nodeMoves");
   const movableContainer = container as MoveBeforeElement;
   if (typeof movableContainer.moveBefore === "function") {
     try {
@@ -118,6 +123,8 @@ export const moveBefore = (container: Element, node: Node, before: Node | null):
 };
 
 export const longestIncreasingSubsequencePositions = (values: readonly number[]): Set<number> => {
+  if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
+    countPerformance("lisCalls");
   const predecessors = Array(values.length).fill(-1) as number[];
   const tails: number[] = [];
   const tailPositions: number[] = [];

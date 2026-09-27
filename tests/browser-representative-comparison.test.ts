@@ -109,4 +109,11 @@ describe("production browser base/head comparison", () => {
     );
     expect(report.paths["mixed-template"].operations.partialUpdate.sync.status).toBe("inconclusive");
   });
+
+  it("rejects counter-mode timings from the production comparison", () => {
+    const base = run("a".repeat(40), "base", 10);
+    const head = run("b".repeat(40), "head", 9);
+    head.measurementMode = "counter-browser";
+    expect(() => compareBrowserRepresentativeRuns([{ base, head }])).toThrow(/Incompatible browser representative contract/);
+  });
 });

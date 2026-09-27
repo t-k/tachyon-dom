@@ -88,6 +88,28 @@ describe("mountTextKeyedList", () => {
     firstChild.mockRestore();
   });
 
+  it("keeps a boundary cache per container when generated options are shared", () => {
+    const first = document.createElement("ul");
+    const second = document.createElement("ul");
+    const options = {
+      signature: "shared-text-boundary",
+      key: "row.id",
+      keyReadItem: (item: unknown) => (item as { id: string }).id,
+      itemName: "row",
+      templateHtml: `<li> </li>`,
+      bindings: [],
+    };
+    mountGeneratedTextKeyedList(first, [], [{ id: "a" }], options);
+    mountGeneratedTextKeyedList(second, [], [{ id: "b" }], options);
+    const firstChild = vi.spyOn(first, "firstChild", "get");
+
+    mountGeneratedTextKeyedList(first, [], [{ id: "a" }], options);
+
+    expect(first.querySelectorAll("li")).toHaveLength(1);
+    expect(firstChild).not.toHaveBeenCalled();
+    firstChild.mockRestore();
+  });
+
   it("does not build a new reconciliation map when keyed order is unchanged", () => {
     const root = document.createElement("ul");
     const options = {
