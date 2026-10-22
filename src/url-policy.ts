@@ -1,4 +1,5 @@
 import { err, ok, type Result } from "./result.js";
+import { isDangerousAttributeName } from "./attribute-policy.js";
 
 export type UrlAttributeName =
   | "href"
@@ -183,9 +184,9 @@ export const decideUrlAttribute = (context: {
 };
 
 export class UnsafeUrlError extends TypeError {
-  readonly attribute: UrlAttributeName;
+  readonly attribute: UrlAttributeName | "attributeName";
 
-  constructor(attribute: UrlAttributeName, message = `Unsafe URL for ${attribute}.`) {
+  constructor(attribute: UrlAttributeName | "attributeName", message = `Unsafe URL for ${attribute}.`) {
     super(message);
     this.name = "UnsafeUrlError";
     this.attribute = attribute;
@@ -245,6 +246,17 @@ export const sanitizeMetaRefreshContent = (
   return decision.ok ? ok(value.trim()) : err(new UnsafeUrlError("content", decision.message));
 };
 
+const svgAnimationElements = new Set(["set", "animate", "animatemotion", "animatetransform"]);
+const unsafeAnimationTargets = new Set<string>([
+  ...urlAttributeRules.map((rule) => rule.attribute),
+  "content",
+  "http-equiv",
+  "style",
+  "attributename",
+]);
+
+export const isSvgAnimationElement = (element: string): boolean => svgAnimationElements.has(element.toLowerCase());
+
 export const sanitizeElementUrlAttributes = (
   element: string,
   attributes: Readonly<Record<string, string>>,
@@ -252,6 +264,16 @@ export const sanitizeElementUrlAttributes = (
 ): Result<Record<string, string>, UnsafeUrlError> => {
   const normalizedElement = element.toLowerCase();
   const output = { ...attributes };
+  if (isSvgAnimationElement(normalizedElement)) {
+    for (const [name, value] of Object.entries(attributes)) {
+      if (name.toLowerCase() !== "attributename") continue;
+      const target = value.trim().toLowerCase();
+      // Namespaced targets and encoded names cannot be resolved safely without the target element's context.
+      if (!/^[a-z][a-z0-9-]*$/.test(target) || unsafeAnimationTargets.has(target) || isDangerousAttributeName(target)) {
+        return err(new UnsafeUrlError("attributeName", "Unsafe SVG animation target."));
+      }
+    }
+  }
   if (normalizedElement === "meta") {
     const httpEquiv = Object.entries(attributes).find(([name]) => name.toLowerCase() === "http-equiv")?.[1];
     const contentEntry = Object.entries(attributes).find(([name]) => name.toLowerCase() === "content");

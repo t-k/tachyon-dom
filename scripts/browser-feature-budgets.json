@@ -12,8 +12,8 @@
     "maxBrotliBytes": 3547
   },
   "runtime/router": {
-    "maxMinifiedBytes": 19102,
-    "maxBrotliBytes": 6416
+    "maxMinifiedBytes": 19642,
+    "maxBrotliBytes": 6590
   },
   "runtime/generic-list": {
     "maxMinifiedBytes": 22126,

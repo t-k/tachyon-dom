@@ -31,11 +31,11 @@ Browser feature measurements (bytes):
 | Fixture | Minified | Brotli |
 | --- | ---: | ---: |
 | runtime/list | 16554 | 5892 |
-| runtime/generic-list | 21821 | 7417 |
+| runtime/generic-list | 21821 | 7415 |
 | runtime/form | 2997 | 1192 |
 | runtime/conditional | 9992 | 3511 |
-| runtime/generic-conditional | 15971 | 5353 |
-| runtime/router | 18819 | 6321 |
+| runtime/generic-conditional | 15971 | 5355 |
+| runtime/router | 19351 | 6492 |
 
 Source: [measurement JSON](../scripts/browser-feature-sizes.json). It records the commit, dirty state, input hashes, Node/esbuild versions, production define, minification, and Brotli conditions. `pnpm check:runtime-sizes` compares the input hashes, the byte counts, and the conditions needed to reproduce them: esbuild version, production define, minification, compression, and the Node major version that CI pins. The commit and dirty state are recorded for traceability but are not compared. CI uploads fresh reports as the browser-feature-measurements artifact. These feature fixtures differ from the client bundle attribution fixtures and Quick Example.
 <!-- browser-feature-sizes:end -->
@@ -224,6 +224,8 @@ Each enhancement runs once per element/name pair. A single element can opt into 
 ## Server HTML and Form Actions
 
 `tachyon-dom/server/html` provides an SSR string helper. `html` escapes text interpolation by default, escapes direct interpolation after an attribute assignment, and only renders trusted markup through `rawHtml()`. Use `attr()`, `booleanAttr()`, `classList()`, and `join()` for optional attributes, boolean attributes, class composition, and lists.
+
+`join(values, separator)` treats its string separator as text and escapes it, just like ordinary string values in the list. To interleave trusted markup, include explicit `html` fragments among the values instead of putting markup in the separator.
 
 ```ts
 import { attr, booleanAttr, html, rawHtml } from "tachyon-dom/server/html";

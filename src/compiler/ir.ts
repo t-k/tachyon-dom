@@ -1,6 +1,11 @@
 import { err, ok, type Result } from "../result.js";
 import { isDangerousAttributeName } from "../attribute-policy.js";
-import { sanitizeElementUrlAttributes, sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../url-policy.js";
+import {
+  isSvgAnimationElement,
+  sanitizeElementUrlAttributes,
+  sanitizeUrlAttributeValue,
+  urlPurposeForAttribute,
+} from "../url-policy.js";
 import { isAssignableExpression, parseExpression } from "./expression.js";
 import type {
   CompilerError,
@@ -171,6 +176,16 @@ const validateTextExpressions = (node: TemplateNode, insideRawTextTag?: string):
 };
 
 const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => {
+  if (isSvgAnimationElement(node.tagName)) {
+    for (const attr of node.attrs) {
+      if (attr.name.toLowerCase() !== "attributename") continue;
+      if (attr.value === true || readExpressionAttribute(attr.value)) {
+        return semanticError("SVG animation attributeName must be a static safe attribute name.", attributeSpan(attr));
+      }
+      const sanitized = sanitizeElementUrlAttributes(node.tagName, { [attr.name]: attr.value });
+      if (!sanitized.ok) return semanticError(sanitized.error.message, attributeSpan(attr));
+    }
+  }
   if (node.tagName.toLowerCase() === "meta") {
     const httpEquiv = node.attrs.find((attr) => attr.name.toLowerCase() === "http-equiv");
     const content = node.attrs.find((attr) => attr.name.toLowerCase() === "content");

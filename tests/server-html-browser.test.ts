@@ -1,6 +1,6 @@
 import { chromium, type Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { attr, html } from "../src/server/html";
+import { attr, html, join } from "../src/server/html";
 
 let browser: Browser | undefined;
 
@@ -11,6 +11,45 @@ describe("server HTML browser security", () => {
 
   afterAll(async () => {
     await browser?.close();
+  });
+
+  it("renders a hostile join separator as visible text without executing it", async () => {
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      const payload = "<script>globalThis.__separatorXss = true</script>";
+      await page.setContent(String(html`<p>${join(["a", "b"], payload)}</p>`));
+      expect(await page.locator("p").textContent()).toBe(`a${payload}b`);
+      expect(await page.locator("script").count()).toBe(0);
+      expect(await page.evaluate(() => "__separatorXss" in globalThis)).toBe(false);
+    } finally {
+      await page.close();
+    }
+  });
+
+  it("blocks animated link replacement while preserving ordinary SVG animation", async () => {
+    expect(
+      () =>
+        html`<svg>
+          <a id="link"><text>probe</text></a>
+          <set href="#link" attributeName="href" to=${"javascript:globalThis.__animationXss=1"}></set>
+        </svg>`,
+    ).toThrow("Unsafe SVG animation target");
+    const page = await browser?.newPage();
+    if (!page) throw new Error("Missing browser page.");
+    try {
+      await page.setContent(
+        String(
+          html`<svg>
+            <rect id="subject" width="10" height="10" opacity="0"><set attributeName="opacity" to=${"0.5"}></set></rect>
+          </svg>`,
+        ),
+      );
+      await expect.poll(() => page.locator("#subject").evaluate((node) => getComputedStyle(node).opacity)).toBe("0.5");
+      expect(await page.evaluate(() => "__animationXss" in globalThis)).toBe(false);
+    } finally {
+      await page.close();
+    }
   });
 
   it("keeps an interpolated payload inside one quoted attribute", async () => {

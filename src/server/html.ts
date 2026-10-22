@@ -314,7 +314,7 @@ type PolicyNode = {
 
 const validateMarkupUrlAttributes = (markup: string): void => {
   if (
-    !/\b(?:on[A-Za-z0-9_.:-]*|srcdoc|href|src|action|formaction|xlink:href|data|poster|srcset|content|http-equiv)\s*=/i.test(
+    !/\b(?:on[A-Za-z0-9_.:-]*|srcdoc|href|src|action|formaction|xlink:href|data|poster|srcset|content|http-equiv|attributeName)\s*=/i.test(
       markup,
     )
   ) {
@@ -518,7 +518,7 @@ const scanHtmlState = (input: string, context: HtmlScanContext): void => {
 export const rawHtml = (value: string): HtmlFragment => fragment(value);
 
 export const join = (values: readonly HtmlValue[], separator = ""): HtmlFragment =>
-  fragment(values.map(renderTextValue).join(separator));
+  fragment(values.map(renderTextValue).join(escapeText(separator)));
 
 export const attr = (name: string, value: unknown): HtmlAttribute => {
   assertAttributeName(name);

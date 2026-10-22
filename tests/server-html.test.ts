@@ -2,6 +2,23 @@ import { describe, expect, it } from "vitest";
 import { attr, booleanAttr, classList, html, join, rawHtml } from "../src/server/html";
 
 describe("server html helper", () => {
+  it("rejects static event handlers even with whitespace before their assignment", () => {
+    expect(() => html`<img onerror="alert(1)" />`).toThrow("Dangerous attribute");
+    expect(() => html`${rawHtml('<img onerror="alert(1)">')}`).toThrow("Dangerous attribute");
+    expect(() => html`${rawHtml('<img onerror ="alert(1)">')}`).toThrow("Dangerous attribute");
+  });
+  it("escapes join separators as text, including nested fragments", () => {
+    const separator = `<script>alert('x')</script>&"`;
+    const escaped = "&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;&amp;&quot;";
+    expect(String(join(["a", "b"], separator))).toBe(`a${escaped}b`);
+    expect(String(html`<p>${join([html`<b>a</b>`, "b"], separator)}</p>`)).toBe(`<p><b>a</b>${escaped}b</p>`);
+    expect(String(join([], separator))).toBe("");
+    expect(String(join(["a"], separator))).toBe("a");
+    expect(String(join(["a", "b", "c"], ", "))).toBe("a, b, c");
+    expect(String(join(["a", "b"]))).toBe("ab");
+    expect(String(join(["a", "b"], "&lt;"))).toBe("a&amp;lt;b");
+  });
+
   const activeUrlCorpus = [
     "javascript:alert(1)",
     " JAVASCRIPT:alert(1)",

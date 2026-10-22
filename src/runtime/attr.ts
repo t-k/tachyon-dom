@@ -6,10 +6,13 @@ import { recordDomWrite } from "./signal.js";
 declare const __TACHYON_PRODUCTION__: boolean | "counter";
 
 const prospectiveAttributes = (element: Element, name: string, value: string): Record<string, string> => {
-  const normalizedName = name.toLowerCase();
+  const caseInsensitive =
+    element.namespaceURI === "http://www.w3.org/1999/xhtml" && element.ownerDocument.contentType === "text/html";
+  const normalize = (attribute: string): string => (caseInsensitive ? attribute.toLowerCase() : attribute);
+  const normalizedName = normalize(name);
   const attributes = Object.fromEntries(
     [...element.attributes]
-      .filter((attribute) => attribute.name.toLowerCase() !== normalizedName)
+      .filter((attribute) => normalize(attribute.name) !== normalizedName)
       .map((attribute) => [attribute.name, attribute.value]),
   );
   attributes[name] = value;
