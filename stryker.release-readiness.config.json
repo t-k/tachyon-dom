@@ -11,10 +11,10 @@
   },
   "mutate": [
     "src/runtime/store.ts",
-    "src/compiler/sfc.ts:887:0-949:0",
-    "src/compiler/targets/client.ts:1248:0-1261:0",
-    "src/compiler/targets/client.ts:1325:0-1333:0",
-    "src/compiler/targets/client.ts:1613:0-1622:0",
+    "src/compiler/sfc.ts:925:0-987:0",
+    "src/compiler/targets/client.ts:1255:0-1268:0",
+    "src/compiler/targets/client.ts:1332:0-1340:0",
+    "src/compiler/targets/client.ts:1620:0-1629:0",
     "src/compiler/html-tree.ts:96:0-127:1"
   ],
   "plugins": [

@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-22
+
+### Added
+
+- Export a typed, reusable `component` from `.td` modules, with independent instance state and prop updates. Imported component tags are still ordinary elements; use the component instance API to compose them.
+- Add an explicitly scoped `createQueryClient()` for shared requests, freshness, invalidation, and optimistic updates. Create a separate client per app session or SSR request.
+- Add `createResourceBoundary()` with pending, success, and error views, retry support, and retention of the last successful view during refetches.
+- Add an owned external DOM adapter with reactive updates, hydration adoption, and disposal for integrations that manage their own child nodes.
+- Type route href parameters from literal route manifests and provide query schemas for validated parsing and URL generation.
+- Export versioned Inspector reports and reactive cause traces, including managed DOM writes, reruns, and subscription churn.
+- Add static accessibility diagnostics for `.td` templates and `tachyon-dom code-preview` reports showing generated client code, runtime imports, region choices, and hydration diagnostics.
+- Preserve keyed virtual-list scroll anchors across updates and support scrolling directly to an item key.
+
+### Fixed
+
+- Release generated list boundary caches on disposal and preserve adopted row identity while reusing list targets.
+
+### Changed
+
+- Omit empty generated region metadata and reuse nested list boundary lookups. Browser benchmark diagnostics now separate operation timings, input response, allocation sampling, and unscored traces.
+- Refresh measured client bundle baselines. The shared SVG security checks add 171 Brotli bytes to the router feature bundle; its budget retains approximately 1.5% headroom.
+
+### Security
+
+- Escape the plain-string separator passed to the server HTML `join()` helper. Separators can no longer introduce executable markup; interleave explicit trusted fragments in the values when markup is intended.
+- Reject SVG animations targeting URL, event-handler, HTML-injection, style, or policy-control attributes. The compiler requires a static safe `attributeName`; the HTML helper and DOM runtime validate the complete element, preserving case-sensitive SVG/XML attribute names. Ordinary numeric and color animation remains supported.
+- Escape request-derived values in the routing documentation and avoid displaying raw exception messages in its error boundary example.
+
+### Validation
+
+- Add regression tests for the HTML separator and SVG animation boundaries, including Chromium checks and targeted mutation testing. Re-anchor the release-readiness mutation ranges to their current source locations.
+
 ## [0.3.1] - 2026-09-11
 
 ### Fixed
