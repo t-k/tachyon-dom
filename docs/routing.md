@@ -49,6 +49,9 @@ Here `params` is `{ id: string }` and `data` is `{ id: string; name: string }`. 
 Use `defineRouteModule()` for route modules:
 
 ```ts
+import { defineRouteModule } from "tachyon-dom/router";
+import { html } from "tachyon-dom/server/html";
+
 export default defineRouteModule({
   path: "/users/:id",
   loader: ({ params }) => ({ name: `User ${params.id}` }),
@@ -56,9 +59,9 @@ export default defineRouteModule({
   head: ({ data }) => ({ title: (data as { name: string }).name }),
   resources: [{ rel: "modulepreload", href: "/users.js" }],
   fallback: "<p>Loading</p>",
-  template: ({ data }) => `<h1>${(data as { name: string }).name}</h1>`,
-  ErrorBoundary: ({ error }) => `<h1>${error instanceof Error ? error.message : "Error"}</h1>`,
-  NotFound: ({ url }) => `<h1>Missing ${url.pathname}</h1>`,
+  template: ({ data }) => String(html`<h1>${(data as { name: string }).name}</h1>`),
+  ErrorBoundary: () => "<h1>Internal Server Error</h1>",
+  NotFound: ({ url }) => String(html`<h1>Missing ${url.pathname}</h1>`),
 });
 ```
 
@@ -294,6 +297,7 @@ For Vite dev servers with request-scoped SSR, `tachyon-dom/vite` exports `tachyo
 ```ts
 import { defineConfig } from "vite";
 import { tachyonDom, tachyonSsr } from "tachyon-dom/vite";
+import { html } from "tachyon-dom/server/html";
 
 export default defineConfig({
   plugins: [
@@ -304,7 +308,10 @@ export default defineConfig({
       fetch: async (request, { clientScript }) => {
         const locale = request.headers.get("accept-language")?.split(",", 1)[0] ?? "en";
         return new Response(
-          `<main data-locale="${locale}"></main><script type="module" src="${clientScript ?? ""}"></script>`,
+          String(
+            html`<main data-locale="${locale}"></main>
+              <script type="module" src=${clientScript ?? ""}></script>`,
+          ),
           {
             headers: { "content-type": "text/html; charset=utf-8" },
           },
