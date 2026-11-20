@@ -144,6 +144,15 @@ describe("insertion markers", () => {
     expect(templateNodeAt(parent, [1])).toBe(parent.querySelector("p"));
   });
 
+  it("leaves visible siblings after a hydration marker before an unmatched list end", () => {
+    const parent = html("<!--tachyon-hydrate:id:start--><p></p><!--/tachyon-for--><i></i>");
+    const visible = [parent.querySelector("p"), parent.querySelector("i")];
+    expect(logicalNodesBetween(parent.firstChild, null)).toEqual(visible);
+    expect(clientShapedNodes(parent.firstChild, null)).toEqual(visible);
+    expect(templateNodeAt(parent, [0])).toBe(visible[0]);
+    expect(templateNodeAt(parent, [1])).toBe(visible[1]);
+  });
+
   it("stops a node view at the given end even inside an insertion", () => {
     const parent = html(`<!--tachyon-slot:a--><b>x</b><i>y</i><!--/tachyon-slot:a-->`);
     const inner = parent.childNodes[2] as Node;
