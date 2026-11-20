@@ -16,3 +16,9 @@ If the scan succeeds, the entire retained sequence is strictly increasing, and e
 `ListAppend` proves that after validating a retained prefix and a new suffix, selecting the suffix produces the same rows in the same order as filtering by membership in the previous list.
 
 `HtmlWhitespace` proves that an input with no whitespace edit candidates has only unchanged tag slices, regardless of quote state. It abstracts source spans as contiguous slices and models the four code-unit classes used by the guard.
+
+`LogicalNode` proves that stopping at the requested logical sibling returns the same entry as collecting every visible sibling and indexing the resulting array. The marker-aware traversal is shared between the two runtime paths.
+
+`RouteIndex` proves that a required literal segment selects the matching bucket, and that discarding impossible routes preserves the first matching route or the last wildcard fallback. The indexed and general candidates merge in the original rank order.
+
+`ParserDelimiter` proves that looking for a delimiter in the remaining UTF-16 code units produces the same offset as one-at-a-time scanning, including the end offset when the delimiter is absent.

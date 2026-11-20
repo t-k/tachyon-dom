@@ -2,6 +2,7 @@
 // full list mount; now it is one module with its own regressions.
 import { describe, expect, it, vi } from "vitest";
 import {
+  appendOrPositionRecords,
   appendStartIndex,
   canReuseListRegion,
   ensureListRegion,
@@ -203,6 +204,30 @@ describe("keyed list core", () => {
 
       expect(appendStart).toBe(2);
       expect(arrayMaterializations).toBe(0);
+    });
+
+    it("rejects inconsistent records when the ordered rows disagree with the next keys", () => {
+      const previous = new Map([["old", {}]]);
+      const next = new Map([["old", {}]]);
+      expect(appendStartIndex(next, [], previous)).toBeUndefined();
+      expect(appendStartIndex(new Map(), [{ key: "old", nodes: [] }], previous)).toBeUndefined();
+    });
+
+    it("appends the new suffix without a second scan of previous keys", () => {
+      const { container, records } = listOf(["old"]);
+      const end = document.createComment("end of list");
+      container.append(end);
+      const added = { key: "new", nodes: [document.createElement("li"), document.createElement("li")] };
+      const next = new Map(records);
+      next.set(added.key, added);
+      const previousKeys = vi.spyOn(records, "keys");
+      try {
+        appendOrPositionRecords(container, next, [...next.values()], records, end);
+        expect(previousKeys).toHaveBeenCalledTimes(1);
+        expect(Array.from(container.childNodes)).toEqual([...records.get("old")!.nodes, ...added.nodes, end]);
+      } finally {
+        previousKeys.mockRestore();
+      }
     });
 
     it("keeps the longest increasing run and skips the positions marked as new", () => {

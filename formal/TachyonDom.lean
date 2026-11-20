@@ -2,3 +2,6 @@ import TachyonDom.ListOrder
 import TachyonDom.CompilerValidation
 import TachyonDom.ListAppend
 import TachyonDom.HtmlWhitespace
+import TachyonDom.LogicalNode
+import TachyonDom.RouteIndex
+import TachyonDom.ParserDelimiter
