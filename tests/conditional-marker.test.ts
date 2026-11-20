@@ -128,6 +128,22 @@ describe("insertion markers", () => {
     expect(templateNodeAt(parent, [2, 0])).toBe(parent.querySelector("p")?.firstChild);
   });
 
+  it.each(["tachyon-if", "tachyon-outlet"])("returns a selected %s anchor before finding its end", (marker) => {
+    const { parent, start } = region(`<!--${marker}--><span></span><!--/${marker}--><p></p>`);
+    const nextSibling = Object.getOwnPropertyDescriptor(Node.prototype, "nextSibling")?.get;
+    if (!nextSibling) throw new Error("Expected a DOM nextSibling accessor.");
+    let reads = 0;
+    Object.defineProperty(start, "nextSibling", {
+      get: () => {
+        reads++;
+        return nextSibling.call(start);
+      },
+    });
+    expect(templateNodeAt(parent, [0])).toBe(start);
+    expect(reads).toBe(0);
+    expect(templateNodeAt(parent, [1])).toBe(parent.querySelector("p"));
+  });
+
   it("stops a node view at the given end even inside an insertion", () => {
     const parent = html(`<!--tachyon-slot:a--><b>x</b><i>y</i><!--/tachyon-slot:a-->`);
     const inner = parent.childNodes[2] as Node;

@@ -177,6 +177,7 @@ export const positionRecords = (
   ) {
     suffixLength++;
   }
+  const middleEnd = nextLength - suffixLength;
   const previousOrder = new Map<PropertyKey, number>();
   for (let index = prefixLength; index < previousKeys.length - suffixLength; index++) {
     previousOrder.set(previousKeys[index] as PropertyKey, index);
@@ -184,7 +185,7 @@ export const positionRecords = (
   const middlePositions: number[] = [];
   let previousPosition = -1;
   let hasInversion = false;
-  for (let index = prefixLength; index < nextLength - suffixLength; index++) {
+  for (let index = prefixLength; index < middleEnd; index++) {
     const position = previousOrder.get((orderedRecords[index] as PositionedRow).key) ?? -1;
     middlePositions.push(position);
     if (!hasInversion && position >= 0) {
@@ -194,11 +195,11 @@ export const positionRecords = (
   }
   // If the retained positions are already increasing, they are the entire LIS.
   const stablePositions = hasInversion ? longestIncreasingSubsequencePositions(middlePositions) : undefined;
-  let anchor: Node | null = orderedRecords[nextLength - suffixLength]?.nodes[0] ?? staticAfter;
-  for (let index = nextLength - suffixLength - 1; index >= prefixLength; index--) {
+  let anchor: Node | null = orderedRecords[middleEnd]?.nodes[0] ?? staticAfter;
+  for (let index = middleEnd - 1; index >= prefixLength; index--) {
     const record = orderedRecords[index] as PositionedRow;
     const middleIndex = index - prefixLength;
-    if (stablePositions?.has(middleIndex) ?? ((middlePositions[middleIndex] as number) >= 0)) {
+    if (stablePositions ? stablePositions.has(middleIndex) : (middlePositions[middleIndex] as number) >= 0) {
       anchor = record.nodes[0] ?? anchor;
       continue;
     }
@@ -342,12 +343,12 @@ export const appendOrPositionRecords = (
   previousRecords: ReadonlyMap<PropertyKey, PositionedRow>,
   end: Comment,
 ): void => {
-  const firstNewIndex = appendStartIndex(nextRecords, orderedRecords, previousRecords);
-  if (firstNewIndex === undefined) {
+  let index = appendStartIndex(nextRecords, orderedRecords, previousRecords);
+  if (index === undefined) {
     positionRecords(container, orderedRecords, previousRecords, end);
     return;
   }
-  for (let index = firstNewIndex; index < orderedRecords.length; index++) {
+  for (; index < orderedRecords.length; index++) {
     for (const node of (orderedRecords[index] as PositionedRow).nodes) container.insertBefore(node, end);
   }
 };

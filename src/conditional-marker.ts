@@ -154,17 +154,6 @@ export const removeInsertionRegion = (start: Comment): void => {
 };
 
 /**
- * For the start marker of a region whose content the parent template never addresses (a conditional's branch
- * or a server-only insertion), the matching end marker; `undefined` for any other node.
- */
-const opaqueRegionEnd = (node: Node): Comment | undefined =>
-  isConditionalStartMarker(node)
-    ? conditionalRegionEnd(node)
-    : isInsertionStartMarker(node)
-      ? insertionRegionEnd(node)
-      : undefined;
-
-/**
  * Hydration markers, region end markers, both list markers, and insertion end markers occupy no logical slot:
  * paths count past them.
  */
@@ -176,94 +165,46 @@ export const isPathInvisibleNode = (node: Node): boolean =>
     isListEndMarker(node) ||
     isInsertionEndMarker(node));
 
-/**
- * The logical nodes from `first` up to (excluding) `end`: the shape the client template gives them, where a
- * nested region is its start marker alone, because its content belongs to the nested conditional.
- */
-export const clientShapedNodes = (first: Node | null, end: Node | null): Node[] => {
-  const nodes: Node[] = [];
-  for (let node = first; node && node !== end; node = node.nextSibling) {
-    if (isListStartMarker(node)) {
-      // A list region occupies no slot, rows included; its start marker stands in for the whole region.
-      const nestedEnd = listRegionEnd(node);
-      if (nestedEnd && nestedEnd !== end) node = nestedEnd;
-      continue;
-    }
-    if (isPathInvisibleNode(node)) continue;
-    nodes.push(node);
-    // A branch or server-inserted content is opaque to the parent template; the start marker stands in for it.
-    const nestedEnd = opaqueRegionEnd(node);
-    if (nestedEnd && nestedEnd !== end) node = nestedEnd;
-  }
-  return nodes;
-};
-
-/**
- * The node a template path addresses from `root`. A region's content and end marker occupy no logical slot: a
- * list's rows are addressed by the list and a conditional's branch by the conditional, so a sibling after either
- * keeps the path the template gave it. Only a conditional's start marker keeps a slot, as its anchor.
- */
-export const templateNodeAt = (root: Node, path: readonly number[]): Node | undefined => {
-  let current: Node | undefined = root;
-  for (const index of path) {
-    let cursor = 0;
-    let next: Node | undefined;
-    for (let child: ChildNode | null = current?.firstChild ?? null; child; child = child.nextSibling) {
-      if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
-        countPerformance("structuralNodesVisited");
-      const list = isListStartMarker(child);
-      const opaqueEnd = list ? undefined : opaqueRegionEnd(child);
-      if (!list && !opaqueEnd && isPathInvisibleNode(child)) continue;
-      if (!list && cursor++ === index) {
-        next = child;
-        break;
-      }
-      if (list) child = listRegionEnd(child as Comment) ?? child;
-      else if (opaqueEnd) child = opaqueEnd;
-    }
-    current = next;
-  }
-  return current;
-};
-
 const scanLogicalNodes = (
   first: Node | null,
   end: Node | null,
   index: number | undefined,
   nodes?: Node[],
+  clientShape?: boolean,
 ): Node | undefined => {
   let ordinal = 0;
   for (let node = first; node && node !== end; node = node.nextSibling) {
-    if (isListStartMarker(node)) {
-      const nestedEnd = listRegionEnd(node);
-      if (nestedEnd && nestedEnd !== end) node = nestedEnd;
-      continue;
-    }
-    if (isPathInvisibleNode(node)) continue;
-    if (nodes) nodes.push(node);
-    else if (ordinal++ === index) return node;
-    if (isInsertionStartMarker(node)) {
-      const nestedEnd = insertionRegionEnd(node);
-      if (nestedEnd && nestedEnd !== end) node = nestedEnd;
-    }
+    if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter" && clientShape && !nodes)
+      countPerformance("structuralNodesVisited");
+    let nestedEnd: Node | undefined;
+    if (!isPathInvisibleNode(node)) {
+      if (nodes) nodes.push(node);
+      else if (ordinal++ === index) return node;
+      if (isInsertionStartMarker(node)) nestedEnd = insertionRegionEnd(node);
+      else if (clientShape && isConditionalStartMarker(node)) nestedEnd = conditionalRegionEnd(node);
+    } else if (isListStartMarker(node)) nestedEnd = listRegionEnd(node);
+    if (nestedEnd && nestedEnd !== end) node = nestedEnd;
   }
   return undefined;
 };
 
-/**
- * Logical siblings up to (excluding) `end`. Conditional branches are visible to their owner, while list
- * rows and server-inserted content occupy no logical slot.
- */
-export const logicalNodesBetween = (first: Node | null, end: Node | null): Node[] => {
+/** Collects logical siblings, skipping nested conditional bodies when reading the client template shape. */
+export const logicalNodesBetween = (first: Node | null, end: Node | null, clientShape?: boolean): Node[] => {
   const nodes: Node[] = [];
-  scanLogicalNodes(first, end, undefined, nodes);
+  scanLogicalNodes(first, end, undefined, nodes, clientShape);
   return nodes;
 };
-
-/** Finds one logical sibling without collecting the others. */
+export const clientShapedNodes = (first: Node | null, end: Node | null): Node[] =>
+  logicalNodesBetween(first, end, true);
 export const logicalNodeAt = (first: Node | null, end: Node | null, index: number): Node | undefined =>
   scanLogicalNodes(first, end, index);
 
+/** Resolves a template path while treating conditional branches and inserted content as opaque. */
+export const templateNodeAt = (root: Node, path: readonly number[]): Node | undefined => {
+  let current: Node | undefined = root;
+  for (const index of path) current = scanLogicalNodes(current?.firstChild ?? null, null, index, undefined, true);
+  return current;
+};
 /** Removes a region's content and its end marker; the start marker is the caller's to remove. */
 export const removeConditionalRegion = (start: Comment): void => {
   clearConditionalRegion(start);

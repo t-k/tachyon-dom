@@ -17,7 +17,7 @@ If the scan succeeds, the entire retained sequence is strictly increasing, and e
 
 `HtmlWhitespace` proves that an input with no whitespace edit candidates has only unchanged tag slices, regardless of quote state. It abstracts source spans as contiguous slices and models the four code-unit classes used by the guard.
 
-`LogicalNode` proves that stopping at the requested logical sibling returns the same entry as collecting every visible sibling and indexing the resulting array. The marker-aware traversal is shared between the two runtime paths.
+`LogicalNode` proves that stopping at the requested logical sibling returns the same entry as collecting every visible sibling and indexing the resulting array. The runtime shares one marker-aware traversal for both live and client-shaped sibling sequences.
 
 `RouteIndex` proves that a required literal segment selects the matching bucket, and that discarding impossible routes preserves the first matching route or the last wildcard fallback. The indexed and general candidates merge in the original rank order.
 
