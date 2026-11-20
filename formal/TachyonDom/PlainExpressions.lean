@@ -15,7 +15,9 @@ inductive Selection where
   | or
   | nullish
 
-/-- Primitive-producing operators and literal objects are plain leaves. Scope reads and calls are unknown. -/
+/-- Built-in primitive-producing operators and literal objects are plain leaves. Scope reads and calls are
+unknown, including regex constructors in selection branches because emitted code can call a replacement.
+The separate legacy fast path for a top-level regex is outside this model. -/
 inductive Expr where
   | plain
   | unknown

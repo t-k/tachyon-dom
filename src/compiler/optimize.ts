@@ -134,7 +134,6 @@ export const expressionScopeNames = (expression: string): ReadonlySet<string> | 
 const nodeAlwaysPlainValue = (node: ExpressionNode): boolean => {
   switch (node.type) {
     case "literal":
-    case "regex":
     case "template":
     case "array":
     case "object":
@@ -153,12 +152,14 @@ const nodeAlwaysPlainValue = (node: ExpressionNode): boolean => {
 };
 
 /**
- * Whether every possible result is a plain value, making the outer signal unwrap unnecessary.
+ * Whether the compiler can omit the outer signal unwrap.
  * A conditional returns one of its branches and a short-circuit operator returns one of its operands.
  */
 export const expressionAlwaysPlainValue = (expression: string): boolean => {
   const parsed = parseExpression(expression);
-  return parsed.ok && nodeAlwaysPlainValue(parsed.value);
+  // A bare regex already skips unwrapping. Under a selection, its emitted RegExp may call a replacement
+  // constructor, so the recursive analysis treats it as unknown.
+  return parsed.ok && (parsed.value.type === "regex" || nodeAlwaysPlainValue(parsed.value));
 };
 
 const containsCall = (node: ExpressionNode): boolean => {

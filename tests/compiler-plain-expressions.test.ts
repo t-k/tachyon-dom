@@ -1,5 +1,6 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { compileTemplate, generateClientModule } from "../src/compiler";
+import { expressionToScopeAccess } from "../src/compiler/utils";
 import { expressionAlwaysPlainValue } from "../src/compiler/optimize";
 import { createSignal } from "../src/runtime/signal";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
@@ -38,7 +39,8 @@ it.each([
   ["flag ? ready() : value.member", false],
   ["accessor ? 1 : 2", true],
   ["left + right", true],
-  ["flag ? /a/ : /b/", true],
+  ["flag ? /a/ : /b/", false],
+  ["/a/", true],
   ["flag ? `before ${value}` : `after`", true],
   ["flag ? [value] : [other]", true],
   ["flag ? { value: value } : { value: other }", true],
@@ -86,4 +88,45 @@ it("preserves selected branch effects and updates while removing a plain binding
   } finally {
     if (typeof cleanup === "function") cleanup();
   }
+});
+
+it("unwraps a signal returned by a replaced RegExp in a selection", () => {
+  const result = compileTemplate('<p>{flag() ? /pattern/ : "off"}</p>');
+  if (!result.ok) throw new Error(result.error.message);
+  const code = generateClientModule(result.value, { reactive: true, mountOnly: true });
+  const generated = evaluateGeneratedClientModule(code);
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = generated.templateHtml;
+  const element = wrapper.firstElementChild as HTMLElement;
+  const replacement = createSignal("replacement");
+  const original = RegExp;
+  let cleanup: ReturnType<typeof generated.bind> = undefined;
+  let replaced = false;
+  try {
+    cleanup = generated.bind(element, {
+      flag: () => {
+        vi.stubGlobal("RegExp", function () {
+          return replacement;
+        });
+        return true;
+      },
+    });
+    replaced = RegExp !== original;
+  } finally {
+    vi.unstubAllGlobals();
+    if (typeof cleanup === "function") cleanup();
+  }
+  expect(replaced).toBe(true);
+  expect(code).toContain("__tachyonRead(");
+  expect(element.textContent).toBe("replacement");
+});
+
+it("does not return an accessor from a template with only an interpolation and a replaced String", () => {
+  const expression = 'flag ? `${value}` : "off"';
+  const emitted = expressionToScopeAccess(expression);
+  const accessor = createSignal("replacement");
+  Object.defineProperty(accessor, Symbol.toPrimitive, { value: () => "coerced" });
+  const evaluate = new Function("scope", "String", `return ${emitted};`);
+  expect(expressionAlwaysPlainValue(expression)).toBe(true);
+  expect(evaluate({ flag: true, value: 1 }, () => accessor)).toBe("coerced");
 });
