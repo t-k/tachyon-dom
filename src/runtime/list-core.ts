@@ -317,19 +317,37 @@ export const replaceRegionContent = ({ start, end }: ListRegionMarkers, nodes: r
   }
 };
 
-/** True when the next order keeps every retained row in place, so new rows only have to be appended. */
-export const canAppendWithoutMoving = (
+/** Returns the start of the new suffix when every retained row is already in order. */
+export const appendStartIndex = (
   nextRecords: ReadonlyMap<PropertyKey, unknown>,
   orderedRecords: readonly PositionedRow[],
   previousRecords: ReadonlyMap<PropertyKey, unknown>,
-): boolean => {
+): number | undefined => {
   let nextIndex = 0;
   for (const key of previousRecords.keys()) {
     if (!nextRecords.has(key)) continue;
-    if (orderedRecords[nextIndex++]?.key !== key) return false;
+    if (orderedRecords[nextIndex++]?.key !== key) return undefined;
   }
+  const firstNewIndex = nextIndex;
   for (; nextIndex < orderedRecords.length; nextIndex++) {
-    if (previousRecords.has((orderedRecords[nextIndex] as PositionedRow).key)) return false;
+    if (previousRecords.has((orderedRecords[nextIndex] as PositionedRow).key)) return undefined;
   }
-  return true;
+  return firstNewIndex;
+};
+
+export const appendOrPositionRecords = (
+  container: Element,
+  nextRecords: ReadonlyMap<PropertyKey, PositionedRow>,
+  orderedRecords: readonly PositionedRow[],
+  previousRecords: ReadonlyMap<PropertyKey, PositionedRow>,
+  end: Comment,
+): void => {
+  const firstNewIndex = appendStartIndex(nextRecords, orderedRecords, previousRecords);
+  if (firstNewIndex === undefined) {
+    positionRecords(container, orderedRecords, previousRecords, end);
+    return;
+  }
+  for (let index = firstNewIndex; index < orderedRecords.length; index++) {
+    for (const node of (orderedRecords[index] as PositionedRow).nodes) container.insertBefore(node, end);
+  }
 };

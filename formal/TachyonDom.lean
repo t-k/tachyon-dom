@@ -1,1 +1,4 @@
 import TachyonDom.ListOrder
+import TachyonDom.CompilerValidation
+import TachyonDom.ListAppend
+import TachyonDom.HtmlWhitespace

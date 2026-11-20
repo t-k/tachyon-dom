@@ -343,10 +343,6 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
 };
 
 const validateTree = (node: TemplateNode, hydrateIds: Set<string>, insideFor = false): Result<void, CompilerError> => {
-  const expressionResult = validateTextExpressions(node);
-  if (!expressionResult.ok) {
-    return expressionResult;
-  }
   if (node.type === "text") {
     return ok(undefined);
   }
@@ -448,6 +444,11 @@ const collectDirectives = (node: TemplateNode, path: number[], directives: Templ
 };
 
 export const createTemplateIr = (root: ElementNode): Result<TemplateIr, CompilerError> => {
+  // Preserve diagnostic order by validating the full expression tree before structural checks.
+  const expressionResult = validateTextExpressions(root);
+  if (!expressionResult.ok) {
+    return expressionResult;
+  }
   const validationResult = validateTree(root, new Set());
   if (!validationResult.ok) {
     return err(validationResult.error);

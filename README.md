@@ -213,7 +213,7 @@ Property tests use a stable fast-check seed; use `FAST_CHECK_SEED`, `FAST_CHECK_
 
 The focused hydration campaign reruns the compiler and conditional-runtime ranges from the hydration review without incremental reuse. See [its coverage and survivor ledger](docs/hydration-mutation-testing.md) for scope, remaining equivalent mutations, and GC test requirements.
 
-The [Lean proofs](formal/README.md) check invariants used by the runtime optimizations. With Elan installed, run `cd formal && lake build && lake env leanchecker TachyonDom.ListOrder`.
+The [Lean proofs](formal/README.md) check invariants used by the runtime optimizations. With Elan installed, run `cd formal && lake build && lake env leanchecker TachyonDom`.
 
 Useful examples:
 

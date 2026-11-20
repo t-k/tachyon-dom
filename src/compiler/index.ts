@@ -66,14 +66,12 @@ export const compileTemplate = (
   }
   return rememberCompiledTemplate(
     cacheKey,
-    ok(
-      deepFreeze({
-        source,
-        ir: irResult.value,
-        root: irResult.value.root,
-        client: lowerClientTemplate(irResult.value.root),
-      }),
-    ),
+    ok({
+      source,
+      ir: irResult.value,
+      root: irResult.value.root,
+      client: lowerClientTemplate(irResult.value.root),
+    }),
   );
 };
 

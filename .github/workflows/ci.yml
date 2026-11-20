@@ -74,7 +74,7 @@ jobs:
           use-mathlib-cache: "false"
 
       - working-directory: formal
-        run: lake env leanchecker TachyonDom.ListOrder
+        run: lake env leanchecker TachyonDom
 
   test:
     name: Unit tests

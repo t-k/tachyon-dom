@@ -2,7 +2,7 @@
 // full list mount; now it is one module with its own regressions.
 import { describe, expect, it, vi } from "vitest";
 import {
-  canAppendWithoutMoving,
+  appendStartIndex,
   canReuseListRegion,
   ensureListRegion,
   hasSameKeyOrder,
@@ -153,7 +153,7 @@ describe("keyed list core", () => {
       ]);
       const ordered = (keys: string[]) => keys.map((key) => ({ key, nodes: [] }));
       expect(
-        canAppendWithoutMoving(
+        appendStartIndex(
           new Map([
             ["b", {}],
             ["c", {}],
@@ -161,9 +161,9 @@ describe("keyed list core", () => {
           ordered(["b", "c"]),
           previous,
         ),
-      ).toBe(true);
+      ).toBe(1);
       expect(
-        canAppendWithoutMoving(
+        appendStartIndex(
           new Map([
             ["c", {}],
             ["b", {}],
@@ -171,9 +171,9 @@ describe("keyed list core", () => {
           ordered(["c", "b"]),
           previous,
         ),
-      ).toBe(false);
+      ).toBeUndefined();
       expect(
-        canAppendWithoutMoving(
+        appendStartIndex(
           new Map([
             ["b", {}],
             ["a", {}],
@@ -181,7 +181,7 @@ describe("keyed list core", () => {
           ordered(["b", "a"]),
           previous,
         ),
-      ).toBe(false);
+      ).toBeUndefined();
     });
 
     it("checks append order without materializing key arrays", () => {
@@ -197,11 +197,11 @@ describe("keyed list core", () => {
       const ordered = ["a", "b", "c"].map((key) => ({ key, nodes: [] }));
       const from = vi.spyOn(Array, "from");
 
-      const appendOnly = canAppendWithoutMoving(next, ordered, previous);
+      const appendStart = appendStartIndex(next, ordered, previous);
       const arrayMaterializations = from.mock.calls.length;
       from.mockRestore();
 
-      expect(appendOnly).toBe(true);
+      expect(appendStart).toBe(2);
       expect(arrayMaterializations).toBe(0);
     });
 
@@ -455,21 +455,25 @@ describe("keyed list core", () => {
       expect(() => moveBefore(otherDomError, node, null)).toThrow("gone");
     });
 
-    it("appends without moving only while every retained row keeps its order", () => {
-      const previous = new Map<PropertyKey, unknown>([
-        ["a", 1],
-        ["b", 1],
-      ]);
-      const rows = (keys: readonly string[]) => keys.map((key) => ({ key, nodes: [] as Node[] }));
-      const next = (keys: readonly string[]) => new Map<PropertyKey, unknown>(keys.map((key) => [key, 1]));
-
-      expect(canAppendWithoutMoving(next(["a", "b", "c"]), rows(["a", "b", "c"]), previous)).toBe(true);
-      expect(canAppendWithoutMoving(next(["a", "b"]), rows(["a", "b"]), previous)).toBe(true);
-      // Dropping a row leaves the rest in order, so the remaining ones still do not have to move.
-      expect(canAppendWithoutMoving(next(["a"]), rows(["a"]), previous)).toBe(true);
-      // A retained row that changed order, and a new row in front of the retained ones, both need positioning.
-      expect(canAppendWithoutMoving(next(["b", "a"]), rows(["b", "a"]), previous)).toBe(false);
-      expect(canAppendWithoutMoving(next(["c", "a", "b"]), rows(["c", "a", "b"]), previous)).toBe(false);
+    it.each([
+      ["empty", "retained", "tail", 0],
+      ["populated", "removed", "tail", 1],
+      ["populated", "retained", "middle", undefined],
+      ["populated", "reordered", "none", undefined],
+      ["empty", "retained", "none", 0],
+      ["populated", "reordered", "middle", undefined],
+      ["populated", "reordered", "tail", undefined],
+      ["populated", "removed", "middle", undefined],
+      ["populated", "removed", "none", 1],
+    ] as const)("finds the new suffix of a %s list with %s rows and %s insertion", (old, order, insertion, boundary) => {
+      const previousKeys = old === "empty" ? [] : ["a", "b"];
+      const keys = order === "reordered" ? ["b", "a"] : order === "removed" ? ["b"] : [...previousKeys];
+      if (insertion === "tail") keys.push("new");
+      if (insertion === "middle") keys.splice(keys.length > 1 ? 1 : 0, 0, "new");
+      const records = (values: readonly string[]) => new Map(values.map((key) => [key, {}]));
+      const start = appendStartIndex(records(keys), keys.map((key) => ({ key, nodes: [] })), records(previousKeys));
+      expect(start).toBe(boundary);
+      if (start !== undefined) expect(keys.slice(start)).toEqual(keys.filter((key) => !previousKeys.includes(key)));
     });
   });
 

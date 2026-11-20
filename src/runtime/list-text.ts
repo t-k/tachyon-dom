@@ -5,12 +5,11 @@ import { cleanupOwnedSubtree, registerOwnedSubtree, runCleanups } from "./subtre
 import { normalizeListKey } from "./key.js";
 import { countPerformance } from "./performance-counters.js";
 import {
-  canAppendWithoutMoving,
+  appendOrPositionRecords,
   canReuseListRegion,
   emptyParentScope,
   ensureListRegion,
   hasSameKeyOrder,
-  positionRecords,
   replaceRegionContent,
   readItemPath,
   readPath,
@@ -553,15 +552,8 @@ const mountTextKeyedListResolved = (
         state.markers,
         orderedRecords.flatMap((record) => record.nodes),
       );
-    } else if (canAppendWithoutMoving(nextRecords, orderedRecords, previousRecords)) {
-      const previousKeys = new Set(previousRecords.keys());
-      for (const record of orderedRecords) {
-        if (!previousKeys.has(record.key)) {
-          for (const node of record.nodes) container.insertBefore(node, end);
-        }
-      }
     } else {
-      positionRecords(container, orderedRecords, previousRecords, end);
+      appendOrPositionRecords(container, nextRecords, orderedRecords, previousRecords, end);
     }
     state.records = nextRecords;
     state.initialized = true;
