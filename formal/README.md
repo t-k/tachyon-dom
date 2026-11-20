@@ -17,10 +17,15 @@ If the scan succeeds, the entire retained sequence is strictly increasing, and e
 
 `HtmlWhitespace` proves that an input with no whitespace edit candidates has only unchanged tag slices, regardless of quote state. It abstracts source spans as contiguous slices and models the four code-unit classes used by the guard.
 
-`LogicalNode` proves that stopping at the requested logical sibling returns the same entry as collecting every visible sibling and indexing the resulting array. The runtime shares one marker-aware traversal for both live and client-shaped sibling sequences.
+`LogicalNode` proves that stopping at the requested logical sibling returns the same entry as collecting every visible sibling and indexing the resulting array. The runtime shares one marker-aware traversal for both live and client-shaped sibling sequences. Counting the visible siblings without storing them gives the same length as collection.
 
 `RouteIndex` proves that a required literal segment selects the matching bucket, and that discarding impossible routes preserves the first matching route or the last wildcard fallback. The indexed and general candidates merge in the original rank order.
 
 `ParserDelimiter` proves that looking for a delimiter in the remaining UTF-16 code units produces the same offset as one-at-a-time scanning, including the end offset when the delimiter is absent.
 
 `Utf8Length` proves that UTF-16 code-unit length is a lower bound for UTF-8 byte length, that ASCII fragments have equal lengths, and that skipping an exact measurement after the lower bound reaches the flush threshold leaves the coalesced stream unchanged.
+
+
+`PlainExpressions` proves that if every result arm of a conditional or short-circuit expression returns a plain value, the outer signal read is redundant. The compiler retains the read on result arms it cannot prove plain, including values from a replaceable regular expression constructor.
+
+`QueryGrouping` proves that stable grouping preserves duplicate values in their original order for each schema key. Grouped lookup applies to well-formed schema keys, while other keys use the native query name conversion.

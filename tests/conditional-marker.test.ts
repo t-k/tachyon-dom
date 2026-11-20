@@ -10,6 +10,8 @@ import {
   isInsertionEndMarker,
   isInsertionStartMarker,
   isPathInvisibleNode,
+  logicalNodeAt,
+  logicalNodeCount,
   logicalNodesBetween,
   outletEndMarker,
   outletStartMarker,
@@ -158,5 +160,28 @@ describe("insertion markers", () => {
     const inner = parent.childNodes[2] as Node;
     expect(clientShapedNodes(parent.firstChild, inner)).toEqual([parent.firstChild]);
     expect(logicalNodesBetween(parent.firstChild, inner)).toEqual([parent.firstChild]);
+  });
+});
+
+describe("logical node aggregation", () => {
+  it.each([
+    ["list", "matching-marker", "visible", 1],
+    ["insertion", "end", "visible", 1],
+    ["conditional", "none", "invisible", 2],
+    ["conditional", "end", "visible", 2],
+    ["list", "end", "invisible", 0],
+    ["insertion", "none", "invisible", 2],
+    ["insertion", "matching-marker", "invisible", 1],
+    ["conditional", "matching-marker", "invisible", 1],
+    ["list", "none", "visible", 1],
+  ] as const)("counts the logical %s siblings with %s and %s content", (kind, boundary, content, expected) => {
+    const marker = { list: "tachyon-for", insertion: "tachyon-outlet", conditional: "tachyon-if" }[kind];
+    const inner = content === "visible" ? "<span></span>" : "<!--tachyon-hydrate:inner:start-->";
+    const { parent } = region(`<!--${marker}-->${inner}<!--/${marker}--><i></i>`);
+    const first = parent.firstChild;
+    const end = boundary === "none" ? null : parent.childNodes[boundary === "end" ? 3 : 2]!;
+    expect(logicalNodesBetween(first, end)).toHaveLength(expected);
+    expect(logicalNodeCount(first, end)).toBe(expected);
+    expect(logicalNodeAt(first, end, 0) !== undefined).toBe(expected > 0);
   });
 });

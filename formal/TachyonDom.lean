@@ -6,3 +6,5 @@ import TachyonDom.LogicalNode
 import TachyonDom.RouteIndex
 import TachyonDom.ParserDelimiter
 import TachyonDom.Utf8Length
+import TachyonDom.PlainExpressions
+import TachyonDom.QueryGrouping

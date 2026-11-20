@@ -7,6 +7,7 @@ import {
   isInsertionStartMarker,
   isPathInvisibleNode,
   logicalNodeAt,
+  logicalNodeCount,
   logicalNodesBetween,
   removeInsertionRegion,
 } from "../conditional-marker.js";
@@ -213,12 +214,8 @@ const registerAnchor = (root: Node, path: readonly number[], anchor: Comment): v
 const conditionalRegionNodeCount = (root: Node, key: string, anchor: Comment): number => {
   const end = conditionalRegionEnd(anchor);
   return end
-    ? regionNodeCount(anchor, end)
+    ? logicalNodeCount(anchor.nextSibling, end)
     : (preparedConditionalNodeCount(root, key) ?? preparedConditionalAdoptionCount(anchor) ?? 0);
-};
-
-const regionNodeCount = (anchor: Comment, end: Node): number => {
-  return logicalNodesBetween(anchor.nextSibling, end).length;
 };
 
 /**
@@ -342,7 +339,7 @@ const adoptRegion = (
   // The template's own list regions are skipped exactly as the live region count skips them.
   const expected = logicalNodesBetween(createFragment(templateHtml).firstChild, null);
   const parent = anchor.parentNode as Node;
-  const liveCount = regionNodeCount(anchor, end);
+  const liveCount = logicalNodeCount(anchor.nextSibling, end);
   // A branch made only of list regions has no shaped nodes of its own; its rows are adopted by the list.
   const nodes =
     liveCount === expected.length
@@ -690,26 +687,23 @@ const disposeState = (anchor: Comment, state: ConditionalCoreState): void => {
 const logicalStateNodes = (state: ConditionalCoreState): Node[] =>
   state.nodes.filter((node) => !isPathInvisibleNode(node));
 
-const nodeAtState = (state: ConditionalCoreState, path: readonly number[]): Node | undefined => {
+const lookupAtState = <T>(
+  state: ConditionalCoreState,
+  path: readonly number[],
+  lookup: (node: Node, path: readonly number[]) => T,
+): T => {
   const nodes = logicalStateNodes(state);
-  if (nodes.length <= 1) return nodeAt(nodes[0] as Node, path);
+  if (nodes.length <= 1) return lookup(nodes[0] as Node, path);
   const [firstIndex, ...rest] = path;
-  return nodeAt(nodes[firstIndex ?? 0] as Node, rest);
-};
-
-const textAtState = (state: ConditionalCoreState, path: readonly number[]): Text => {
-  const nodes = logicalStateNodes(state);
-  if (nodes.length <= 1) return textAt(nodes[0] as Node, path);
-  const [firstIndex, ...rest] = path;
-  return textAt(nodes[firstIndex ?? 0] as Node, rest);
+  return lookup(nodes[firstIndex ?? 0] as Node, rest);
 };
 
 const bindNodes = (state: ConditionalCoreState, options: ConditionalCoreOptions, bindEvents: boolean): void => {
   for (const binding of options.bindings) {
-    const node = nodeAtState(state, binding.path);
+    const node = lookupAtState(state, binding.path, nodeAt);
     if (!node) continue;
     if (binding.kind === "text") {
-      setText(textAtState(state, binding.path), readBinding(state.scope, binding));
+      setText(lookupAtState(state, binding.path, textAt), readBinding(state.scope, binding));
     } else if (binding.kind === "class") {
       setClassPresence(node as Element, binding.className, readBinding(state.scope, binding));
     } else if (binding.kind === "attr") {
@@ -734,16 +728,16 @@ const bindGeneratedNodes = (
   bindEvents: boolean,
 ): void => {
   for (const binding of options.bindings) {
-    const node = nodeAtState(state, binding.path);
+    const node = lookupAtState(state, binding.path, nodeAt);
     if (!node) continue;
     const value = read(binding.read(state.scope));
     if (binding.apply) binding.apply(node, value);
-    else setText(textAtState(state, binding.path), value);
+    else setText(lookupAtState(state, binding.path, textAt), value);
   }
   if (!bindEvents) return;
   const currentScope = (): Record<string, unknown> => state.scope;
   for (const event of options.events ?? []) {
-    const node = nodeAtState(state, event.path);
+    const node = lookupAtState(state, event.path, nodeAt);
     if (node instanceof Element) state.cleanups.push(event.bind(node, currentScope));
   }
 };

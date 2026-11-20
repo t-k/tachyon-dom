@@ -1,5 +1,7 @@
 import { countPerformance } from "./runtime/performance-counters.js";
 
+const commentNodeType = 8; // DOM COMMENT_NODE
+
 declare const __TACHYON_PRODUCTION__: boolean | "counter";
 
 /**
@@ -14,10 +16,10 @@ export const conditionalStartMarker = `<!--${conditionalStartMarkerValue}-->`;
 export const conditionalEndMarker = `<!--${conditionalEndMarkerValue}-->`;
 
 export const isConditionalStartMarker = (node: Node): node is Comment =>
-  node.nodeType === Node.COMMENT_NODE && node.nodeValue === conditionalStartMarkerValue;
+  node.nodeType === commentNodeType && node.nodeValue === conditionalStartMarkerValue;
 
 export const isConditionalEndMarker = (node: Node): node is Comment =>
-  node.nodeType === Node.COMMENT_NODE && node.nodeValue === conditionalEndMarkerValue;
+  node.nodeType === commentNodeType && node.nodeValue === conditionalEndMarkerValue;
 
 /**
  * Comment markers that delimit a `<for>` region the same way. Both markers are invisible to logical paths, so a
@@ -31,10 +33,10 @@ export const listStartMarker = `<!--${listStartMarkerValue}-->`;
 export const listEndMarker = `<!--${listEndMarkerValue}-->`;
 
 export const isListStartMarker = (node: Node): node is Comment =>
-  node.nodeType === Node.COMMENT_NODE && node.nodeValue === listStartMarkerValue;
+  node.nodeType === commentNodeType && node.nodeValue === listStartMarkerValue;
 
 export const isListEndMarker = (node: Node): node is Comment =>
-  node.nodeType === Node.COMMENT_NODE && node.nodeValue === listEndMarkerValue;
+  node.nodeType === commentNodeType && node.nodeValue === listEndMarkerValue;
 
 /** The end marker that closes the region `start` opens, skipping nested regions of the same kind. */
 const regionEnd = (
@@ -131,13 +133,13 @@ export const slotStartMarker = (name: string): string => `<!--${slotMarkerPrefix
 export const slotEndMarker = (name: string): string => `<!--/${slotMarkerPrefix}${name}-->`;
 
 export const isInsertionStartMarker = (node: Node): node is Comment => {
-  if (node.nodeType !== Node.COMMENT_NODE) return false;
+  if (node.nodeType !== commentNodeType) return false;
   const value = node.nodeValue ?? "";
   return value === outletMarkerValue || value.startsWith(slotMarkerPrefix);
 };
 
 export const isInsertionEndMarker = (node: Node): node is Comment => {
-  if (node.nodeType !== Node.COMMENT_NODE) return false;
+  if (node.nodeType !== commentNodeType) return false;
   const value = node.nodeValue ?? "";
   return value === `/${outletMarkerValue}` || value.startsWith(`/${slotMarkerPrefix}`);
 };
@@ -158,20 +160,23 @@ export const removeInsertionRegion = (start: Comment): void => {
  * paths count past them.
  */
 export const isPathInvisibleNode = (node: Node): boolean =>
-  node.nodeType === Node.COMMENT_NODE &&
+  node.nodeType === commentNodeType &&
   ((node.nodeValue ?? "").startsWith("tachyon-hydrate:") ||
     isConditionalEndMarker(node) ||
     isListStartMarker(node) ||
     isListEndMarker(node) ||
     isInsertionEndMarker(node));
 
-const scanLogicalNodes = (
+// A two-argument call counts. Lookup callers always pass the index slot, even for a sparse path.
+function scanLogicalNodes(first: Node | null, end: Node | null, index?: undefined, nodes?: Node[], clientShape?: boolean): number;
+function scanLogicalNodes(first: Node | null, end: Node | null, index: number, nodes?: undefined, clientShape?: boolean): Node | undefined;
+function scanLogicalNodes(
   first: Node | null,
   end: Node | null,
-  index: number | undefined,
+  index?: number,
   nodes?: Node[],
   clientShape?: boolean,
-): Node | undefined => {
+): Node | number | undefined {
   let ordinal = 0;
   for (let node = first; node && node !== end; node = node.nextSibling) {
     if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter" && clientShape && !nodes)
@@ -185,8 +190,8 @@ const scanLogicalNodes = (
     } else if (isListStartMarker(node)) nestedEnd = listRegionEnd(node);
     if (nestedEnd && nestedEnd !== end) node = nestedEnd;
   }
-  return undefined;
-};
+  if (arguments.length === 2) return ordinal;
+}
 
 /** Collects logical siblings, skipping nested conditional bodies when reading the client template shape. */
 export const logicalNodesBetween = (first: Node | null, end: Node | null, clientShape?: boolean): Node[] => {
@@ -196,8 +201,10 @@ export const logicalNodesBetween = (first: Node | null, end: Node | null, client
 };
 export const clientShapedNodes = (first: Node | null, end: Node | null): Node[] =>
   logicalNodesBetween(first, end, true);
-export const logicalNodeAt = (first: Node | null, end: Node | null, index: number): Node | undefined =>
-  scanLogicalNodes(first, end, index);
+export const logicalNodeAt: (first: Node | null, end: Node | null, index: number) => Node | undefined = scanLogicalNodes;
+
+/** Counts logical siblings without retaining them. */
+export const logicalNodeCount: (first: Node | null, end: Node | null) => number = scanLogicalNodes;
 
 /** Resolves a template path while treating conditional branches and inserted content as opaque. */
 export const templateNodeAt = (root: Node, path: readonly number[]): Node | undefined => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { logicalNodeAt, logicalNodesBetween } from "../src/conditional-marker.js";
-import { preparedNodeAt } from "../src/runtime/conditional-core.js";
+import { nodeAt } from "../src/runtime/conditional.js";
+import { mountConditionalCore, preparedNodeAt } from "../src/runtime/conditional-core.js";
 import { nodeAtWithDynamicLists } from "../src/runtime/list-path.js";
 
 const container = (html: string): HTMLDivElement => {
@@ -71,6 +72,27 @@ describe("logical sibling lookup", () => {
     expect(logicalNodeAt(root.firstChild, null, index)).toBeUndefined();
     expect(() => nodeAtWithDynamicLists(root, [index], [])).toThrow(TypeError);
     expect(() => preparedNodeAt(root, [index])).toThrow(TypeError);
+  });
+
+  it("treats sparse public paths as missing nodes", () => {
+    const root = container("<p></p><i></i>");
+    const sparse = new Array<number>(1);
+    expect(nodeAt(root, sparse)).toBeUndefined();
+    expect(() => nodeAtWithDynamicLists(root, sparse, [])).toThrow(TypeError);
+    expect(() => preparedNodeAt(root, sparse)).toThrow(TypeError);
+  });
+
+  it("targets later roots of a mounted conditional for both text and element bindings", () => {
+    const root = container("<!--tachyon-if--><!--/tachyon-if-->");
+    mountConditionalCore(root, [0], true, { label: "updated", active: true }, {
+      templateHtml: "<b>first</b><span>second</span>",
+      bindings: [
+        { kind: "text", path: [1, 0], expression: "label" },
+        { kind: "class", path: [1], className: "active", expression: "active" },
+      ],
+    });
+    expect(root.querySelector("b")?.textContent).toBe("first");
+    expect(root.querySelector("span")?.outerHTML).toBe('<span class="active">updated</span>');
   });
 
   it("stops the public lookup without reading siblings after the requested node", () => {

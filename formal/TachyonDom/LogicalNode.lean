@@ -32,4 +32,23 @@ theorem select_eq_getElem {α : Type} (steps : List (Option α)) (index : Nat) :
     selectFrom steps index 0 = (steps.filterMap id)[index]? := by
   simpa using selectFrom_eq_getElem steps 0 index
 
+/-- The scanner increments once per visible node, starting at its current ordinal. -/
+def countFrom {α : Type} : List (Option α) → Nat → Nat
+  | [], ordinal => ordinal
+  | none :: rest, ordinal => countFrom rest ordinal
+  | some _ :: rest, ordinal => countFrom rest (ordinal + 1)
+
+theorem countFrom_eq_length {α : Type} (steps : List (Option α)) (ordinal : Nat) :
+    countFrom steps ordinal = ordinal + (steps.filterMap id).length := by
+  induction steps generalizing ordinal with
+  | nil => simp [countFrom]
+  | cons step rest ih =>
+    cases step <;> simp_all [countFrom, Nat.add_left_comm, Nat.add_comm]
+
+/-- A lookup of the first visible node answers the existence check on the full count. -/
+theorem first_isSome_iff_countPositive {α : Type} (steps : List (Option α)) :
+    (selectFrom steps 0 0).isSome = true ↔ 0 < countFrom steps 0 := by
+  rw [select_eq_getElem, countFrom_eq_length]
+  cases steps.filterMap id <;> simp
+
 end TachyonDom.LogicalNode
