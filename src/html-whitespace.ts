@@ -63,6 +63,8 @@ const collectTagRanges = (node: LocatedNode, ranges: SourceRange[]): void => {
 };
 
 export const normalizeHtmlTagWhitespace = (html: string): string => {
+  // A tag can change only at non-space HTML whitespace, consecutive spaces, or a space before '>'.
+  if (!/[\t\n\f\r]| {2}| >/.test(html)) return html;
   const errors: unknown[] = [];
   const options = {
     sourceCodeLocationInfo: true,
