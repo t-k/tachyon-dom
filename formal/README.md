@@ -22,3 +22,5 @@ If the scan succeeds, the entire retained sequence is strictly increasing, and e
 `RouteIndex` proves that a required literal segment selects the matching bucket, and that discarding impossible routes preserves the first matching route or the last wildcard fallback. The indexed and general candidates merge in the original rank order.
 
 `ParserDelimiter` proves that looking for a delimiter in the remaining UTF-16 code units produces the same offset as one-at-a-time scanning, including the end offset when the delimiter is absent.
+
+`Utf8Length` proves that UTF-16 code-unit length is a lower bound for UTF-8 byte length, that ASCII fragments have equal lengths, and that skipping an exact measurement after the lower bound reaches the flush threshold leaves the coalesced stream unchanged.
