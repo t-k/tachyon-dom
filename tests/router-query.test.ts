@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { createSearchParamsSchema, queryInteger, queryString, queryStringList } from "../src/router";
 
 describe("typed search params", () => {
@@ -113,5 +113,149 @@ describe("typed search params", () => {
       queryString<string>();
     };
     expectTypeOf(invalidCalls).toBeFunction();
+  });
+});
+
+describe("large typed search params schemas", () => {
+  it.each([
+    ["params", "threshold", "threshold", "repeated", "success"],
+    ["url", "threshold", "threshold", "reserved", "success"],
+    ["string", "threshold", "threshold", "unknown", "error"],
+    ["string", "below", "threshold", "repeated", "success"],
+    ["string", "threshold", "below", "repeated", "success"],
+    ["url", "below", "below", "repeated", "error"],
+    ["params", "below", "below", "reserved", "error"],
+    ["url", "below", "below", "unknown", "success"],
+    ["string", "threshold", "below", "reserved", "error"],
+    ["params", "below", "threshold", "unknown", "success"],
+  ] as const)(
+    "preserves parse semantics for %s with %s fields, %s pairs, %s values and %s",
+    (inputType, fields, pairs, shape, outcome) => {
+      const fieldCount = fields === "threshold" ? 64 : 63;
+      const pairCount = pairs === "threshold" ? 32 : 31;
+      const names = ["seen", "capture", "__proto__", "constructor", "", "2", "10"];
+      for (let index = names.length; index < fieldCount; index++) names.push(`field-${index}`);
+      const queryNames = {
+        repeated: ["capture", "seen", "capture", "constructor", "capture"],
+        reserved: ["__proto__", "", "constructor", "2", "10", "__proto__"],
+        unknown: ["unknown", "capture", "not-a-field", "", "never-in-schema"],
+      }[shape];
+      const params = new URLSearchParams();
+      for (let index = 0; index < pairCount; index++) {
+        params.append(queryNames[index % queryNames.length]!, index % 7 === 0 ? "" : `a + ${index} 雪`);
+      }
+      const input = {
+        params,
+        string: params.toString(),
+        url: new URL(`https://example.test/?${params}`),
+      }[inputType];
+      const rejected = new RangeError("codec rejected the value");
+      const calls: string[] = [];
+      const schema = Object.fromEntries(names.map((name) => [name, {
+        parse: (values: readonly string[]) => {
+          calls.push(name);
+          if (outcome === "error" && (name === "capture" || name === "constructor")) throw rejected;
+          return values;
+        },
+        stringify: (values: readonly string[]) => values,
+      }]));
+      const expected = Object.fromEntries(Object.keys(schema).map((name) => [name, params.getAll(name)]));
+      const parse = createSearchParamsSchema(schema).parse;
+      const getAll = vi.spyOn(URLSearchParams.prototype, "getAll");
+      let result: unknown;
+      let failure: unknown;
+      let fallbackCalls: number;
+      try {
+        result = parse(input);
+      } catch (error) {
+        failure = error;
+      } finally {
+        fallbackCalls = getAll.mock.calls.length;
+        getAll.mockRestore();
+      }
+
+      if (outcome === "success") {
+        expect(failure).toBeUndefined();
+        expect(Object.entries(result as object)).toEqual(Object.entries(expected));
+        expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+        expect(Object.hasOwn(result as object, "__proto__")).toBe(true);
+        expect(calls).toEqual(Object.keys(schema));
+      } else {
+        expect(failure).toBeInstanceOf(TypeError);
+        expect(failure).toMatchObject({
+          message: "Invalid query parameter capture: codec rejected the value",
+          cause: rejected,
+        });
+        expect(calls).toEqual(Object.keys(schema).slice(0, Object.keys(schema).indexOf("capture") + 1));
+      }
+      expect(fallbackCalls).toBe(fields === "threshold" && pairs === "threshold" ? 1 : calls.length);
+    },
+  );
+
+  it("propagates the first codec failure before grouping the query", () => {
+    const schema = createSearchParamsSchema(Object.fromEntries([
+      ["invalid", queryInteger()] as const,
+      ...Array.from({ length: 63 }, (_, index) => [`field-${index}`, queryStringList()] as const),
+    ]));
+    const input = new URLSearchParams({ invalid: "not-a-number" });
+    for (let index = 0; index < 31; index++) input.append("unknown", String(index));
+    const visit = vi.spyOn(URLSearchParams.prototype, "forEach");
+    try {
+      expect(() => schema.parse(input)).toThrow("Invalid query parameter invalid: Expected a decimal integer.");
+      expect(visit).not.toHaveBeenCalled();
+    } finally {
+      visit.mockRestore();
+    }
+  });
+
+  it("keeps unknown names out of the grouped value buckets", () => {
+    const schema = createSearchParamsSchema(Object.fromEntries(
+      Array.from({ length: 64 }, (_, index) => [`field-${index}`, queryStringList()] as const),
+    ));
+    const input = new URLSearchParams();
+    for (let index = 0; index < 32; index++) input.append(`outside-query-scope-${index}`, "value");
+    const set = Map.prototype.set;
+    let unknownWrites = 0;
+    const write = vi.spyOn(Map.prototype, "set").mockImplementation(function (this: Map<unknown, unknown>, key, value) {
+      if (typeof key === "string" && key.startsWith("outside-query-scope-")) unknownWrites++;
+      return set.call(this, key, value);
+    });
+    try {
+      schema.parse(input);
+    } finally {
+      write.mockRestore();
+    }
+    expect(unknownWrites).toBe(0);
+  });
+
+  it("keeps the outer snapshot stable and lets a reentrant parse observe its own input", () => {
+    const original = new URLSearchParams({ trigger: "outer", watched: "before", second: "two" });
+    for (let index = 0; index < 30; index++) original.append("outside", String(index));
+    let nested: Record<string, readonly string[]> | undefined;
+    const values = {
+      parse: (entries: readonly string[]) => entries,
+      stringify: (entries: readonly string[]) => entries,
+    };
+    const schema = createSearchParamsSchema(Object.fromEntries([
+      ["trigger", {
+        ...values,
+        parse: (entries: readonly string[]) => {
+          if (entries[0] === "outer") {
+            original.set("trigger", "inner");
+            original.set("watched", "after");
+            nested = schema.parse(original);
+          }
+          return entries;
+        },
+      }],
+      ["watched", values],
+      ["second", values],
+      ...Array.from({ length: 61 }, (_, index) => [`field-${index}`, values] as const),
+    ]));
+    const result = schema.parse(original);
+    expect(result.watched).toEqual(["before"]);
+    expect(nested?.watched).toEqual(["after"]);
+    expect(result.second).not.toBe(nested?.second);
+    expect(result["field-0"]).not.toBe(result["field-1"]);
   });
 });
