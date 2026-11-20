@@ -3,7 +3,9 @@
   "concurrency": 2,
   "incremental": false,
   "mutate": [
-    "src/runtime/list-core.ts:248:0-330:0",
+    "src/runtime/list-core.ts:184:0-197:0",
+    "src/runtime/list-core.ts:200:0-202:0",
+    "src/runtime/list-core.ts:257:0-339:0",
     "src/runtime/list-text.ts:323:0-355:0",
     "src/runtime/list-text.ts:375:0-425:0",
     "src/runtime/list-text.ts:515:0-529:0",

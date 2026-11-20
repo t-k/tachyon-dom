@@ -182,14 +182,23 @@ export const positionRecords = (
     previousOrder.set(previousKeys[index] as PropertyKey, index);
   }
   const middlePositions: number[] = [];
+  let previousPosition = -1;
+  let hasInversion = false;
   for (let index = prefixLength; index < nextLength - suffixLength; index++) {
-    middlePositions.push(previousOrder.get((orderedRecords[index] as PositionedRow).key) ?? -1);
+    const position = previousOrder.get((orderedRecords[index] as PositionedRow).key) ?? -1;
+    middlePositions.push(position);
+    if (!hasInversion && position >= 0) {
+      hasInversion = position <= previousPosition;
+      previousPosition = position;
+    }
   }
-  const stablePositions = longestIncreasingSubsequencePositions(middlePositions);
+  // If the retained positions are already increasing, they are the entire LIS.
+  const stablePositions = hasInversion ? longestIncreasingSubsequencePositions(middlePositions) : undefined;
   let anchor: Node | null = orderedRecords[nextLength - suffixLength]?.nodes[0] ?? staticAfter;
   for (let index = nextLength - suffixLength - 1; index >= prefixLength; index--) {
     const record = orderedRecords[index] as PositionedRow;
-    if (stablePositions.has(index - prefixLength)) {
+    const middleIndex = index - prefixLength;
+    if (stablePositions?.has(middleIndex) ?? ((middlePositions[middleIndex] as number) >= 0)) {
       anchor = record.nodes[0] ?? anchor;
       continue;
     }

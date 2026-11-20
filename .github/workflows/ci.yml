@@ -56,6 +56,26 @@ jobs:
 
       - run: pnpm verify:whitespace-types
 
+  lean:
+    name: Lean proofs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: leanprover/lean-action@ba3fdfe5c4476c925da13bf11a005ddb47e47aee # v1
+        with:
+          lake-package-directory: formal
+          auto-config: "false"
+          build: "true"
+          use-github-cache: "false"
+          use-mathlib-cache: "false"
+
+      - working-directory: formal
+        run: lake env leanchecker TachyonDom.ListOrder
+
   test:
     name: Unit tests
     runs-on: ubuntu-latest
