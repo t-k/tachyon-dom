@@ -76,7 +76,8 @@ describe("logical sibling lookup", () => {
 
   it("treats sparse public paths as missing nodes", () => {
     const root = container("<p></p><i></i>");
-    const sparse = new Array<number>(1);
+    const sparse: number[] = [];
+    sparse.length = 1;
     expect(nodeAt(root, sparse)).toBeUndefined();
     expect(() => nodeAtWithDynamicLists(root, sparse, [])).toThrow(TypeError);
     expect(() => preparedNodeAt(root, sparse)).toThrow(TypeError);
