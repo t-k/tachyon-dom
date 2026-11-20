@@ -508,7 +508,7 @@ describe("DX helpers", () => {
   // A size baseline drifting by a few bytes used to stop the single CI job before the tests it was queued in
   // front of ever ran, so the run reported nothing about them. Each gate is its own job now, and no job waits
   // for another.
-  it("reports tests, browser tests, and bundle sizes as jobs that cannot mask each other", async () => {
+  it("reports proofs, tests, browser tests, and bundle sizes as jobs that cannot mask each other", async () => {
     const workflow = await readFile(".github/workflows/ci.yml", "utf8");
     const jobs = workflow.slice(workflow.indexOf("\njobs:\n"));
     const jobNames = Array.from(jobs.matchAll(/^ {2}([a-z][a-z-]*):$/gm), (match) => match[1] as string);
@@ -519,8 +519,11 @@ describe("DX helpers", () => {
     };
     const runsIn = (name: string, command: string) => `${jobBody(name)}\n`.includes(`\n      - run: ${command}\n`);
 
-    expect(jobNames).toEqual(["verify", "test", "browser", "sizes", "benchmark"]);
+    expect(jobNames).toEqual(["verify", "lean", "test", "browser", "sizes", "benchmark"]);
     expect(workflow).not.toContain("needs:");
+    expect(jobBody("lean")).toContain('lake-package-directory: formal');
+    expect(jobBody("lean")).toContain('build: "true"');
+    expect(jobBody("lean")).toContain("working-directory: formal\n        run: lake env leanchecker TachyonDom");
     expect(runsIn("test", "pnpm test")).toBe(true);
     expect(runsIn("browser", "pnpm test:browser")).toBe(true);
     expect(runsIn("sizes", "pnpm check:quick-example-size")).toBe(true);

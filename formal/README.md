@@ -7,7 +7,6 @@ lake build
 lake env leanchecker TachyonDom
 ```
 
-
 `CompilerValidation` proves that a successful expression check stays successful when inherited raw-text restrictions are dropped, that removing successful checks preserves the first structural diagnostic, and that freezing the cache wrapper freezes every reachable payload object.
 
 `HtmlWhitespace` proves that an input with no whitespace edit candidates has only unchanged tag slices, regardless of quote state. It abstracts source spans as contiguous slices and models the four code-unit classes used by the guard.
