@@ -46,6 +46,26 @@ describe("logical sibling lookup", () => {
     expect(logicalNodeAt(root.firstChild, null, 4)).toBeUndefined();
   });
 
+  it("never returns a visible boundary or its following siblings", () => {
+    const root = container("<p></p><span></span><b></b>");
+    expect(logicalNodeAt(root.firstChild, root.querySelector("span"), 1)).toBeUndefined();
+  });
+
+  it.each([
+    ["tachyon-for", 0],
+    ["tachyon-outlet", 1],
+  ] as const)("counts the inner node when the %s closing marker is the boundary", (marker, index) => {
+    const root = container(`<!--${marker}--><span></span><!--/${marker}--><b></b>`);
+    const bound = root.childNodes[2] as Node;
+    expect(logicalNodeAt(root.firstChild, bound, index)).toBe(root.querySelector("span"));
+    expect(logicalNodeAt(root.firstChild, bound, index + 1)).toBeUndefined();
+  });
+
+  it("keeps a normal sibling in front of an unmatched insertion end", () => {
+    const root = container("<p></p><span></span><!--/tachyon-outlet--><b></b>");
+    expect(logicalNodeAt(root.firstChild, null, 1)).toBe(root.querySelector("span"));
+  });
+
   it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])("returns no node for an invalid numeric index (%s)", (index) => {
     const root = container("<p></p><i></i>");
     expect(logicalNodeAt(root.firstChild, null, index)).toBeUndefined();
