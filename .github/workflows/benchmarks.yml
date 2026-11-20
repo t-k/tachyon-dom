@@ -2,111 +2,63 @@ name: Benchmarks
 
 on:
   workflow_dispatch:
-    inputs:
-      suite:
-        description: Benchmark suite to run
-        required: true
-        type: choice
-        default: all
-        options:
-          - all
-          - web-framework
-          - js-framework
-          - client-bundle
-          - generated-template
 
 permissions:
   contents: read
 
-concurrency:
-  group: benchmarks-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
-  benchmark:
+  paired-generated-template:
+    name: Paired generated-template comparison
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 90
     env:
+      BASE_COMMIT: 83c55e0212adce7b7ba14d9d367234ac05aeef40
+      HEAD_COMMIT: b566b551ea88d8c57d5c8e85564b59c04682788e
       NODE_OPTIONS: --max-old-space-size=6144
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Setup Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 24
           package-manager-cache: false
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright Chromium
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Prepare output directory
+      - name: Install both subjects and Chromium
         shell: bash
         run: |
-          result_dir="$RUNNER_TEMP/tachyon-dom-benchmarks-${{ github.run_id }}"
-          mkdir -p "$result_dir"
-          echo "RESULT_DIR=$result_dir" >> "$GITHUB_ENV"
-
-      - name: Run Web Framework benchmark
-        if: ${{ inputs.suite == 'all' || inputs.suite == 'web-framework' }}
-        run: pnpm bench:web-framework --output "$RESULT_DIR/web-framework.json"
-
-      - name: Run js-framework-benchmark comparison
-        if: ${{ inputs.suite == 'all' || inputs.suite == 'js-framework' }}
-        run: pnpm bench:local:stable --output "$RESULT_DIR/js-framework.json"
-
-      - name: Measure client bundle sizes of interactive pages
-        if: ${{ inputs.suite == 'all' || inputs.suite == 'client-bundle' }}
-        run: pnpm bench:client-bundle --output "$RESULT_DIR/client-bundle.json"
-
-      - name: Measure generated templates in a production browser
-        if: ${{ inputs.suite == 'all' || inputs.suite == 'generated-template' }}
-        run: pnpm bench:template-browser -- --iterations 5 --warmup 2 --item-count 1000 --child-count 2 --output "$RESULT_DIR/generated-template-timing.json"
-
-      - name: Count generated template work
-        if: ${{ inputs.suite == 'all' || inputs.suite == 'generated-template' }}
-        run: pnpm bench:template-browser -- --iterations 1 --warmup 0 --item-count 1000 --child-count 2 --counters true --output "$RESULT_DIR/generated-template-counters.json"
-
-      - name: Diagnose generated template retained memory
-        if: ${{ inputs.suite == 'all' || inputs.suite == 'generated-template' }}
-        run: pnpm bench:template-browser -- --iterations 1 --warmup 0 --item-count 1000 --child-count 2 --memory true --memory-cycles 10 --output "$RESULT_DIR/generated-template-memory.json"
-
-      - name: Write benchmark summary
-        if: ${{ inputs.suite != 'generated-template' }}
+          corepack enable
+          git worktree add --detach "$RUNNER_TEMP/lean-base" "$BASE_COMMIT"
+          git worktree add --detach "$RUNNER_TEMP/lean-head" "$HEAD_COMMIT"
+          pnpm --dir "$RUNNER_TEMP/lean-base" install --frozen-lockfile
+          pnpm --dir "$RUNNER_TEMP/lean-head" install --frozen-lockfile
+          pnpm --dir "$RUNNER_TEMP/lean-head" exec playwright install --with-deps chromium
+          mkdir -p "$RUNNER_TEMP/lean-results"
+      - name: Measure five base/head pairs on the same runner
         shell: bash
         run: |
-          summary_args=(--suite "${{ inputs.suite }}" --output "$RESULT_DIR/summary.md")
-          if [ "${{ inputs.suite }}" = "all" ] || [ "${{ inputs.suite }}" = "web-framework" ]; then
-            summary_args+=(--web "$RESULT_DIR/web-framework.json")
-          fi
-          if [ "${{ inputs.suite }}" = "all" ] || [ "${{ inputs.suite }}" = "js-framework" ]; then
-            summary_args+=(--local "$RESULT_DIR/js-framework.json")
-          fi
-          if [ "${{ inputs.suite }}" = "all" ] || [ "${{ inputs.suite }}" = "client-bundle" ]; then
-            summary_args+=(--client "$RESULT_DIR/client-bundle.json")
-          fi
-          pnpm bench:summary "${summary_args[@]}"
-          cat "$RESULT_DIR/summary.md" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Describe generated template artifacts
-        if: ${{ inputs.suite == 'all' || inputs.suite == 'generated-template' }}
-        run: |
-          echo '## Generated template browser benchmark' >> "$GITHUB_STEP_SUMMARY"
-          echo 'The artifact contains separate production timing, operation counter, and GC-after-memory reports for keyed rows, generated text lists, and generated mixed lists. Timings from counter and memory runs are diagnostic only.' >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload benchmark results
-        if: ${{ always() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+          result_dir="$RUNNER_TEMP/lean-results"
+          compare_args=()
+          for pair in {1..5}; do
+            if ((pair % 2 == 1)); then
+              subjects=(base head)
+            else
+              subjects=(head base)
+            fi
+            for subject in "${subjects[@]}"; do
+              printf 'Pair %s of 5, %s\n' "$pair" "$subject"
+              pnpm --dir "$RUNNER_TEMP/lean-$subject" bench:template-browser -- \
+                --iterations 3 --warmup 1 --item-count 1000 --child-count 2 \
+                --output "$result_dir/$subject-$pair.json"
+            done
+            compare_args+=(--pair "$result_dir/base-$pair.json" "$result_dir/head-$pair.json")
+          done
+          pnpm --dir "$RUNNER_TEMP/lean-head" bench:template-browser:compare -- \
+            "${compare_args[@]}" --output "$result_dir/comparison.json"
+          printf 'Five clean paired runs compared %s with %s. The artifact contains the comparison and all ten measurements.\n' \
+            "$BASE_COMMIT" "$HEAD_COMMIT" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c64a875d1fc6a0a # v7
+        if: always()
         with:
-          name: benchmark-results-${{ github.run_id }}-${{ inputs.suite }}
-          path: |
-            ${{ env.RESULT_DIR }}
-            benchmark/web-framework/results/logs
+          name: lean-followups-paired-${{ github.run_id }}
+          path: ${{ runner.temp }}/lean-results
           if-no-files-found: warn
