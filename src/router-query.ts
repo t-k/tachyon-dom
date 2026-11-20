@@ -18,6 +18,8 @@ export type SearchParamsSchema<Values> = {
   href: (href: string, values: Values) => string;
 };
 
+const unpairedSurrogate = /[\uD800-\uDFFF]/u;
+
 const groupQueryValues = (
   params: URLSearchParams,
   fieldNames: ReadonlySet<string>,
@@ -36,7 +38,10 @@ export const createSearchParamsSchema = <const Schema extends Record<string, Any
   schema: Schema,
 ): SearchParamsSchema<QueryValues<Schema>> => {
   const fields = Object.entries({ ...schema });
-  const fieldNames = fields.length >= 64 ? new Set(fields.map(([name]) => name)) : undefined;
+  // getAll converts field names to USVString. Use native lookup when that conversion can change a name.
+  const fieldNames = fields.length >= 64 && fields.every(([name]) => !unpairedSurrogate.test(name))
+    ? new Set(fields.map(([name]) => name))
+    : undefined;
   const codec: SearchParamsSchema<QueryValues<Schema>> = {
     parse: (input) => {
       const params = new URLSearchParams(input instanceof URL ? input.search : input);

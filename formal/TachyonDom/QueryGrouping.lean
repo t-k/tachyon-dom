@@ -31,4 +31,13 @@ theorem group_eq_getAll (known : Key → Bool) (name : Key) (pairs : List (Key �
       · simp [getAll, addKnown, same]
   simpa using append_result (fun _ => [])
 
+/-- Native lookup converts a field name before matching. The grouping path is used only
+when that conversion leaves the requested name unchanged. -/
+theorem group_eq_getAll_after_conversion (known : Key → Bool) (convertName : Key → Key)
+    (name : Key) (pairs : List (Key × Value)) (isKnown : known name = true)
+    (unchanged : convertName name = name) :
+    (pairs.foldl (addKnown known) (fun _ => [])) name = getAll (convertName name) pairs := by
+  rw [unchanged]
+  exact group_eq_getAll known name pairs isKnown
+
 end TachyonDom.QueryGrouping

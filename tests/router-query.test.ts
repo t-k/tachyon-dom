@@ -228,6 +228,42 @@ describe("large typed search params schemas", () => {
     expect(unknownWrites).toBe(0);
   });
 
+  it.each(["astral pair", "unpaired surrogate"] as const)(
+    "preserves native query-name conversion for a %s",
+    (shape) => {
+      const malformed = shape === "unpaired surrogate";
+      const requestedName = malformed ? "key-\uD800" : "key-\u{1F680}";
+      const normalizedName = malformed ? "key-\uFFFD" : "key-\u{1F680}";
+      const field = { parse: (values: readonly string[]) => values, stringify: (values: readonly string[]) => values };
+      const schema = createSearchParamsSchema(Object.fromEntries([
+        ["first", field] as const,
+        [requestedName, field] as const,
+        ...(malformed ? [[normalizedName, field] as const] : []),
+        ...Array.from({ length: malformed ? 61 : 62 }, (_, index) => [`field-${index}`, field] as const),
+      ]));
+      const input = new URLSearchParams();
+      input.append(normalizedName, "first");
+      for (let index = 0; index < 30; index++) input.append("outside", "value");
+      input.append(normalizedName, "second");
+      const lookup = vi.spyOn(URLSearchParams.prototype, "getAll");
+      let lookups: number;
+      let parsed: Record<string, readonly string[]>;
+      try {
+        parsed = schema.parse(input);
+        lookups = lookup.mock.calls.length;
+      } finally {
+        lookup.mockRestore();
+      }
+
+      expect(parsed[requestedName]).toEqual(["first", "second"]);
+      expect(lookups).toBe(malformed ? 64 : 1);
+      if (malformed) {
+        expect(parsed[normalizedName]).toEqual(["first", "second"]);
+        expect(parsed[requestedName]).not.toBe(parsed[normalizedName]);
+      }
+    },
+  );
+
   it("keeps the outer snapshot stable and lets a reentrant parse observe its own input", () => {
     const original = new URLSearchParams({ trigger: "outer", watched: "before", second: "two" });
     for (let index = 0; index < 30; index++) original.append("outside", String(index));
