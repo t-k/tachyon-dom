@@ -44,11 +44,6 @@ const readName = (parser: Parser): Result<string, CompilerError> => {
   return ok(name);
 };
 
-const delimiterOffset = (source: string, delimiter: string, start: number): number => {
-  const found = source.indexOf(delimiter, start);
-  return found === -1 ? source.length : found;
-};
-
 const readQuotedValue = (parser: Parser): Result<string, CompilerError> => {
   const quote = peek(parser);
   if (quote !== `"` && quote !== `'`) {
@@ -56,7 +51,9 @@ const readQuotedValue = (parser: Parser): Result<string, CompilerError> => {
   }
   parser.offset++;
   const start = parser.offset;
-  parser.offset = delimiterOffset(parser.source, quote, parser.offset);
+  while (parser.offset < parser.source.length && peek(parser) !== quote) {
+    parser.offset++;
+  }
   if (peek(parser) !== quote) {
     return parserError(parser, "Unclosed attribute value.");
   }
@@ -230,7 +227,9 @@ const parseAttributes = (parser: Parser): Result<Attribute[], CompilerError> => 
 
 const parseText = (parser: Parser): TextNode => {
   const start = parser.offset;
-  parser.offset = delimiterOffset(parser.source, "<", parser.offset);
+  while (parser.offset < parser.source.length && peek(parser) !== "<") {
+    parser.offset++;
+  }
   return { type: "text", value: parser.source.slice(start, parser.offset), start, end: parser.offset };
 };
 
