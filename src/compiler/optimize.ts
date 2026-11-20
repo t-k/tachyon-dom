@@ -131,19 +131,7 @@ export const expressionScopeNames = (expression: string): ReadonlySet<string> | 
   return names;
 };
 
-/**
- * Whether an expression's result can never be a signal accessor, so the runtime's `read` unwrapping is
- * unnecessary.
- *
- * Compound expressions are evaluated in JavaScript before the result reaches the binding, so an operator that
- * always produces a primitive, array, or object literal cannot yield an accessor. Anything that can return one
- * of its operands unchanged - `&&`, `||`, `??`, and the conditional operator - is excluded, as are identifiers,
- * member access, and calls, whose value the compiler cannot see.
- */
-export const expressionAlwaysPlainValue = (expression: string): boolean => {
-  const parsed = parseExpression(expression);
-  if (!parsed.ok) return false;
-  const node = parsed.value;
+const nodeAlwaysPlainValue = (node: ExpressionNode): boolean => {
   switch (node.type) {
     case "literal":
     case "regex":
@@ -153,10 +141,24 @@ export const expressionAlwaysPlainValue = (expression: string): boolean => {
     case "unary":
       return true;
     case "binary":
-      return !["&&", "||", "??"].includes(node.operator);
+      return (
+        !["&&", "||", "??"].includes(node.operator) ||
+        (nodeAlwaysPlainValue(node.left) && nodeAlwaysPlainValue(node.right))
+      );
+    case "conditional":
+      return nodeAlwaysPlainValue(node.consequent) && nodeAlwaysPlainValue(node.alternate);
     default:
       return false;
   }
+};
+
+/**
+ * Whether every possible result is a plain value, making the outer signal unwrap unnecessary.
+ * A conditional returns one of its branches and a short-circuit operator returns one of its operands.
+ */
+export const expressionAlwaysPlainValue = (expression: string): boolean => {
+  const parsed = parseExpression(expression);
+  return parsed.ok && nodeAlwaysPlainValue(parsed.value);
 };
 
 const containsCall = (node: ExpressionNode): boolean => {
