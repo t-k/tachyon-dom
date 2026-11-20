@@ -120,10 +120,10 @@ it.each([
 ] as const)("preserves the ranked candidate list at the %s size, %s buckets, generic %s", (size, buckets, generic) => {
   const total = { below: 23, at: 24, above: 25 }[size];
   const genericCount = generic === "limit" ? 8 : 9;
-  const entries = Array.from({ length: total }, (_, rank) => ({
-    rank,
-    firstSegment: rank < genericCount * 2 && rank % 2 ? undefined : buckets === "two" && rank % 3 ? "b" : "a",
-  }));
+  const entries = Array.from({ length: total }, (_, rank) => {
+    const isGeneric = rank < (genericCount - 1) * 2 && rank % 2 === 1 || rank === total - 1;
+    return { rank, firstSegment: isGeneric ? undefined : buckets === "two" && rank % 3 ? "b" : "a" };
+  });
   const table = indexRankedRoutes(entries);
   if (size === "below" || buckets === "one" || generic === "over") {
     expect(table.index).toBeUndefined();
