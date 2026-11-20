@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 20
     env:
       BASE: 83c55e0212adce7b7ba14d9d367234ac05aeef40
-      CANDIDATE: d692a3ee1358fc86fa43df78509a03e841bb7f9d
+      CANDIDATE: 843757df48025ad94ab7e5e741205165ee8f7d4a
       NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
