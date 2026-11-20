@@ -207,6 +207,8 @@ pnpm test:mutation:store
 pnpm test:mutation:release-readiness
 ```
 
+The [Lean proofs](formal/README.md) document and verify equivalence rules used by the compiler and server fast paths.
+
 Property tests use a stable fast-check seed; use `FAST_CHECK_SEED`, `FAST_CHECK_PATH`, and `FAST_CHECK_NUM_RUNS` to replay or resize a campaign. Mutation testing remains a local check: the normal command reuses incremental results, the full command retests every in-scope mutant, and the detailed report is written to `reports/mutation/index.html`. The scoped campaigns narrow both the mutated ranges and the tests run against them: the SFC campaign reports to `reports/mutation/sfc/`, the release-readiness campaign covers the reactive store plus the SFC and client-target ranges a release touches and reports to `reports/mutation/release-readiness/`, and the store campaign reports to the terminal.
 
 `pnpm check:runtime-sizes` compares the recorded per-feature runtime measurements and the generated table in the runtime guide. Re-record both with `pnpm update:runtime-sizes` on a clean checkout after a change that moves them.

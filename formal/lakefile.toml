@@ -1,0 +1,6 @@
+name = "tachyon-dom"
+defaultTargets = ["TachyonDom"]
+leanOptions = { warningAsError = true }
+
+[[lean_lib]]
+name = "TachyonDom"
