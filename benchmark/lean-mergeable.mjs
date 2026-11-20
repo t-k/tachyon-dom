@@ -21,18 +21,12 @@ if (mode === "bundles") {
   console.log(JSON.stringify(result));
 } else {
   const { compileTemplate, generateServerStreamModule } = await load("dist/compiler/index.js");
-  const { parseTemplate } = await load("dist/compiler/parser.js");
   const { normalizeHtmlTagWhitespace } = await load("dist/html-whitespace.js");
   const { createSearchParamsSchema, queryStringList } = await load("dist/router-query.js");
   const { renderToReadableStream } = await load("dist/server/stream.js");
 
   const compile = (content) => (index) => {
     const result = compileTemplate('<main data-run="' + index + '">' + content + '</main>');
-    assert(result.ok);
-    return result.value;
-  };
-  const parse = (source) => () => {
-    const result = parseTemplate(source);
     assert(result.ok);
     return result.value;
   };
@@ -68,10 +62,6 @@ if (mode === "bundles") {
   const workloads = [
     ["compiler-small", compile("<p>{value}</p>"), 2800],
     ["compiler-nested", compile(nested), 450],
-    ["parser-small-ascii", parse('<p title="short">Plain text</p>'), 120000],
-    ["parser-small", parse('<p title="short">短い text</p>'), 120000],
-    ["parser-long", parse('<p title="' + "alpha漢字".repeat(8192) + '">' + "long漢 text ".repeat(8192) + '</p>'), 600],
-    ["parser-many-small", parse('<main>' + '<p title="name">短い本文</p>'.repeat(240) + '</main>'), 1800],
     ["html-compact", () => normalizeHtmlTagWhitespace(compact), 320],
     ["html-formatted", () => normalizeHtmlTagWhitespace(formatted), 500],
     ["query-small", query(4, 4), 60000],

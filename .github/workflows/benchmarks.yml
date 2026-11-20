@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 20
     env:
       BASE: 83c55e0212adce7b7ba14d9d367234ac05aeef40
-      CANDIDATE: 843757df48025ad94ab7e5e741205165ee8f7d4a
+      CANDIDATE: b669f9b59caa822846a6646eb542b298e7bb5134
       NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -36,6 +36,8 @@ jobs:
             pnpm --dir "$RUNNER_TEMP/$subject" install --frozen-lockfile
             pnpm --dir "$RUNNER_TEMP/$subject" build
           done
+      - name: Confirm that parser code is unchanged
+        run: cmp "$RUNNER_TEMP/base/dist/compiler/parser.js" "$RUNNER_TEMP/candidate/dist/compiler/parser.js"
       - name: Compare browser bundle bytes
         run: |
           for subject in base candidate; do
