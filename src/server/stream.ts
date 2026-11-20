@@ -2,6 +2,8 @@ export type HtmlChunk = string | Uint8Array;
 export type HtmlChunkSource = Iterable<HtmlChunk | Promise<HtmlChunk>> | AsyncIterable<HtmlChunk>;
 
 const encoder = new TextEncoder();
+const asciiProbeMaxCodeUnits = 256;
+const nonAsciiCodeUnit = /[\u0080-\uffff]/;
 const coalescedChunkTargetBytes = 8192;
 
 const isAsyncIterable = (value: HtmlChunkSource): value is AsyncIterable<HtmlChunk> => Symbol.asyncIterator in value;
@@ -33,7 +35,14 @@ async function* toAsyncChunks(source: HtmlChunkSource): AsyncIterable<HtmlChunk>
       continue;
     }
     textBuffer += resolved;
-    textBufferBytes += toBytes(resolved).byteLength;
+    // UTF-16 code-unit count is a lower bound on UTF-8 bytes, and exact for ASCII.
+    textBufferBytes += resolved.length;
+    if (
+      textBufferBytes < coalescedChunkTargetBytes &&
+      (resolved.length > asciiProbeMaxCodeUnits || nonAsciiCodeUnit.test(resolved))
+    ) {
+      textBufferBytes += encoder.encode(resolved).byteLength - resolved.length;
+    }
     if (textBufferBytes >= coalescedChunkTargetBytes) {
       yield* flush();
     }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   compileTemplate,
   generateServerModule,
@@ -18,6 +18,22 @@ const readStream = async (stream: ReadableStream<Uint8Array>): Promise<string> =
     }
     output += decoder.decode(result.value, { stream: true });
   }
+};
+
+const readByteChunks = async (stream: ReadableStream<Uint8Array>): Promise<Uint8Array[]> => {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  while (true) {
+    const result = await reader.read();
+    if (result.done) return chunks;
+    chunks.push(result.value);
+  }
+};
+
+const readTextChunks = async (stream: AsyncIterable<string>): Promise<string[]> => {
+  const chunks: string[] = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return chunks;
 };
 
 async function* delayedChunks(): AsyncIterable<string> {
@@ -40,6 +56,144 @@ describe("server stream adapter", () => {
     expect(decoder.decode(first.value)).toBe("<h1>Hello</h1>");
     expect(second.done).toBe(true);
   });
+
+  it.each([
+    ["adapter", "ascii", "at"],
+    ["generated", "ascii", "at"],
+    ["adapter", "paired", "below"],
+    ["generated", "paired", "beyond"],
+    ["adapter", "unpaired", "at"],
+    ["generated", "unpaired", "below"],
+    ["adapter", "ascii", "below"],
+    ["adapter", "three", "beyond"],
+    ["generated", "three", "below"],
+    ["generated", "ascii", "beyond"],
+    ["generated", "two", "at"],
+    ["adapter", "two", "below"],
+    ["generated", "two", "beyond"],
+    ["adapter", "paired", "at"],
+    ["generated", "three", "at"],
+    ["generated", "unpaired", "beyond"],
+  ] as const)("preserves %s flush boundaries for %s code units %s the target", async (entry, units, boundary) => {
+    const sample = { ascii: "a", two: "π", three: "漢", paired: "🚀", unpaired: "\uD800x\uDC00" }[units];
+    const offset = { below: -1, at: 0, beyond: 5 }[boundary];
+    const encoder = new TextEncoder();
+    const prefix = "<main>";
+    const suffix = "</main>";
+    const payload = "x".repeat(8192 + offset - prefix.length - encoder.encode(sample).byteLength) + sample;
+    const expected = boundary === "below" ? [prefix + payload + suffix] : [prefix + payload, suffix];
+    if (entry === "adapter") {
+      const chunks = await readByteChunks(renderToReadableStream([prefix, payload, suffix]));
+      expect(chunks).toEqual(expected.map((part) => encoder.encode(part)));
+    } else {
+      const result = compileTemplate("<main>{value}</main>");
+      if (!result.ok) throw new Error(result.error.message);
+      const code = generateServerStreamModule(result.value).replace("export const stream", "const stream");
+      const stream = new Function(`${code}; return stream;`)() as (
+        scope: Record<string, unknown>,
+      ) => AsyncIterable<string>;
+      expect(await readTextChunks(stream({ value: payload }))).toEqual(expected);
+    }
+  });
+
+  it("counts split surrogate chunks individually and encodes their concatenation", async () => {
+    const prefix = "x".repeat(8186);
+    const encoder = new TextEncoder();
+    const chunks = await readByteChunks(renderToReadableStream([prefix, "\uD83D", "\uDE80", "end"]));
+    expect(chunks).toEqual([encoder.encode(prefix + "🚀"), encoder.encode("end")]);
+  });
+
+  it.each(["adapter", "generated"] as const)(
+    "skips measurement encoding for ASCII and for chunks guaranteed to flush in the %s",
+    async (entry) => {
+      const prefix = "<main>";
+      const suffix = "</main>";
+      const value = "漢".repeat(8192 - prefix.length);
+      const result = compileTemplate("<main>{value}</main>");
+      if (!result.ok) throw new Error(result.error.message);
+      const code = generateServerStreamModule(result.value).replace("export const stream", "const stream");
+      const stream = new Function(`${code}; return stream;`)() as (
+        scope: Record<string, unknown>,
+      ) => AsyncIterable<string>;
+      const encode = vi.spyOn(TextEncoder.prototype, "encode");
+      try {
+        if (entry === "adapter") {
+          await readByteChunks(renderToReadableStream([prefix, value, suffix]));
+          expect(encode).toHaveBeenCalledTimes(2);
+          expect(encode.mock.calls[0]?.[0]).toBe(prefix + value);
+          expect(encode.mock.calls[1]?.[0]).toBe(suffix);
+        } else {
+          await readTextChunks(stream({ value }));
+          expect(encode).not.toHaveBeenCalled();
+        }
+      } finally {
+        encode.mockRestore();
+      }
+    },
+  );
+
+  it.each(["adapter", "generated"] as const)("bounds the %s ASCII probe at 256 code units", async (entry) => {
+    const short = "a".repeat(256);
+    const long = "b".repeat(257);
+    const result = compileTemplate("<main>{short}<b>{long}</b></main>");
+    if (!result.ok) throw new Error(result.error.message);
+    const code = generateServerStreamModule(result.value).replace("export const stream", "const stream");
+    const stream = new Function(`${code}; return stream;`)() as (
+      scope: Record<string, unknown>,
+    ) => AsyncIterable<string>;
+    const encode = vi.spyOn(TextEncoder.prototype, "encode");
+    try {
+      if (entry === "adapter") {
+        await readByteChunks(renderToReadableStream([short, long]));
+        expect(encode.mock.calls).toEqual([[long], [short + long]]);
+      } else {
+        await readTextChunks(stream({ short, long }));
+        expect(encode.mock.calls).toEqual([[long]]);
+      }
+    } finally {
+      encode.mockRestore();
+    }
+  });
+
+  it.each(["adapter", "generated"] as const)("measures the %s ASCII code-unit boundary", async (entry) => {
+    const ascii = "\u0000\u007F";
+    const firstNonAscii = "\u0080";
+    const lastUnit = "\uFFFF";
+    const result = compileTemplate("<main>{ascii}<b>{firstNonAscii}</b><b>{lastUnit}</b></main>");
+    if (!result.ok) throw new Error(result.error.message);
+    const code = generateServerStreamModule(result.value).replace("export const stream", "const stream");
+    const stream = new Function(`${code}; return stream;`)() as (
+      scope: Record<string, unknown>,
+    ) => AsyncIterable<string>;
+    const encode = vi.spyOn(TextEncoder.prototype, "encode");
+    try {
+      if (entry === "adapter") {
+        await readByteChunks(renderToReadableStream([ascii, firstNonAscii, lastUnit]));
+        expect(encode.mock.calls).toEqual([[firstNonAscii], [lastUnit], [ascii + firstNonAscii + lastUnit]]);
+      } else {
+        await readTextChunks(stream({ ascii, firstNonAscii, lastUnit }));
+        expect(encode.mock.calls).toEqual([[firstNonAscii], [lastUnit]]);
+      }
+    } finally {
+      encode.mockRestore();
+    }
+  });
+
+  it.each(["__tachyonAsciiProbeMaxCodeUnits", "__tachyonNonAsciiCodeUnit"])(
+    "keeps the generated stream default scope name %s available",
+    async (defaultScopeName) => {
+      const result = compileTemplate("<main>{value}</main>");
+      if (!result.ok) throw new Error(result.error.message);
+      const code = generateServerStreamModule(result.value, { defaultScopeName }).replace(
+        "export const stream",
+        "const stream",
+      );
+      const stream = new Function(`const ${defaultScopeName} = { value: "default" }; ${code}; return stream;`)() as (
+        scope?: Record<string, unknown>,
+      ) => AsyncIterable<string>;
+      expect(await readTextChunks(stream())).toEqual(["<main>default</main>"]);
+    },
+  );
 
   it("flushes before unresolved async boundaries", async () => {
     let resolveLate!: () => void;
@@ -97,8 +251,6 @@ describe("server stream adapter", () => {
       throw new Error(result.error.message);
     }
     const module = generateServerStreamModule(result.value).replace("export const stream", "const stream");
-    expect(module).toContain("new TextEncoder");
-    expect(module).toContain("__tachyonBufferBytes += __tachyonTextEncoder.encode(text).byteLength");
     const stream = new Function(`${module}; return stream;`)() as (
       scope: Record<string, unknown>,
     ) => AsyncIterable<string>;
