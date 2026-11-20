@@ -30,11 +30,11 @@ Browser feature measurements (bytes):
 
 | Fixture | Minified | Brotli |
 | --- | ---: | ---: |
-| runtime/list | 16619 | 5931 |
-| runtime/generic-list | 21886 | 7475 |
+| runtime/list | 16640 | 5932 |
+| runtime/generic-list | 21907 | 7467 |
 | runtime/form | 2997 | 1192 |
-| runtime/conditional | 9992 | 3511 |
-| runtime/generic-conditional | 15971 | 5355 |
+| runtime/conditional | 10100 | 3529 |
+| runtime/generic-conditional | 16100 | 5405 |
 | runtime/router | 19351 | 6492 |
 
 Source: [measurement JSON](../scripts/browser-feature-sizes.json). It records the commit, dirty state, input hashes, Node/esbuild versions, production define, minification, and Brotli conditions. `pnpm check:runtime-sizes` compares the input hashes, the byte counts, and the conditions needed to reproduce them: esbuild version, production define, minification, compression, and the Node major version that CI pins. The commit and dirty state are recorded for traceability but are not compared. CI uploads fresh reports as the browser-feature-measurements artifact. These feature fixtures differ from the client bundle attribution fixtures and Quick Example.

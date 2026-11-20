@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "provenance": {
-    "commit": "dbea6891969265724c5c9b5c3c1a002446b37b0b",
+    "commit": "431411718ac3f2e334cd72f944d7f1ce00162c87",
     "dirty": false,
     "node": "v24.14.0",
     "esbuild": "0.28.1",
@@ -14,9 +14,9 @@
   "fixtures": [
     {
       "name": "runtime/list",
-      "inputHash": "064565dec325524cbd1e84f89a31d085189c705421c09e98d90ff157618ece7a",
-      "minifiedBytes": 16619,
-      "brotliBytes": 5931
+      "inputHash": "155e4f1dd806f0ec8bcca7ea74c6383faef2aae3210dd612215827675a8576c5",
+      "minifiedBytes": 16640,
+      "brotliBytes": 5932
     },
     {
       "name": "runtime/form",
@@ -26,21 +26,21 @@
     },
     {
       "name": "runtime/conditional",
-      "inputHash": "9520266a55d30e1ae5bbe36605fb2364d1d7ae467b0484fb492f9a55866ce986",
-      "minifiedBytes": 9992,
-      "brotliBytes": 3511
+      "inputHash": "c3e60db448d8d48dcdc625206ce1c2935072bee98c0395205a4a506384de533b",
+      "minifiedBytes": 10100,
+      "brotliBytes": 3529
     },
     {
       "name": "runtime/generic-list",
-      "inputHash": "457666c0aa277d4af95098722f402b751c18443b3c6466d765f913d5d90a72fb",
-      "minifiedBytes": 21886,
-      "brotliBytes": 7475
+      "inputHash": "36453ae4cf449294ad277a61ab3a505120ff4b087fc23f1a62841db158689cbb",
+      "minifiedBytes": 21907,
+      "brotliBytes": 7467
     },
     {
       "name": "runtime/generic-conditional",
-      "inputHash": "e9760d6b9849dcdced2ba06256d942020df0a2bc899a5400d50e1f7ccba1d068",
-      "minifiedBytes": 15971,
-      "brotliBytes": 5355
+      "inputHash": "e3f3d67b86fdee44b66f34f3f8bebd34d74e5814110d128653f06c1de8a6146f",
+      "minifiedBytes": 16100,
+      "brotliBytes": 5405
     },
     {
       "name": "runtime/router",
