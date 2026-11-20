@@ -216,6 +216,71 @@ describe("keyed list core", () => {
       expect([...longestIncreasingSubsequencePositions([])]).toEqual([]);
     });
 
+    it.each([
+      ["increasing", "middle", "static", "single"],
+      ["inversion-first", "none", "end", "single"],
+      ["inversion-last", "ends", "static", "multiple"],
+      ["no-retained", "middle", "static", "multiple"],
+      ["increasing", "ends", "end", "multiple"],
+      ["inversion-last", "none", "end", "single"],
+      ["no-retained", "ends", "end", "single"],
+      ["increasing", "none", "static", "multiple"],
+      ["inversion-last", "middle", "end", "multiple"],
+      ["inversion-first", "ends", "static", "multiple"],
+      ["inversion-first", "middle", "static", "single"],
+    ] as const)("positions %s rows with %s insertions, a %s anchor, and %s nodes", (order, insertion, anchor, nodes) => {
+      type Row = { key: string; nodes: Node[] };
+      const container = document.createElement("ul");
+      const previousKeys = ["a", "b", "c", "d", "e", "f"];
+      const createRecord = (key: string): Row => ({
+        key,
+        nodes: Array.from({ length: nodes === "single" ? 1 : 2 }, () => document.createElement("li")),
+      });
+      const previous = new Map(previousKeys.map((key) => [key, createRecord(key)]));
+      for (const row of previous.values()) container.append(...row.nodes);
+      const trailer = anchor === "static" ? document.createComment("end of list") : null;
+      if (trailer) container.append(trailer);
+
+      const retainedKeys = {
+        increasing: ["a", "c", "d", "f"],
+        "inversion-first": ["b", "a", "d", "f"],
+        "inversion-last": ["a", "c", "f", "d"],
+        "no-retained": [],
+      }[order];
+      const nextKeys = [...retainedKeys];
+      if (insertion === "middle") nextKeys.splice(1, 0, "x");
+      if (insertion === "ends") {
+        nextKeys.unshift("x");
+        nextKeys.push("y");
+      }
+      const ordered = nextKeys.map((key) => previous.get(key) ?? createRecord(key));
+      const positions = nextKeys.map((key) => previousKeys.indexOf(key));
+      const expectedLIS = longestIncreasingSubsequencePositions(positions);
+      const counters: { lisCalls?: number; nodeMoves?: number } = {};
+      vi.stubGlobal("__TACHYON_PRODUCTION__", "counter");
+      vi.stubGlobal("__tachyonPerformanceCounters", counters);
+      try {
+        positionRecords(container, ordered, previous, trailer);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      for (const [key, row] of previous) {
+        if (!nextKeys.includes(key)) {
+          for (const node of row.nodes) container.removeChild(node);
+        }
+      }
+      const expected = ordered.flatMap((row) => row.nodes);
+      if (trailer) expected.push(trailer);
+      expect(container.childNodes.length).toBe(expected.length);
+      expected.forEach((node, index) => expect(container.childNodes[index]).toBe(node));
+      const reordered = expectedLIS.size !== retainedKeys.length;
+      expect(counters.lisCalls ?? 0).toBe(reordered ? 1 : 0);
+      if (!reordered) {
+        const newNodes = ordered.filter((row) => !previous.has(row.key)).flatMap((row) => row.nodes);
+        expect(counters.nodeMoves ?? 0).toBe(newNodes.length);
+      }
+    });
+
     it("moves only the rows whose order changed", () => {
       const { container, records } = listOf(["a", "b", "c", "d"]);
       const ordered = ["d", "a", "b", "c"].map((key) => records.get(key) as { key: PropertyKey; nodes: Node[] });
