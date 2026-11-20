@@ -5,6 +5,7 @@ it.each([
   ["small", "double", "early"],
   ["boundary", "text", "late"],
   ["large", "single", "absent"],
+  ["small", "single", "absent"],
   ["large", "double", "late"],
   ["large", "text", "early"],
   ["small", "text", "absent"],
