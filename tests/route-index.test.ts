@@ -1,4 +1,5 @@
 import { expect, it, vi } from "vitest";
+import { firstStaticSegment, indexedRouteCandidates, indexRankedRoutes } from "../src/route-index";
 import { createClientRouter, rawHtml, type ClientRouteDefinition } from "../src/runtime/router";
 import { matchRoute, type RouteDefinition } from "../src/router";
 
@@ -93,5 +94,49 @@ it("skips unrelated multi-segment patterns in large route tables", () => {
       .toHaveLength(1);
   } finally {
     exec.mockRestore();
+  }
+});
+
+it.each([
+  [[], undefined],
+  [["single"], undefined],
+  [["", "details"], undefined],
+  [[":tenant", "details"], undefined],
+  [["*rest", "details"], undefined],
+  [["team", ":id"], "team"],
+  [["team+", "*remainder"], "team+"],
+] as const)("classifies the first literal of %j", (segments, expected) => {
+  expect(firstStaticSegment(segments)).toBe(expected);
+});
+
+it.each([
+  ["below", "two", "limit"],
+  ["at", "two", "limit"],
+  ["at", "two", "over"],
+  ["above", "one", "limit"],
+  ["below", "one", "over"],
+  ["above", "two", "over"],
+  ["at", "one", "over"],
+] as const)("preserves the ranked candidate list at the %s size, %s buckets, generic %s", (size, buckets, generic) => {
+  const total = { below: 23, at: 24, above: 25 }[size];
+  const genericCount = generic === "limit" ? 8 : 9;
+  const entries = Array.from({ length: total }, (_, rank) => ({
+    rank,
+    firstSegment: rank < genericCount * 2 && rank % 2 ? undefined : buckets === "two" && rank % 3 ? "b" : "a",
+  }));
+  const table = indexRankedRoutes(entries);
+  if (size === "below" || buckets === "one" || generic === "over") {
+    expect(table.index).toBeUndefined();
+    expect(indexedRouteCandidates(table, "/a/detail")).toBe(entries);
+    return;
+  }
+  expect(table.index).toBeDefined();
+  for (const prefix of ["a", "b", "other"]) {
+    const actual = indexedRouteCandidates(table, "/" + prefix + "/details");
+    expect(actual).toEqual(entries.filter(({ firstSegment }) => firstSegment === undefined || firstSegment === prefix));
+  }
+  const genericEntries = entries.filter(({ firstSegment }) => firstSegment === undefined);
+  for (const pathname of ["xa/details", "/a", "//a/details", "/"]) {
+    expect(indexedRouteCandidates(table, pathname)).toEqual(genericEntries);
   }
 });
