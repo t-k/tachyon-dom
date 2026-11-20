@@ -1,3 +1,4 @@
+import { firstStaticSegment, indexedRouteCandidates, indexRankedRoutes, type RankedRouteTable } from "./route-index.js";
 import { escapeHtml } from "./html-escape.js";
 import { err, ok, type Result } from "./result.js";
 import { serializeHydrationState } from "./runtime/hydrate.js";
@@ -919,14 +920,19 @@ export const createRoutePreloadPlan = (manifest: RouteBuildManifest, routeId: st
     return { href, rel: "prefetch" };
   });
 
-const compileRoutePath = (path: string): { regex: RegExp; names: string[]; wildcard: boolean } => {
+const compileRoutePath = (path: string): {
+  regex: RegExp;
+  names: string[];
+  wildcard: boolean;
+  firstSegment: string | undefined;
+} => {
   if (path === "*") {
-    return { regex: /^.*$/, names: [], wildcard: true };
+    return { regex: /^.*$/, names: [], wildcard: true, firstSegment: undefined };
   }
   const names: string[] = [];
   const segments = trimSlashes(path).split("/").filter(Boolean);
   if (segments.length === 0) {
-    return { regex: /^\/?$/, names, wildcard: false };
+    return { regex: /^\/?$/, names, wildcard: false, firstSegment: undefined };
   }
   const source = segments
     .map((segment) => {
@@ -941,7 +947,12 @@ const compileRoutePath = (path: string): { regex: RegExp; names: string[]; wildc
       return segment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     })
     .join("/");
-  return { regex: new RegExp(`^/${source}/?$`), names, wildcard: false };
+  return {
+    regex: new RegExp(`^/${source}/?$`),
+    names,
+    wildcard: false,
+    firstSegment: firstStaticSegment(segments),
+  };
 };
 
 type FlatRoute = {
@@ -952,6 +963,7 @@ type FlatRoute = {
 };
 
 type CompiledRoute = FlatRoute & {
+  firstSegment: string | undefined;
   regex: RegExp;
   names: string[];
   wildcard: boolean;
@@ -1009,9 +1021,9 @@ const compareCompiledRoutes = (left: CompiledRoute, right: CompiledRoute): numbe
   return left.order - right.order;
 };
 
-const compiledRouteCache = new WeakMap<readonly RouteDefinition[], readonly CompiledRoute[]>();
+const compiledRouteCache = new WeakMap<readonly RouteDefinition[], RankedRouteTable<CompiledRoute>>();
 
-const compiledRoutesFor = (routes: readonly RouteDefinition[]): readonly CompiledRoute[] => {
+const compiledRoutesFor = (routes: readonly RouteDefinition[]): RankedRouteTable<CompiledRoute> => {
   const cached = compiledRouteCache.get(routes);
   if (cached) {
     return cached;
@@ -1025,11 +1037,13 @@ const compiledRoutesFor = (routes: readonly RouteDefinition[]): readonly Compile
         regex: compiledPath.regex,
         specificity: routeSpecificity(candidate.path),
         wildcard: compiledPath.wildcard,
+        firstSegment: compiledPath.firstSegment,
       };
     })
     .sort(compareCompiledRoutes);
-  compiledRouteCache.set(routes, compiled);
-  return compiled;
+  const table = indexRankedRoutes(compiled);
+  compiledRouteCache.set(routes, table);
+  return table;
 };
 
 export const matchRoute = (
@@ -1043,9 +1057,14 @@ export const matchRoute = (
   } catch {
     return err(routeError("Invalid path encoding.", 400));
   }
+  const table = compiledRoutesFor(routes);
+  // The highest-ranked route can match before the pathname needs to be split.
+  const head = table.index ? table.entries[0] : undefined;
+  const headMatch = head?.regex.exec(pathname);
+  const candidates = head && !headMatch ? indexedRouteCandidates(table, pathname) : table.entries;
   let fallback: MatchedRoute | undefined;
-  for (const candidate of compiledRoutesFor(routes)) {
-    const match = candidate.regex.exec(pathname);
+  for (const candidate of candidates) {
+    const match = candidate === head ? headMatch : candidate.regex.exec(pathname);
     if (!match) {
       continue;
     }
