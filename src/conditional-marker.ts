@@ -226,13 +226,13 @@ export const templateNodeAt = (root: Node, path: readonly number[]): Node | unde
   return current;
 };
 
-/**
- * The logical nodes among `first` up to (excluding) `end` for the conditional runtime, which accounts for the
- * branches it owns itself: invisible markers and every node inside a list region are skipped, so a path never
- * addresses a row from its container.
- */
-export const logicalNodesBetween = (first: Node | null, end: Node | null): Node[] => {
-  const nodes: Node[] = [];
+const scanLogicalNodes = (
+  first: Node | null,
+  end: Node | null,
+  index: number | undefined,
+  nodes?: Node[],
+): Node | undefined => {
+  let ordinal = 0;
   for (let node = first; node && node !== end; node = node.nextSibling) {
     if (isListStartMarker(node)) {
       const nestedEnd = listRegionEnd(node);
@@ -240,14 +240,29 @@ export const logicalNodesBetween = (first: Node | null, end: Node | null): Node[
       continue;
     }
     if (isPathInvisibleNode(node)) continue;
-    nodes.push(node);
+    if (nodes) nodes.push(node);
+    else if (ordinal++ === index) return node;
     if (isInsertionStartMarker(node)) {
       const nestedEnd = insertionRegionEnd(node);
       if (nestedEnd && nestedEnd !== end) node = nestedEnd;
     }
   }
+  return undefined;
+};
+
+/**
+ * Logical siblings up to (excluding) `end`. Conditional branches are visible to their owner, while list
+ * rows and server-inserted content occupy no logical slot.
+ */
+export const logicalNodesBetween = (first: Node | null, end: Node | null): Node[] => {
+  const nodes: Node[] = [];
+  scanLogicalNodes(first, end, undefined, nodes);
   return nodes;
 };
+
+/** Finds one logical sibling without collecting the others. */
+export const logicalNodeAt = (first: Node | null, end: Node | null, index: number): Node | undefined =>
+  scanLogicalNodes(first, end, index);
 
 /** Removes a region's content and its end marker; the start marker is the caller's to remove. */
 export const removeConditionalRegion = (start: Comment): void => {

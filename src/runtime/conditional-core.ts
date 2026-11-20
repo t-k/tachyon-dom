@@ -6,6 +6,7 @@ import {
   conditionalRegionEnd,
   isInsertionStartMarker,
   isPathInvisibleNode,
+  logicalNodeAt,
   logicalNodesBetween,
   removeInsertionRegion,
 } from "../conditional-marker.js";
@@ -181,6 +182,8 @@ const isHydrationMarker = isPathInvisibleNode;
 
 const logicalChildren = (node: Node): Node[] => logicalNodesBetween(node.firstChild, null);
 
+const childAt = (node: Node, index: number): Node | undefined => logicalNodeAt(node.firstChild, null, index);
+
 const registeredAnchorFor = (root: Node, path: readonly number[]): Comment | undefined => {
   const anchors = anchorsByRoot.get(root);
   const key = pathKey(path);
@@ -255,10 +258,10 @@ const liveNodeForLogicalPath = (
     const region = registeredAnchorFor(root, parentPath);
     if (region && (descendFinalRegion || step < path.length - 1)) {
       current =
-        conditionalRegionNodeCount(root, key, region) > 0 ? logicalChildren(current)[actualIndex + 1] : undefined;
+        conditionalRegionNodeCount(root, key, region) > 0 ? childAt(current, actualIndex + 1) : undefined;
       continue;
     }
-    current = logicalChildren(current)[actualIndex];
+    current = childAt(current, actualIndex);
   }
   return current;
 };
@@ -310,7 +313,7 @@ export const prepareConditionalCoreForMount = (
   for (const descriptor of orderedPreparedConditionals(descriptors)) {
     const parent = liveNodeForLogicalPath(root, descriptor.path.slice(0, -1), undefined, true);
     const index = descriptor.index + conditionalRegionOffset(root, descriptor.parentKey, descriptor.index);
-    const candidate = parent ? logicalChildren(parent)[index] : undefined;
+    const candidate = parent ? childAt(parent, index) : undefined;
     if (candidate instanceof Comment && !isHydrationMarker(candidate)) registerAnchor(root, descriptor.path, candidate);
     else plan.invalid.add(descriptor.key);
   }
@@ -376,7 +379,7 @@ const prepareConditionalCoreWith = (
       continue;
     }
     const index = descriptor.index + conditionalRegionOffset(root, descriptor.parentKey, descriptor.index);
-    const candidate = logicalChildren(parent)[index];
+    const candidate = childAt(parent, index);
     const dynamicAttributes = source?.dynamicAttributes ?? [];
     if (candidate instanceof Comment && !isHydrationMarker(candidate)) {
       registerAnchor(root, descriptor.path, candidate);
@@ -537,8 +540,6 @@ export const preparedNodeAt = (root: Node, path: readonly number[], childOffset?
   return node;
 };
 
-const childAt = (node: Node, index: number): Node | undefined => logicalChildren(node)[index];
-
 const nodeAt = (root: Node, path: readonly number[]): Node | undefined => {
   let current: Node | undefined = root;
   for (const index of path) {
@@ -614,7 +615,7 @@ const resolveAnchor = (
   }
   const location = liveLocationForLogicalPath(root, path);
   if (!location || location.index < 0) return undefined;
-  const candidate = logicalChildren(location.parent)[location.index];
+  const candidate = childAt(location.parent, location.index);
   if (candidate instanceof Comment && !isHydrationMarker(candidate)) {
     registerAnchor(root, path, candidate);
     return { anchor: candidate, adoptedNodes: undefined };

@@ -1,4 +1,4 @@
-import { logicalNodesBetween } from "../conditional-marker.js";
+import { logicalNodeAt } from "../conditional-marker.js";
 
 /**
  * Kept for modules compiled before list regions carried markers. Every path walker now steps over a list
@@ -24,7 +24,7 @@ export const nodeAtWithDynamicLists = (
   _lists: readonly DynamicListPath[],
 ): Node => {
   let current: Node | undefined = root;
-  for (const index of path) current = current ? logicalNodesBetween(current.firstChild, null)[index] : undefined;
+  for (const index of path) current = current ? logicalNodeAt(current.firstChild, null, index) : undefined;
   if (!current) throw new TypeError(`Missing generated binding node at path ${path.join(".")}.`);
   return current;
 };
