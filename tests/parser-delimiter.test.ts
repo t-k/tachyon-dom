@@ -47,5 +47,5 @@ it.each([
       expect(result.value.attrs[0]).toMatchObject({ value, valueStart: opening.length - 1, valueEnd: valueEnd + 1 });
     }
   }
-  expect(nativeFinds).toBe(size === "small" ? 0 : 1);
+  expect(nativeFinds).toBe(1);
 });
