@@ -18,16 +18,40 @@ export type SearchParamsSchema<Values> = {
   href: (href: string, values: Values) => string;
 };
 
+const unpairedSurrogate = /[\uD800-\uDFFF]/u;
+
+const groupQueryValues = (
+  params: URLSearchParams,
+  fieldNames: ReadonlySet<string>,
+): Map<string, string[]> => {
+  const grouped = new Map<string, string[]>();
+  params.forEach((value, name) => {
+    if (!fieldNames.has(name)) return;
+    const values = grouped.get(name);
+    if (values) values.push(value);
+    else grouped.set(name, [value]);
+  });
+  return grouped;
+};
+
 export const createSearchParamsSchema = <const Schema extends Record<string, AnyQueryField>>(
   schema: Schema,
 ): SearchParamsSchema<QueryValues<Schema>> => {
   const fields = Object.entries({ ...schema });
+  // getAll converts field names to USVString. Use native lookup when that conversion can change a name.
+  const fieldNames = fields.length >= 64 && fields.every(([name]) => !unpairedSurrogate.test(name))
+    ? new Set(fields.map(([name]) => name))
+    : undefined;
   const codec: SearchParamsSchema<QueryValues<Schema>> = {
     parse: (input) => {
       const params = new URLSearchParams(input instanceof URL ? input.search : input);
-      const entries = fields.map(([name, field]) => {
+      let grouped: Map<string, string[]> | undefined;
+      const entries = fields.map(([name, field], index) => {
+        // Let the first codec fail before doing setup for the remaining fields.
+        if (index === 1 && fieldNames && params.size >= 32) grouped = groupQueryValues(params, fieldNames);
         try {
-          return [name, field.parse(params.getAll(name))] as const;
+          const values = grouped ? (grouped.get(name) ?? []) : params.getAll(name);
+          return [name, field.parse(values)] as const;
         } catch (error) {
           throw new TypeError(`Invalid query parameter ${name}: ${error instanceof Error ? error.message : String(error)}`, {
             cause: error,
