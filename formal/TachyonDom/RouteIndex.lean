@@ -2,6 +2,17 @@ import Std
 
 namespace TachyonDom.RouteIndex
 
+/-- The regex requires a leading slash, a non-slash literal segment, and a second slash before any remainder can match. -/
+theorem firstSegmentOfMatchingPrefix (segment suffix : List Char)
+    (literal : ∀ c ∈ segment, c ≠ '/') :
+    ((segment ++ '/' :: suffix).takeWhile (· != '/')) = segment := by
+  induction segment with
+  | nil => simp
+  | cons c rest ih =>
+    have head := literal c List.mem_cons_self
+    have tail := ih (fun d hd => literal d (List.mem_cons_of_mem c hd))
+    simp [head, tail]
+
 /-- A miss changes nothing, a fallback replaces the previous fallback, and a decisive
 result stops the search. A decisive result may be a match or a server diagnostic. -/
 inductive Outcome (α : Type) where
