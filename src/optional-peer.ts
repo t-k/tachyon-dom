@@ -35,3 +35,22 @@ export const requireOptionalPeer = <Module>(packageName: string, feature: string
     throw optionalPeerError(packageName, feature, cause);
   }
 };
+
+type TypeScriptModule = typeof import("typescript");
+
+let typeScriptApi: TypeScriptModule | undefined;
+
+export const requireTypeScriptApi = (feature: string): TypeScriptModule => {
+  if (typeScriptApi) return typeScriptApi;
+  try {
+    const installed = requireOptionalPeer<Partial<TypeScriptModule>>("typescript", feature);
+    if (typeof installed.createSourceFile === "function") {
+      typeScriptApi = installed as TypeScriptModule;
+      return typeScriptApi;
+    }
+  } catch {
+    // The project can install the compatibility API independently.
+  }
+  typeScriptApi = requireOptionalPeer<TypeScriptModule>("@typescript/typescript6", feature);
+  return typeScriptApi;
+};

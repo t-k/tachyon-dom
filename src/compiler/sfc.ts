@@ -10,7 +10,7 @@ import type {
   Statement,
   StringLiteral,
 } from "typescript";
-import { requireOptionalPeer } from "../optional-peer.js";
+import { requireTypeScriptApi } from "../optional-peer.js";
 import { err, ok, type Result } from "../result.js";
 import { compileTemplate } from "./index.js";
 import { parseExpression, type ExpressionNode } from "./expression.js";
@@ -20,12 +20,9 @@ import type { CompiledTemplate, CompilerError, CompileTemplateOptions, TemplateN
 
 type TypeScriptModule = typeof import("typescript");
 
-let loadedTypeScript: TypeScriptModule | undefined;
-
 const ts = new Proxy({} as TypeScriptModule, {
   get: (_target, property) => {
-    loadedTypeScript ??= requireOptionalPeer<TypeScriptModule>("typescript", "Tachyon SFC compilation");
-    return Reflect.get(loadedTypeScript, property);
+    return Reflect.get(requireTypeScriptApi("Tachyon SFC compilation"), property);
   },
 });
 

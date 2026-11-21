@@ -11,7 +11,7 @@
   },
   "mutate": [
     "src/runtime/store.ts",
-    "src/compiler/sfc.ts:925:0-987:0",
+    "src/compiler/sfc.ts:922:0-984:0",
     "src/compiler/targets/client.ts:1255:0-1268:0",
     "src/compiler/targets/client.ts:1332:0-1340:0",
     "src/compiler/targets/client.ts:1620:0-1629:0",

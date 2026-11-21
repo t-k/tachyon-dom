@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-22
+
+### Fixed
+
+- Allow projects to use TypeScript 7 and run SFC compilation, template diagnostics, and code previews with the official optional `@typescript/typescript6` API. Keep the existing TypeScript 5.8–6 API path and access to the client runtime without optional tooling.
+
+### Changed
+
+- Validate template expressions once, freeze compiled results once, and skip HTML whitespace normalization work when no edits are possible.
+- Group repeated values for large query schemas and reduce redundant UTF-8 encoding in SSR streams.
+
+### Validation
+
+- Check the Lean equivalence proofs in CI and verify packed consumers across TypeScript 5.8, 6, and 7.
+
 ## [0.4.0] - 2026-10-22
 
 ### Added

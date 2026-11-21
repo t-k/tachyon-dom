@@ -1,6 +1,6 @@
 import { brotliCompressSync, gzipSync } from "node:zlib";
 import type { TemplateExplanation } from "./compiler/explain.js";
-import { requireOptionalPeer } from "./optional-peer.js";
+import { requireTypeScriptApi } from "./optional-peer.js";
 
 export type CodePreviewReport = {
   version: 1;
@@ -12,10 +12,8 @@ export type CodePreviewReport = {
   explanation: TemplateExplanation;
 };
 
-type TypeScriptModule = typeof import("typescript");
-
 const staticRuntimeImports = (code: string): string[] => {
-  const ts = requireOptionalPeer<TypeScriptModule>("typescript", "Generated code preview");
+  const ts = requireTypeScriptApi("Generated code preview");
   const source = ts.createSourceFile("generated-preview.js", code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const imports: string[] = [];
   for (const statement of source.statements) {

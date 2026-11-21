@@ -12,17 +12,12 @@ import {
 } from "./compiler/utils.js";
 import type { ElementNode, TemplateNode } from "./compiler/types.js";
 import { locateOffset } from "./diagnostics.js";
-import { requireOptionalPeer } from "./optional-peer.js";
+import { requireTypeScriptApi } from "./optional-peer.js";
 import { err, ok, type Result } from "./result.js";
 
 type TypeScriptModule = typeof import("typescript");
 
-let loadedTypeScript: TypeScriptModule | undefined;
-
-const typescript = (): TypeScriptModule => {
-  loadedTypeScript ??= requireOptionalPeer<TypeScriptModule>("typescript", "Tachyon template type checking");
-  return loadedTypeScript;
-};
+const typescript = (): TypeScriptModule => requireTypeScriptApi("Tachyon template type checking");
 
 export type TemplateTypeDiagnostic = {
   code: number;
