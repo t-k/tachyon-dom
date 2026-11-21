@@ -184,6 +184,86 @@ describe("hydrate boundary runtime", () => {
     ]);
   });
 
+  it("skips scanning comments when no hydration boundaries are expected", () => {
+    const walker = vi.spyOn(document, "createTreeWalker");
+    try {
+      expect(diagnoseHydrationBoundaries(document.body, [])).toEqual([]);
+      expect(walker).not.toHaveBeenCalled();
+    } finally {
+      walker.mockRestore();
+    }
+  });
+
+  it.each([
+    [1, 1, "Ordered", [], null],
+    [1, 1, "Reversed", ["malformed"], "malformed"],
+    [1, 1, "Split", ["malformed"], "malformed"],
+    [1, 1, "Empty", ["missing-element"], "malformed"],
+    [0, 2, "Ordered", ["missing-start", "duplicate"], "duplicate"],
+    [2, 0, "Ordered", ["missing-end", "duplicate"], "duplicate"],
+    [2, 2, "Ordered", ["duplicate"], "duplicate"],
+    [0, 0, "Ordered", ["missing-start", "missing-end"], "missing"],
+    [1, 2, "Ordered", ["duplicate"], "duplicate"],
+    [0, 1, "Ordered", ["missing-start"], "missing"],
+    [2, 1, "Ordered", ["duplicate"], "duplicate"],
+    [1, 0, "Ordered", ["missing-end"], "missing"],
+  ] as const)(
+    "preserves boundary diagnostics for %d starts, %d ends, %s",
+    (startCount, endCount, layout, types, kind) => {
+      const id = "nested:start";
+      const main = document.createElement("main");
+      const element = document.createElement("section");
+      const starts = Array.from({ length: startCount }, () => document.createComment(`tachyon-hydrate:${id}:start`));
+      const ends = Array.from({ length: endCount }, () => document.createComment(`tachyon-hydrate:${id}:end`));
+      main.append(document.createComment(`tachyon-hydrate:${id}:other`), document.createComment(`other:${id}:start`));
+      if (layout === "Reversed") {
+        main.append(...ends, element, ...starts);
+      } else if (layout === "Split") {
+        element.append(...ends);
+        main.append(...starts, element);
+      } else if (layout === "Empty") {
+        main.append(...starts, "text", ...ends, document.createElement("aside"));
+      } else {
+        main.append(...starts, "text", element, document.createElement("aside"), ...ends);
+      }
+
+      const messages = {
+        duplicate: `Duplicate hydrate boundary markers for ${id}.`,
+        malformed: `Malformed hydrate boundary markers for ${id}.`,
+        "missing-start": `Missing hydrate boundary start marker for ${id}.`,
+        "missing-end": `Missing hydrate boundary end marker for ${id}.`,
+        "missing-element": `Missing hydrate boundary element for ${id}.`,
+      };
+      expect(diagnoseHydrationBoundaries(main, [id])).toEqual(
+        types.map((type) => ({ id, type, message: messages[type] })),
+      );
+      const located = locateHydrationBoundary(main, id);
+      if (kind === null) {
+        expect(located).toEqual({ ok: true, value: { id, start: starts[0], end: ends[0], element } });
+      } else {
+        expect(located).toEqual({
+          ok: false,
+          error: {
+            kind,
+            message:
+              kind === "missing"
+                ? `Missing hydrate boundary markers for ${id}.`
+                : messages[layout === "Empty" ? "missing-element" : kind],
+          },
+        });
+      }
+    },
+  );
+
+  it("reports duplicate markers without interpreting an ambiguous pair", () => {
+    const main = document.createElement("main");
+    main.innerHTML = `<!--tachyon-hydrate:panel:end-->
+      <!--tachyon-hydrate:panel:start--><section></section><!--tachyon-hydrate:panel:end-->`;
+    expect(diagnoseHydrationBoundaries(main, ["panel"])).toEqual([
+      { id: "panel", type: "duplicate", message: "Duplicate hydrate boundary markers for panel." },
+    ]);
+  });
+
   it("reports hydration diagnostics to a Vite-style dev overlay", () => {
     document.body.innerHTML = `<main><!--tachyon-hydrate:panel:start--></main>`;
     const main = document.querySelector("main");

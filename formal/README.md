@@ -14,3 +14,5 @@ lake env leanchecker TachyonDom
 `Utf8Length` proves that UTF-16 code-unit length is a lower bound for UTF-8 byte length, that ASCII fragments have equal lengths, and that skipping an exact measurement after the lower bound reaches the flush threshold leaves the coalesced stream unchanged.
 
 `QueryGrouping` proves that stable grouping preserves duplicate values in their original order for each schema key. Grouped lookup applies to well-formed schema keys, while other keys use the native query name conversion.
+
+`HydrationMarkers` proves that classifying comments during the DOM walk produces the same marker buckets as collecting them first, preserving document order and duplicate markers.

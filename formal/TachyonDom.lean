@@ -1,4 +1,5 @@
 import TachyonDom.CompilerValidation
 import TachyonDom.HtmlWhitespace
+import TachyonDom.HydrationMarkers
 import TachyonDom.QueryGrouping
 import TachyonDom.Utf8Length

@@ -85,48 +85,45 @@ const escapeScriptJson = (value: string): string => value.replaceAll("<", "\\u00
 const escapeAttribute = (value: string): string =>
   value.replaceAll("&", "&amp;").replaceAll(`"`, "&quot;").replaceAll("<", "&lt;");
 
-const commentsIn = (root: ParentNode): Comment[] => {
+const hydrationCommentIndex = (root: ParentNode): HydrationCommentIndex => {
   const ownerDocument = root instanceof Document ? root : (root.ownerDocument ?? document);
   const walker = ownerDocument.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
-  const comments: Comment[] = [];
-  let current = walker.nextNode();
-  while (current) {
-    if (current instanceof Comment) {
-      comments.push(current);
-    }
-    current = walker.nextNode();
-  }
-  return comments;
-};
-
-const hydrationCommentIndex = (root: ParentNode): HydrationCommentIndex => {
   const starts = new Map<string, Comment[]>();
   const ends = new Map<string, Comment[]>();
-  for (const comment of commentsIn(root)) {
-    if (!comment.data.startsWith("tachyon-hydrate:")) {
-      continue;
-    }
-    if (comment.data.endsWith(":start")) {
-      const id = comment.data.slice("tachyon-hydrate:".length, -":start".length);
-      starts.set(id, [...(starts.get(id) ?? []), comment]);
-    } else if (comment.data.endsWith(":end")) {
-      const id = comment.data.slice("tachyon-hydrate:".length, -":end".length);
-      ends.set(id, [...(ends.get(id) ?? []), comment]);
-    }
+  const prefix = "tachyon-hydrate:";
+  for (let comment = walker.nextNode(); comment; comment = walker.nextNode()) {
+    if (!(comment instanceof Comment) || !comment.data.startsWith(prefix)) continue;
+    const suffix = comment.data.endsWith(":start") ? ":start" : comment.data.endsWith(":end") ? ":end" : undefined;
+    if (suffix === undefined) continue;
+    const id = comment.data.slice(prefix.length, -suffix.length);
+    const markers = suffix === ":start" ? starts : ends;
+    const bucket = markers.get(id);
+    if (bucket) bucket.push(comment);
+    else markers.set(id, [comment]);
   }
   return { starts, ends };
 };
 
-const nextElementBetween = (start: Comment, end: Comment): Element | undefined => {
-  let current = start.nextSibling;
-  while (current && current !== end) {
-    if (current instanceof Element) {
-      return current;
-    }
-    current = current.nextSibling;
+type BoundaryPairIssue = "malformed" | "missing-element";
+
+const findBoundaryElement = (start: Comment, end: Comment): Element | BoundaryPairIssue => {
+  if (
+    start.parentNode === null ||
+    start.parentNode !== end.parentNode ||
+    !(start.compareDocumentPosition(end) & Node.DOCUMENT_POSITION_FOLLOWING)
+  ) {
+    return "malformed";
   }
-  return undefined;
+  for (let current = start.nextSibling; current && current !== end; current = current.nextSibling) {
+    if (current instanceof Element) return current;
+  }
+  return "missing-element";
 };
+
+const boundaryPairMessage = (id: string, issue: BoundaryPairIssue): string =>
+  issue === "malformed"
+    ? `Malformed hydrate boundary markers for ${id}.`
+    : `Missing hydrate boundary element for ${id}.`;
 
 export const locateHydrationBoundary = (
   root: ParentNode,
@@ -143,16 +140,9 @@ export const locateHydrationBoundary = (
   if (!start || !end) {
     return err({ kind: "missing", message: `Missing hydrate boundary markers for ${id}.` });
   }
-  if (
-    start.parentNode === null ||
-    start.parentNode !== end.parentNode ||
-    !(start.compareDocumentPosition(end) & Node.DOCUMENT_POSITION_FOLLOWING)
-  ) {
-    return err({ kind: "malformed", message: `Malformed hydrate boundary markers for ${id}.` });
-  }
-  const element = nextElementBetween(start, end);
-  if (!element) {
-    return err({ kind: "malformed", message: `Missing hydrate boundary element for ${id}.` });
+  const element = findBoundaryElement(start, end);
+  if (typeof element === "string") {
+    return err({ kind: "malformed", message: boundaryPairMessage(id, element) });
   }
   return ok({ id, start, end, element });
 };
@@ -161,8 +151,9 @@ export const diagnoseHydrationBoundaries = (
   root: ParentNode,
   expectedIds: readonly string[],
 ): HydrationBoundaryDiagnostic[] => {
-  const index = hydrationCommentIndex(root);
   const diagnostics: HydrationBoundaryDiagnostic[] = [];
+  if (expectedIds.length === 0) return diagnostics;
+  const index = hydrationCommentIndex(root);
   for (const id of expectedIds) {
     const starts = index.starts.get(id) ?? [];
     const ends = index.ends.get(id) ?? [];
@@ -175,16 +166,12 @@ export const diagnoseHydrationBoundaries = (
     if (starts.length > 1 || ends.length > 1) {
       diagnostics.push({ id, type: "duplicate", message: `Duplicate hydrate boundary markers for ${id}.` });
     }
-    if (starts.length === 1 && ends.length === 1) {
-      // Mirror locateHydrationBoundary exactly so a preflight pass guarantees
-      // that boundary creation cannot fail afterwards.
-      const located = locateHydrationBoundary(root, id, index);
-      if (!located.ok) {
-        diagnostics.push({
-          id,
-          type: located.error.message.startsWith("Missing hydrate boundary element") ? "missing-element" : "malformed",
-          message: located.error.message,
-        });
+    const start = starts[0];
+    const end = ends[0];
+    if (starts.length === 1 && ends.length === 1 && start && end) {
+      const element = findBoundaryElement(start, end);
+      if (typeof element === "string") {
+        diagnostics.push({ id, type: element, message: boundaryPairMessage(id, element) });
       }
     }
   }
