@@ -249,7 +249,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json && node scripts/copy-td-modules.mjs",
+    "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json && node scripts/finalize-dist.mjs",
     "bench:compiler": "tsx benchmark/compiler/compare-expression-backends.ts",
     "bench:raw-text-scan": "tsx benchmark/raw-text-scan/run.ts",
     "bench:sfc": "tsx benchmark/compiler/compare-sfc-transform.ts",
