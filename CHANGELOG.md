@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-25
+
+### Added
+
+- Support declarative component composition (`<Panel ... />`, `<Ui.Panel ... />`) across the compiler IR, client/server/stream targets, hydration adoption, SFC setup scope narrowing, Vite target-query propagation (`?server` / `?stream`), TypeScript template typechecking, and the language server while keeping inline `<component name="...">` scope boundaries unchanged.
+- Support streaming `<await>` in-place placeholder replacement (`pending="..."` / `fallback="..."`, `error="..."`), completion-order (`reorder="resolve"`) and document-order (`reorder="preserve"`) draining without cross-mode head-of-line blocking, optional CSP `nonce` forwarding via `stream(scope, { nonce })`, strict-CSP `MutationObserver` / `applyPendingAwaitSwaps()` fallback, and full `hydrate()` / `mount()` integration for templates containing `<await>`.
+
+### Changed
+
+- Delimit `<await>` regions with `<!--tachyon-await:<id>-->` / `<!--/tachyon-await:<id>-->` markers across synchronous SSR, streaming SSR, and client targets, assigning unique per-stream runtime IDs across `<for>` rows, repeated child components, and independent root streams.
+- Reject `<await>` and declarative component calls when placed directly as the template root (including through transparent `<component>` wrappers) with positioned compile diagnostics.
+- Compact published compiler and tooling JavaScript outputs and reduce hydration boundary diagnostic and marker traversal overhead, backed by Lean equivalence proofs in `formal/TachyonDom/HydrationMarkers.lean`.
+- Refresh measured client bundle baselines (`quickExampleMinifiedBytes`: 17,428 minified / 6,025 Brotli bytes; `runtime/generic-conditional`: 15,901 minified / 5,350 Brotli bytes).
+- Organize Stryker and mutation-only Vitest configuration files under `config/stryker/` and `config/vitest/`.
+
+### Fixed
+
+- Preserve existing SSR DOM nodes and clean up bound listeners when adoption fails on a sibling inside a nested `<if>` branch or partially bound `<await>` subtree.
+- Locate root-level `hydrate:*` boundary markers on child components when `hydrate()` runs against a child element root, and propagate `<script setup>` default scopes for `?server` and `?stream` Vite modules.
+- Maintain reactive parent scope reads inside resolved `<await>` bodies (including frozen parent scopes and signal-wrapped promises), isolate client-side pending markers from stale SSR chunks, enforce parent-before-child chunk ordering, and propagate deferred body render errors cleanly instead of stalling the stream.
+
+### Security
+
+- Validate static `<await>` `pending`, `fallback`, and `error` HTML fragments with HTML5-compliant `parse5` parsing, rejecting `<script>`, `<template>`, forbidden elements, event-handler attributes (`on*`) regardless of tag casing, unsafe or entity-encoded URLs, internal Tachyon markers, and unbalanced or stray closing tags.
+- Fail closed on invalid CSP `nonce` characters in `<await>` streaming scripts and require complete replacement templates before applying strict-CSP swaps.
+
+### Validation
+
+- Verify `<await>` streaming/hydration invariants with a TLA+ model, cover declarative component composition and `<await>` lifecycles with combinatorial PICT suites, and re-anchor hydration and release-readiness mutation ranges.
+
 ## [0.4.1] - 2026-11-22
 
 ### Fixed
