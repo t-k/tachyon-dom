@@ -1,5 +1,6 @@
 import type {
   AttributeBinding,
+  AwaitBinding,
   ClassBinding,
   ClientBinding,
   ComponentBoundary,
@@ -133,6 +134,7 @@ type ClientLoweringContext = LoweringContext & {
   lexicalScope: LexicalScope;
   declarations: DeclarationState;
   hydrationIds: WeakMap<ElementNode, string>;
+  awaitCounter: { next: number };
 };
 
 /** Template source spans of client bindings, kept beside the compiled objects. */
@@ -371,6 +373,7 @@ const lowerIf = (node: ElementNode, path: number[], context: ClientLoweringConte
     lexicalScope: createChildScope(context.lexicalScope),
     declarations: context.declarations,
     hydrationIds: context.hydrationIds,
+    awaitCounter: context.awaitCounter,
   };
   const children = renderableChildren(node);
   const renderedChildren = children.filter(
@@ -439,6 +442,7 @@ const lowerList = (
     lexicalScope: childScope,
     declarations: context.declarations,
     hydrationIds: context.hydrationIds,
+    awaitCounter: context.awaitCounter,
   };
   const children = renderableChildren(node);
   let templateHtml = "";
@@ -469,6 +473,70 @@ const lowerList = (
   );
 };
 
+const lowerAwait = (node: ElementNode, path: number[], context: ClientLoweringContext): string => {
+  const id = `a${context.awaitCounter.next++}`;
+  const thenName = attrString(node, "then") ?? "value";
+  const pending = attrString(node, "pending") ?? attrString(node, "fallback");
+  const errorText = attrString(node, "error");
+  const childScope = createChildScope(context.lexicalScope);
+  childScope.bindings.set(thenName, thenName);
+  const childContext: ClientLoweringContext = {
+    bindings: [],
+    stores: [],
+    hydrationBoundaries: [],
+    hydrationDynamicRegions: [],
+    hydrationDynamicRegionErrors: context.hydrationDynamicRegionErrors,
+    components: [],
+    lexicalScope: childScope,
+    declarations: context.declarations,
+    hydrationIds: context.hydrationIds,
+    awaitCounter: context.awaitCounter,
+  };
+  const children = renderableChildren(node);
+  const renderedChildren = children.filter(
+    (child) => child.type !== "element" || (child.tagName !== "store" && child.tagName !== "for"),
+  );
+  let templateHtml = "";
+  let domIndex = 0;
+  let listIndex = 0;
+  for (const child of children) {
+    if (child.type === "element" && child.tagName === "for") {
+      childContext.bindings.push(
+        lowerList(child, [], childContext, listIndex > 0 ? { direct: true, index: listIndex } : { direct: true }),
+      );
+      listIndex++;
+      templateHtml += `${listStartMarker}${listEndMarker}`;
+      continue;
+    }
+    const lowered = lowerNode(child, renderedChildren.length === 1 ? [] : [domIndex], childContext);
+    templateHtml += lowered.html;
+    domIndex += lowered.nodeCount;
+  }
+  context.bindings.push(
+    recordBinding(
+      {
+        kind: "await",
+        id,
+        path: [...path],
+        value: attrExpression(node, "value") ?? "undefined",
+        thenName,
+        ...(pending !== undefined ? { pending } : {}),
+        ...(errorText !== undefined ? { error: errorText } : {}),
+        templateHtml,
+        bindings: childContext.bindings,
+        ...(childContext.stores.length > 0 ? { stores: childContext.stores } : {}),
+        ...(childContext.hydrationBoundaries.length > 0
+          ? { hydrationBoundaries: childContext.hydrationBoundaries }
+          : {}),
+        ...(childContext.components.length > 0 ? { components: childContext.components } : {}),
+      },
+      expressionLocationForAttribute(node.attrs.find((attr) => attr.name === "value") ?? { value: true }),
+      context,
+    ),
+  );
+  return `<!--tachyon-await:${id}--><!--/tachyon-await:${id}-->`;
+};
+
 const lowerElement = (
   node: ElementNode,
   path: number[],
@@ -485,15 +553,7 @@ const lowerElement = (
     return `${slotStartMarker(name)}${slotEndMarker(name)}`;
   }
   if (node.tagName === "await") {
-    // The client target has no way to await: it leaves a marker and binds nothing, the same as <slot>, instead
-    // of emitting an <await> element with bindings that would read the Promise as a plain value. The server
-    // renders the resolved children in this slot, so a hydrated document has nodes here the client template
-    // does not; hydrate() refuses the template rather than binding later siblings to the wrong nodes.
-    const label = path.length === 0 ? "root" : `root.${path.join(".")}`;
-    context.hydrationDynamicRegionErrors.push(
-      `Hydration does not support <await> at ${label}: the client target renders no await content. Render the resolved value with createResource() and <if>, or mount() the template instead.`,
-    );
-    return "<!--tachyon-await-->";
+    return lowerAwait(node, path, context);
   }
   if (node.tagName === "for") {
     context.bindings.push(lowerList(node, path, context, listRegion));
@@ -696,6 +756,7 @@ export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client
     lexicalScope: { bindings: new Map() },
     declarations: { next: 0, stores: new WeakMap(), props: new WeakMap() },
     hydrationIds,
+    awaitCounter: { next: 0 },
   };
   const templateHtml = lowerElement(root, [], context);
   return {
@@ -712,7 +773,9 @@ export const lowerClientTemplate = (root: ElementNode): CompiledTemplate["client
 const scopeName = (usesStore: boolean): string => (usesStore ? "state" : "scope");
 
 const runtimeNames = {
+  awaitAnchorAt: "__tachyonAwaitAnchorAt",
   bindControl: "__tachyonBindControl",
+  cleanupAwaitRegion: "__tachyonCleanupAwaitRegion",
   cleanupComponentCall: "__tachyonCleanupComponentCall",
   cleanupTextKeyedList: "__tachyonCleanupTextKeyedList",
   componentAnchorAt: "__tachyonComponentAnchorAt",
@@ -722,6 +785,7 @@ const runtimeNames = {
   delegate: "__tachyonDelegate",
   effect: "__tachyonEffect",
   elementAt: "__tachyonElementAt",
+  mountAwaitRegion: "__tachyonMountAwaitRegion",
   mountComponentCall: "__tachyonMountComponentCall",
   mountGeneratedConditional: "__tachyonMountGeneratedConditional",
   mountGeneratedConditionalCore: "__tachyonMountGeneratedConditionalCore",
@@ -807,7 +871,7 @@ export const isTextOnlyList = (binding: ListBinding): boolean =>
  */
 const generatedNestedBindings = (children: readonly ClientBinding[]): ClientBinding[] =>
   children.flatMap((binding) =>
-    binding.kind === "list" || binding.kind === "if"
+    binding.kind === "list" || binding.kind === "if" || binding.kind === "await"
       ? [...binding.bindings, ...generatedNestedBindings(binding.bindings)]
       : [],
   );
@@ -894,7 +958,7 @@ const hasModelBinding = (binding: ClientBinding): boolean => {
   if (binding.kind === "model") {
     return true;
   }
-  return (binding.kind === "list" || binding.kind === "if") && binding.bindings.some(hasModelBinding);
+  return (binding.kind === "list" || binding.kind === "if" || binding.kind === "await") && binding.bindings.some(hasModelBinding);
 };
 
 const clientModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
@@ -1049,7 +1113,6 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsStore = template.client.stores.length > 0;
   const hasDefaultScope = typeof options.defaultScopeName === "string" && options.defaultScopeName.length > 0;
   const sourceName = scopeName(needsStore);
-  const needsText = bindings.some((binding) => binding.kind === "text");
   // A statically named class attribute is exactly what setClassValue does, so it skips the generic attribute
   // setter and its name validation and URL sanitization, which never applied to class in the first place.
   const isKnownClassAttribute = (binding: ClientBinding): boolean =>
@@ -1057,6 +1120,17 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   // Generated rows and generated branches are driven by setters this module injects, so their kinds decide its
   // imports too.
   const generatedRowBindings = generatedNestedBindings(bindings);
+  const awaitDirectBindings = (children: readonly ClientBinding[]): ClientBinding[] =>
+    children.flatMap((binding) =>
+      binding.kind === "await"
+        ? [...binding.bindings, ...awaitDirectBindings(binding.bindings)]
+        : binding.kind === "if" || binding.kind === "list"
+          ? awaitDirectBindings(binding.bindings)
+          : [],
+    );
+  const awaitBodyBindings = awaitDirectBindings(bindings);
+  const needsText =
+    bindings.some((binding) => binding.kind === "text") || awaitBodyBindings.some((binding) => binding.kind === "text");
   const needsElementClass = bindings.some((binding) => binding.kind === "class" || isKnownClassAttribute(binding));
   const needsElementAttr = bindings.some(
     (binding) =>
@@ -1070,9 +1144,13 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsInjectedDelegate = generatedRowBindings.some((binding) => binding.kind === "event");
   const needsModel = bindings.some(hasModelBinding);
   const needsEvent = bindings.some((binding) => binding.kind === "event") || needsInjectedDelegate;
-  const needsRef = bindings.some((binding) => binding.kind === "ref");
+  const needsRef =
+    bindings.some((binding) => binding.kind === "ref") || awaitBodyBindings.some((binding) => binding.kind === "ref");
   const needsTopLevelComponentCall = bindings.some((binding) => binding.kind === "component-call");
-  const needsComponentCall = needsTopLevelComponentCall || generatedRowBindings.some((binding) => binding.kind === "component-call");
+  const needsComponentCall =
+    needsTopLevelComponentCall || generatedRowBindings.some((binding) => binding.kind === "component-call");
+  const needsTopLevelAwait = bindings.some((binding) => binding.kind === "await");
+  const needsAwait = needsTopLevelAwait || generatedRowBindings.some((binding) => binding.kind === "await");
   // Every nested region carries the entry that mounts it, so the module that emits the descriptor imports it.
   const needsList =
     bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding)) ||
@@ -1145,6 +1223,7 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
     needsRef ||
     needsTextList ||
     needsTopLevelComponentCall ||
+    needsTopLevelAwait ||
     hasDefaultScope;
   const lines: string[] = [];
   if (needsText) {
@@ -1243,14 +1322,21 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   if (needsComponentCall) {
     const componentImports = [
       `mountComponentCall as ${runtimeNames.mountComponentCall}`,
-      ...(needsTopLevelComponentCall
+      ...(needsTopLevelComponentCall || awaitBodyBindings.some((b) => b.kind === "component-call")
         ? [
             `cleanupComponentCall as ${runtimeNames.cleanupComponentCall}`,
-            ...(!needsConditionalPrepare ? [`componentAnchorAt as ${runtimeNames.componentAnchorAt}`] : []),
+            ...(needsTopLevelComponentCall && !needsConditionalPrepare
+              ? [`componentAnchorAt as ${runtimeNames.componentAnchorAt}`]
+              : []),
           ]
         : []),
     ];
     lines.push(`import { ${componentImports.join(", ")} } from "tachyon-dom/runtime/component";`);
+  }
+  if (needsAwait) {
+    lines.push(
+      `import { awaitAnchorAt as ${runtimeNames.awaitAnchorAt}, cleanupAwaitRegion as ${runtimeNames.cleanupAwaitRegion}, mountAwaitRegion as ${runtimeNames.mountAwaitRegion} } from "tachyon-dom/runtime/stream-client";`,
+    );
   }
   const hydrateImports = [
     ...(hasHydrationChunks
@@ -1602,6 +1688,23 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
         );
       }
       lines.push(`  cleanups.push(() => ${runtimeNames.cleanupComponentCall}(${targetName}));`);
+    } else if (binding.kind === "await") {
+      const anchorExpr = needsConditionalPrepare
+        ? preparedPathExpression(binding.path)
+        : binding.path.length === 0
+          ? "root"
+          : `${runtimeNames.awaitAnchorAt}(root, ${JSON.stringify(binding.path)})`;
+      const targetName = `__tachyonTarget${targetIndex++}`;
+      lines.push(`  const ${targetName} = ${anchorExpr};`);
+      const optionsExpr = serializeAwaitOptions(binding, reactive, instrumentBindings, bindingAliases);
+      if (reactive) {
+        lines.push(
+          `  cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.mountAwaitRegion}(${targetName}, ${optionsExpr}, ${sourceName})));`,
+        );
+      } else {
+        lines.push(`  ${runtimeNames.mountAwaitRegion}(${targetName}, ${optionsExpr}, ${sourceName});`);
+      }
+      lines.push(`  cleanups.push(() => ${runtimeNames.cleanupAwaitRegion}(${targetName}));`);
     } else if (binding.kind === "list") {
       const targetName =
         needsConditionalPrepare || reactive || isTextOnlyList(binding) ? `__tachyonTarget${targetIndex++}` : undefined;
@@ -1919,9 +2022,151 @@ const rowValueSetter = (binding: ClassBinding | AttributeBinding | StyleBinding)
  * that applies it, each control its binder, and each nested region the entry that mounts it. Neither runtime
  * imports one of its own.
  */
+const serializeAwaitBodyBinder = (
+  bindings: readonly ClientBinding[],
+  reactive: boolean,
+  detailed: boolean,
+): string => {
+  if (bindings.length === 0) return `() => undefined`;
+  const body: string[] = [
+    `const __cleanups = [];`,
+    `const __nodeAt = (p) => {`,
+    `  if (__nodes.length <= 1) return p.length === 0 ? __nodes[0] : ${runtimeNames.awaitAnchorAt}(__nodes[0], p);`,
+    `  const [first, ...rest] = p;`,
+    `  return rest.length === 0 ? __nodes[first ?? 0] : ${runtimeNames.awaitAnchorAt}(__nodes[first ?? 0], rest);`,
+    `};`,
+  ];
+  let idx = 0;
+  for (const child of bindings) {
+    const aliases = aliasesForBinding(child);
+    const tName = `__t${idx++}`;
+    if (child.kind === "text") {
+      const val = runtimeValueExpression(child.expression, reactive, "scope", aliases);
+      body.push(`const ${tName} = ${runtimeNames.textAt}(__nodeAt(${JSON.stringify(child.path)}), []);`);
+      body.push(
+        reactive
+          ? `__cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setText}(${tName}, ${val})));`
+          : `${runtimeNames.setText}(${tName}, ${val});`,
+      );
+    } else if (child.kind === "class") {
+      const val = runtimeValueExpression(child.expression, reactive, "scope", aliases);
+      body.push(`const ${tName} = __nodeAt(${JSON.stringify(child.path)});`);
+      body.push(
+        reactive
+          ? `__cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setClassPresence}(${tName}, ${JSON.stringify(child.className)}, ${val})));`
+          : `${runtimeNames.setClassPresence}(${tName}, ${JSON.stringify(child.className)}, ${val});`,
+      );
+    } else if (child.kind === "attr") {
+      const val = runtimeValueExpression(child.expression, reactive, "scope", aliases);
+      const write =
+        child.name.toLowerCase() === "class"
+          ? `${runtimeNames.setClassValue}(${tName}, ${val})`
+          : `${runtimeNames.setAttributeValue}(${tName}, ${JSON.stringify(child.name)}, ${val})`;
+      body.push(`const ${tName} = __nodeAt(${JSON.stringify(child.path)});`);
+      body.push(reactive ? `__cleanups.push(${runtimeNames.effect}(() => ${write}));` : `${write};`);
+    } else if (child.kind === "style") {
+      const val = runtimeValueExpression(child.expression, reactive, "scope", aliases);
+      body.push(`const ${tName} = __nodeAt(${JSON.stringify(child.path)});`);
+      body.push(
+        reactive
+          ? `__cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setStyleValue}(${tName}, ${JSON.stringify(child.name)}, ${val})));`
+          : `${runtimeNames.setStyleValue}(${tName}, ${JSON.stringify(child.name)}, ${val});`,
+      );
+    } else if (child.kind === "event") {
+      const handler = expressionToScopeAccess(child.handler, new Set(), "scope", aliases);
+      body.push(
+        `__cleanups.push(${runtimeNames.delegate}(__nodeAt(${JSON.stringify(child.path)}), ${JSON.stringify(child.eventName)}, [], ${handler}));`,
+      );
+    } else if (child.kind === "ref") {
+      const ref = refTargetExpressions(child.expression, aliases);
+      body.push(
+        `__cleanups.push(${runtimeNames.bindRef}(scope, ${ref.owner}, ${JSON.stringify(ref.property)}, __nodeAt(${JSON.stringify(child.path)})));`,
+      );
+    } else if (child.kind === "model") {
+      const target = expressionToScopeAccess(child.expression, new Set(), "scope", aliases);
+      body.push(`const ${tName} = __nodeAt(${JSON.stringify(child.path)});`);
+      body.push(
+        `__cleanups.push(${runtimeNames.bindControl}(${tName}, ${JSON.stringify(child.property)}, () => ${runtimeValueExpression(child.expression, false, "scope", aliases)}, (value) => ${runtimeNames.writeModelValue}(${target}, value, () => { ${target} = value; })));`,
+      );
+      if (reactive) {
+        body.push(
+          `__cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.setControlValue}(${tName}, ${JSON.stringify(child.property)}, ${runtimeValueExpression(child.expression, true, "scope", aliases)})));`,
+        );
+      }
+    } else if (child.kind === "component-call") {
+      const targetExpr = expressionToScopeAccess(child.tagName, new Set(), "scope", aliases);
+      const propEntries = child.props.map((prop) => {
+        const val =
+          prop.kind === "boolean"
+            ? "true"
+            : prop.kind === "static"
+              ? JSON.stringify(prop.value)
+              : expressionToScopeAccess(prop.value as string, new Set(), "scope", aliases);
+        return `${JSON.stringify(prop.name)}: ${val}`;
+      });
+      body.push(`const ${tName} = __nodeAt(${JSON.stringify(child.path)});`);
+      body.push(
+        reactive
+          ? `__cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.mountComponentCall}(${tName}, ${targetExpr}, { ${propEntries.join(", ")} }, ${JSON.stringify(child.tagName)})));`
+          : `${runtimeNames.mountComponentCall}(${tName}, ${targetExpr}, { ${propEntries.join(", ")} }, ${JSON.stringify(child.tagName)});`,
+      );
+      body.push(`__cleanups.push(() => ${runtimeNames.cleanupComponentCall}(${tName}));`);
+    } else if (child.kind === "await") {
+      const nestedOpts = serializeAwaitOptions(child, reactive, detailed, aliases);
+      body.push(`const ${tName} = __nodeAt(${JSON.stringify(child.path)});`);
+      body.push(
+        reactive
+          ? `__cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.mountAwaitRegion}(${tName}, ${nestedOpts}, scope)));`
+          : `${runtimeNames.mountAwaitRegion}(${tName}, ${nestedOpts}, scope);`,
+      );
+      body.push(`__cleanups.push(() => ${runtimeNames.cleanupAwaitRegion}(${tName}));`);
+    } else if (child.kind === "if") {
+      const nestedIf = serializeListRowBinding(child, detailed);
+      const vis = runtimeValueExpression(child.test, reactive, "scope", aliases);
+      body.push(`const ${tName} = __nodeAt(${JSON.stringify(child.path)});`);
+      body.push(`const __ifOpts${idx} = ${nestedIf};`);
+      body.push(
+        reactive
+          ? `__cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.mountGeneratedConditional}(${tName}, [], ${vis}, scope, __ifOpts${idx})));`
+          : `${runtimeNames.mountGeneratedConditional}(${tName}, [], ${vis}, scope, __ifOpts${idx});`,
+      );
+    } else if (child.kind === "list") {
+      const nestedList = serializeListRowBinding(child, detailed);
+      const each = runtimeValueExpression(child.each, reactive, "scope", aliases);
+      body.push(`const ${tName} = __nodeAt(${JSON.stringify(child.path)});`);
+      body.push(`const __listOpts${idx} = ${nestedList};`);
+      body.push(
+        reactive
+          ? `__cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.mountGeneratedKeyedList}(${tName}, [], ${each}, __listOpts${idx}, scope)));`
+          : `${runtimeNames.mountGeneratedKeyedList}(${tName}, [], ${each}, __listOpts${idx}, scope);`,
+      );
+    }
+  }
+  body.push(`return () => { for (const c of __cleanups.splice(0).reverse()) { try { c?.(); } catch {} } };`);
+  return `(__nodes, scope) => { ${body.join(" ")} }`;
+};
+
+const serializeAwaitOptions = (
+  binding: AwaitBinding,
+  reactive: boolean,
+  detailed: boolean,
+  aliases: ReadonlyMap<string, string>,
+): string => {
+  const fields: string[] = [
+    `id: ${JSON.stringify(binding.id)}`,
+    `thenName: ${JSON.stringify(binding.thenName)}`,
+    ...(binding.pending !== undefined ? [`pending: ${JSON.stringify(binding.pending)}`] : []),
+    ...(binding.error !== undefined ? [`error: ${JSON.stringify(binding.error)}`] : []),
+    `templateHtml: ${JSON.stringify(binding.templateHtml)}`,
+    `readValue: (scope) => ${bindingReadExpression(binding.value, aliases)}`,
+    `bind: ${serializeAwaitBodyBinder(binding.bindings, reactive, detailed)}`,
+  ];
+  return `{ ${fields.join(", ")} }`;
+};
+
 const serializeListRowBinding = (binding: ListBinding["bindings"][number], detailed: boolean): string => {
   const fields: string[] = [
-    `kind: ${JSON.stringify(binding.kind === "component-call" ? "mount" : binding.kind)}`,
+    `kind: ${JSON.stringify(binding.kind === "component-call" || binding.kind === "await" ? "mount" : binding.kind)}`,
     `path: ${JSON.stringify(binding.path)}`,
   ];
   const aliases = aliasesForBinding(binding);
@@ -1969,6 +2214,10 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number], detai
     });
     fields.push(
       `mount: (node, scope) => ${runtimeNames.mountComponentCall}(node, ${bindingReadExpression(binding.tagName, aliases)}, { ${propEntries.join(", ")} }, ${JSON.stringify(binding.tagName)})`,
+    );
+  } else if (binding.kind === "await") {
+    fields.push(
+      `mount: (node, scope) => ${runtimeNames.mountAwaitRegion}(node, ${serializeAwaitOptions(binding, true, detailed, aliases)}, scope)`,
     );
   } else if (binding.kind === "list") {
     const itemKeyExpression = simpleItemKeyExpression(binding.key, binding.itemName);
@@ -2111,6 +2360,11 @@ const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> | undef
         for (const prop of child.props) {
           if (prop.kind === "expression") add(prop.value as string, aliases, provided);
         }
+      } else if (child.kind === "await") {
+        add(child.value, aliases, provided);
+        const nested = new Set(provided);
+        nested.add(child.thenName);
+        visitBindings(child.bindings, nested);
       } else add(child.expression, aliases, provided);
     }
   };

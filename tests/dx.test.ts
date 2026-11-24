@@ -894,18 +894,17 @@ export const scope = (input: Partial<AppState> = {}) => ({
     }
   });
 
-  it("reports unsupported stream await reordering at the source attribute", async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-stream-await-diagnostic-"));
+  it("compiles resolve-order stream await fragments without error", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "tachyon-dom-stream-await-resolve-"));
     try {
       const input = path.join(dir, "page.td");
       await writeFile(input, `<main>\n  <await value={message} then="value" reorder="resolve">Ready</await>\n</main>`);
 
       const result = await compileFile({ input, target: "stream", reactive: false, sourcemap: false });
 
-      expect(result.ok).toBe(false);
-      if (result.ok) throw new Error("Expected stream target diagnostic.");
-      expect(result.error).toContain(`${input}:2:39:`);
-      expect(result.error).toContain('<await reorder="resolve"> is not supported by the stream target');
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error(result.error);
+      expect(result.value).toContain(`reorder: "resolve"`);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

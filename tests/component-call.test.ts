@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import {
   compileTachyonSfc,
@@ -102,6 +102,14 @@ describe("declarative component composition (<Panel />)", () => {
 
     const badChildren = compileTemplate(`<main><Panel><p>child</p></Panel></main>`);
     expect(badChildren.ok).toBe(false);
+
+    const directInFor = compileTemplate(`<main><for each={items} key={item.id}><Panel item={item} /></for></main>`);
+    expect(directInFor.ok).toBe(false);
+    if (!directInFor.ok) expect(directInFor.error.message).toContain("directly inside <for>");
+
+    const rootCall = compileTemplate(`<Panel title={title} />`);
+    expect(rootCall.ok).toBe(false);
+    if (!rootCall.ok) expect(rootCall.error.message).toContain("cannot be the template root");
   });
 
   it("tracks component tag root identifiers in templateScopeIdentifiers for SFC setup narrowing", () => {
@@ -276,6 +284,69 @@ describe("declarative component composition (<Panel />)", () => {
     // Sibling click listener must not remain bound after failed hydrate
     root.querySelector("button")?.click();
     expect(onClick).not.toHaveBeenCalled();
+
+    // Inside <if>: failed child hydrate must preserve SSR DOM and dispose earlier sibling once
+    const firstDisposed = vi.fn();
+    const GoodPanel = await compileComponent<{ title: string }>(`<aside>{title}</aside>`, {
+      onDispose: firstDisposed,
+    });
+    const ifParentCompiled = compileTemplate(
+      `<main><if test={open}><GoodPanel title={title} /><Panel title={title} /></if></main>`,
+    );
+    expect(ifParentCompiled.ok).toBe(true);
+    if (!ifParentCompiled.ok) return;
+    const ifClient = await loadClientModule(generateClientModule(ifParentCompiled.value, { reactive: true }));
+    const ifRoot = document.createElement("div");
+    const ssrInsideIf = `<main><!--tachyon-if--><!--tachyon-component--><aside>Hello</aside><!--/tachyon-component--><!--tachyon-component--><div><h2>Wrong</h2></div><!--/tachyon-component--><!--/tachyon-if--></main>`;
+    ifRoot.innerHTML = ssrInsideIf;
+    const ifResult = hydrate(ifRoot, ifClient, { open: true, GoodPanel, Panel, title: "Hello" });
+    expect(ifResult.ok).toBe(false);
+    expect(ifRoot.innerHTML).toBe(ssrInsideIf);
+    expect(firstDisposed).toHaveBeenCalledTimes(1);
+  });
+
+  it("hydrates a child component whose root element itself carries hydrate:visible", async () => {
+    const LazyPanel = await compileComponent<{ title: string }>(
+      `<section hydrate:visible="64px"><h2>{title}</h2></section>`,
+    );
+    const parentCompiled = compileTemplate(`<main><LazyPanel title={title} /></main>`);
+    expect(parentCompiled.ok).toBe(true);
+    if (!parentCompiled.ok) return;
+    const parentClient = await loadClientModule(generateClientModule(parentCompiled.value, { reactive: true }));
+    const parentServer = (await loadJsModule(generateServerModule(parentCompiled.value))) as {
+      render: (scope: Record<string, unknown>) => string;
+    };
+
+    const html = parentServer.render({ LazyPanel, title: "Visible" });
+    expect(html).toContain("<!--tachyon-hydrate:");
+    const root = document.createElement("div");
+    root.innerHTML = html;
+    const section = root.querySelector("section");
+    const hydrated = hydrate(root, parentClient, { LazyPanel, title: "Visible" });
+    expect(hydrated.ok).toBe(true);
+    if (!hydrated.ok) return;
+    expect(root.querySelector("section")).toBe(section);
+    hydrated.value.dispose();
+  });
+
+  it("transforms a parent .td with <script setup> for ?server and ?stream so imported components run without external scope", async () => {
+    const { tachyonDom } = await import("../src/vite");
+    const plugin = tachyonDom({ reactive: true });
+    const transform = plugin.transform as unknown as (
+      this: { error: (msg: string) => never },
+      source: string,
+      id: string,
+    ) => Promise<{ code: string } | null>;
+    const ctx = {
+      error: (msg: string): never => {
+        throw new Error(msg);
+      },
+    };
+    const parentSource = `<script setup>\nimport { component as Panel } from "./Panel.td";\nconst title = "SetupTitle";\n</script>\n<main><Panel title={title} /></main>`;
+    const serverOut = await transform.call(ctx, parentSource, "/virtual/Page.td?server");
+    const streamOut = await transform.call(ctx, parentSource, "/virtual/Page.td?stream");
+    expect(serverOut?.code).toContain("__tachyonSfcSetupScope");
+    expect(streamOut?.code).toContain("__tachyonSfcSetupScope");
   });
 
   it("typechecks component call props (missing, excess, wrong type, non-component)", () => {
@@ -283,6 +354,7 @@ describe("declarative component composition (<Panel />)", () => {
 <script setup lang="ts">
 import type { TemplateComponent } from "./src/runtime/component";
 declare const Panel: TemplateComponent<{ title: string; count?: number }>;
+declare const MountOnly: { mount: (root: Element, props: { title: string }) => void };
 declare const notAComp: number;
 const okTitle = "Hello";
 const badCount = "nope";
@@ -291,6 +363,7 @@ const badCount = "nope";
   <Panel title={okTitle} count={badCount} />
   <Panel title={okTitle} extra={1} />
   <Panel />
+  <MountOnly title={okTitle} />
   <notAComp />
 </main>
 `;
@@ -301,6 +374,7 @@ const badCount = "nope";
     expect(messages).toContain("not assignable");
     expect(messages).toContain("extra");
     expect(messages).toContain("title");
+    expect(messages).toContain("hydrate");
   });
 
   it("propagates server and stream target queries to imported .td components in the Vite plugin", async () => {
@@ -348,8 +422,43 @@ const badCount = "nope";
   });
 
   it("covers all generated PICT scenarios across targets, placements, props, and lifecycles", async () => {
-    const tsv = readFileSync("docs.local/coverage-ledger/component-call.generated.tsv", "utf8").trim().split("\n");
-    const rows = tsv.slice(1).map((line) => {
+    const embeddedPictTsv = [
+      "Target\tPlacement\tPropsKind\tTargetExpr\tLifecycle",
+      "client_mount\ttop_level\tnone\tsimple_ident\tinitial",
+      "client_mount\twith_siblings\treactive_expr\tsimple_ident\tprop_update",
+      "client_hydrate\twith_siblings\treactive_expr\tsimple_ident\tprop_update",
+      "client_mount\tinside_for\treactive_expr\tsimple_ident\treorder_or_toggle",
+      "client_hydrate\tinside_for\treactive_expr\tsimple_ident\treorder_or_toggle",
+      "client_hydrate\tinside_if\tsignal_passthrough\tdotted_member\tdispose",
+      "client_hydrate\tnested_component\treactive_expr\tsimple_ident\tprop_update",
+      "stream\tnested_component\tstatic_and_bool\tdotted_member\tinitial",
+      "server\twith_siblings\tsignal_passthrough\tsimple_ident\tinitial",
+      "client_mount\tinside_if\tnone\tdotted_member\treorder_or_toggle",
+      "client_mount\tnested_component\tnone\tsimple_ident\tdispose",
+      "client_hydrate\tinside_for\tnone\tdotted_member\tprop_update",
+      "server\tinside_if\treactive_expr\tdotted_member\tinitial",
+      "client_hydrate\ttop_level\tstatic_and_bool\tsimple_ident\tdispose",
+      "client_mount\tinside_if\tstatic_and_bool\tsimple_ident\tprop_update",
+      "client_mount\twith_siblings\tstatic_and_bool\tdotted_member\tdispose",
+      "server\tnested_component\tnone\tdotted_member\tinitial",
+      "server\tinside_for\tstatic_and_bool\tsimple_ident\tinitial",
+      "stream\tinside_for\tsignal_passthrough\tsimple_ident\tinitial",
+      "client_mount\tinside_if\tsignal_passthrough\tdotted_member\treorder_or_toggle",
+      "stream\twith_siblings\tnone\tdotted_member\tinitial",
+      "client_mount\tnested_component\tsignal_passthrough\tdotted_member\tprop_update",
+      "stream\ttop_level\treactive_expr\tdotted_member\tinitial",
+      "client_hydrate\tinside_for\treactive_expr\tsimple_ident\tdispose",
+      "server\ttop_level\tsignal_passthrough\tsimple_ident\tinitial",
+      "client_hydrate\tinside_if\tnone\tsimple_ident\tinitial",
+      "client_hydrate\tinside_if\tstatic_and_bool\tdotted_member\treorder_or_toggle",
+      "client_hydrate\ttop_level\treactive_expr\tsimple_ident\tprop_update",
+      "stream\tinside_if\tstatic_and_bool\tsimple_ident\tinitial",
+    ];
+    const ledgerPath = "docs.local/coverage-ledger/component-call.generated.tsv";
+    if (existsSync(ledgerPath)) {
+      expect(readFileSync(ledgerPath, "utf8").trim().split("\n")).toEqual(embeddedPictTsv);
+    }
+    const rows = embeddedPictTsv.slice(1).map((line) => {
       const [target, placement, propsKind, targetExpr, lifecycle] = line.split("\t");
       return { target, placement, propsKind, targetExpr, lifecycle };
     });

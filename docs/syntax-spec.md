@@ -187,29 +187,30 @@ Use them for route layouts and for composing server-rendered fragments. They are
 
 ## Await Streaming
 
-`<await value={promise} then="name">...</await>` creates an async fragment. The stream target awaits `value`, binds the resolved value to `then`, and yields the child HTML as soon as it is ready.
+`<await value={promise} then="name">...</await>` creates an async fragment that works consistently across streaming SSR, synchronous SSR (for resolved plain values), client `mount()`, and `hydrate()`.
 
 ```html
-<await value="{messagePromise}" then="message">
+<await value="{messagePromise}" then="message" pending="<p>Loading...</p>" error="<p>Failed</p>" reorder="resolve">
   <p>{message}</p>
 </await>
 ```
 
-`<await>` also accepts:
+`<await>` accepts:
 
-- `pending="..."` to yield static HTML before awaiting in the stream target. This HTML is appended output: once the value resolves, the resolved children are yielded after it and the pending HTML is not removed or replaced. Use it for a heading or an explanatory line that should remain in the document, not for a spinner that must disappear. `fallback="..."` is accepted as an alias with the same meaning; using both on one element is a compile error.
-- `error="..."` to yield static error HTML if the awaited value rejects in the stream target.
-- `reorder="preserve"` or `reorder="resolve"` in the IR. The stream target currently supports document-order output (`preserve` or omission); `reorder="resolve"` is rejected with a positioned diagnostic until resolve-order emission is implemented.
+- `pending="..."` (or its alias `fallback="..."`; using both on one element is a compile error) to yield static placeholder HTML while the promise is pending. In the stream target, the shell flushes immediately without waiting on the promise; once the promise settles, a trailing `<template data-tachyon-await="a0">` and inline replacement `<script>` replace the pending DOM in place and remove the temporary elements.
+- `error="..."` to replace the pending placeholder with static error HTML if the promise rejects. Static `pending`, `fallback`, and `error` strings are validated against Tachyon DOM's HTML/URL security policy (`<script>`, `<template>`, `on*`, `srcdoc`, `javascript:`, `data:`, and internal marker comments are rejected at compile time).
+- `reorder="preserve"` (default) or `reorder="resolve"`. Both flush the surrounding shell immediately when `pending` is present; `reorder="resolve"` streams replacement chunks in completion order, while `reorder="preserve"` streams them in document order.
+- Pass `{ nonce }` as the optional second argument to `stream(scope, { nonce })` to attach a validated CSP nonce to the bootstrap and swap `<script>` tags. Even if a strict CSP blocks inline scripts, `hydrate()` drains any unapplied `<template data-tachyon-await>` elements automatically via `applyPendingAwaitSwaps()`.
+
+Every target wraps the region in `<!--tachyon-await:<id>-->` and `<!--/tachyon-await:<id>-->` markers (one logical slot, opaque to parent sibling paths), so templates containing `<await>` hydrate cleanly before swap (streaming in-flight), after swap, or under strict CSP.
 
 Per-target meaning:
 
-| Target             | `value` is a plain value                                                                                                                                                                                                                                                                   | `value` is a Promise                                          | `pending` / `error`        |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- | -------------------------- |
-| Stream             | Rendered as the resolved value                                                                                                                                                                                                                                                             | Awaited; children yielded on resolution                       | Yielded as described above |
-| Synchronous server | Rendered as the resolved value                                                                                                                                                                                                                                                             | Rejected with an error at render time; the target cannot wait | Ignored                    |
-| Client             | Lowered to a marker comment with no binding. `mount()` renders nothing there; `hydrate()` refuses a template containing `<await>` with a diagnostic, because the server-rendered children would shift later siblings. Load data with `createResource()` and render it with `<if>` instead. |                                                               |                            |
-
-Replacing a placeholder with the resolved UI in the browser would require region identification, a replacement protocol, and a hydration contract. That is not implemented, and the `pending` name is chosen so the current behavior is not mistaken for it.
+| Target             | `value` is a plain value                       | `value` is a Promise                                                                                      | `pending` / `error`                                                  |
+| ------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Stream             | Rendered inline between region markers         | Flushes shell + placeholder when `pending` or `reorder="resolve"` is set, then streams replacement chunks | Replaced in place on settlement; error HTML never binds `then`       |
+| Synchronous server | Rendered inline between region markers         | Rejected with an error at render time; the target cannot wait                                             | Ignored                                                              |
+| Client (`mount` / `hydrate`) | Rendered/adopted and bound immediately | Shows `pending` on `mount()`, waits for swap on in-flight `hydrate()`, binds `then` subtree on resolution | Replaced on resolution/rejection; cancelled cleanly on `dispose()`   |
 
 ## Target Contract
 

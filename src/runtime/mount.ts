@@ -336,7 +336,7 @@ const hydrationStructureError = (
 
 const hydrationRootFor = (root: Element, expectedRoot: Element): Element | undefined => {
   if (tagNameFor(root) === tagNameFor(expectedRoot)) return root;
-  const children = Array.from(root.children);
+  const children = Array.from(root.children).filter((child) => !child.hasAttribute("data-tachyon-await"));
   return children.length === 1 && tagNameFor(children[0] as Element) === tagNameFor(expectedRoot)
     ? (children[0] as Element)
     : undefined;

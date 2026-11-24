@@ -20,22 +20,26 @@ const strip = (html: string): string => html.replace(/<!--[^>]*-->/g, "");
 describe("hydration after <await>", () => {
   const template = `<section><await value={data} then="v"><p>{v}</p><p>x</p></await><h1>{title}</h1></section>`;
 
-  it("rejects hydration of a template with <await> instead of binding later siblings to the wrong node", () => {
+  it("hydrates a template with <await> while preserving later sibling paths and binding <await> content", () => {
     const root = document.createElement("div");
     root.innerHTML = renderServerTemplate(compile(template), { data: "D", title: "T" });
-    const result = hydrate(root, moduleFor(template), { title: "T2" });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toMatch(/<await>/);
-    expect(root.innerHTML).toBe(`<section><p>D</p><p>x</p><h1>T</h1></section>`);
+    const title = createSignal("T2");
+    const result = hydrate(root, moduleFor(template), { data: "D", title });
+    expect(result.ok).toBe(true);
+    expect(strip(root.innerHTML)).toBe(`<section><p>D</p><p>x</p><h1>T2</h1></section>`);
+    title.set("T3");
+    expect(strip(root.innerHTML)).toBe(`<section><p>D</p><p>x</p><h1>T3</h1></section>`);
+    if (result.ok) result.value.dispose();
   });
 
   it("still mounts the template on the client with the later sibling bound", () => {
     const root = document.createElement("div");
     const title = createSignal("T2");
-    mount(root, moduleFor(template), { title });
-    expect(strip(root.innerHTML)).toBe(`<section><h1>T2</h1></section>`);
+    const handle = mount(root, moduleFor(template), { data: "D", title });
+    expect(strip(root.innerHTML)).toBe(`<section><p>D</p><p>x</p><h1>T2</h1></section>`);
     title.set("T3");
-    expect(strip(root.innerHTML)).toBe(`<section><h1>T3</h1></section>`);
+    expect(strip(root.innerHTML)).toBe(`<section><p>D</p><p>x</p><h1>T3</h1></section>`);
+    handle.dispose();
   });
 });
 

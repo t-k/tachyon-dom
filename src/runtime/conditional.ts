@@ -248,7 +248,6 @@ type ConditionalState = {
   cleanups: Array<() => void>;
   refCleanups: Map<number, () => void>;
   scope: Record<string, unknown>;
-  sourceScope: Record<string, unknown>;
   sourceScopeSnapshot: Map<string, unknown>;
   localScopeKeys: ReadonlySet<string>;
   interactiveBindingsBound: boolean;
@@ -335,14 +334,6 @@ const legacySignature = (options: ConditionalOptions): string => options.signatu
 const sourceScopeSnapshotFor = (scope: Record<string, unknown>): Map<string, unknown> =>
   new Map(Object.keys(scope).map((key) => [key, scope[key]] as const));
 
-const sourceScopeChanged = (previous: ReadonlyMap<string, unknown>, next: ReadonlyMap<string, unknown>): boolean => {
-  if (previous.size !== next.size) return true;
-  for (const [key, value] of previous) {
-    if (!next.has(key) || !Object.is(next.get(key), value)) return true;
-  }
-  return false;
-};
-
 const localScopeKeysFor = (options: ConditionalRuntimeOptions): ReadonlySet<string> =>
   new Set([
     ...(options.stores ?? []).flatMap((store) => [store.name, store.key ?? store.name]),
@@ -382,9 +373,8 @@ const updateScope = (
   state: ConditionalState,
   sourceScope: Record<string, unknown>,
   options: ConditionalRuntimeOptions,
-): boolean => {
+): void => {
   const nextSnapshot = sourceScopeSnapshotFor(sourceScope);
-  const changed = state.sourceScope !== sourceScope || sourceScopeChanged(state.sourceScopeSnapshot, nextSnapshot);
   for (const key of state.sourceScopeSnapshot.keys()) {
     if (!nextSnapshot.has(key) && !state.localScopeKeys.has(key)) state.scope[key] = undefined;
   }
@@ -397,9 +387,7 @@ const updateScope = (
       state.scope[prop.key ?? prop.name] = options.readDeclaration(state.scope, prop.expression, prop.read);
     }
   }
-  state.sourceScope = sourceScope;
   state.sourceScopeSnapshot = nextSnapshot;
-  return changed;
 };
 
 const readBinding = (
@@ -808,7 +796,6 @@ const mountResolvedConditional = (
           cleanups: [],
           refCleanups: new Map<number, () => void>(),
           scope: scopeFor(scope, options),
-          sourceScope: scope,
           sourceScopeSnapshot: sourceScopeSnapshotFor(scope),
           localScopeKeys: localScopeKeysFor(options),
           interactiveBindingsBound: false,
@@ -860,6 +847,15 @@ const mountResolvedConditional = (
     bindNodes(anchor, state, options, hydratedEntries, state.cleanups, false);
     hydrationState.pending.clear();
   } catch (error) {
+    if (adoptedNodes) {
+      for (const node of state.nodes.splice(0)) {
+        try {
+          cleanupOwnedSubtree(node);
+        } catch {
+          // Retain the adoption failure over cleanup failures while preserving SSR DOM.
+        }
+      }
+    }
     for (const rollback of state.hydrationState?.pending ?? []) {
       try {
         rollback(error);

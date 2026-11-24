@@ -91,15 +91,26 @@ const hydrationCommentIndex = (root: ParentNode): HydrationCommentIndex => {
   const starts = new Map<string, Comment[]>();
   const ends = new Map<string, Comment[]>();
   const prefix = "tachyon-hydrate:";
-  for (let comment = walker.nextNode(); comment; comment = walker.nextNode()) {
-    if (!(comment instanceof Comment) || !comment.data.startsWith(prefix)) continue;
+  const record = (comment: Comment): void => {
+    if (!comment.data.startsWith(prefix)) return;
     const suffix = comment.data.endsWith(":start") ? ":start" : comment.data.endsWith(":end") ? ":end" : undefined;
-    if (suffix === undefined) continue;
+    if (suffix === undefined) return;
     const id = comment.data.slice(prefix.length, -suffix.length);
     const markers = suffix === ":start" ? starts : ends;
     const bucket = markers.get(id);
     if (bucket) bucket.push(comment);
     else markers.set(id, [comment]);
+  };
+  if (root instanceof Element) {
+    const prev = root.previousSibling;
+    const next = root.nextSibling;
+    if (prev instanceof Comment && next instanceof Comment && prev.data.endsWith(":start") && next.data === `${prev.data.slice(0, -5)}end`) {
+      record(prev);
+      record(next);
+    }
+  }
+  for (let comment = walker.nextNode(); comment; comment = walker.nextNode()) {
+    if (comment instanceof Comment) record(comment);
   }
   return { starts, ends };
 };

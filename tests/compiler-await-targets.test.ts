@@ -19,7 +19,9 @@ describe("<await> target contracts", () => {
   const template = `<main><await value={messagePromise} then="message"><p>{message}</p></await></main>`;
 
   it("renders a resolved value through the synchronous server renderer", () => {
-    expect(renderServerTemplate(compile(template), { messagePromise: "Ready" })).toBe(`<main><p>Ready</p></main>`);
+    expect(renderServerTemplate(compile(template), { messagePromise: "Ready" })).toBe(
+      `<main><!--tachyon-await:a0--><p>Ready</p><!--/tachyon-await:a0--></main>`,
+    );
   });
 
   it("rejects a Promise in the synchronous server renderer instead of rendering it as text", () => {
@@ -32,23 +34,31 @@ describe("<await> target contracts", () => {
     const module = await importModule<{ render: (scope: Record<string, unknown>) => string }>(
       generateServerModule(compile(template)),
     );
-    expect(module.render({ messagePromise: "Ready" })).toBe(`<main><p>Ready</p></main>`);
+    expect(module.render({ messagePromise: "Ready" })).toBe(
+      `<main><!--tachyon-await:a0--><p>Ready</p><!--/tachyon-await:a0--></main>`,
+    );
     expect(() => module.render({ messagePromise: Promise.resolve("Ready") })).toThrow(
       /<await> received a Promise in the synchronous server target/,
     );
   });
 
-  it("lowers <await> to a marker without bindings in the client target", () => {
+  it("lowers <await> to paired markers and an await binding in the client target", () => {
     const compiled = compile(template);
-    expect(compiled.client.templateHtml).toBe(`<main><!--tachyon-await--></main>`);
-    expect(compiled.client.bindings).toEqual([]);
+    expect(compiled.client.templateHtml).toBe(`<main><!--tachyon-await:a0--><!--/tachyon-await:a0--></main>`);
+    expect(compiled.client.bindings).toHaveLength(1);
+    expect(compiled.client.bindings[0]).toMatchObject({
+      kind: "await",
+      id: "a0",
+      value: "messagePromise",
+      thenName: "message",
+    });
   });
 
   it("does not emit the await guard when a template has no <await>", () => {
     expect(generateServerModule(compile(`<main>{label}</main>`))).not.toContain("awaitValue");
   });
 
-  it("accepts pending= as the documented name for the HTML yielded before awaiting", async () => {
+  it("accepts pending= as the documented name for the placeholder HTML replaced on settlement", async () => {
     const compiled = compile(
       `<main><await value={messagePromise} then="message" pending="<p>Loading</p>"><p>{message}</p></await></main>`,
     );
@@ -60,8 +70,10 @@ describe("<await> target contracts", () => {
     );
     const chunks: string[] = [];
     for await (const chunk of module.stream({ messagePromise: Promise.resolve("Ready") })) chunks.push(chunk);
-    // The pending HTML is appended output, not a placeholder that gets replaced.
-    expect(chunks.join("")).toBe(`<main><p>Loading</p><p>Ready</p></main>`);
+    const html = chunks.join("");
+    expect(html).toContain(`<!--tachyon-await:a0--><!--td:await:pending--><p>Loading</p><!--/tachyon-await:a0-->`);
+    expect(html).toContain(`<template data-tachyon-await="a0" data-status="resolved"><p>Ready</p></template>`);
+    expect(html).toContain(`__tachyonAwaitSwap("a0","resolved")`);
   });
 
   it("keeps fallback= as an alias of pending=", () => {

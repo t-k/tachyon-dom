@@ -567,7 +567,7 @@ export const checkTachyonTemplateTypes = (
     `const __tachyonCheckModel = <T>(_read: () => T, _write: (value: T) => void, _target: __TachyonModelTarget<T>): void => undefined;`,
   );
   builder.line(
-    `type __TachyonComponentLike = { mount?: (root: Element, props: any) => unknown; render?: (props: any) => unknown; stream?: (props: any) => unknown };`,
+    `type __TachyonComponentLike = { mount: (root: Element, props: any) => unknown; hydrate: (root: Element, props: any) => unknown } | { render: (props: any) => unknown } | { stream: (props: any) => unknown };`,
   );
   builder.line(
     `type __TachyonComponentProps<T> = T extends { mount: (root: Element, props: infer P) => unknown } ? P : T extends { render: (props: infer P) => unknown } ? P : T extends { stream: (props: infer P) => unknown } ? P : never;`,

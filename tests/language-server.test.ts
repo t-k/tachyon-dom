@@ -29,13 +29,19 @@ describe("Tachyon language server diagnostics", () => {
     expect(diagnosticsForTachyonDocument("<main><h1>{title}</h1></main>")).toEqual([]);
   });
 
-  it("reports unsupported stream await reordering at the reorder attribute", () => {
+  it("accepts reorder='resolve' and reports invalid <await> reorder values at the reorder attribute", () => {
+    expect(
+      diagnosticsForTachyonDocument(
+        `<main>\n  <await value={message} then="value" reorder="resolve">Ready</await>\n</main>`,
+      ),
+    ).toEqual([]);
+
     const diagnostics = diagnosticsForTachyonDocument(
-      `<main>\n  <await value={message} then="value" reorder="resolve">Ready</await>\n</main>`,
+      `<main>\n  <await value={message} then="value" reorder="invalid">Ready</await>\n</main>`,
     );
 
     expect(diagnostics[0]).toMatchObject({
-      message: '<await reorder="resolve"> is not supported by the stream target; use reorder="preserve" or omit it.',
+      message: '<await> reorder must be "preserve" or "resolve".',
       range: {
         start: { line: 1, character: 38 },
       },

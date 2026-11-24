@@ -71,18 +71,20 @@ const renderChildren = (
   children: readonly TemplateNode[],
   scope: Record<string, unknown>,
   path: readonly number[],
+  awaitCounter = { next: 0 },
 ): string =>
   childPathEntries(children, path)
-    .map((entry) => renderNode(entry.child, scope, entry.path))
+    .map((entry) => renderNode(entry.child, scope, entry.path, awaitCounter))
     .join("");
 
 const renderChildExpressions = (
   children: readonly TemplateNode[],
   locals: ReadonlySet<string>,
   path: readonly number[],
+  awaitCounter = { next: 0 },
 ): string =>
   childPathEntries(children, path)
-    .map((entry) => renderNodeExpression(entry.child, locals, entry.path))
+    .map((entry) => renderNodeExpression(entry.child, locals, entry.path, awaitCounter))
     .join(" + ");
 
 const hasStaticMetaRefreshMode = (node: ElementNode): boolean =>
@@ -131,7 +133,12 @@ const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
   return output;
 };
 
-const renderFor = (node: ElementNode, scope: Record<string, unknown>, path: number[]): string => {
+const renderFor = (
+  node: ElementNode,
+  scope: Record<string, unknown>,
+  path: number[],
+  awaitCounter = { next: 0 },
+): string => {
   const each = attrExpression(node, "each");
   const key = attrExpression(node, "key") ?? "item";
   const itemName = attrString(node, "as")?.trim() || itemNameFromKey(key);
@@ -143,14 +150,19 @@ const renderFor = (node: ElementNode, scope: Record<string, unknown>, path: numb
     ? items
         .map((item, index) => {
           const childScope = { ...scope, [itemName]: item, ...(indexName ? { [indexName]: index } : {}) };
-          return renderChildren(node.children, childScope, path);
+          return renderChildren(node.children, childScope, path, awaitCounter);
         })
         .join("")
     : "";
   return `${listStartMarker}${rows}${listEndMarker}`;
 };
 
-const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: number[] = []): string => {
+const renderElement = (
+  node: ElementNode,
+  scope: Record<string, unknown>,
+  path: number[] = [],
+  awaitCounter = { next: 0 },
+): string => {
   if (node.tagName === "outlet") {
     return `${outletStartMarker}${String(scope.outlet ?? "")}${outletEndMarker}`;
   }
@@ -161,13 +173,13 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
     return `${slotStartMarker(name)}${content}${slotEndMarker(name)}`;
   }
   if (node.tagName === "for") {
-    return renderFor(node, scope, path);
+    return renderFor(node, scope, path, awaitCounter);
   }
   if (node.tagName === "if") {
     // The region keeps the same markers the client template carries, so whitespace beside it stays separate
     // and hydration adopts exactly the nodes between them.
     const branch = readPath(scope, attrExpression(node, "test") ?? "false")
-      ? renderChildren(node.children, scope, path)
+      ? renderChildren(node.children, scope, path, awaitCounter)
       : "";
     return `${conditionalStartMarker}${branch}${conditionalEndMarker}`;
   }
@@ -178,9 +190,9 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
     const next = componentScope(node, scope);
     const children = renderableChildren(node);
     if (children.length === 1) {
-      return renderNode(children[0] as TemplateNode, next, path);
+      return renderNode(children[0] as TemplateNode, next, path, awaitCounter);
     }
-    return renderChildren(children, next, path);
+    return renderChildren(children, next, path, awaitCounter);
   }
   if (isComponentCallTagName(node.tagName)) {
     const target = readPath(scope, node.tagName) as { render?: (props: Record<string, unknown>) => unknown } | undefined;
@@ -199,9 +211,10 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
     return `${componentStartMarker}${String(target.render(props))}${componentEndMarker}`;
   }
   if (node.tagName === "await") {
+    const id = `a${awaitCounter.next++}`;
     const thenName = attrString(node, "then") ?? "value";
     const value = awaitedServerValue(readPath(scope, attrExpression(node, "value") ?? "undefined"));
-    return renderChildren(node.children, { ...scope, [thenName]: value }, path);
+    return `<!--tachyon-await:${id}-->${renderChildren(node.children, { ...scope, [thenName]: value }, path, awaitCounter)}<!--/tachyon-await:${id}-->`;
   }
 
   const attrs: string[] = [];
@@ -259,7 +272,7 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
   }
   const html = isVoidElement(node)
     ? `<${node.tagName}${attrs.join("")}>`
-    : `<${node.tagName}${attrs.join("")}>${renderChildren(node.children, scope, path)}</${node.tagName}>`;
+    : `<${node.tagName}${attrs.join("")}>${renderChildren(node.children, scope, path, awaitCounter)}</${node.tagName}>`;
   if (!hydrateBoundary) {
     return html;
   }
@@ -299,11 +312,16 @@ const generatedRenderComponentHelperLines = [
   `const __tachyonRenderComponent = (target, props, name) => { if (!target || typeof target.render !== "function") throw new TypeError("Component call <" + name + "> does not provide a server render() method."); return String(target.render(props)); };`,
 ];
 
-const renderNode = (node: TemplateNode, scope: Record<string, unknown>, path: number[] = []): string => {
+const renderNode = (
+  node: TemplateNode,
+  scope: Record<string, unknown>,
+  path: number[] = [],
+  awaitCounter = { next: 0 },
+): string => {
   if (node.type === "text") {
     return renderText(node, scope);
   }
-  return renderElement(node, scope, path);
+  return renderElement(node, scope, path, awaitCounter);
 };
 
 const renderTextExpression = (node: TextNode, locals: ReadonlySet<string> = new Set()): string => {
@@ -440,14 +458,20 @@ export const renderNodeExpression = (
   node: TemplateNode,
   locals: ReadonlySet<string> = new Set(),
   path: number[] = [],
+  awaitCounter = { next: 0 },
 ): string => {
   if (node.type === "text") {
     return renderTextExpression(node, locals);
   }
-  return renderElementExpression(node, locals, path);
+  return renderElementExpression(node, locals, path, awaitCounter);
 };
 
-const renderForExpression = (node: ElementNode, locals: ReadonlySet<string>, path: number[]): string => {
+const renderForExpression = (
+  node: ElementNode,
+  locals: ReadonlySet<string>,
+  path: number[],
+  awaitCounter: { next: number },
+): string => {
   const each = attrExpression(node, "each") ?? "[]";
   const key = attrExpression(node, "key") ?? "item";
   const itemName = attrString(node, "as")?.trim() || itemNameFromKey(key);
@@ -456,7 +480,7 @@ const renderForExpression = (node: ElementNode, locals: ReadonlySet<string>, pat
   const childLocals = new Set(locals);
   childLocals.add(itemName);
   if (indexName) childLocals.add(indexName);
-  const childExpression = renderChildExpressions(node.children, childLocals, path);
+  const childExpression = renderChildExpressions(node.children, childLocals, path, awaitCounter);
   const callbackParameters = indexName ? `(${itemName}, ${indexName})` : `(${itemName})`;
   return `(${jsString(listStartMarker)} + (Array.isArray(${eachAccess}) ? ${eachAccess}.map(${callbackParameters} => ${childExpression || `""`}).join("") : "") + ${jsString(listEndMarker)})`;
 };
@@ -465,6 +489,7 @@ const renderElementExpression = (
   node: ElementNode,
   locals: ReadonlySet<string> = new Set(),
   path: number[] = [],
+  awaitCounter = { next: 0 },
 ): string => {
   if (node.tagName === "outlet") {
     return `${JSON.stringify(outletStartMarker)} + String(scope.outlet ?? "") + ${JSON.stringify(outletEndMarker)}`;
@@ -474,18 +499,18 @@ const renderElementExpression = (
     return `${JSON.stringify(slotStartMarker(name))} + String(${jsOptionalPropertyAccess("scope.slots", name)} ?? "") + ${JSON.stringify(slotEndMarker(name))}`;
   }
   if (node.tagName === "for") {
-    return renderForExpression(node, locals, path);
+    return renderForExpression(node, locals, path, awaitCounter);
   }
   if (node.tagName === "if") {
     const test = expressionToScopeAccess(attrExpression(node, "test") ?? "false", locals);
-    const childExpression = renderChildExpressions(node.children, locals, path);
+    const childExpression = renderChildExpressions(node.children, locals, path, awaitCounter);
     return `(${jsString(conditionalStartMarker)} + (${test} ? ${childExpression || `""`} : "") + ${jsString(conditionalEndMarker)})`;
   }
   if (node.tagName === "store") {
     return `""`;
   }
   if (node.tagName === "component") {
-    return renderComponentExpression(node, locals, path);
+    return renderComponentExpression(node, locals, path, awaitCounter);
   }
   if (isComponentCallTagName(node.tagName)) {
     const targetExpr = expressionToScopeAccess(node.tagName, locals);
@@ -501,16 +526,17 @@ const renderElementExpression = (
     return `(${jsString(componentStartMarker)} + __tachyonRenderComponent(${targetExpr}, { ${propEntries.join(", ")} }, ${jsString(node.tagName)}) + ${jsString(componentEndMarker)})`;
   }
   if (node.tagName === "await") {
+    const id = `a${awaitCounter.next++}`;
     const value = expressionToScopeAccess(attrExpression(node, "value") ?? "undefined", locals);
     const thenName = attrString(node, "then") ?? "value";
     const childLocals = new Set(locals);
     childLocals.add(thenName);
-    const childExpression = renderChildExpressions(node.children, childLocals, path);
-    return `(((${thenName}) => ${childExpression || `""`})(awaitValue(${value})))`;
+    const childExpression = renderChildExpressions(node.children, childLocals, path, awaitCounter);
+    return `(${jsString(`<!--tachyon-await:${id}-->`)} + (((${thenName}) => ${childExpression || `""`})(awaitValue(${value}))) + ${jsString(`<!--/tachyon-await:${id}-->`)})`;
   }
 
   const parts: string[] = [renderOpenTagExpression(node, locals)];
-  const childExpression = renderChildExpressions(node.children, locals, path);
+  const childExpression = renderChildExpressions(node.children, locals, path, awaitCounter);
   if (childExpression) parts.push(childExpression);
   if (!isVoidElement(node)) {
     parts.push(jsString(`</${node.tagName}>`));
@@ -527,7 +553,12 @@ const renderElementExpression = (
   return `${jsString("<!--tachyon-hydrate:")} + escapeMarker(${marker}) + ${jsString(":start-->")} + ${expression} + ${jsString("<!--tachyon-hydrate:")} + escapeMarker(${marker}) + ${jsString(":end-->")}`;
 };
 
-const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string>, path: number[]): string => {
+const renderComponentExpression = (
+  node: ElementNode,
+  locals: ReadonlySet<string>,
+  path: number[],
+  awaitCounter = { next: 0 },
+): string => {
   const localNames = new Set(locals);
   const declarations: string[] = [];
   for (const attr of node.attrs) {
@@ -559,8 +590,8 @@ const renderComponentExpression = (node: ElementNode, locals: ReadonlySet<string
   const children = renderableChildren(node);
   const expression =
     children.length === 1
-      ? renderNodeExpression(children[0] as TemplateNode, localNames, path)
-      : children.map((child, index) => renderNodeExpression(child, localNames, [...path, index])).join(" + ") || `""`;
+      ? renderNodeExpression(children[0] as TemplateNode, localNames, path, awaitCounter)
+      : children.map((child, index) => renderNodeExpression(child, localNames, [...path, index], awaitCounter)).join(" + ") || `""`;
   return `(() => { ${declarations.join(" ")} return ${expression}; })()`;
 };
 

@@ -12,6 +12,7 @@ import * as listRuntime from "../src/runtime/list";
 import type { ClientTemplateModule } from "../src/runtime/mount";
 import * as signalRuntime from "../src/runtime/signal";
 import * as storeRuntime from "../src/runtime/store";
+import * as streamClientRuntime from "../src/runtime/stream-client";
 import * as textRuntime from "../src/runtime/text";
 
 const runtimeModules: Record<string, Record<string, unknown>> = {
@@ -28,6 +29,7 @@ const runtimeModules: Record<string, Record<string, unknown>> = {
   "tachyon-dom/runtime/list": listRuntime,
   "tachyon-dom/runtime/signal": signalRuntime,
   "tachyon-dom/runtime/store": storeRuntime,
+  "tachyon-dom/runtime/stream-client": streamClientRuntime,
   "tachyon-dom/runtime/text": textRuntime,
 };
 

@@ -430,6 +430,13 @@ const collectBindingIdentifiers = (binding: ClientBinding, identifiers: Set<stri
     }
     return;
   }
+  if (binding.kind === "await") {
+    collectExpressionIdentifiers(binding.value, identifiers);
+    for (const child of binding.bindings) {
+      collectBindingIdentifiers(child, identifiers);
+    }
+    return;
+  }
   collectExpressionIdentifiers(binding.expression, identifiers);
 };
 

@@ -7,6 +7,7 @@ import {
   urlPurposeForAttribute,
 } from "../url-policy.js";
 import { isAssignableExpression, parseExpression } from "./expression.js";
+import { parseTemplate } from "./parser.js";
 import type {
   CompilerError,
   Attribute,
@@ -140,6 +141,43 @@ export const componentCallPropsFor = (node: ElementNode): ComponentCallProp[] =>
     if (expression !== undefined) return { name: attr.name, value: expression, kind: "expression" };
     return { name: attr.name, value: attr.value, kind: "static" };
   });
+
+const unsafeAwaitRawPattern = /<\/?(?:script|template)\b|<!--\s*\/?(?:tachyon-|td:await:)/i;
+
+const validateAwaitStaticHtml = (
+  raw: string,
+  attrName: string,
+  span: SourceSpan,
+): Result<void, CompilerError> => {
+  if (unsafeAwaitRawPattern.test(raw)) {
+    return semanticError(
+      `<await> ${attrName} must not contain <script>, <template>, or internal Tachyon comment markers.`,
+      span,
+    );
+  }
+  const parsed = parseTemplate(`<div>${raw}</div>`);
+  if (!parsed.ok) {
+    return semanticError(`<await> ${attrName} must be valid static HTML: ${parsed.error.message}`, span);
+  }
+  const checkNode = (child: TemplateNode): Result<void, CompilerError> => {
+    if (child.type === "text") return ok(undefined);
+    if (child.tagName.toLowerCase() === "script" || child.tagName.toLowerCase() === "template") {
+      return semanticError(`<await> ${attrName} must not contain <${child.tagName.toLowerCase()}>.`, span);
+    }
+    const special = validateSpecialNode(child);
+    if (!special.ok) return semanticError(`<await> ${attrName}: ${special.error.message}`, span);
+    for (const grandChild of child.children) {
+      const next = checkNode(grandChild);
+      if (!next.ok) return next;
+    }
+    return ok(undefined);
+  };
+  for (const child of parsed.value.children) {
+    const res = checkNode(child);
+    if (!res.ok) return res;
+  }
+  return ok(undefined);
+};
 
 const validateTextExpressions = (node: TemplateNode, insideRawTextTag?: string): Result<void, CompilerError> => {
   if (node.type === "text") {
@@ -289,6 +327,15 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
         openingTagSpan(directList),
       );
     }
+    const directComponentCall = node.children.find(
+      (child): child is ElementNode => child.type === "element" && isComponentCallTagName(child.tagName),
+    );
+    if (directComponentCall) {
+      return semanticError(
+        `A component call <${directComponentCall.tagName}> placed directly inside <for> is not supported yet; wrap it in an element such as <li>.`,
+        openingTagSpan(directComponentCall),
+      );
+    }
     for (const name of ["as", "index"] as const) {
       const attribute = node.attrs.find((candidate) => candidate.name === name);
       if (attribute && (typeof attribute.value !== "string" || !isSafeIdentifierName(attribute.value.trim()))) {
@@ -369,6 +416,15 @@ const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => 
         `<await> accepts either pending="..." or its alias fallback="...", not both.`,
         attributeSpan(node.attrs.find((attr) => attr.name === "fallback") as Attribute),
       );
+    }
+    for (const attrName of ["pending", "fallback", "error"] as const) {
+      const attr = node.attrs.find((candidate) => candidate.name === attrName);
+      if (!attr) continue;
+      if (attr.value === true || readExpressionAttribute(attr.value) !== undefined) {
+        return semanticError(`<await> ${attrName} must be a static HTML string.`, attributeSpan(attr));
+      }
+      const checked = validateAwaitStaticHtml(attr.value, attrName, attributeSpan(attr));
+      if (!checked.ok) return checked;
     }
   }
   for (const attr of node.attrs) {
@@ -496,6 +552,12 @@ const collectDirectives = (node: TemplateNode, path: number[], directives: Templ
 };
 
 export const createTemplateIr = (root: ElementNode): Result<TemplateIr, CompilerError> => {
+  if (isComponentCallTagName(root.tagName)) {
+    return semanticError(
+      `Component call <${root.tagName}> cannot be the template root; wrap it in an element.`,
+      openingTagSpan(root),
+    );
+  }
   // Preserve diagnostic order by validating the full expression tree before structural checks.
   const expressionResult = validateTextExpressions(root);
   if (!expressionResult.ok) {

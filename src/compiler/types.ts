@@ -143,6 +143,21 @@ export type ComponentCallBinding = {
   props: ComponentCallProp[];
 };
 
+export type AwaitBinding = {
+  kind: "await";
+  id: string;
+  path: number[];
+  value: string;
+  thenName: string;
+  pending?: string;
+  error?: string;
+  templateHtml: string;
+  bindings: ClientBinding[];
+  stores?: StoreDefinition[];
+  hydrationBoundaries?: HydrationBoundary[];
+  components?: ComponentBoundary[];
+};
+
 export type ClientBinding =
   | TextBinding
   | ClassBinding
@@ -153,7 +168,8 @@ export type ClientBinding =
   | ModelBinding
   | ListBinding
   | ConditionalBinding
-  | ComponentCallBinding;
+  | ComponentCallBinding
+  | AwaitBinding;
 
 export type StoreDefinition = {
   name: string;
@@ -200,7 +216,7 @@ export type TemplateDirective =
       path: number[];
       value: string;
       thenName: string;
-      /** HTML yielded by the stream target before awaiting. It is appended output and is not replaced. */
+      /** Static placeholder HTML yielded while awaiting and replaced once settled. */
       pending?: string;
       /** Alias of `pending`, kept for IR consumers that read the original attribute name. */
       fallback?: string;

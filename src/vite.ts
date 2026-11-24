@@ -575,7 +575,7 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
         result.value.template,
         options.reactive === true,
         result.value.scriptOnly,
-        resolvedTarget === "client" && hydrationBoundaryId === undefined && script.value.defaultScopeName
+        hydrationBoundaryId === undefined && script.value.defaultScopeName
           ? script.value.defaultScopeName
           : undefined,
         hydrationBoundaryId,

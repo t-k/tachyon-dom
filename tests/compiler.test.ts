@@ -1960,7 +1960,7 @@ describe("HTML-first compiler", () => {
     for await (const chunk of module.stream({ messagePromise: Promise.resolve("Ready") })) {
       chunks.push(chunk);
     }
-    expect(chunks.join("")).toBe(`<main><h1>Before</h1><p>Ready</p></main>`);
+    expect(chunks.join("")).toBe(`<main><h1>Before</h1><!--tachyon-await:a0--><p>Ready</p><!--/tachyon-await:a0--></main>`);
   });
 
   it("keeps the generated synchronous await fallback when its child is empty", async () => {
@@ -1973,7 +1973,7 @@ describe("HTML-first compiler", () => {
     const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
       render: (scope: { messagePromise: unknown }) => string;
     };
-    expect(module.render({ messagePromise: "Ready" })).toBe(`<main></main>`);
+    expect(module.render({ messagePromise: "Ready" })).toBe(`<main><!--tachyon-await:a0--><!--/tachyon-await:a0--></main>`);
   });
 
   it("generates hydration state helpers for server modules", async () => {
@@ -2015,9 +2015,9 @@ describe("HTML-first compiler", () => {
     });
 
     const code = generateServerStreamModule(result.value);
-    expect(code).toContain(`__tachyonPush("Loading");`);
-    expect(code).toContain(`} catch {`);
-    expect(code).toContain(`__tachyonPush("Failed");`);
+    expect(code).toContain(`<!--tachyon-await:a0--><!--td:await:pending-->Loading<!--/tachyon-await:a0-->`);
+    expect(code).toContain(`__tachyonDrainPendingAwaits`);
+    expect(code).toContain(`<!--td:await:error-->Failed`);
 
     const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
       stream: (scope: { messagePromise: Promise<string> }) => AsyncIterable<string>;
@@ -2026,23 +2026,33 @@ describe("HTML-first compiler", () => {
     for await (const chunk of module.stream({ messagePromise: Promise.resolve("Ready") })) {
       successChunks.push(chunk);
     }
-    expect(successChunks.join("")).toBe(`<main>Loading<p>Ready</p></main>`);
+    const successHtml = successChunks.join("");
+    expect(successHtml).toContain(`<main><!--tachyon-await:a0--><!--td:await:pending-->Loading<!--/tachyon-await:a0--></main>`);
+    expect(successHtml).toContain(`<template data-tachyon-await="a0" data-status="resolved"><p>Ready</p></template>`);
 
     const errorChunks: string[] = [];
     for await (const chunk of module.stream({ messagePromise: Promise.reject(new Error("Nope")) })) {
       errorChunks.push(chunk);
     }
-    expect(errorChunks.join("")).toBe(`<main>LoadingFailed</main>`);
+    const errorHtml = errorChunks.join("");
+    expect(errorHtml).toContain(`<template data-tachyon-await="a0" data-status="error"><!--td:await:error-->Failed</template>`);
   });
 
-  it("rejects resolve-order await fragments in the streaming target", () => {
+  it("supports resolve-order await fragments in the streaming target", async () => {
     const result = compileTemplate(
       `<main><await value={messagePromise} then="message" reorder="resolve"><p>{message}</p></await></main>`,
     );
     if (!result.ok) throw new Error(result.error.message);
 
-    expect(() => generateServerStreamModule(result.value)).toThrow(
-      '<await reorder="resolve"> is not supported by the stream target',
-    );
+    const code = generateServerStreamModule(result.value);
+    expect(code).toContain(`reorder: "resolve"`);
+    const module = (await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`)) as {
+      stream: (scope: { messagePromise: Promise<string> }) => AsyncIterable<string>;
+    };
+    const chunks: string[] = [];
+    for await (const chunk of module.stream({ messagePromise: Promise.resolve("Fast") })) {
+      chunks.push(chunk);
+    }
+    expect(chunks.join("")).toContain(`<template data-tachyon-await="a0" data-status="resolved"><p>Fast</p></template>`);
   });
 });

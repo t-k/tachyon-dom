@@ -10,15 +10,15 @@
     "fileName": "reports/mutation/hydration/mutation.json"
   },
   "mutate": [
-    "src/runtime/conditional.ts:533:0-548:0",
-    "src/runtime/conditional.ts:653:0-873:0",
-    "src/runtime/list.ts:829:0-908:0",
-    "src/compiler/targets/client.ts:643:0-657:0",
-    "src/compiler/targets/client.ts:973:0-989:0",
-    "src/compiler/sfc.ts:471:0-487:0",
-    "src/compiler/sfc.ts:84:0-159:0",
-    "src/compiler/sfc.ts:759:0-803:0",
-    "src/compiler/sfc.ts:869:0-878:0"
+    "src/runtime/conditional.ts:555:0-572:0",
+    "src/runtime/conditional.ts:665:0-885:0",
+    "src/runtime/list.ts:841:0-925:0",
+    "src/compiler/targets/client.ts:736:0-750:0",
+    "src/compiler/targets/client.ts:1058:0-1076:0",
+    "src/compiler/sfc.ts:465:0-493:0",
+    "src/compiler/sfc.ts:81:0-161:0",
+    "src/compiler/sfc.ts:798:0-842:0",
+    "src/compiler/sfc.ts:896:0-918:0"
   ],
   "plugins": [
     "./node_modules/@stryker-mutator/vitest-runner/dist/src/index.js"
