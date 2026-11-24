@@ -2015,7 +2015,7 @@ describe("HTML-first compiler", () => {
     });
 
     const code = generateServerStreamModule(result.value);
-    expect(code).toContain(`<!--tachyon-await:a0--><!--td:await:pending-->Loading<!--/tachyon-await:a0-->`);
+    expect(code).toContain(`<!--td:await:pending-->Loading`);
     expect(code).toContain(`__tachyonDrainPendingAwaits`);
     expect(code).toContain(`<!--td:await:error-->Failed`);
 

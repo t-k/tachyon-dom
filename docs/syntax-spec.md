@@ -190,9 +190,11 @@ Use them for route layouts and for composing server-rendered fragments. They are
 `<await value={promise} then="name">...</await>` creates an async fragment that works consistently across streaming SSR, synchronous SSR (for resolved plain values), client `mount()`, and `hydrate()`.
 
 ```html
-<await value="{messagePromise}" then="message" pending="<p>Loading...</p>" error="<p>Failed</p>" reorder="resolve">
-  <p>{message}</p>
-</await>
+<section>
+  <await value="{messagePromise}" then="message" pending="<p>Loading...</p>" error="<p>Failed</p>" reorder="resolve">
+    <p>{message}</p>
+  </await>
+</section>
 ```
 
 `<await>` accepts:
@@ -218,7 +220,7 @@ Every element form is compiled by the client, synchronous server, and stream tar
 
 > Where a form is supported by more than one target, it has the same meaning in each. Where a target cannot realize that meaning, it reports a diagnostic instead of silently doing something else.
 
-Examples of the rule in this document: a `<for>` region renders the same rows and the same markers in every target; `<await>` with a Promise in the synchronous server target is an error rather than text; `reorder="resolve"` is rejected by the stream target; `<outlet>` and `<slot>` on the client are documented as markers only rather than being emulated. The lightweight and generic client runtimes chosen for a `<for>` or `<if>` (see `tachyon-dom explain`) differ in size only, never in observable behavior.
+Examples of the rule in this document: a `<for>` region renders the same rows and the same markers in every target; `<await>` with a Promise in the synchronous server target is an error rather than text; `<outlet>` and `<slot>` on the client are documented as markers only rather than being emulated. The lightweight and generic client runtimes chosen for a `<for>` or `<if>` (see `tachyon-dom explain`) differ in size only, never in observable behavior.
 
 ## Single File Templates
 

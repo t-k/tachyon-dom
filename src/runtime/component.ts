@@ -11,7 +11,7 @@ export type TemplateComponentOptions<
   client: ClientTemplateModule<Scope>;
   scope?: (props: Props) => Scope;
   render?: (props: Props) => string;
-  stream?: (props: Props) => AsyncIterable<string>;
+  stream?: (props: Props, streamOptions?: unknown) => AsyncIterable<string>;
 };
 
 export type TemplateComponentInstance<Props extends object> = MountHandle & {
@@ -23,7 +23,7 @@ export type TemplateComponent<Props extends object, Scope extends Record<string,
   mount: (root: Element, props: Props) => TemplateComponentInstance<Props>;
   hydrate: (root: Element, props: Props) => Result<TemplateComponentInstance<Props>, HydrateError>;
   render: (props: Props) => string;
-  stream: (props: Props) => AsyncIterable<string>;
+  stream: (props: Props, streamOptions?: unknown) => AsyncIterable<string>;
 };
 
 const scopeFor = <Props extends object, Scope extends Record<string, unknown>>(
@@ -168,9 +168,9 @@ export const createTemplateComponent = <
       if (!options.render) throw new Error("This template component does not provide a server renderer.");
       return options.render(props);
     },
-    stream: (props) => {
+    stream: (props, streamOptions) => {
       if (!options.stream) throw new Error("This template component does not provide a stream renderer.");
-      return options.stream(props);
+      return options.stream(props, streamOptions);
     },
   };
 };

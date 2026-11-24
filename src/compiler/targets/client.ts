@@ -2121,7 +2121,7 @@ const serializeAwaitBodyBinder = (
       );
       body.push(`__cleanups.push(() => ${runtimeNames.cleanupAwaitRegion}(${tName}));`);
     } else if (child.kind === "if") {
-      const nestedIf = serializeListRowBinding(child, detailed);
+      const nestedIf = serializeListRowBinding(child, detailed, reactive);
       const vis = runtimeValueExpression(child.test, reactive, "scope", aliases);
       body.push(`const ${tName} = __nodeAt(${JSON.stringify(child.path)});`);
       body.push(`const __ifOpts${idx} = ${nestedIf};`);
@@ -2131,19 +2131,24 @@ const serializeAwaitBodyBinder = (
           : `${runtimeNames.mountGeneratedConditional}(${tName}, [], ${vis}, scope, __ifOpts${idx});`,
       );
     } else if (child.kind === "list") {
-      const nestedList = serializeListRowBinding(child, detailed);
+      const nestedList = serializeListRowBinding(child, detailed, reactive);
       const each = runtimeValueExpression(child.each, reactive, "scope", aliases);
-      body.push(`const ${tName} = __nodeAt(${JSON.stringify(child.path)});`);
       body.push(`const __listOpts${idx} = ${nestedList};`);
-      body.push(
-        reactive
-          ? `__cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.mountGeneratedKeyedList}(${tName}, [], ${each}, __listOpts${idx}, scope)));`
-          : `${runtimeNames.mountGeneratedKeyedList}(${tName}, [], ${each}, __listOpts${idx}, scope);`,
-      );
+      if (child.region?.direct) {
+        const directCall = `__mountDirectList(${child.region.index ?? 0}, (__container) => ${runtimeNames.mountGeneratedKeyedList}(__container, [], ${each}, __listOpts${idx}, scope))`;
+        body.push(reactive ? `__cleanups.push(${runtimeNames.effect}(() => ${directCall}));` : `${directCall};`);
+      } else {
+        body.push(`const ${tName} = __nodeAt(${JSON.stringify(child.path)});`);
+        body.push(
+          reactive
+            ? `__cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.mountGeneratedKeyedList}(${tName}, [], ${each}, __listOpts${idx}, scope)));`
+            : `${runtimeNames.mountGeneratedKeyedList}(${tName}, [], ${each}, __listOpts${idx}, scope);`,
+        );
+      }
     }
   }
   body.push(`return () => { for (const c of __cleanups.splice(0).reverse()) { try { c?.(); } catch {} } };`);
-  return `(__nodes, scope) => { ${body.join(" ")} }`;
+  return `(__nodes, scope, _adopted, __mountDirectList) => { ${body.join(" ")} }`;
 };
 
 const serializeAwaitOptions = (
@@ -2164,7 +2169,11 @@ const serializeAwaitOptions = (
   return `{ ${fields.join(", ")} }`;
 };
 
-const serializeListRowBinding = (binding: ListBinding["bindings"][number], detailed: boolean): string => {
+const serializeListRowBinding = (
+  binding: ListBinding["bindings"][number],
+  detailed: boolean,
+  reactive = true,
+): string => {
   const fields: string[] = [
     `kind: ${JSON.stringify(binding.kind === "component-call" || binding.kind === "await" ? "mount" : binding.kind)}`,
     `path: ${JSON.stringify(binding.path)}`,
@@ -2217,7 +2226,7 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number], detai
     );
   } else if (binding.kind === "await") {
     fields.push(
-      `mount: (node, scope) => ${runtimeNames.mountAwaitRegion}(node, ${serializeAwaitOptions(binding, true, detailed, aliases)}, scope)`,
+      `mount: (node, scope) => ${runtimeNames.mountAwaitRegion}(node, ${serializeAwaitOptions(binding, reactive, detailed, aliases)}, scope)`,
     );
   } else if (binding.kind === "list") {
     const itemKeyExpression = simpleItemKeyExpression(binding.key, binding.itemName);
@@ -2241,7 +2250,9 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number], detai
         : `keyRead: (scope) => ${bindingReadExpression(binding.key, aliases)}`,
     );
     fields.push(`templateHtml: ${JSON.stringify(binding.templateHtml)}`);
-    fields.push(`bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}]`);
+    fields.push(
+      `bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed, reactive)).join(", ")}]`,
+    );
   } else if (binding.kind === "if") {
     fields.push(`signature: ${JSON.stringify(conditionalSignature(binding, detailed))}`);
     fields.push(`test: ${JSON.stringify(binding.test)}`);
@@ -2253,7 +2264,9 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number], detai
       fields.push(`hydrationBoundaries: ${serializeHydrationBoundaries(binding.hydrationBoundaries)}`);
     fields.push(...nestedHydrationRuntimeField(binding));
     if (binding.components?.length) fields.push(`components: ${serializeComponentBoundaries(binding.components)}`);
-    fields.push(`bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}]`);
+    fields.push(
+      `bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed, reactive)).join(", ")}]`,
+    );
   }
   return `{ ${fields.join(", ")} }`;
 };
@@ -2481,7 +2494,9 @@ const emitListBinding = (
     `    templateHtml: ${JSON.stringify(binding.templateHtml)},`,
     ...(isTextOnlyList(binding)
       ? generatedRowBindingFields(binding)
-      : [`    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}],`]),
+      : [
+          `    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed, reactive)).join(", ")}],`,
+        ]),
     `  };`,
   ].join("\n");
   const target = targetName ?? "root";
@@ -2522,7 +2537,7 @@ const emitConditionalBinding = (
             : []),
           ...nestedHydrationRuntimeField(binding).map((field) => `    ${field},`),
           ...(binding.components?.length ? [`    components: ${serializeComponentBoundaries(binding.components)},`] : []),
-          `    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed)).join(", ")}],`,
+          `    bindings: [${binding.bindings.map((child) => serializeListRowBinding(child, detailed, reactive)).join(", ")}],`,
         ]),
     `  };`,
   ].join("\n");

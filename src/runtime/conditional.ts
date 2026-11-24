@@ -266,6 +266,7 @@ type ConditionalState = {
 
 const states = new WeakMap<Comment, ConditionalState>();
 const ownerCleanupDisposers = new WeakMap<Comment, () => void>();
+let preservingAdoptedDom = false;
 
 const detachOwnerCleanup = (anchor: Comment): void => {
   ownerCleanupDisposers.get(anchor)?.();
@@ -443,10 +444,12 @@ const cleanup = (state: ConditionalState): void => {
       if (!failed) firstError = error;
       failed = true;
     } finally {
-      if (isConditionalStartMarker(node)) removeConditionalRegion(node);
-      else if (isListStartMarker(node)) removeListRegion(node);
-      else if (isInsertionStartMarker(node)) removeInsertionRegion(node);
-      node.parentNode?.removeChild(node);
+      if (!preservingAdoptedDom) {
+        if (isConditionalStartMarker(node)) removeConditionalRegion(node);
+        else if (isListStartMarker(node)) removeListRegion(node);
+        else if (isInsertionStartMarker(node)) removeInsertionRegion(node);
+        node.parentNode?.removeChild(node);
+      }
     }
   }
   state.nodes.length = 0;
@@ -463,10 +466,12 @@ const removeAdoptedNodes = (nodes: readonly Node[]): void => {
       if (!failed) firstError = error;
       failed = true;
     } finally {
-      if (isConditionalStartMarker(node)) removeConditionalRegion(node);
-      else if (isListStartMarker(node)) removeListRegion(node);
-      else if (isInsertionStartMarker(node)) removeInsertionRegion(node);
-      node.parentNode?.removeChild(node);
+      if (!preservingAdoptedDom) {
+        if (isConditionalStartMarker(node)) removeConditionalRegion(node);
+        else if (isListStartMarker(node)) removeListRegion(node);
+        else if (isInsertionStartMarker(node)) removeInsertionRegion(node);
+        node.parentNode?.removeChild(node);
+      }
     }
   }
   if (failed) throw firstError;
@@ -848,12 +853,18 @@ const mountResolvedConditional = (
     hydrationState.pending.clear();
   } catch (error) {
     if (adoptedNodes) {
-      for (const node of state.nodes.splice(0)) {
-        try {
-          cleanupOwnedSubtree(node);
-        } catch {
-          // Retain the adoption failure over cleanup failures while preserving SSR DOM.
+      const previousPreserving = preservingAdoptedDom;
+      preservingAdoptedDom = true;
+      try {
+        for (const node of state.nodes.splice(0)) {
+          try {
+            cleanupOwnedSubtree(node);
+          } catch {
+            // Retain the adoption failure over cleanup failures while preserving SSR DOM.
+          }
         }
+      } finally {
+        preservingAdoptedDom = previousPreserving;
       }
     }
     for (const rollback of state.hydrationState?.pending ?? []) {

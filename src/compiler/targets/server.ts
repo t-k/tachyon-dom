@@ -71,10 +71,10 @@ const renderChildren = (
   children: readonly TemplateNode[],
   scope: Record<string, unknown>,
   path: readonly number[],
-  awaitCounter = { next: 0 },
+  awaitIds: WeakMap<ElementNode, string>,
 ): string =>
   childPathEntries(children, path)
-    .map((entry) => renderNode(entry.child, scope, entry.path, awaitCounter))
+    .map((entry) => renderNode(entry.child, scope, entry.path, awaitIds))
     .join("");
 
 const renderChildExpressions = (
@@ -133,11 +133,23 @@ const renderText = (node: TextNode, scope: Record<string, unknown>): string => {
   return output;
 };
 
+const assignAwaitIds = (root: ElementNode): WeakMap<ElementNode, string> => {
+  const ids = new WeakMap<ElementNode, string>();
+  let next = 0;
+  const walk = (node: TemplateNode): void => {
+    if (node.type !== "element") return;
+    if (node.tagName === "await") ids.set(node, `a${next++}`);
+    for (const child of node.children) walk(child);
+  };
+  walk(root);
+  return ids;
+};
+
 const renderFor = (
   node: ElementNode,
   scope: Record<string, unknown>,
   path: number[],
-  awaitCounter = { next: 0 },
+  awaitIds: WeakMap<ElementNode, string>,
 ): string => {
   const each = attrExpression(node, "each");
   const key = attrExpression(node, "key") ?? "item";
@@ -150,7 +162,7 @@ const renderFor = (
     ? items
         .map((item, index) => {
           const childScope = { ...scope, [itemName]: item, ...(indexName ? { [indexName]: index } : {}) };
-          return renderChildren(node.children, childScope, path, awaitCounter);
+          return renderChildren(node.children, childScope, path, awaitIds);
         })
         .join("")
     : "";
@@ -161,7 +173,7 @@ const renderElement = (
   node: ElementNode,
   scope: Record<string, unknown>,
   path: number[] = [],
-  awaitCounter = { next: 0 },
+  awaitIds: WeakMap<ElementNode, string> = assignAwaitIds(node),
 ): string => {
   if (node.tagName === "outlet") {
     return `${outletStartMarker}${String(scope.outlet ?? "")}${outletEndMarker}`;
@@ -173,13 +185,13 @@ const renderElement = (
     return `${slotStartMarker(name)}${content}${slotEndMarker(name)}`;
   }
   if (node.tagName === "for") {
-    return renderFor(node, scope, path, awaitCounter);
+    return renderFor(node, scope, path, awaitIds);
   }
   if (node.tagName === "if") {
     // The region keeps the same markers the client template carries, so whitespace beside it stays separate
     // and hydration adopts exactly the nodes between them.
     const branch = readPath(scope, attrExpression(node, "test") ?? "false")
-      ? renderChildren(node.children, scope, path, awaitCounter)
+      ? renderChildren(node.children, scope, path, awaitIds)
       : "";
     return `${conditionalStartMarker}${branch}${conditionalEndMarker}`;
   }
@@ -190,9 +202,9 @@ const renderElement = (
     const next = componentScope(node, scope);
     const children = renderableChildren(node);
     if (children.length === 1) {
-      return renderNode(children[0] as TemplateNode, next, path, awaitCounter);
+      return renderNode(children[0] as TemplateNode, next, path, awaitIds);
     }
-    return renderChildren(children, next, path, awaitCounter);
+    return renderChildren(children, next, path, awaitIds);
   }
   if (isComponentCallTagName(node.tagName)) {
     const target = readPath(scope, node.tagName) as { render?: (props: Record<string, unknown>) => unknown } | undefined;
@@ -211,10 +223,10 @@ const renderElement = (
     return `${componentStartMarker}${String(target.render(props))}${componentEndMarker}`;
   }
   if (node.tagName === "await") {
-    const id = `a${awaitCounter.next++}`;
+    const id = awaitIds.get(node) ?? "a0";
     const thenName = attrString(node, "then") ?? "value";
     const value = awaitedServerValue(readPath(scope, attrExpression(node, "value") ?? "undefined"));
-    return `<!--tachyon-await:${id}-->${renderChildren(node.children, { ...scope, [thenName]: value }, path, awaitCounter)}<!--/tachyon-await:${id}-->`;
+    return `<!--tachyon-await:${id}-->${renderChildren(node.children, { ...scope, [thenName]: value }, path, awaitIds)}<!--/tachyon-await:${id}-->`;
   }
 
   const attrs: string[] = [];
@@ -272,7 +284,7 @@ const renderElement = (
   }
   const html = isVoidElement(node)
     ? `<${node.tagName}${attrs.join("")}>`
-    : `<${node.tagName}${attrs.join("")}>${renderChildren(node.children, scope, path, awaitCounter)}</${node.tagName}>`;
+    : `<${node.tagName}${attrs.join("")}>${renderChildren(node.children, scope, path, awaitIds)}</${node.tagName}>`;
   if (!hydrateBoundary) {
     return html;
   }
@@ -316,12 +328,12 @@ const renderNode = (
   node: TemplateNode,
   scope: Record<string, unknown>,
   path: number[] = [],
-  awaitCounter = { next: 0 },
+  awaitIds: WeakMap<ElementNode, string> = node.type === "element" ? assignAwaitIds(node) : new WeakMap(),
 ): string => {
   if (node.type === "text") {
     return renderText(node, scope);
   }
-  return renderElement(node, scope, path, awaitCounter);
+  return renderElement(node, scope, path, awaitIds);
 };
 
 const renderTextExpression = (node: TextNode, locals: ReadonlySet<string> = new Set()): string => {
@@ -661,7 +673,8 @@ export const compileServerTemplate = (template: CompiledTemplate): ServerRendere
     return cached;
   }
   const root = structuredClone(template.root);
-  const renderer: ServerRenderer = (scope) => renderNode(root, scope);
+  const awaitIds = assignAwaitIds(root);
+  const renderer: ServerRenderer = (scope) => renderNode(root, scope, [], awaitIds);
   serverRendererCache.set(template, renderer);
   return renderer;
 };

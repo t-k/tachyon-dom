@@ -109,9 +109,8 @@ const renderAwaitYieldStatements = (
   path: number[],
   ctx: StreamEmitContext,
 ): string[] => {
-  const id = `a${ctx.awaitCounter.next++}`;
-  const startMarker = `<!--tachyon-await:${id}-->`;
-  const endMarker = `<!--/tachyon-await:${id}-->`;
+  const staticId = ctx.awaitCounter.next++;
+  const idVar = `__tachyonAwaitId_${staticId}`;
   const thenName = attrString(node, "then") ?? "value";
   const pending = attrString(node, "pending") ?? attrString(node, "fallback");
   const errorText = attrString(node, "error");
@@ -124,10 +123,11 @@ const renderAwaitYieldStatements = (
 
   if (!usesDeferredReplacement) {
     // Inline awaiting when neither pending placeholder nor resolve-order streaming is requested:
-    // preserves zero-script streaming while still emitting region markers for hydration.
+    // preserves zero-script streaming while still emitting unique per-instance region markers for hydration.
     const statements = [
       `${indent}{`,
-      `${indent}  yield ${jsString(startMarker)};`,
+      `${indent}  const ${idVar} = "a" + (__tachyonCtx.nextId++);`,
+      `${indent}  yield "<!--tachyon-await:" + ${idVar} + "-->";`,
     ];
     if (errorText !== undefined) {
       statements.push(`${indent}  try {`);
@@ -140,44 +140,46 @@ const renderAwaitYieldStatements = (
       statements.push(`${indent}  const ${thenName} = await ${valueExpr};`);
       statements.push(...bodyStatements);
     }
-    statements.push(`${indent}  yield ${jsString(endMarker)};`);
+    statements.push(`${indent}  yield "<!--/tachyon-await:" + ${idVar} + "-->";`);
     statements.push(`${indent}}`);
     return statements;
   }
 
   // Deferred replacement streaming: flush placeholder immediately without blocking shell HTML,
-  // then stream `<template>` + `<script>` replacement chunks after the shell finishes.
+  // then stream `<template>` + `<script>` replacement chunks after the root shell finishes.
   const collectedBody = bodyStatements.map((line) => {
     const yieldMatch = /^(\s*)yield (.*);$/.exec(line);
     if (yieldMatch) return `${yieldMatch[1]}__out += String(${yieldMatch[2]} ?? "");`;
     const yieldStarMatch = /^(\s*)yield\* (.*);$/.exec(line);
-    if (yieldStarMatch) return `${yieldStarMatch[1]}for await (const __c of ${yieldStarMatch[2]}) __out += String(__c ?? "");`;
+    if (yieldStarMatch)
+      return `${yieldStarMatch[1]}for await (const __c of ${yieldStarMatch[2]}) __out += String(__c ?? "");`;
     return line;
   });
 
-  const valVar = `__tachyonAwaitVal_${id}`;
+  const valVar = `__tachyonAwaitVal_${staticId}`;
   const statements = [
     `${indent}{`,
+    `${indent}  const ${idVar} = "a" + (__tachyonCtx.nextId++);`,
     `${indent}  const ${valVar} = ${valueExpr};`,
     `${indent}  if (!__tachyonIsThenable(${valVar})) {`,
     `${indent}    const ${thenName} = ${valVar};`,
-    `${indent}    yield ${jsString(startMarker)};`,
+    `${indent}    yield "<!--tachyon-await:" + ${idVar} + "-->";`,
     ...bodyStatements,
-    `${indent}    yield ${jsString(endMarker)};`,
+    `${indent}    yield "<!--/tachyon-await:" + ${idVar} + "-->";`,
     `${indent}  } else {`,
-    `${indent}    yield ${jsString(`${startMarker}<!--td:await:pending-->${pending ?? ""}${endMarker}`)};`,
-    `${indent}    __tachyonPendingAwaits.push({`,
-    `${indent}      id: ${jsString(id)},`,
+    `${indent}    yield "<!--tachyon-await:" + ${idVar} + "-->" + ${jsString(`<!--td:await:pending-->${pending ?? ""}`)} + "<!--/tachyon-await:" + ${idVar} + "-->";`,
+    `${indent}    __tachyonEnqueueAwait(__tachyonCtx, {`,
+    `${indent}      id: ${idVar},`,
     `${indent}      reorder: ${jsString(reorder)},`,
     `${indent}      task: Promise.resolve(${valVar}).then(`,
     `${indent}        async (${thenName}) => {`,
     `${indent}          let __out = "";`,
     ...collectedBody,
-    `${indent}          return { id: ${jsString(id)}, status: "resolved", html: __out };`,
+    `${indent}          return { id: ${idVar}, status: "resolved", html: __out };`,
     `${indent}        },`,
     errorText !== undefined
-      ? `${indent}        () => ({ id: ${jsString(id)}, status: "error", html: ${jsString(`<!--td:await:error-->${errorText}`)} }),`
-      : `${indent}        (error) => ({ id: ${jsString(id)}, status: "throw", error }),`,
+      ? `${indent}        () => ({ id: ${idVar}, status: "error", html: ${jsString(`<!--td:await:error-->${errorText}`)} }),`
+      : `${indent}        (error) => ({ id: ${idVar}, status: "throw", error }),`,
     `${indent}      ),`,
     `${indent}    });`,
     `${indent}  }`,
@@ -239,7 +241,7 @@ const renderElementYieldStatements = (
     });
     return [
       `${indent}yield ${jsString(componentStartMarker)};`,
-      `${indent}yield* __tachyonStreamComponent(${targetExpr}, { ${propEntries.join(", ")} }, ${jsString(node.tagName)}, __tachyonStreamOptions);`,
+      `${indent}yield* __tachyonStreamComponent(${targetExpr}, { ${propEntries.join(", ")} }, ${jsString(node.tagName)}, __tachyonChildOptions);`,
       `${indent}yield ${jsString(componentEndMarker)};`,
     ];
   }
@@ -338,6 +340,9 @@ export const validateServerStreamTemplate = (_template: CompiledTemplate): Resul
 const hasComponentCallNode = (node: TemplateNode): boolean =>
   node.type === "element" && (isComponentCallTagName(node.tagName) || node.children.some(hasComponentCallNode));
 
+const hasAwaitNode = (node: TemplateNode): boolean =>
+  node.type === "element" && (node.tagName === "await" || node.children.some(hasAwaitNode));
+
 const hasDeferredAwaitNode = (node: TemplateNode): boolean =>
   node.type === "element" &&
   ((node.tagName === "await" &&
@@ -358,11 +363,11 @@ const awaitBootstrapScriptBody =
   `window.__tachyonAwaitSwap||(window.__tachyonAwaitSwap=function(id,st){` +
   `var d=document,t=d.querySelector('template[data-tachyon-await="'+id+'"]');if(!t)return;` +
   `var s="tachyon-await:"+id,e="/"+s,w=d.createTreeWalker(d,128),n,a,b;` +
-  `while((n=w.nextNode())){if(n.nodeValue===s){var nx=n.nextSibling;if(nx&&nx.nodeType===8&&nx.nodeValue==="td:await:pending"){a=n;break;}if(!a)a=n;}}` +
+  `while((n=w.nextNode())){if(n.nodeValue===s){var nx=n.nextSibling;if(nx&&nx.nodeType===8&&nx.nodeValue==="td:await:pending"){a=n;break;}}}` +
   `if(a){for(n=a.nextSibling;n;n=n.nextSibling){if(n.nodeType===8&&n.nodeValue===e){b=n;break;}}}` +
   `if(a&&b&&a.parentNode===b.parentNode){while(a.nextSibling&&a.nextSibling!==b)a.nextSibling.remove();b.parentNode.insertBefore(t.content,b);}` +
   `t.remove();var sc=d.querySelector('script[data-tachyon-await="swap:'+id+'"]');if(sc)sc.remove();` +
-  `var h=window.__tachyonAwaitHandlers,fn=h&&h.get(id);if(fn){h.delete(id);fn(st);}});`;
+  `if(a&&b){var h=window.__tachyonAwaitHandlers,fn=h&&h.get(id);if(fn){h.delete(id);fn(st);}}});`;
 
 const generatedDeferredAwaitHelperLines = [
   `const __tachyonIsThenable = (value) => (typeof value === "object" || typeof value === "function") && value !== null && typeof value.then === "function";`,
@@ -374,24 +379,41 @@ const generatedDeferredAwaitHelperLines = [
   `};`,
   `const __tachyonAwaitBootstrap = (nonceAttr) => '<script data-tachyon-await="bootstrap"' + nonceAttr + '>' + ${jsString(awaitBootstrapScriptBody)} + '</script>';`,
   `const __tachyonAwaitSwapChunk = (entry, nonceAttr) => '<template data-tachyon-await="' + entry.id + '" data-status="' + entry.status + '">' + entry.html + '</template><script data-tachyon-await="swap:' + entry.id + '"' + nonceAttr + '>__tachyonAwaitSwap(' + JSON.stringify(entry.id) + ',' + JSON.stringify(entry.status) + ')</script>';`,
-  `const __tachyonDrainPendingAwaits = async function* (pending, nonceAttr) {`,
-  `  if (pending.length === 0) return;`,
-  `  yield __tachyonAwaitBootstrap(nonceAttr);`,
-  `  const resolveQueue = pending.filter((entry) => entry.reorder === "resolve");`,
-  `  const preserveQueue = pending.filter((entry) => entry.reorder !== "resolve");`,
-  `  if (resolveQueue.length > 0) {`,
-  `    const inFlight = new Map(resolveQueue.map((entry, idx) => [idx, entry.task.then((res) => ({ idx, res }))]));`,
-  `    while (inFlight.size > 0) {`,
-  `      const { idx, res } = await Promise.race(inFlight.values());`,
-  `      inFlight.delete(idx);`,
-  `      if (res.status === "throw") throw res.error;`,
-  `      yield __tachyonAwaitSwapChunk(res, nonceAttr);`,
+  `const __tachyonEnqueueAwait = (ctx, item) => {`,
+  `  const entry = { id: item.id, reorder: item.reorder, done: false, result: undefined, seq: -1 };`,
+  `  ctx.pending.push(entry);`,
+  `  item.task.then((res) => {`,
+  `    entry.done = true;`,
+  `    entry.result = res;`,
+  `    entry.seq = ctx.doneSeq++;`,
+  `    const wake = ctx.wake;`,
+  `    ctx.wake = undefined;`,
+  `    if (wake) wake();`,
+  `  });`,
+  `};`,
+  `const __tachyonDrainPendingAwaits = async function* (ctx) {`,
+  `  if (ctx.pending.length === 0) return;`,
+  `  yield __tachyonAwaitBootstrap(ctx.nonceAttr);`,
+  `  const emitted = new Set();`,
+  `  while (emitted.size < ctx.pending.length) {`,
+  `    let next = undefined;`,
+  `    let firstUnemittedPreserve = undefined;`,
+  `    for (const entry of ctx.pending) {`,
+  `      if (emitted.has(entry)) continue;`,
+  `      if (entry.reorder === "resolve") {`,
+  `        if (entry.done && (!next || entry.seq < next.seq)) next = entry;`,
+  `      } else if (firstUnemittedPreserve === undefined) {`,
+  `        firstUnemittedPreserve = entry;`,
+  `        if (entry.done && (!next || entry.seq < next.seq)) next = entry;`,
+  `      }`,
   `    }`,
-  `  }`,
-  `  for (const entry of preserveQueue) {`,
-  `    const res = await entry.task;`,
-  `    if (res.status === "throw") throw res.error;`,
-  `    yield __tachyonAwaitSwapChunk(res, nonceAttr);`,
+  `    if (next) {`,
+  `      emitted.add(next);`,
+  `      if (next.result.status === "throw") throw next.result.error;`,
+  `      yield __tachyonAwaitSwapChunk(next.result, ctx.nonceAttr);`,
+  `      continue;`,
+  `    }`,
+  `    await new Promise((resolve) => { ctx.wake = resolve; });`,
   `  }`,
   `};`,
 ];
@@ -418,8 +440,10 @@ export const generateServerStreamModule = (
     return cached;
   }
   const hasComponentCall = hasComponentCallNode(template.root);
+  const hasAwait = hasAwaitNode(template.root);
   const hasDeferredAwait = hasDeferredAwaitNode(template.root);
-  const acceptsStreamOptions = hasDeferredAwait || hasComponentCall;
+  const usesStreamContext = hasAwait || hasComponentCall;
+  const usesDrainHelpers = hasDeferredAwait || hasComponentCall;
   const coalescedStatements = renderNodeYieldStatements(template.root, new Set(), "  ").flatMap((line) => {
     const yieldMatch = /^(\s*)yield (.*);$/.exec(line);
     if (yieldMatch) {
@@ -437,12 +461,12 @@ export const generateServerStreamModule = (
     }
     return [line];
   });
-  const streamParams = `${options.defaultScopeName ? "inputScope = {}" : "scope"}${acceptsStreamOptions ? ", __tachyonStreamOptions = undefined" : ""}`;
+  const streamParams = `${options.defaultScopeName ? "inputScope = {}" : "scope"}${usesStreamContext ? ", __tachyonStreamOptions = undefined" : ""}`;
   const lines = [
     ...generatedEscapeHtmlHelperLines,
     ...(hasDynamicUrlAttribute(template.root) ? generatedUrlAttributeHelperLines : []),
     ...(hasComponentCall ? generatedStreamComponentHelperLines : []),
-    ...(hasDeferredAwait ? generatedDeferredAwaitHelperLines : []),
+    ...(usesDrainHelpers ? generatedDeferredAwaitHelperLines : []),
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `export const stream = async function* (${streamParams}) {`,
     ...(options.defaultScopeName
@@ -451,10 +475,15 @@ export const generateServerStreamModule = (
           `  const scope = localScope && typeof localScope === "object" ? { ...localScope, ...inputScope } : inputScope;`,
         ]
       : []),
-    ...(hasDeferredAwait
+    ...(usesStreamContext
       ? [
-          `  const __tachyonNonceAttr = __tachyonFormatNonce(__tachyonStreamOptions);`,
-          `  const __tachyonPendingAwaits = [];`,
+          `  const __tachyonIsRoot = !(__tachyonStreamOptions && typeof __tachyonStreamOptions === "object" && __tachyonStreamOptions.__tachyonCtx);`,
+          `  const __tachyonCtx = __tachyonIsRoot ? { nextId: 0, pending: [], doneSeq: 0, wake: undefined, nonceAttr: ${usesDrainHelpers ? "__tachyonFormatNonce(__tachyonStreamOptions)" : '""'} } : __tachyonStreamOptions.__tachyonCtx;`,
+          ...(hasComponentCall
+            ? [
+                `  const __tachyonChildOptions = __tachyonIsRoot ? { ...(__tachyonStreamOptions && typeof __tachyonStreamOptions === "object" ? __tachyonStreamOptions : {}), __tachyonCtx } : __tachyonStreamOptions;`,
+              ]
+            : []),
         ]
       : []),
     `  const __tachyonFlushBytes = 8192;`,
@@ -474,7 +503,7 @@ export const generateServerStreamModule = (
     `  })();`,
     ...coalescedStatements,
     `  if (__tachyonBuffer) { yield __tachyonBuffer; __tachyonBuffer = ""; __tachyonBufferBytes = 0; }`,
-    ...(hasDeferredAwait ? [`  yield* __tachyonDrainPendingAwaits(__tachyonPendingAwaits, __tachyonNonceAttr);`] : []),
+    ...(usesDrainHelpers ? [`  if (__tachyonIsRoot) yield* __tachyonDrainPendingAwaits(__tachyonCtx);`] : []),
     `};`,
   ];
   const code = `${lines.join("\n")}\n`;

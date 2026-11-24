@@ -579,4 +579,34 @@ const badCount = "nope";
       handle.dispose();
     }
   });
+
+  it("preserves nested <if> SSR DOM nodes while cleaning up listeners when a later sibling fails adoption", async () => {
+    const Bad = createTemplateComponent({
+      render: () => `<div class="bad">SSR</div>`,
+      client: {
+        templateHtml: `<span class="mismatch">Client</span>`,
+        bind: () => () => undefined,
+      },
+    });
+    const compiled = compileTemplate(
+      `<main><if test={outer}><div><if test={inner}><button on:click={hit}>Keep</button></if><Bad /></div></if></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const serverHtml = renderServerTemplate(compiled.value, { outer: true, inner: true, Bad });
+    const clientMod = await loadClientModule(generateClientModule(compiled.value, { reactive: true }));
+
+    const host = document.createElement("div");
+    host.innerHTML = serverHtml;
+    const originalButton = host.querySelector("button");
+    expect(originalButton?.textContent).toBe("Keep");
+
+    const hit = vi.fn();
+    const res = hydrate(host, clientMod, { outer: true, inner: true, hit, Bad });
+    expect(res.ok).toBe(false);
+    // Inner <if>'s SSR DOM must survive rollback untouched, and its click listener must be disposed.
+    expect(host.querySelector("button")).toBe(originalButton);
+    expect(host.contains(originalButton)).toBe(true);
+    originalButton?.click();
+    expect(hit).not.toHaveBeenCalled();
+  });
 });

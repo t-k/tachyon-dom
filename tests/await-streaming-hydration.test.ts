@@ -5,8 +5,9 @@ import {
   generateClientModule,
   generateServerModule,
   generateServerStreamModule,
+  renderServerTemplate,
 } from "../src/compiler";
-import { createSignal, hydrate, mount } from "../src/index";
+import { createSignal, createStore, createTemplateComponent, hydrate, mount } from "../src/index";
 import { applyPendingAwaitSwaps } from "../src/runtime/stream-client";
 import { evaluateGeneratedClientModule } from "./generated-client-module";
 
@@ -552,5 +553,353 @@ describe("<await> streaming replacement and hydration", () => {
         host.remove();
       }
     }
+  });
+
+  it("rejects uppercase tags, HTML entity URLs, and forbidden elements in static pending/error HTML", () => {
+    const cases = [
+      `<main><await value={p} then="v" pending="<Img onerror=alert(1)>"><p>{v}</p></await></main>`,
+      `<main><await value={p} then="v" pending="<A href='javascript:alert(1)'>x</A>"><p>{v}</p></await></main>`,
+      `<main><await value={p} then="v" pending="<a href='&#106;avascript:alert(1)'>x</a>"><p>{v}</p></await></main>`,
+      `<main><await value={p} then="v" error="<a href='&#x6a;avascript:alert(1)'>x</a>"><p>{v}</p></await></main>`,
+      `<main><await value={p} then="v" pending="<iframe src='https://example.com'></iframe>"><p>{v}</p></await></main>`,
+      `<main><await value={p} then="v" pending="<svg><set attributeName='href' to='javascript:alert(1)'/></svg>"><p>{v}</p></await></main>`,
+      `<await value={p} then="v"><p>{v}</p></await>`,
+    ];
+    for (const source of cases) {
+      const result = compileTemplate(source);
+      expect(result.ok, source).toBe(false);
+    }
+  });
+
+  it("isolates runtime await IDs across <for> rows and repeated child components even under out-of-order resolution", async () => {
+    const rowTemplate = compileTemplate(
+      `<ul><for each={rows} key={row.id}><li><await value={row.promise} then="text" pending="<span class=w>...</span>" reorder="resolve"><button on:click={row.onClick}>{text}</button></await></li></for></ul>`,
+    );
+    if (!rowTemplate.ok) throw new Error(rowTemplate.error.message);
+
+    const streamMod = (await loadJsModule(generateServerStreamModule(rowTemplate.value))) as {
+      stream: (scope: Record<string, unknown>) => AsyncIterable<string>;
+    };
+    const clientMod = await evaluateGeneratedClientModule(generateClientModule(rowTemplate.value, { reactive: true }));
+
+    const d1 = createDeferred<string>();
+    const d2 = createDeferred<string>();
+    const hits: string[] = [];
+    const rows = [
+      { id: 1, promise: d1.promise, onClick: () => hits.push("row1") },
+      { id: 2, promise: d2.promise, onClick: () => hits.push("row2") },
+    ];
+
+    const iter = streamMod.stream({ rows })[Symbol.asyncIterator]();
+    let shell = "";
+    while (!shell.includes("</ul>")) shell += (await iter.next()).value;
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    try {
+      host.innerHTML = shell;
+      const hydrated = hydrate(host, clientMod, { rows });
+      expect(hydrated.ok).toBe(true);
+      if (!hydrated.ok) return;
+
+      // Resolve row 2 BEFORE row 1
+      d2.resolve("Second");
+      d1.resolve("First");
+      let trailing = "";
+      while (true) {
+        const next = await iter.next();
+        if (next.done) break;
+        trailing += next.value;
+      }
+      const frag = document.createElement("div");
+      frag.innerHTML = trailing;
+      while (frag.firstChild) host.appendChild(frag.firstChild);
+      executeAwaitScripts(host);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const buttons = Array.from(host.querySelectorAll("button"));
+      expect(buttons.map((b) => b.textContent)).toEqual(["First", "Second"]);
+      buttons[1]?.click();
+      buttons[0]?.click();
+      expect(hits).toEqual(["row2", "row1"]);
+
+      // A duplicate late swap targeting a0 must not overwrite already-resolved/updated DOM.
+      buttons[0]!.textContent = "ClientUpdated";
+      const dup = document.createElement("template");
+      dup.setAttribute("data-tachyon-await", "a0");
+      dup.setAttribute("data-status", "resolved");
+      dup.innerHTML = "<button>Stale</button>";
+      host.appendChild(dup);
+      expect(applyPendingAwaitSwaps(host)).toBe(0);
+      expect(host.querySelector("button")?.textContent).toBe("ClientUpdated");
+
+      hydrated.value.dispose();
+    } finally {
+      host.remove();
+    }
+
+    // Two instances of the same child component with deferred <await>
+    const childCompiled = compileTemplate(
+      `<article><await value={promise} then="body" pending="<em>Wait</em>" reorder="resolve"><button on:click={onClick}>{body}</button></await></article>`,
+    );
+    if (!childCompiled.ok) throw new Error(childCompiled.error.message);
+    const childStream = (await loadJsModule(generateServerStreamModule(childCompiled.value))) as {
+      stream: (scope: Record<string, unknown>, options?: unknown) => AsyncIterable<string>;
+    };
+    const childClient = await evaluateGeneratedClientModule(
+      generateClientModule(childCompiled.value, { reactive: true }),
+    );
+    const AsyncCard = createTemplateComponent({
+      client: childClient,
+      stream: childStream.stream,
+    });
+
+    const parentCompiled = compileTemplate(
+      `<section><AsyncCard promise={p1} onClick={c1} /><AsyncCard promise={p2} onClick={c2} /></section>`,
+    );
+    if (!parentCompiled.ok) throw new Error(parentCompiled.error.message);
+    const parentStream = (await loadJsModule(generateServerStreamModule(parentCompiled.value))) as {
+      stream: (scope: Record<string, unknown>) => AsyncIterable<string>;
+    };
+    const parentClient = await evaluateGeneratedClientModule(
+      generateClientModule(parentCompiled.value, { reactive: true }),
+    );
+
+    const cp1 = createDeferred<string>();
+    const cp2 = createDeferred<string>();
+    const cardHits: string[] = [];
+    const parentScope = {
+      AsyncCard,
+      p1: cp1.promise,
+      p2: cp2.promise,
+      c1: () => cardHits.push("card1"),
+      c2: () => cardHits.push("card2"),
+    };
+
+    const pIter = parentStream.stream(parentScope)[Symbol.asyncIterator]();
+    let pShell = "";
+    while (!pShell.includes("</section>")) pShell += (await pIter.next()).value;
+    // Child component must not leak bootstrap/template tags inside <!--tachyon-component-->
+    expect(pShell).not.toContain("<script");
+    expect(pShell).not.toContain("<template");
+
+    const host2 = document.createElement("div");
+    document.body.appendChild(host2);
+    try {
+      host2.innerHTML = pShell;
+      const hydrated = hydrate(host2, parentClient, parentScope);
+      expect(hydrated.ok).toBe(true);
+      if (!hydrated.ok) return;
+
+      cp2.resolve("CardTwo");
+      cp1.resolve("CardOne");
+      let pTrailing = "";
+      while (true) {
+        const next = await pIter.next();
+        if (next.done) break;
+        pTrailing += next.value;
+      }
+      const frag = document.createElement("div");
+      frag.innerHTML = pTrailing;
+      while (frag.firstChild) host2.appendChild(frag.firstChild);
+      executeAwaitScripts(host2);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const btns = Array.from(host2.querySelectorAll("button"));
+      expect(btns.map((b) => b.textContent)).toEqual(["CardOne", "CardTwo"]);
+      btns[1]?.click();
+      btns[0]?.click();
+      expect(cardHits).toEqual(["card2", "card1"]);
+      hydrated.value.dispose();
+    } finally {
+      host2.remove();
+    }
+  });
+
+  it("drains nested deferred <await>, preserves true completion order for pre-settled resolve, and avoids head-of-line blocking between resolve and preserve", async () => {
+    // 1. Nested deferred <await>
+    const nestedCompiled = compileTemplate(
+      `<main><await value={outer} then="o" pending="<span>O-Wait</span>" reorder="resolve"><section><p>{o}</p><await value={inner} then="i" pending="<span>I-Wait</span>" reorder="resolve"><b>{i}</b></await></section></await></main>`,
+    );
+    if (!nestedCompiled.ok) throw new Error(nestedCompiled.error.message);
+    const nestedStream = (await loadJsModule(generateServerStreamModule(nestedCompiled.value))) as {
+      stream: (scope: Record<string, unknown>) => AsyncIterable<string>;
+    };
+
+    const outer = createDeferred<string>();
+    const inner = createDeferred<string>();
+    const chunks: string[] = [];
+    const drainPromise = (async () => {
+      for await (const chunk of nestedStream.stream({ outer: outer.promise, inner: inner.promise })) {
+        chunks.push(chunk);
+      }
+    })();
+    await Promise.resolve();
+    outer.resolve("OuterDone");
+    await Promise.resolve();
+    await Promise.resolve();
+    inner.resolve("InnerDone");
+    await drainPromise;
+    const html = chunks.join("");
+    expect(html).toContain(`OuterDone`);
+    expect(html).toContain(`InnerDone`);
+    expect(html).toContain(`data-tachyon-await="a1"`);
+
+    // 2. Pre-settled reorder="resolve" preserves actual settlement order + mixed resolve/preserve doesn't head-of-line block
+    const mixedCompiled = compileTemplate(
+      `<main><await value={slowResolve} then="r1" pending="R1" reorder="resolve"><p>{r1}</p></await><await value={fastResolve} then="r2" pending="R2" reorder="resolve"><p>{r2}</p></await><await value={fastPreserve} then="p1" pending="P1" reorder="preserve"><p>{p1}</p></await></main>`,
+    );
+    if (!mixedCompiled.ok) throw new Error(mixedCompiled.error.message);
+    const mixedStream = (await loadJsModule(generateServerStreamModule(mixedCompiled.value))) as {
+      stream: (scope: Record<string, unknown>) => AsyncIterable<string>;
+    };
+    const slowResolve = createDeferred<string>();
+    const fastResolve = createDeferred<string>();
+    const fastPreserve = createDeferred<string>();
+    const iter = mixedStream.stream({
+      slowResolve: slowResolve.promise,
+      fastResolve: fastResolve.promise,
+      fastPreserve: fastPreserve.promise,
+    })[Symbol.asyncIterator]();
+
+    // Shell flushes first
+    let shell = "";
+    while (!shell.includes("</main>")) shell += (await iter.next()).value;
+    // Settle fastResolve and fastPreserve BEFORE slowResolve
+    fastResolve.resolve("FastR2");
+    fastPreserve.resolve("FastP1");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const emittedBeforeSlow: string[] = [];
+    // Bootstrap + FastR2 + FastP1 must stream without waiting on slowResolve!
+    for (let i = 0; i < 3; i++) {
+      emittedBeforeSlow.push((await iter.next()).value);
+    }
+    const partial = emittedBeforeSlow.join("");
+    expect(partial).toContain("FastR2");
+    expect(partial).toContain("FastP1");
+    expect(partial.indexOf("FastR2")).toBeLessThan(partial.indexOf("FastP1"));
+
+    slowResolve.resolve("SlowR1");
+    const last = (await iter.next()).value;
+    expect(last).toContain("SlowR1");
+  });
+
+  it("applies strict-CSP chunks arriving AFTER hydration via MutationObserver and cleans up async nested <if> handlers on dispose", async () => {
+    const compiled = compileTemplate(
+      `<main><await value={p} then="v" pending="<p class=wait>Wait</p>" reorder="resolve"><if test={show}><button on:click={hit}>{v}:{label}</button></if></await></main>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const streamMod = (await loadJsModule(generateServerStreamModule(compiled.value))) as {
+      stream: (scope: Record<string, unknown>) => AsyncIterable<string>;
+    };
+    const clientMod = await evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+
+    const d = createDeferred<string>();
+    const store = createStore({ label: "Before", show: true });
+    const hit = vi.fn();
+    const scope = new Proxy(store as Record<string, unknown>, {
+      get: (t, prop) => (prop === "p" ? d.promise : prop === "hit" ? hit : Reflect.get(t, prop)),
+    });
+
+    const iter = streamMod.stream({ p: d.promise, show: true, label: "Before", hit })[Symbol.asyncIterator]();
+    let shell = "";
+    while (!shell.includes("</main>")) shell += (await iter.next()).value;
+
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    try {
+      host.innerHTML = shell;
+      // Hydrate BEFORE chunk arrives, under strict CSP (never call executeAwaitScripts)
+      const hydrated = hydrate(host, clientMod, scope);
+      expect(hydrated.ok).toBe(true);
+      if (!hydrated.ok) return;
+
+      d.resolve("Ready");
+      let trailing = "";
+      while (true) {
+        const next = await iter.next();
+        if (next.done) break;
+        trailing += next.value;
+      }
+      // Append trailing <template> WITHOUT executing any inline <script>
+      const frag = document.createElement("div");
+      frag.innerHTML = trailing;
+      while (frag.firstChild) host.appendChild(frag.firstChild);
+
+      // Wait for MutationObserver + promise microtasks
+      await new Promise((r) => setTimeout(r, 0));
+      await Promise.resolve();
+
+      expect(host.querySelector(".wait")).toBeNull();
+      const btn = host.querySelector("button");
+      expect(btn?.textContent).toBe("Ready:Before");
+
+      // Parent store reactivity propagates into already-resolved <await> body!
+      store.label = "After";
+      expect(btn?.textContent).toBe("Ready:After");
+
+      btn?.click();
+      expect(hit).toHaveBeenCalledTimes(1);
+
+      // Dispose must clean up listeners inside async-resolved nested <if>
+      hydrated.value.dispose();
+      btn?.click();
+      expect(hit).toHaveBeenCalledTimes(1);
+    } finally {
+      host.remove();
+    }
+  });
+
+  it("supports non-reactive nested <await>, direct <for> inside <await>, and interpreter/codegen sync SSR ID parity", async () => {
+    // 1. Non-reactive <if> containing <await> must not reference __tachyonEffect
+    const nonReactiveCompiled = compileTemplate(
+      `<main><if test={open}><await value={p} then="v"><p>{v}</p></await></if></main>`,
+    );
+    if (!nonReactiveCompiled.ok) throw new Error(nonReactiveCompiled.error.message);
+    const nonReactiveCode = generateClientModule(nonReactiveCompiled.value, { reactive: false });
+    expect(nonReactiveCode).not.toContain("__tachyonEffect");
+    const nonReactiveMod = await evaluateGeneratedClientModule(nonReactiveCode);
+    const h1 = document.createElement("div");
+    const m1 = mount(h1, nonReactiveMod, { open: true, p: "StaticVal" });
+    expect(h1.querySelector("p")?.textContent).toBe("StaticVal");
+    m1.dispose();
+
+    // 2. Direct <for> inside <await> mounts and hydrates rows
+    const directForCompiled = compileTemplate(
+      `<ul><await value={itemsPromise} then="items" pending="<li>Wait</li>"><for each={items} key={item.id}><li>{item.name}</li></for></await></ul>`,
+    );
+    if (!directForCompiled.ok) throw new Error(directForCompiled.error.message);
+    const directForClient = await evaluateGeneratedClientModule(
+      generateClientModule(directForCompiled.value, { reactive: true }),
+    );
+    const h2 = document.createElement("div");
+    const itemsDef = createDeferred<Array<{ id: number; name: string }>>();
+    const m2 = mount(h2, directForClient, { itemsPromise: itemsDef.promise });
+    expect(h2.querySelector("li")?.textContent).toBe("Wait");
+    itemsDef.resolve([
+      { id: 1, name: "Alpha" },
+      { id: 2, name: "Beta" },
+    ]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(Array.from(h2.querySelectorAll("li")).map((el) => el.textContent)).toEqual(["Alpha", "Beta"]);
+    m2.dispose();
+
+    // 3. Sync SSR interpreter vs generated module ID parity when preceding <if> is false
+    const parityCompiled = compileTemplate(
+      `<main><if test={show}><await value={a} then="x"><p>{x}</p></await></if><await value={b} then="y"><span class="y">{y}</span></await></main>`,
+    );
+    if (!parityCompiled.ok) throw new Error(parityCompiled.error.message);
+    const serverGen = (await loadJsModule(generateServerModule(parityCompiled.value))) as {
+      render: (scope: Record<string, unknown>) => string;
+    };
+    const interpHtml = renderServerTemplate(parityCompiled.value, { show: false, a: "A", b: "B" });
+    const genHtml = serverGen.render({ show: false, a: "A", b: "B" });
+    expect(interpHtml).toBe(genHtml);
+    expect(interpHtml).toContain("<!--tachyon-await:a1-->");
   });
 });

@@ -1,6 +1,8 @@
-import { clientShapedNodes, templateNodeAt } from "../conditional-marker.js";
+import { clientShapedNodes, listRegionStartBetween, templateNodeAt } from "../conditional-marker.js";
 import { err, ok, type Result } from "../result.js";
-import { registerOwnedSubtree } from "./subtree.js";
+import { withListRegionStart } from "./list-core.js";
+import { createRoot } from "./signal.js";
+import { cleanupOwnedSubtree, registerOwnedSubtree } from "./subtree.js";
 
 export const readTextStreamChunks = async (stream: ReadableStream<Uint8Array>): Promise<string[]> => {
   const reader = stream.getReader();
@@ -69,6 +71,8 @@ export const readDeferredDataScript = <T = unknown>(root: ParentNode, id: string
 
 export type AwaitSwapStatus = "resolved" | "error";
 
+export type AwaitDirectListMounter = (index: number, mount: (container: Element) => void) => void;
+
 export type AwaitRegionOptions = {
   id: string;
   thenName: string;
@@ -76,7 +80,12 @@ export type AwaitRegionOptions = {
   error?: string;
   templateHtml: string;
   readValue: (scope: Record<string, unknown>) => unknown;
-  bind: (nodes: readonly Node[], scope: Record<string, unknown>, adopted: boolean) => void | (() => void);
+  bind: (
+    nodes: readonly Node[],
+    scope: Record<string, unknown>,
+    adopted: boolean,
+    mountDirectList: AwaitDirectListMounter,
+  ) => void | (() => void);
 };
 
 type AwaitSwapHandler = (status: AwaitSwapStatus) => void;
@@ -88,6 +97,11 @@ type AwaitGlobalHost = typeof globalThis & {
 const getAwaitHandlers = (): Map<string, AwaitSwapHandler> => {
   const host = globalThis as AwaitGlobalHost;
   return (host.__tachyonAwaitHandlers ??= new Map<string, AwaitSwapHandler>());
+};
+
+const awaitMarkerId = (anchor: Comment, fallbackId: string): string => {
+  const value = anchor.nodeValue ?? "";
+  return value.startsWith("tachyon-await:") ? value.slice("tachyon-await:".length) : fallbackId;
 };
 
 const awaitEndMarker = (start: Comment, id: string): Comment | undefined => {
@@ -106,21 +120,19 @@ const awaitEndMarker = (start: Comment, id: string): Comment | undefined => {
   return undefined;
 };
 
-const findAwaitStart = (root: ParentNode, id: string): Comment | undefined => {
+const findPendingAwaitStart = (root: ParentNode, id: string): Comment | undefined => {
   const doc = root instanceof Document ? root : (root.ownerDocument ?? document);
   const targetValue = `tachyon-await:${id}`;
   const walker = doc.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
-  let fallback: Comment | undefined;
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     if (node.nodeValue === targetValue) {
       const next = node.nextSibling;
       if (next && next.nodeType === Node.COMMENT_NODE && next.nodeValue === "td:await:pending") {
         return node as Comment;
       }
-      fallback ??= node as Comment;
     }
   }
-  return fallback;
+  return undefined;
 };
 
 const clearBetween = (start: Comment, end: Comment): void => {
@@ -145,37 +157,76 @@ const isThenable = (value: unknown): value is PromiseLike<unknown> =>
 
 /**
  * Applies any unexecuted `<template data-tachyon-await="...">` replacement chunks within `root`
- * (or the owning document). This guarantees pending placeholders are replaced even when strict CSP
- * blocks inline streaming swap scripts.
+ * (or the owning document). Only pending regions (`<!--td:await:pending-->`) are swapped so late
+ * or duplicate chunks can never overwrite already-resolved or client-updated DOM. Runs in passes
+ * so nested `<await>` templates apply right after their parent swaps in.
  */
 export const applyPendingAwaitSwaps = (root: ParentNode = document, onlyId?: string): number => {
   const selector = onlyId
     ? `template[data-tachyon-await="${escapeSelectorValue(onlyId)}"]`
     : `template[data-tachyon-await]`;
-  const templates = Array.from(root.querySelectorAll(selector));
-  let swapped = 0;
-  for (const template of templates) {
-    const id = template.getAttribute("data-tachyon-await");
-    if (!id) continue;
-    const status = (template.getAttribute("data-status") === "error" ? "error" : "resolved") as AwaitSwapStatus;
-    const start = findAwaitStart(root, id);
-    const end = start ? awaitEndMarker(start, id) : undefined;
-    if (start && end && start.parentNode === end.parentNode) {
+  let totalSwapped = 0;
+  while (true) {
+    let passSwapped = 0;
+    const templates = Array.from(root.querySelectorAll(selector));
+    for (const template of templates) {
+      const id = template.getAttribute("data-tachyon-await");
+      if (!id) continue;
+      const start = findPendingAwaitStart(root, id);
+      const end = start ? awaitEndMarker(start, id) : undefined;
+      if (!start || !end || start.parentNode !== end.parentNode) continue;
+      const status = (template.getAttribute("data-status") === "error" ? "error" : "resolved") as AwaitSwapStatus;
       clearBetween(start, end);
       end.parentNode?.insertBefore((template as HTMLTemplateElement).content, end);
-      swapped++;
+      template.remove();
+      const swapScript = root.querySelector(`script[data-tachyon-await="swap:${escapeSelectorValue(id)}"]`);
+      swapScript?.remove();
+      passSwapped++;
+      totalSwapped++;
+      const handlers = getAwaitHandlers();
+      const handler = handlers.get(id);
+      if (handler) {
+        handlers.delete(id);
+        handler(status);
+      }
     }
-    template.remove();
-    const swapScript = root.querySelector(`script[data-tachyon-await="swap:${escapeSelectorValue(id)}"]`);
-    swapScript?.remove();
-    const handlers = getAwaitHandlers();
-    const handler = handlers.get(id);
-    if (handler) {
-      handlers.delete(id);
-      handler(status);
-    }
+    if (passSwapped === 0 || onlyId) break;
   }
-  return swapped;
+  return totalSwapped;
+};
+
+type PendingObserverEntry = {
+  observer: MutationObserver;
+  count: number;
+};
+
+const pendingObservers = new WeakMap<ParentNode, PendingObserverEntry>();
+
+const retainPendingObserver = (root: ParentNode): (() => void) => {
+  if (typeof MutationObserver === "undefined") return () => undefined;
+  let entry = pendingObservers.get(root);
+  if (!entry) {
+    const target = root instanceof Document ? (root.documentElement ?? root) : root;
+    const observer = new MutationObserver(() => {
+      applyPendingAwaitSwaps(root);
+    });
+    observer.observe(target, { childList: true, subtree: true });
+    entry = { observer, count: 0 };
+    pendingObservers.set(root, entry);
+  }
+  entry.count++;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const current = pendingObservers.get(root);
+    if (!current) return;
+    current.count--;
+    if (current.count <= 0) {
+      current.observer.disconnect();
+      pendingObservers.delete(root);
+    }
+  };
 };
 
 type AwaitState = {
@@ -184,8 +235,10 @@ type AwaitState = {
   bound: boolean;
   generation: number;
   lastValue: unknown;
+  scope: Record<string, unknown>;
   cleanup?: (() => void) | undefined;
   handler?: AwaitSwapHandler | undefined;
+  releaseObserver?: (() => void) | undefined;
 };
 
 const awaitStates = new WeakMap<Comment, AwaitState>();
@@ -206,6 +259,9 @@ export const cleanupAwaitRegion = (anchor: Node | undefined): void => {
     if (handlers.get(state.id) === state.handler) handlers.delete(state.id);
     state.handler = undefined;
   }
+  const releaseObserver = state.releaseObserver;
+  state.releaseObserver = undefined;
+  releaseObserver?.();
   const cleanup = state.cleanup;
   state.cleanup = undefined;
   cleanup?.();
@@ -221,10 +277,17 @@ const regionStatus = (start: Comment, end: Comment): "empty" | "pending" | "erro
   return "resolved";
 };
 
+const createAwaitScope = (state: AwaitState, thenName: string, resolved: unknown): Record<string, unknown> =>
+  new Proxy(state.scope, {
+    get: (_target, prop) => (prop === thenName ? resolved : Reflect.get(state.scope, prop)),
+    has: (_target, prop) => prop === thenName || prop in state.scope,
+    set: (_target, prop, next) => (prop === thenName ? false : Reflect.set(state.scope, prop, next)),
+  });
+
 /**
  * Mounts or hydrates an `<await>` region between `<!--tachyon-await:id-->` and `<!--/tachyon-await:id-->`.
- * Supports SSR already-resolved adoption, SSR in-flight pending wait + swap handoff, strict CSP template draining,
- * error settlement without binding the `then` branch, and client-only async mounting.
+ * Supports SSR already-resolved adoption, SSR in-flight pending wait + swap handoff, strict CSP template draining
+ * (both before and after hydration), error settlement without binding the `then` branch, and client-only async mounting.
  */
 export const mountAwaitRegion = (
   anchor: Node | undefined,
@@ -232,12 +295,14 @@ export const mountAwaitRegion = (
   scope: Record<string, unknown>,
 ): void => {
   if (!(anchor instanceof Comment)) return;
-  const end = awaitEndMarker(anchor, options.id);
+  const runtimeId = awaitMarkerId(anchor, options.id);
+  const end = awaitEndMarker(anchor, runtimeId);
   if (!end) return;
 
   const value = options.readValue(scope);
   const existing = awaitStates.get(anchor);
   if (existing && Object.is(existing.lastValue, value)) {
+    existing.scope = scope;
     return;
   }
   if (existing) {
@@ -246,28 +311,86 @@ export const mountAwaitRegion = (
   }
 
   const state: AwaitState = {
-    id: options.id,
+    id: runtimeId,
     disposed: false,
     bound: false,
     generation: 0,
     lastValue: value,
+    scope,
   };
   awaitStates.set(anchor, state);
   registerOwnedSubtree(anchor, () => cleanupAwaitRegion(anchor));
 
-  // Drain any unapplied streaming swap templates in the owning root/document (CSP fallback).
   const rootNode = anchor.getRootNode();
-  if (rootNode instanceof Document || rootNode instanceof Element || rootNode instanceof DocumentFragment) {
-    applyPendingAwaitSwaps(rootNode, options.id);
+  const observableRoot =
+    rootNode instanceof Document || rootNode instanceof Element || rootNode instanceof DocumentFragment
+      ? rootNode
+      : undefined;
+
+  // Drain any unapplied streaming swap templates already in the owning root/document (strict CSP fallback).
+  if (observableRoot) {
+    applyPendingAwaitSwaps(observableRoot, runtimeId);
   }
+
+  const mountDirectList: AwaitDirectListMounter = (index, mount) => {
+    const parent = anchor.parentNode;
+    const start = listRegionStartBetween(anchor.nextSibling, end, index);
+    if (parent instanceof Element && start) {
+      withListRegionStart(start, () => mount(parent));
+    }
+  };
+
+  const bindInOwner = (nodes: readonly Node[], resolved: unknown, adopted: boolean): void => {
+    const childScope = createAwaitScope(state, options.thenName, resolved);
+    let innerCleanup: (() => void) | undefined;
+    let rootDispose: (() => void) | undefined;
+    try {
+      createRoot((dispose) => {
+        rootDispose = dispose;
+        const cleanup = options.bind(nodes, childScope, adopted, mountDirectList);
+        innerCleanup = typeof cleanup === "function" ? cleanup : undefined;
+      });
+    } catch (error) {
+      try {
+        innerCleanup?.();
+      } catch {
+        // Retain the bind failure over cleanup failures.
+      }
+      try {
+        rootDispose?.();
+      } catch {
+        // Retain the bind failure over cleanup failures.
+      }
+      throw error;
+    }
+    state.cleanup = () => {
+      let firstError: unknown;
+      let failed = false;
+      const run = (fn: (() => void) | undefined): void => {
+        if (!fn) return;
+        try {
+          fn();
+        } catch (error) {
+          if (!failed) {
+            firstError = error;
+            failed = true;
+          }
+        }
+      };
+      run(innerCleanup);
+      run(rootDispose);
+      for (const node of nodes) {
+        run(() => cleanupOwnedSubtree(node));
+      }
+      if (failed) throw firstError;
+    };
+  };
 
   const bindAdoptedWith = (resolved: unknown): void => {
     if (state.disposed || state.bound) return;
     state.bound = true;
     const nodes = clientShapedNodes(anchor.nextSibling, end);
-    const childScope = { ...scope, [options.thenName]: resolved };
-    const cleanup = options.bind(nodes, childScope, true);
-    state.cleanup = typeof cleanup === "function" ? cleanup : undefined;
+    bindInOwner(nodes, resolved, true);
   };
 
   const settleAdopted = (): void => {
@@ -297,12 +420,18 @@ export const mountAwaitRegion = (
   if (status === "pending") {
     const handler: AwaitSwapHandler = (swapStatus) => {
       state.handler = undefined;
+      const release = state.releaseObserver;
+      state.releaseObserver = undefined;
+      release?.();
       if (state.disposed || state.bound) return;
       if (swapStatus === "error") return;
       settleAdopted();
     };
     state.handler = handler;
-    getAwaitHandlers().set(options.id, handler);
+    getAwaitHandlers().set(runtimeId, handler);
+    if (observableRoot) {
+      state.releaseObserver = retainPendingObserver(observableRoot);
+    }
     return;
   }
 
@@ -313,9 +442,7 @@ export const mountAwaitRegion = (
     clearBetween(anchor, end);
     insertHtmlBefore(options.templateHtml, end);
     const nodes = clientShapedNodes(anchor.nextSibling, end);
-    const childScope = { ...scope, [options.thenName]: resolved };
-    const cleanup = options.bind(nodes, childScope, false);
-    state.cleanup = typeof cleanup === "function" ? cleanup : undefined;
+    bindInOwner(nodes, resolved, false);
   };
 
   if (!isThenable(value)) {
