@@ -123,10 +123,10 @@ const renderAwaitYieldStatements = (
 
   if (!usesDeferredReplacement) {
     // Inline awaiting when neither pending placeholder nor resolve-order streaming is requested:
-    // preserves zero-script streaming while still emitting unique per-instance region markers for hydration.
+    // preserves zero-script streaming and byte-for-byte parity with synchronous SSR markers.
     const statements = [
       `${indent}{`,
-      `${indent}  const ${idVar} = "a" + __tachyonCtx.streamId + "_" + (__tachyonCtx.nextId++);`,
+      `${indent}  const ${idVar} = "a" + (__tachyonCtx.nextId++);`,
       `${indent}  yield "<!--tachyon-await:" + ${idVar} + "-->";`,
     ];
     if (errorText !== undefined) {
@@ -159,14 +159,15 @@ const renderAwaitYieldStatements = (
   const valVar = `__tachyonAwaitVal_${staticId}`;
   const statements = [
     `${indent}{`,
-    `${indent}  const ${idVar} = "a" + __tachyonCtx.streamId + "_" + (__tachyonCtx.nextId++);`,
     `${indent}  const ${valVar} = ${valueExpr};`,
     `${indent}  if (!__tachyonIsThenable(${valVar})) {`,
+    `${indent}    const ${idVar} = "a" + (__tachyonCtx.nextId++);`,
     `${indent}    const ${thenName} = ${valVar};`,
     `${indent}    yield "<!--tachyon-await:" + ${idVar} + "-->";`,
     ...bodyStatements,
     `${indent}    yield "<!--/tachyon-await:" + ${idVar} + "-->";`,
     `${indent}  } else {`,
+    `${indent}    const ${idVar} = "a" + __tachyonCtx.streamId + "_" + (__tachyonCtx.nextId++);`,
     `${indent}    yield "<!--tachyon-await:" + ${idVar} + "-->" + ${jsString(`<!--td:await:pending-->${pending ?? ""}`)} + "<!--/tachyon-await:" + ${idVar} + "-->";`,
     `${indent}    __tachyonEnqueueAwait(__tachyonCtx, {`,
     `${indent}      id: ${idVar},`,

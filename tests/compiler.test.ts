@@ -1960,9 +1960,7 @@ describe("HTML-first compiler", () => {
     for await (const chunk of module.stream({ messagePromise: Promise.resolve("Ready") })) {
       chunks.push(chunk);
     }
-    expect(chunks.join("")).toMatch(
-      /^<main><h1>Before<\/h1><!--tachyon-await:(a\d+_\d+)--><p>Ready<\/p><!--\/tachyon-await:\1--><\/main>$/,
-    );
+    expect(chunks.join("")).toBe(`<main><h1>Before</h1><!--tachyon-await:a0--><p>Ready</p><!--/tachyon-await:a0--></main>`);
   });
 
   it("keeps the generated synchronous await fallback when its child is empty", async () => {
