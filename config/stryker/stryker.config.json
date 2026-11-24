@@ -1,5 +1,5 @@
 {
-  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "$schema": "../../node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "concurrency": 4,
   "htmlReporter": {
     "fileName": "reports/mutation/index.html"
@@ -19,7 +19,7 @@
     "break": null
   },
   "vitest": {
-    "configFile": "vitest.mutation.config.ts",
+    "configFile": "config/vitest/vitest.mutation.config.ts",
     "related": true
   }
 }

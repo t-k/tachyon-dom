@@ -7,5 +7,5 @@ export default {
   mutate: ["src/url-policy.ts", "src/server/html.ts", "src/compiler/ir.ts", "src/runtime/attr.ts"],
   htmlReporter: { fileName: "reports/mutation/security/index.html" },
   jsonReporter: { fileName: "reports/mutation/security/mutation.json" },
-  vitest: { configFile: "vitest.security-mutation.config.ts", related: false },
+  vitest: { configFile: "config/vitest/vitest.security-mutation.config.ts", related: false },
 };

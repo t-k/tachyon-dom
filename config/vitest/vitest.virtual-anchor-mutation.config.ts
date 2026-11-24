@@ -1,10 +1,10 @@
 import { defineConfig } from "vitest/config";
-import base from "./vitest.config";
+import base from "../../vitest.config";
 
 export default defineConfig({
   ...base,
   test: {
     ...base.test,
-    include: ["tests/code-preview.test.ts"],
+    include: ["tests/runtime-virtual-list.test.ts"],
   },
 });

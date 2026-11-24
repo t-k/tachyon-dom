@@ -1,5 +1,5 @@
 {
-  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "$schema": "../../node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "concurrency": 2,
   "incremental": false,
   "mutate": [
@@ -26,7 +26,7 @@
     "break": null
   },
   "vitest": {
-    "configFile": "vitest.inspector-trace-mutation.config.ts",
+    "configFile": "config/vitest/vitest.inspector-trace-mutation.config.ts",
     "related": false
   },
   "ignorePatterns": ["docs.local", "tests/browser/generated", "test-results", "benchmark", ".worktree"]
