@@ -423,6 +423,13 @@ const collectBindingIdentifiers = (binding: ClientBinding, identifiers: Set<stri
     }
     return;
   }
+  if (binding.kind === "component-call") {
+    collectExpressionIdentifiers(binding.tagName, identifiers);
+    for (const prop of binding.props) {
+      if (prop.kind === "expression") collectExpressionIdentifiers(prop.value as string, identifiers);
+    }
+    return;
+  }
   collectExpressionIdentifiers(binding.expression, identifiers);
 };
 

@@ -130,6 +130,19 @@ export type ConditionalBinding = {
   components?: ComponentBoundary[];
 };
 
+export type ComponentCallProp = {
+  name: string;
+  value: string | true;
+  kind: "expression" | "static" | "boolean";
+};
+
+export type ComponentCallBinding = {
+  kind: "component-call";
+  path: number[];
+  tagName: string;
+  props: ComponentCallProp[];
+};
+
 export type ClientBinding =
   | TextBinding
   | ClassBinding
@@ -139,7 +152,8 @@ export type ClientBinding =
   | RefBinding
   | ModelBinding
   | ListBinding
-  | ConditionalBinding;
+  | ConditionalBinding
+  | ComponentCallBinding;
 
 export type StoreDefinition = {
   name: string;
@@ -180,6 +194,7 @@ export type TemplateDirective =
   | { kind: "store"; path: number[]; stores: StoreDefinition[] }
   | { kind: "event"; path: number[]; eventName: string; handler: string }
   | { kind: "component"; path: number[]; name: string; props: ComponentProp[]; stores: StoreDefinition[] }
+  | { kind: "componentCall"; path: number[]; tagName: string; props: ComponentCallProp[] }
   | {
       kind: "await";
       path: number[];

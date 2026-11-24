@@ -104,9 +104,25 @@ Tachyon DOM has two things that are both called "component". They are different,
 | Concept                                | What it is                                                                                                                                                | Where it lives              |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
 | `<component name="Name">…</component>` | An inline scope boundary inside one template. It declares local prop names and local `<store>` state for its subtree and emits no wrapper element.        | Template syntax             |
+| `<Panel prop={value} />`               | A declarative component call. Invokes an imported `.td` `component` export or a `createTemplateComponent()` instance from scope across client, SSR, stream, and hydration. | Template syntax             |
 | `createTemplateComponent({ … })`       | A reusable unit defined in code: typed props, independent reactive scope per instance, `mount`, `hydrate`, `update`, `dispose`, SSR and stream renderers. | Runtime API (`tachyon-dom`) |
 
-`<component name="Panel">` does not call a `Panel` defined elsewhere. The `name` is a label for diagnostics and generated metadata; the subtree is compiled in place. Think of it as `let` for template scope, not as a function call. To reuse UI across files, import the generated named `component` from another `.td` module or define one with `createTemplateComponent()`, then mount or render that instance. An imported `<Panel />` tag is not yet a component call; the compiler treats it as an element. The compiler may still emit transparent boundaries inside a reusable component, but those are an implementation detail.
+`<component name="Panel">` does not call a `Panel` defined elsewhere. The `name` is a label for diagnostics and generated metadata; the subtree is compiled in place. Think of it as `let` for template scope, not as a function call.
+
+To reuse UI across files declaratively, import the generated named `component` from another `.td` module (or define one with `createTemplateComponent()`) and invoke it with a PascalCase or dotted tag name such as `<Panel title={title} />` or `<Ui.Panel title={title} />`:
+
+```html
+<script setup lang="ts">
+import { component as Panel } from "./Panel.td";
+const title = "Overview";
+</script>
+
+<main>
+  <Panel title={title} active />
+</main>
+```
+
+Component calls emit `<!--tachyon-component-->` and `<!--/tachyon-component-->` region markers on every target so parent binding paths stay stable across siblings, `<if>` branches, and keyed `<for>` rows. Expression props are passed without implicit signal unwrapping (signals stay signals if passed directly, while reactive expressions trigger `update()` on change). Static string and boolean props are passed as literals. Component calls require a single root element in the child component and do not support child content or HTML-element directives (`on:*`, `bind:*`, `class:*`, `style:*`, `ref`, `hydrate:*`) directly on the call tag yet. In Vite, importing a `.td` component from a `?server` or `?stream` template automatically resolves the imported `.td` module for the matching target.
 
 `<component>` does not emit a wrapper element. A component must currently have exactly one renderable root child.
 

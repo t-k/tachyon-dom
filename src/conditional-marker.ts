@@ -79,9 +79,9 @@ export const listRegionStartBetween = (first: Node | null, end: Node | null, ind
     if (typeof __TACHYON_PRODUCTION__ !== "undefined" && __TACHYON_PRODUCTION__ === "counter")
       countPerformance("structuralNodesVisited");
     if (isInsertionStartMarker(node)) {
-      // Server-inserted content is never the parent's: whatever regions it holds are skipped as a whole. An
-      // unterminated insertion cannot be skipped safely, so nothing after it is claimed either.
-      // The search bound applies inside the insertion too: an end at or inside it means nothing after it.
+      // Server-inserted content and component calls are never the parent's: whatever regions they hold are skipped
+      // as a whole. An unterminated region cannot be skipped safely, so nothing after it is claimed either.
+      // The search bound applies inside the region too: an end at or inside it means nothing after it.
       const insertionEnd = insertionRegionEnd(node, end);
       if (!insertionEnd) return undefined;
       node = insertionEnd;
@@ -125,21 +125,44 @@ export const clearConditionalRegion = (start: Comment): void => {
  */
 export const outletMarkerValue = "tachyon-outlet";
 export const slotMarkerPrefix = "tachyon-slot:";
+export const componentStartMarkerValue = "tachyon-component";
+export const componentEndMarkerValue = "/tachyon-component";
 export const outletStartMarker = `<!--${outletMarkerValue}-->`;
 export const outletEndMarker = `<!--/${outletMarkerValue}-->`;
+export const componentStartMarker = `<!--${componentStartMarkerValue}-->`;
+export const componentEndMarker = `<!--${componentEndMarkerValue}-->`;
 export const slotStartMarker = (name: string): string => `<!--${slotMarkerPrefix}${name}-->`;
 export const slotEndMarker = (name: string): string => `<!--/${slotMarkerPrefix}${name}-->`;
 
-export const isInsertionStartMarker = (node: Node): node is Comment => {
-  if (node.nodeType !== Node.COMMENT_NODE) return false;
-  const value = node.nodeValue ?? "";
-  return value === outletMarkerValue || value.startsWith(slotMarkerPrefix);
+export const isComponentStartMarker = (node: Node): node is Comment =>
+  node.nodeType === Node.COMMENT_NODE && node.nodeValue === componentStartMarkerValue;
+
+export const isComponentEndMarker = (node: Node): node is Comment =>
+  node.nodeType === Node.COMMENT_NODE && node.nodeValue === componentEndMarkerValue;
+
+/** The end marker that closes the component call region `start` opens, skipping nested component regions. */
+export const componentRegionEnd = (start: Comment, bound: Node | null = null): Comment | undefined =>
+  regionEnd(start, isComponentStartMarker, isComponentEndMarker, bound);
+
+/** Removes every node between a component call's markers; the markers themselves stay. */
+export const clearComponentRegion = (start: Comment): void => {
+  const end = componentRegionEnd(start);
+  while (end && start.nextSibling && start.nextSibling !== end) start.nextSibling.remove();
 };
+
+const isInsertionValue = (value: string): boolean =>
+  value.startsWith("tachyon-") &&
+  value !== conditionalStartMarkerValue &&
+  value !== listStartMarkerValue &&
+  !value.startsWith("tachyon-hydrate:");
+
+export const isInsertionStartMarker = (node: Node): node is Comment =>
+  node.nodeType === Node.COMMENT_NODE && isInsertionValue(node.nodeValue ?? "");
 
 export const isInsertionEndMarker = (node: Node): node is Comment => {
   if (node.nodeType !== Node.COMMENT_NODE) return false;
   const value = node.nodeValue ?? "";
-  return value === `/${outletMarkerValue}` || value.startsWith(`/${slotMarkerPrefix}`);
+  return value[0] === "/" && isInsertionValue(value.slice(1));
 };
 
 /** The end marker that closes the insertion `start` opens, skipping nested insertions. */
@@ -154,8 +177,8 @@ export const removeInsertionRegion = (start: Comment): void => {
 };
 
 /**
- * For the start marker of a region whose content the parent template never addresses (a conditional's branch
- * or a server-only insertion), the matching end marker; `undefined` for any other node.
+ * For the start marker of a region whose content the parent template never addresses (a conditional's branch,
+ * a server-only insertion, or a declarative component call), the matching end marker; `undefined` otherwise.
  */
 const opaqueRegionEnd = (node: Node): Comment | undefined =>
   isConditionalStartMarker(node)
@@ -165,8 +188,8 @@ const opaqueRegionEnd = (node: Node): Comment | undefined =>
       : undefined;
 
 /**
- * Hydration markers, region end markers, both list markers, and insertion end markers occupy no logical slot:
- * paths count past them.
+ * Hydration markers, region end markers, both list markers, and insertion/component end markers occupy no
+ * logical slot: paths count past them.
  */
 export const isPathInvisibleNode = (node: Node): boolean =>
   node.nodeType === Node.COMMENT_NODE &&

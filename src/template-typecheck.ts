@@ -6,6 +6,7 @@ import {
   expressionLocationForAttribute,
   expressionLocationForText,
   expressionToScopeAccess,
+  isComponentCallTagName,
   itemNameFromKey,
   readExpressionAttribute,
   textExpressionSegments,
@@ -302,6 +303,39 @@ const appendTemplateChecks = (
     }
   }
 
+  if (isComponentCallTagName(node.tagName)) {
+    const tagStart = descriptor.mapTemplateOffset(node.start ?? 0);
+    const tagEnd = descriptor.mapTemplateOffset(node.openEnd ?? node.end ?? (node.start ?? 0) + node.tagName.length);
+    const tagMapping: SourceMapping = { start: 0, end: 0, sourceStart: tagStart, sourceEnd: tagEnd };
+    const targetAccess = expressionCode(node.tagName, locals);
+    builder.append(`__tachyonCheckComponent(`);
+    builder.append(targetAccess, tagMapping);
+    builder.append(`, {`);
+    for (const attribute of node.attrs) {
+      const attrStart = descriptor.mapTemplateOffset(attribute.start ?? node.start ?? 0);
+      const attrEnd = descriptor.mapTemplateOffset(attribute.end ?? node.openEnd ?? attrStart + attribute.name.length);
+      const attrMapping: SourceMapping = { start: 0, end: 0, sourceStart: attrStart, sourceEnd: attrEnd };
+      builder.append(` `);
+      builder.append(JSON.stringify(attribute.name), attrMapping);
+      builder.append(`: `);
+      if (attribute.value === true) {
+        builder.append(`true`, attrMapping);
+      } else {
+        const location = expressionLocationForAttribute(attribute);
+        const expression = readExpressionAttribute(attribute.value);
+        if (location && expression) {
+          builder.append(expressionCode(expression, locals), mappedLocation(location, descriptor));
+        } else {
+          builder.append(JSON.stringify(attribute.value), attrMapping);
+        }
+      }
+      builder.append(`,`);
+    }
+    builder.append(` }`, tagMapping);
+    builder.line(`);`);
+    return;
+  }
+
   appendAttributeExpressions(builder, descriptor, node, locals, nextIndex);
   if (node.tagName === "await") {
     const valueAttribute = node.attrs.find((attribute) => attribute.name === "value");
@@ -531,6 +565,15 @@ export const checkTachyonTemplateTypes = (
   );
   builder.line(
     `const __tachyonCheckModel = <T>(_read: () => T, _write: (value: T) => void, _target: __TachyonModelTarget<T>): void => undefined;`,
+  );
+  builder.line(
+    `type __TachyonComponentLike = { mount?: (root: Element, props: any) => unknown; render?: (props: any) => unknown; stream?: (props: any) => unknown };`,
+  );
+  builder.line(
+    `type __TachyonComponentProps<T> = T extends { mount: (root: Element, props: infer P) => unknown } ? P : T extends { render: (props: infer P) => unknown } ? P : T extends { stream: (props: infer P) => unknown } ? P : never;`,
+  );
+  builder.line(
+    `const __tachyonCheckComponent = <T extends __TachyonComponentLike>(_component: T, _props: __TachyonComponentProps<T>): void => undefined;`,
   );
   builder.line(`const __tachyonCheckTemplate = (__tachyonScope: __TachyonScope): void => {`);
   let expressionIndex = 0;

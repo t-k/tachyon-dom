@@ -1,6 +1,8 @@
+import { clearComponentRegion, componentRegionEnd, templateNodeAt } from "../conditional-marker.js";
 import { err, ok, type Result } from "../result.js";
 import { hydrate, mount, type ClientTemplateModule, type HydrateError, type MountHandle } from "./mount.js";
-import { batch, createRoot, createStore, onCleanup } from "./signal.js";
+import { batch, createRoot, createStore, onCleanup, untrack } from "./signal.js";
+import { registerOwnedSubtree } from "./subtree.js";
 
 export type TemplateComponentOptions<
   Props extends object,
@@ -171,4 +173,102 @@ export const createTemplateComponent = <
       return options.stream(props);
     },
   };
+};
+
+type ComponentCallState = {
+  target: TemplateComponent<Record<string, unknown>>;
+  instance: TemplateComponentInstance<Record<string, unknown>>;
+};
+
+const componentCallStates = new WeakMap<Comment, ComponentCallState>();
+
+const isTemplateComponent = (value: unknown): value is TemplateComponent<Record<string, unknown>> =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { mount?: unknown }).mount === "function" &&
+  typeof (value as { hydrate?: unknown }).hydrate === "function";
+
+/** Resolves the component marker comment addressed by a template path. */
+export const componentAnchorAt = (root: Node, path: readonly number[]): Node | undefined => templateNodeAt(root, path);
+
+/** Disposes the child component instance bound to `anchor`, leaving DOM cleanup to its owning region. */
+export const cleanupComponentCall = (anchor: Node | undefined): void => {
+  if (!(anchor instanceof Comment)) return;
+  const state = componentCallStates.get(anchor);
+  if (!state) return;
+  componentCallStates.delete(anchor);
+  state.instance.dispose();
+};
+
+/**
+ * Mounts, hydrates, or updates a declarative component call (`<Panel ... />`) between its comment markers.
+ * Running inside an effect keeps parent prop expressions reactive while isolating child setup via `untrack`.
+ */
+export const mountComponentCall = (
+  anchor: Node | undefined,
+  target: unknown,
+  props: Record<string, unknown>,
+  name = "Component",
+): void => {
+  if (!(anchor instanceof Comment)) {
+    throw new TypeError(`Component call <${name}> requires a component marker anchor.`);
+  }
+  const end = componentRegionEnd(anchor);
+  if (!end) {
+    throw new Error(`Component call <${name}> is missing its closing marker.`);
+  }
+  if (!isTemplateComponent(target)) {
+    throw new TypeError(`Component call <${name}> requires a template component created with createTemplateComponent().`);
+  }
+  const existing = componentCallStates.get(anchor);
+  if (existing) {
+    if (existing.target === target) {
+      untrack(() => existing.instance.update(props));
+      return;
+    }
+    componentCallStates.delete(anchor);
+    existing.instance.dispose();
+    clearComponentRegion(anchor);
+  }
+  const between: Node[] = [];
+  for (let node = anchor.nextSibling; node && node !== end; node = node.nextSibling) {
+    between.push(node);
+  }
+  let instance: TemplateComponentInstance<Record<string, unknown>>;
+  if (between.length > 0) {
+    const elements: Element[] = [];
+    for (const node of between) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        elements.push(node as Element);
+      } else if (node.nodeType === Node.TEXT_NODE && (node.nodeValue ?? "").trim().length > 0) {
+        throw new Error(`Component call <${name}> hydration mismatch: found unexpected text outside the child root.`);
+      }
+    }
+    if (elements.length !== 1) {
+      throw new Error(
+        `Component call <${name}> hydration mismatch: expected a single root element, found ${elements.length}.`,
+      );
+    }
+    const hydrated = untrack(() => target.hydrate(elements[0] as Element, props));
+    if (!hydrated.ok) {
+      throw new Error(`Component call <${name}> hydration failed: ${hydrated.error.message}`);
+    }
+    instance = hydrated.value;
+  } else {
+    const parent = anchor.parentNode;
+    if (!parent) {
+      throw new Error(`Component call <${name}> anchor is detached from the DOM.`);
+    }
+    const host = (anchor.ownerDocument ?? document).createElement("div");
+    instance = untrack(() => target.mount(host, props));
+    if (host.children.length !== 1) {
+      instance.dispose();
+      throw new Error(`Component call <${name}> must render a single root element.`);
+    }
+    for (const child of Array.from(host.childNodes)) {
+      parent.insertBefore(child, end);
+    }
+  }
+  componentCallStates.set(anchor, { target, instance });
+  registerOwnedSubtree(anchor, () => cleanupComponentCall(anchor));
 };

@@ -15,7 +15,7 @@ import { err, ok, type Result } from "../result.js";
 import { compileTemplate } from "./index.js";
 import { parseExpression, type ExpressionNode } from "./expression.js";
 import { parseTemplate } from "./parser.js";
-import { readExpressionAttribute, textExpressionSegments } from "./utils.js";
+import { isComponentCallTagName, readExpressionAttribute, textExpressionSegments } from "./utils.js";
 import type { CompiledTemplate, CompilerError, CompileTemplateOptions, TemplateNode } from "./types.js";
 
 type TypeScriptModule = typeof import("typescript");
@@ -139,6 +139,10 @@ export const templateScopeIdentifiers = (template: string | CompiledTemplate): S
     }
     if (node.tagName === "outlet") names.add("outlet");
     if (node.tagName === "slot") names.add("slots");
+    if (isComponentCallTagName(node.tagName)) {
+      const rootName = node.tagName.split(".")[0];
+      if (rootName) names.add(rootName);
+    }
     for (const attr of node.attrs) {
       const source = readExpressionAttribute(attr.value);
       if (source) expression(source);

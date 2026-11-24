@@ -172,6 +172,12 @@ type NestedConditionalBinding = {
   read?: (scope: Record<string, unknown>) => unknown;
 };
 
+type NestedMountBinding = {
+  kind: "mount";
+  path: number[];
+  mount: (node: Node, scope: Record<string, unknown>) => void;
+};
+
 type ConditionalBinding =
   | TextBinding
   | ClassBinding
@@ -181,7 +187,8 @@ type ConditionalBinding =
   | RefBinding
   | ModelBinding
   | NestedListBinding
-  | NestedConditionalBinding;
+  | NestedConditionalBinding
+  | NestedMountBinding;
 
 export type ConditionalOptions = {
   signature?: string;
@@ -397,7 +404,10 @@ const updateScope = (
 
 const readBinding = (
   scope: Record<string, unknown>,
-  binding: Exclude<ConditionalBinding, EventBinding | RefBinding | NestedListBinding | NestedConditionalBinding>,
+  binding: Exclude<
+    ConditionalBinding,
+    EventBinding | RefBinding | NestedListBinding | NestedConditionalBinding | NestedMountBinding
+  >,
 ): unknown => read(binding.read ? binding.read(scope) : readLiteralExpression(scope, binding.expression ?? ""));
 
 const readEvent = (scope: Record<string, unknown>, binding: EventBinding): unknown =>
@@ -523,8 +533,8 @@ const logicalNodes = (nodes: readonly Node[]): Node[] => {
     else if (isListEndMarker(node)) listDepth--;
     else if (isInsertionEndMarker(node)) insertionDepth--;
     else if (listDepth === 0 && insertionDepth === 0 && !isConditionalEndMarker(node)) logical.push(node);
-    // A server-only insertion is one logical node: its start marker. Its content, empty in a fresh template,
-    // and its end marker are skipped like a list's rows.
+    // A server-only insertion or component call is one logical node: its start marker. Its content and end
+    // marker are skipped like a list's rows.
     if (isInsertionStartMarker(node)) insertionDepth++;
   }
   return logical;
@@ -637,6 +647,10 @@ const bindNodes = (
         options.readDeclaration(state.scope, binding.test, binding.read),
         state.scope,
       );
+    } else if (binding.kind === "mount") {
+      const target = nodeAtState(state, binding.path);
+      if (cleanups !== state.cleanups) cleanups.push(() => cleanupOwnedSubtree(target));
+      binding.mount(target, state.scope);
     }
   }
   if (bindInteractiveBindings) {
@@ -907,7 +921,8 @@ type GeneratedConditionalBinding =
   | GeneratedRef
   | GeneratedControl
   | GeneratedNestedList
-  | GeneratedNestedBranch;
+  | GeneratedNestedBranch
+  | NestedMountBinding;
 
 /** The compiler always emits the signature and the generated entry never computes one, so the type demands it. */
 export type GeneratedConditionalOptions = Omit<ConditionalOptions, keyof GeneratedChildren | "signature"> &

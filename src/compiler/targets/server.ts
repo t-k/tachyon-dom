@@ -1,6 +1,8 @@
 import type { CompiledTemplate, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
 import {
+  componentEndMarker,
+  componentStartMarker,
   conditionalEndMarker,
   conditionalStartMarker,
   listEndMarker,
@@ -13,6 +15,7 @@ import {
 import { emptyTextMarker } from "../../text-marker.js";
 import { sanitizeMetaRefreshContent, sanitizeUrlAttributeValue, urlPurposeForAttribute } from "../../url-policy.js";
 import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
+import { componentCallPropsFor } from "../ir.js";
 import {
   attrExpression,
   attrString,
@@ -22,6 +25,7 @@ import {
   escapeMarker,
   expressionToScopeAccess,
   hydrationBoundaryFor,
+  isComponentCallTagName,
   isHydrationAttribute,
   isVoidElement,
   jsOptionalPropertyAccess,
@@ -178,6 +182,22 @@ const renderElement = (node: ElementNode, scope: Record<string, unknown>, path: 
     }
     return renderChildren(children, next, path);
   }
+  if (isComponentCallTagName(node.tagName)) {
+    const target = readPath(scope, node.tagName) as { render?: (props: Record<string, unknown>) => unknown } | undefined;
+    if (!target || typeof target.render !== "function") {
+      throw new TypeError(`Component call <${node.tagName}> does not provide a server render() method.`);
+    }
+    const props: Record<string, unknown> = {};
+    for (const prop of componentCallPropsFor(node)) {
+      props[prop.name] =
+        prop.kind === "boolean"
+          ? true
+          : prop.kind === "static"
+            ? prop.value
+            : readPath(scope, prop.value as string);
+    }
+    return `${componentStartMarker}${String(target.render(props))}${componentEndMarker}`;
+  }
   if (node.tagName === "await") {
     const thenName = attrString(node, "then") ?? "value";
     const value = awaitedServerValue(readPath(scope, attrExpression(node, "value") ?? "undefined"));
@@ -268,8 +288,15 @@ const awaitedServerValue = (value: unknown): unknown => {
 const hasAwaitNode = (node: TemplateNode): boolean =>
   node.type === "element" && (node.tagName === "await" || node.children.some(hasAwaitNode));
 
+const hasComponentCallNode = (node: TemplateNode): boolean =>
+  node.type === "element" && (isComponentCallTagName(node.tagName) || node.children.some(hasComponentCallNode));
+
 const generatedAwaitGuardLines = [
   `const awaitValue = (value) => { if (value && typeof value.then === "function") throw new Error(${JSON.stringify(synchronousAwaitPromiseMessage)}); return value; };`,
+];
+
+const generatedRenderComponentHelperLines = [
+  `const __tachyonRenderComponent = (target, props, name) => { if (!target || typeof target.render !== "function") throw new TypeError("Component call <" + name + "> does not provide a server render() method."); return String(target.render(props)); };`,
 ];
 
 const renderNode = (node: TemplateNode, scope: Record<string, unknown>, path: number[] = []): string => {
@@ -460,6 +487,19 @@ const renderElementExpression = (
   if (node.tagName === "component") {
     return renderComponentExpression(node, locals, path);
   }
+  if (isComponentCallTagName(node.tagName)) {
+    const targetExpr = expressionToScopeAccess(node.tagName, locals);
+    const propEntries = componentCallPropsFor(node).map((prop) => {
+      const valueExpr =
+        prop.kind === "boolean"
+          ? "true"
+          : prop.kind === "static"
+            ? jsString(prop.value as string)
+            : expressionToScopeAccess(prop.value as string, locals);
+      return `${JSON.stringify(prop.name)}: ${valueExpr}`;
+    });
+    return `(${jsString(componentStartMarker)} + __tachyonRenderComponent(${targetExpr}, { ${propEntries.join(", ")} }, ${jsString(node.tagName)}) + ${jsString(componentEndMarker)})`;
+  }
   if (node.tagName === "await") {
     const value = expressionToScopeAccess(attrExpression(node, "value") ?? "undefined", locals);
     const thenName = attrString(node, "then") ?? "value";
@@ -564,6 +604,7 @@ export const generateServerModule = (template: CompiledTemplate, options: Server
     ...generatedEscapeHtmlHelperLines,
     ...(hasDynamicUrlAttribute(template.root) ? generatedUrlAttributeHelperLines : []),
     ...(hasAwaitNode(template.root) ? generatedAwaitGuardLines : []),
+    ...(hasComponentCallNode(template.root) ? generatedRenderComponentHelperLines : []),
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `const escapeScriptJson = (value) => value.replaceAll("<", "\\\\u003c").replaceAll(">", "\\\\u003e");`,
     `const ATTRIBUTE_ESCAPE = { "&": "&amp;", '"': "&quot;", "<": "&lt;" };`,

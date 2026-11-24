@@ -261,8 +261,8 @@ const hydrationStructureError = (
       }
       logicalIndex++;
       if (isConditionalStartMarker(expectedChild) || isInsertionStartMarker(expectedChild)) {
-        // A server-only insertion (<outlet>, <slot>) is walked like a branch: whatever the server inserted sits
-        // between its markers, is left in place, and is never bound by this template.
+        // A conditional branch, server-only insertion (<outlet>, <slot>), or component call region lives
+        // between its start and end markers; its internal nodes are owned by that region's runtime.
         const regionEnd = hydrationRegionEnd(
           isConditionalStartMarker(expectedChild) ? "conditional" : "insertion",
           actualChildren,

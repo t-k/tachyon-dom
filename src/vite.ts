@@ -411,6 +411,37 @@ export const tachyonDom = (options: TachyonDomViteOptions = {}): Plugin => {
       configResolved = true;
       rootDir = typeof config.root === "string" ? config.root : undefined;
     },
+    async resolveId(source, importer) {
+      if (!importer || !include.test(cleanId(importer)) || !include.test(cleanId(source))) {
+        return null;
+      }
+      const sourceQuery = queryForId(source);
+      if (
+        sourceQuery.has("client") ||
+        sourceQuery.has("server") ||
+        sourceQuery.has("stream") ||
+        sourceQuery.has("raw") ||
+        sourceQuery.has("url") ||
+        sourceQuery.has("entry")
+      ) {
+        return null;
+      }
+      const importerQuery = queryForId(importer);
+      const propagatedTarget = importerQuery.has("server")
+        ? "server"
+        : importerQuery.has("stream")
+          ? "stream"
+          : undefined;
+      if (!propagatedTarget) {
+        return null;
+      }
+      const resolved = await this.resolve(source, importer, { skipSelf: true });
+      if (!resolved) {
+        return null;
+      }
+      const separator = resolved.id.includes("?") ? "&" : "?";
+      return `${resolved.id}${separator}${propagatedTarget}`;
+    },
     configureServer(server) {
       if (!shouldLogRequests(options.requestLog)) {
         return;

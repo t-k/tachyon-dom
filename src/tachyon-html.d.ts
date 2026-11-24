@@ -8,6 +8,32 @@ type TachyonHydrationBoundary = {
   rootMargin?: string;
 };
 
+type TachyonTemplateComponent<Props extends object = Record<string, unknown>> = {
+  client: unknown;
+  mount: (root: Element, props: Props) => {
+    root: Element;
+    disposed: () => boolean;
+    dispose: () => void;
+    update: (props: Props) => void;
+  };
+  hydrate: (
+    root: Element,
+    props: Props,
+  ) =>
+    | {
+        ok: true;
+        value: {
+          root: Element;
+          disposed: () => boolean;
+          dispose: () => void;
+          update: (props: Props) => void;
+        };
+      }
+    | { ok: false; error: { message: string } };
+  render: (props: Props) => string;
+  stream: (props: Props) => AsyncIterable<string>;
+};
+
 declare module "*.td" {
   const defaultScope: Record<string, unknown> | ((scope: Record<string, unknown>) => Record<string, unknown>);
   export default defaultScope;
@@ -26,7 +52,7 @@ declare module "*.td" {
   }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.td?raw" {
@@ -49,7 +75,7 @@ declare module "*.td?client" {
   }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.td?client&mount-only" {
@@ -84,12 +110,12 @@ declare module "*.td?server" {
   export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
   export const renderHydrationState: (id: string, state: unknown) => string;
   export const render: (scope: Record<string, unknown>) => string;
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.td?stream" {
   export const stream: (scope: Record<string, unknown>) => AsyncIterable<string>;
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.td?entry" {
@@ -115,7 +141,7 @@ declare module "*.tachyon" {
   }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.tachyon?raw" {
@@ -138,7 +164,7 @@ declare module "*.tachyon?client" {
   }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.tachyon?client&mount-only" {
@@ -173,12 +199,12 @@ declare module "*.tachyon?server" {
   export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
   export const renderHydrationState: (id: string, state: unknown) => string;
   export const render: (scope: Record<string, unknown>) => string;
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.tachyon?stream" {
   export const stream: (scope: Record<string, unknown>) => AsyncIterable<string>;
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.tachyon?entry" {
@@ -204,7 +230,7 @@ declare module "*.tachyon.html" {
   }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.tachyon.html?raw" {
@@ -227,7 +253,7 @@ declare module "*.tachyon.html?client" {
   }[];
   export const componentBoundaries: unknown[];
   export const bind: (root: Element, scope: Record<string, unknown>) => void | (() => void);
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.tachyon.html?client&mount-only" {
@@ -262,12 +288,12 @@ declare module "*.tachyon.html?server" {
   export const hydrationBoundaries: readonly TachyonHydrationBoundary[];
   export const renderHydrationState: (id: string, state: unknown) => string;
   export const render: (scope: Record<string, unknown>) => string;
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.tachyon.html?stream" {
   export const stream: (scope: Record<string, unknown>) => AsyncIterable<string>;
-  export const component: unknown;
+  export const component: TachyonTemplateComponent;
 }
 
 declare module "*.tachyon.html?entry" {

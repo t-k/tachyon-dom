@@ -10,6 +10,7 @@ import { isAssignableExpression, parseExpression } from "./expression.js";
 import type {
   CompilerError,
   Attribute,
+  ComponentCallProp,
   ComponentProp,
   ElementNode,
   StoreDefinition,
@@ -20,6 +21,8 @@ import type {
 import {
   attrExpression,
   attrString,
+  isComponentCallTagName,
+  isHydrationAttribute,
   isSafeIdentifierName,
   hydrationBoundaryFor,
   identifierPattern,
@@ -128,6 +131,16 @@ const validateExpression = (expression: string, context: string, span: SourceSpa
 
 const rawTextExpressionForbiddenTags = new Set(["script", "style"]);
 
+const forbiddenComponentPropNames = new Set(["constructor", "__proto__", "prototype"]);
+
+export const componentCallPropsFor = (node: ElementNode): ComponentCallProp[] =>
+  node.attrs.map((attr) => {
+    if (attr.value === true) return { name: attr.name, value: true, kind: "boolean" };
+    const expression = readExpressionAttribute(attr.value);
+    if (expression !== undefined) return { name: attr.name, value: expression, kind: "expression" };
+    return { name: attr.name, value: attr.value, kind: "static" };
+  });
+
 const validateTextExpressions = (node: TemplateNode, insideRawTextTag?: string): Result<void, CompilerError> => {
   if (node.type === "text") {
     for (const segment of textExpressionSegments(node.value)) {
@@ -155,7 +168,7 @@ const validateTextExpressions = (node: TemplateNode, insideRawTextTag?: string):
   const rawTextTag =
     insideRawTextTag ?? (rawTextExpressionForbiddenTags.has(node.tagName.toLowerCase()) ? node.tagName : undefined);
   for (const attr of node.attrs) {
-    if (attr.name === "name") {
+    if (attr.name === "name" && !isComponentCallTagName(node.tagName)) {
       continue;
     }
     const expression = readExpressionAttribute(attr.value);
@@ -176,6 +189,36 @@ const validateTextExpressions = (node: TemplateNode, insideRawTextTag?: string):
 };
 
 const validateSpecialNode = (node: ElementNode): Result<void, CompilerError> => {
+  if (isComponentCallTagName(node.tagName)) {
+    for (const attr of node.attrs) {
+      if (forbiddenComponentPropNames.has(attr.name)) {
+        return semanticError(`Forbidden component prop name: ${attr.name}.`, attributeSpan(attr));
+      }
+      if (
+        attr.name.startsWith("on:") ||
+        attr.name.startsWith("bind:") ||
+        attr.name.startsWith("class:") ||
+        attr.name.startsWith("style:") ||
+        attr.name === "ref" ||
+        isHydrationAttribute(attr.name)
+      ) {
+        return semanticError(
+          `Template directive ${attr.name} is not supported directly on component call <${node.tagName}>; pass a prop instead.`,
+          attributeSpan(attr),
+        );
+      }
+    }
+    const nonWhitespaceChildren = node.children.filter(
+      (child) => child.type !== "text" || child.value.trim().length > 0,
+    );
+    if (nonWhitespaceChildren.length > 0) {
+      return semanticError(
+        `Component call <${node.tagName}> does not support child content yet; pass props or use self-closing <${node.tagName} ... />.`,
+        openingTagSpan(node),
+      );
+    }
+    return ok(undefined);
+  }
   if (isSvgAnimationElement(node.tagName)) {
     for (const attr of node.attrs) {
       if (attr.name.toLowerCase() !== "attributename") continue;
@@ -379,6 +422,15 @@ const collectDirectives = (node: TemplateNode, path: number[], directives: Templ
   }
   if (node.tagName === "store") {
     directives.push({ kind: "store", path: [...path], stores: storeDefinitionsFor(node) });
+    return;
+  }
+  if (isComponentCallTagName(node.tagName)) {
+    directives.push({
+      kind: "componentCall",
+      path: [...path],
+      tagName: node.tagName,
+      props: componentCallPropsFor(node),
+    });
     return;
   }
   const isComponent = node.tagName === "component";

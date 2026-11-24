@@ -6,6 +6,13 @@ export { escapeHtml } from "../html-escape.js";
 export const expressionPattern = /\{([^{}]+)\}/g;
 export const identifierNamePattern = /^[A-Za-z_$][\w$]*$/;
 export const identifierPattern = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
+const componentCallTagPattern = /^[A-Z][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*$/;
+const forbiddenComponentSegments = new Set(["constructor", "__proto__", "prototype"]);
+
+/** Whether a template tag name invokes a component (`<Panel />` or `<Ui.Panel />`) rather than an HTML element. */
+export const isComponentCallTagName = (tagName: string): boolean =>
+  componentCallTagPattern.test(tagName) &&
+  tagName.split(".").every((segment) => !forbiddenComponentSegments.has(segment));
 
 const reservedIdentifierNames = new Set([
   "await",

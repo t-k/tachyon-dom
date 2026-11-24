@@ -46,8 +46,9 @@ describe("local mutation testing configuration", () => {
       } else if (file.endsWith(".mjs")) {
         const source = readFileSync(`config/stryker/${file}`, "utf8");
         const match = source.match(/configFile:\s*"([^"]+)"/);
-        expect(match?.[1]).toMatch(/^config\/vitest\/vitest\..+\.ts$/);
-        expect(existsSync(match![1])).toBe(true);
+        const configFile = match?.[1] ?? "";
+        expect(configFile).toMatch(/^config\/vitest\/vitest\..+\.ts$/);
+        expect(existsSync(configFile)).toBe(true);
       }
     }
   });

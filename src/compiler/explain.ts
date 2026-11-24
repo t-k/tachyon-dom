@@ -48,6 +48,8 @@ const bindingFeature = (binding: ClientBinding): string => {
       return `class:${binding.className}={${binding.expression}}`;
     case "event":
       return `on:${binding.eventName}={${binding.handler}}`;
+    case "component-call":
+      return `<${binding.tagName} />`;
     case "text":
       return `{${binding.expression}}`;
   }

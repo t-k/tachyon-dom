@@ -2,6 +2,8 @@ import { err, ok, type Result } from "../../result.js";
 import type { CompiledTemplate, CompilerError, ElementNode, TemplateNode, TextNode } from "../types.js";
 import { generatedEscapeHtmlHelperLines } from "../../html-escape.js";
 import {
+  componentEndMarker,
+  componentStartMarker,
   conditionalEndMarker,
   conditionalStartMarker,
   listEndMarker,
@@ -13,6 +15,7 @@ import {
 } from "../../conditional-marker.js";
 import { emptyTextMarker } from "../../text-marker.js";
 import { generatedUrlAttributeHelperLines } from "../url-policy-codegen.js";
+import { componentCallPropsFor } from "../ir.js";
 import {
   attrExpression,
   attrString,
@@ -20,6 +23,7 @@ import {
   childPathEntries,
   expressionToScopeAccess,
   hydrationBoundaryFor,
+  isComponentCallTagName,
   isVoidElement,
   itemNameFromKey,
   jsOptionalPropertyAccess,
@@ -130,6 +134,23 @@ const renderElementYieldStatements = (
   }
   if (node.tagName === "component") {
     return renderComponentYieldStatements(node, locals, indent, path);
+  }
+  if (isComponentCallTagName(node.tagName)) {
+    const targetExpr = expressionToScopeAccess(node.tagName, locals);
+    const propEntries = componentCallPropsFor(node).map((prop) => {
+      const valueExpr =
+        prop.kind === "boolean"
+          ? "true"
+          : prop.kind === "static"
+            ? jsString(prop.value as string)
+            : expressionToScopeAccess(prop.value as string, locals);
+      return `${JSON.stringify(prop.name)}: ${valueExpr}`;
+    });
+    return [
+      `${indent}yield ${jsString(componentStartMarker)};`,
+      `${indent}yield* __tachyonStreamComponent(${targetExpr}, { ${propEntries.join(", ")} }, ${jsString(node.tagName)});`,
+      `${indent}yield ${jsString(componentEndMarker)};`,
+    ];
   }
   if (node.tagName === "await") {
     const thenName = attrString(node, "then") ?? "value";
@@ -271,6 +292,17 @@ export const validateServerStreamTemplate = (template: CompiledTemplate): Result
   return error ? err(error) : ok(undefined);
 };
 
+const hasComponentCallNode = (node: TemplateNode): boolean =>
+  node.type === "element" && (isComponentCallTagName(node.tagName) || node.children.some(hasComponentCallNode));
+
+const generatedStreamComponentHelperLines = [
+  `const __tachyonStreamComponent = async function* (target, props, name) {`,
+  `  if (target && typeof target.stream === "function") { yield* target.stream(props); return; }`,
+  `  if (target && typeof target.render === "function") { yield String(target.render(props)); return; }`,
+  `  throw new TypeError("Component call <" + name + "> does not provide a stream or render method.");`,
+  `};`,
+];
+
 const streamModuleCache = new WeakMap<CompiledTemplate, Map<string, string>>();
 
 export const generateServerStreamModule = (
@@ -300,7 +332,7 @@ export const generateServerStreamModule = (
         `${yieldMatch[1]}if (__tachyonBufferBytes >= __tachyonFlushBytes) { yield __tachyonBuffer; __tachyonBuffer = ""; __tachyonBufferBytes = 0; }`,
       ];
     }
-    if (line.includes(" await ")) {
+    if (line.includes(" await ") || line.includes("yield* ")) {
       const indent = line.match(/^\s*/)?.[0] ?? "";
       return [
         `${indent}if (__tachyonBuffer) { yield __tachyonBuffer; __tachyonBuffer = ""; __tachyonBufferBytes = 0; }`,
@@ -312,6 +344,7 @@ export const generateServerStreamModule = (
   const lines = [
     ...generatedEscapeHtmlHelperLines,
     ...(hasDynamicUrlAttribute(template.root) ? generatedUrlAttributeHelperLines : []),
+    ...(hasComponentCallNode(template.root) ? generatedStreamComponentHelperLines : []),
     `const escapeMarker = (value) => String(value ?? "").replaceAll("--", "- -").replaceAll(">", "&gt;");`,
     `export const stream = async function* (${options.defaultScopeName ? "inputScope = {}" : "scope"}) {`,
     ...(options.defaultScopeName

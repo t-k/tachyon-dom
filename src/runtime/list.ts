@@ -185,6 +185,12 @@ type NestedConditionalBinding = {
   components?: ComponentBoundary[];
 };
 
+type NestedMountBinding = {
+  kind: "mount";
+  path: number[];
+  mount: (node: Node, scope: Record<string, unknown>) => void;
+};
+
 type Binding =
   | TextBinding
   | ClassBinding
@@ -194,7 +200,8 @@ type Binding =
   | RefBinding
   | ModelBinding
   | NestedListBinding
-  | NestedConditionalBinding;
+  | NestedConditionalBinding
+  | NestedMountBinding;
 
 type BindingPlanEntry = {
   binding: Binding;
@@ -724,6 +731,9 @@ const applyRowBinding = (
     const value = options.readValue(scope, { expression: binding.test, read: binding.read });
     const target = record.targets[index] ?? (record.targets[index] = nodeAtRecord(record, binding.path));
     options.mountBranch(binding, target, value, scope);
+  } else if (binding.kind === "mount") {
+    const target = record.targets[index] ?? (record.targets[index] = nodeAtRecord(record, binding.path));
+    binding.mount(target, scope);
   }
 };
 
@@ -1225,7 +1235,8 @@ type GeneratedBinding =
   | GeneratedRef
   | GeneratedControl
   | GeneratedNestedList
-  | GeneratedBranch;
+  | GeneratedBranch
+  | NestedMountBinding;
 
 /**
  * The compiler always emits the signature, and the generated entry never computes one, so the type demands it:

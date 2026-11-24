@@ -20,7 +20,7 @@ import type {
 } from "../types.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { utf8ToBytes } from "@noble/hashes/utils.js";
-import { storeDefinitionsFor } from "../ir.js";
+import { componentCallPropsFor, storeDefinitionsFor } from "../ir.js";
 import type { ExpressionSourceLocation } from "../utils.js";
 import {
   attrExpression,
@@ -29,6 +29,7 @@ import {
   expressionToScopeAccess,
   jsOptionalPropertyAccess,
   hydrationBoundaryFor,
+  isComponentCallTagName,
   isHydrationAttribute,
   isVoidElement,
   isStoreNode,
@@ -45,6 +46,8 @@ import {
 } from "../utils.js";
 import { isAssignableExpression } from "../expression.js";
 import {
+  componentEndMarker,
+  componentStartMarker,
   conditionalEndMarker,
   conditionalStartMarker,
   listEndMarker,
@@ -103,7 +106,13 @@ const hydrationShapeForStaticAttributes = (node: ElementNode): string[] =>
 const hydrationShapeForNode = (node: TemplateNode): string => {
   if (node.type === "text") return node.value.length > 0 ? "text" : "";
   if (node.tagName === "store" || node.tagName === "for") return "";
-  if (node.tagName === "if" || node.tagName === "outlet" || node.tagName === "slot" || node.tagName === "await")
+  if (
+    node.tagName === "if" ||
+    node.tagName === "outlet" ||
+    node.tagName === "slot" ||
+    node.tagName === "await" ||
+    isComponentCallTagName(node.tagName)
+  )
     return "comment";
   if (node.tagName === "component") return hydrationShapeForChildren(node.children);
   return `element:${node.tagName.toLowerCase()}:${JSON.stringify(hydrationShapeForStaticAttributes(node))}:${hydrationShapeForChildren(node.children)}`;
@@ -502,6 +511,23 @@ const lowerElement = (
   if (node.tagName === "component") {
     return lowerComponent(node, path, context, listRegion);
   }
+  if (isComponentCallTagName(node.tagName)) {
+    context.bindings.push(
+      recordBinding(
+        {
+          kind: "component-call",
+          path: [...path],
+          tagName: node.tagName,
+          props: componentCallPropsFor(node),
+        },
+        node.start !== undefined
+          ? { expression: node.tagName, start: node.start, end: node.openEnd ?? node.end ?? node.start + node.tagName.length }
+          : undefined,
+        context,
+      ),
+    );
+    return `${componentStartMarker}${componentEndMarker}`;
+  }
 
   const attrs: string[] = [];
   const staticClassNames: string[] = [];
@@ -687,13 +713,16 @@ const scopeName = (usesStore: boolean): string => (usesStore ? "state" : "scope"
 
 const runtimeNames = {
   bindControl: "__tachyonBindControl",
+  cleanupComponentCall: "__tachyonCleanupComponentCall",
   cleanupTextKeyedList: "__tachyonCleanupTextKeyedList",
+  componentAnchorAt: "__tachyonComponentAnchorAt",
   createStore: "__tachyonCreateStore",
   createMemo: "__tachyonCreateMemo",
   createRoot: "__tachyonCreateRoot",
   delegate: "__tachyonDelegate",
   effect: "__tachyonEffect",
   elementAt: "__tachyonElementAt",
+  mountComponentCall: "__tachyonMountComponentCall",
   mountGeneratedConditional: "__tachyonMountGeneratedConditional",
   mountGeneratedConditionalCore: "__tachyonMountGeneratedConditionalCore",
   prepareConditionalCore: "__tachyonPrepareConditionalCore",
@@ -1042,6 +1071,8 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   const needsModel = bindings.some(hasModelBinding);
   const needsEvent = bindings.some((binding) => binding.kind === "event") || needsInjectedDelegate;
   const needsRef = bindings.some((binding) => binding.kind === "ref");
+  const needsTopLevelComponentCall = bindings.some((binding) => binding.kind === "component-call");
+  const needsComponentCall = needsTopLevelComponentCall || generatedRowBindings.some((binding) => binding.kind === "component-call");
   // Every nested region carries the entry that mounts it, so the module that emits the descriptor imports it.
   const needsList =
     bindings.some((binding) => binding.kind === "list" && !isTextOnlyList(binding)) ||
@@ -1108,7 +1139,13 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
           binding.kind === "text" || binding.kind === "class" || binding.kind === "attr" || binding.kind === "style",
       ));
   const needsManualCleanup =
-    registersReactiveCleanup || needsEvent || needsModel || needsRef || needsTextList || hasDefaultScope;
+    registersReactiveCleanup ||
+    needsEvent ||
+    needsModel ||
+    needsRef ||
+    needsTextList ||
+    needsTopLevelComponentCall ||
+    hasDefaultScope;
   const lines: string[] = [];
   if (needsText) {
     lines.push(
@@ -1202,6 +1239,18 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
   }
   if (needsStore) {
     lines.push(`import { createScopeStore as ${runtimeNames.createStore} } from "tachyon-dom/runtime/store";`);
+  }
+  if (needsComponentCall) {
+    const componentImports = [
+      `mountComponentCall as ${runtimeNames.mountComponentCall}`,
+      ...(needsTopLevelComponentCall
+        ? [
+            `cleanupComponentCall as ${runtimeNames.cleanupComponentCall}`,
+            ...(!needsConditionalPrepare ? [`componentAnchorAt as ${runtimeNames.componentAnchorAt}`] : []),
+          ]
+        : []),
+    ];
+    lines.push(`import { ${componentImports.join(", ")} } from "tachyon-dom/runtime/component";`);
   }
   const hydrateImports = [
     ...(hasHydrationChunks
@@ -1523,6 +1572,36 @@ export const generateClientModule = (template: CompiledTemplate, options: Genera
           `  cleanups.push(${runtimeNames.bindControl}(${target}, ${JSON.stringify(binding.property)}, () => ${value}, (value) => ${runtimeNames.writeModelValue}(${expressionToScopeAccess(binding.expression, new Set(), sourceName, bindingAliases)}, value, () => { ${expressionToScopeAccess(binding.expression, new Set(), sourceName, bindingAliases)} = value; })));`,
         );
       }
+    } else if (binding.kind === "component-call") {
+      const targetExpr = expressionToScopeAccess(binding.tagName, new Set(), sourceName, bindingAliases);
+      const propsExpr = `{ ${binding.props
+        .map((prop) => {
+          const val =
+            prop.kind === "boolean"
+              ? "true"
+              : prop.kind === "static"
+                ? JSON.stringify(prop.value)
+                : expressionToScopeAccess(prop.value as string, new Set(), sourceName, bindingAliases);
+          return `${JSON.stringify(prop.name)}: ${val}`;
+        })
+        .join(", ")} }`;
+      const anchorExpr = needsConditionalPrepare
+        ? preparedPathExpression(binding.path)
+        : binding.path.length === 0
+          ? "root"
+          : `${runtimeNames.componentAnchorAt}(root, ${JSON.stringify(binding.path)})`;
+      const targetName = `__tachyonTarget${targetIndex++}`;
+      lines.push(`  const ${targetName} = ${anchorExpr};`);
+      if (reactive) {
+        lines.push(
+          `  cleanups.push(${runtimeNames.effect}(() => ${runtimeNames.mountComponentCall}(${targetName}, ${targetExpr}, ${propsExpr}, ${JSON.stringify(binding.tagName)})));`,
+        );
+      } else {
+        lines.push(
+          `  ${runtimeNames.mountComponentCall}(${targetName}, ${targetExpr}, ${propsExpr}, ${JSON.stringify(binding.tagName)});`,
+        );
+      }
+      lines.push(`  cleanups.push(() => ${runtimeNames.cleanupComponentCall}(${targetName}));`);
     } else if (binding.kind === "list") {
       const targetName =
         needsConditionalPrepare || reactive || isTextOnlyList(binding) ? `__tachyonTarget${targetIndex++}` : undefined;
@@ -1841,7 +1920,10 @@ const rowValueSetter = (binding: ClassBinding | AttributeBinding | StyleBinding)
  * imports one of its own.
  */
 const serializeListRowBinding = (binding: ListBinding["bindings"][number], detailed: boolean): string => {
-  const fields: string[] = [`kind: ${JSON.stringify(binding.kind)}`, `path: ${JSON.stringify(binding.path)}`];
+  const fields: string[] = [
+    `kind: ${JSON.stringify(binding.kind === "component-call" ? "mount" : binding.kind)}`,
+    `path: ${JSON.stringify(binding.path)}`,
+  ];
   const aliases = aliasesForBinding(binding);
   if (binding.kind === "text") {
     fields.push(`read: (scope) => ${bindingReadExpression(binding.expression, aliases)}`);
@@ -1874,6 +1956,19 @@ const serializeListRowBinding = (binding: ListBinding["bindings"][number], detai
     );
     fields.push(
       `bind: (scope, element) => ${runtimeNames.bindControl}(element, ${JSON.stringify(binding.property)}, () => ${runtimeValueExpression(binding.expression, true, "scope", aliases)}, (value) => ${write})`,
+    );
+  } else if (binding.kind === "component-call") {
+    const propEntries = binding.props.map((prop) => {
+      const val =
+        prop.kind === "boolean"
+          ? "true"
+          : prop.kind === "static"
+            ? JSON.stringify(prop.value)
+            : bindingReadExpression(prop.value as string, aliases);
+      return `${JSON.stringify(prop.name)}: ${val}`;
+    });
+    fields.push(
+      `mount: (node, scope) => ${runtimeNames.mountComponentCall}(node, ${bindingReadExpression(binding.tagName, aliases)}, { ${propEntries.join(", ")} }, ${JSON.stringify(binding.tagName)})`,
     );
   } else if (binding.kind === "list") {
     const itemKeyExpression = simpleItemKeyExpression(binding.key, binding.itemName);
@@ -2011,6 +2106,11 @@ const listParentScopeNames = (binding: ListBinding): ReadonlySet<string> | undef
         // `each` is read in the enclosing scope; the key and the rows are read in the nested one.
         add(child.each, aliases, provided);
         visitList(child, provided);
+      } else if (child.kind === "component-call") {
+        add(child.tagName, aliases, provided);
+        for (const prop of child.props) {
+          if (prop.kind === "expression") add(prop.value as string, aliases, provided);
+        }
       } else add(child.expression, aliases, provided);
     }
   };

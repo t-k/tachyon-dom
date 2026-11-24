@@ -567,11 +567,13 @@ const scriptSymbols = (
     }
     if (importMode) {
       if (token.punct === ";") importMode = false;
-      else if (token.punct === "{") importBrace = true;
-      else if (token.punct === "}") importBrace = false;
-      else if (token.name && token.name !== "type" && token.name !== "from") {
+      else if (token.punct === "{") {
+        importBrace = true;
+        importFirst = false;
+      } else if (token.punct === "}") importBrace = false;
+      else if (token.name && token.name !== "type" && token.name !== "from" && token.name !== "as") {
         if (previous?.name === "as" || importFirst || (importBrace && tokens[index + 1]?.name !== "as")) {
-          declare(token, "Imported in the component script");
+          declare(token, "Imported in the component script", root);
         }
         importFirst = false;
       }
@@ -707,6 +709,16 @@ const collectSymbols = (source: string): CollectedSymbols => {
       const word = { name, start, end: start + name.length };
       remember(word, declareTemplate(word, scope));
     }
+  }
+  const componentCallPattern = /<\s*\/?\s*([A-Z][A-Za-z0-9_$]*)(?=[\s/>.]|$)/g;
+  for (const match of template.matchAll(componentCallPattern)) {
+    const name = match[1] as string;
+    const matchIndex = match.index ?? 0;
+    const rawOffset = matchIndex + (match[0]?.indexOf(name) ?? 0);
+    const nameOffset = descriptor.ok ? descriptor.value.mapTemplateOffset(rawOffset) : templateOffset + rawOffset;
+    const scope = scopeFor(templateScopes, nameOffset);
+    const binding = resolveBinding(scope, name);
+    if (binding) remember({ name, start: nameOffset, end: nameOffset + name.length }, binding);
   }
   for (const range of expressionRanges(source, templateOffset)) {
     const keyRange = keyRanges.find((candidate) => candidate.start <= range.start && range.end <= candidate.end);
