@@ -126,7 +126,7 @@ const renderAwaitYieldStatements = (
     // preserves zero-script streaming while still emitting unique per-instance region markers for hydration.
     const statements = [
       `${indent}{`,
-      `${indent}  const ${idVar} = "a" + (__tachyonCtx.nextId++);`,
+      `${indent}  const ${idVar} = "a" + __tachyonCtx.streamId + "_" + (__tachyonCtx.nextId++);`,
       `${indent}  yield "<!--tachyon-await:" + ${idVar} + "-->";`,
     ];
     if (errorText !== undefined) {
@@ -159,7 +159,7 @@ const renderAwaitYieldStatements = (
   const valVar = `__tachyonAwaitVal_${staticId}`;
   const statements = [
     `${indent}{`,
-    `${indent}  const ${idVar} = "a" + (__tachyonCtx.nextId++);`,
+    `${indent}  const ${idVar} = "a" + __tachyonCtx.streamId + "_" + (__tachyonCtx.nextId++);`,
     `${indent}  const ${valVar} = ${valueExpr};`,
     `${indent}  if (!__tachyonIsThenable(${valVar})) {`,
     `${indent}    const ${thenName} = ${valVar};`,
@@ -170,9 +170,12 @@ const renderAwaitYieldStatements = (
     `${indent}    yield "<!--tachyon-await:" + ${idVar} + "-->" + ${jsString(`<!--td:await:pending-->${pending ?? ""}`)} + "<!--/tachyon-await:" + ${idVar} + "-->";`,
     `${indent}    __tachyonEnqueueAwait(__tachyonCtx, {`,
     `${indent}      id: ${idVar},`,
+    `${indent}      parentId: __tachyonParentAwaitId,`,
     `${indent}      reorder: ${jsString(reorder)},`,
+    `__TACHYON_CB_START__`,
     `${indent}      task: Promise.resolve(${valVar}).then(`,
     `${indent}        async (${thenName}) => {`,
+    `${indent}          const __tachyonParentAwaitId = ${idVar};`,
     `${indent}          let __out = "";`,
     ...collectedBody,
     `${indent}          return { id: ${idVar}, status: "resolved", html: __out };`,
@@ -181,6 +184,7 @@ const renderAwaitYieldStatements = (
       ? `${indent}        () => ({ id: ${idVar}, status: "error", html: ${jsString(`<!--td:await:error-->${errorText}`)} }),`
       : `${indent}        (error) => ({ id: ${idVar}, status: "throw", error }),`,
     `${indent}      ),`,
+    `__TACHYON_CB_END__`,
     `${indent}    });`,
     `${indent}  }`,
     `${indent}}`,
@@ -241,7 +245,7 @@ const renderElementYieldStatements = (
     });
     return [
       `${indent}yield ${jsString(componentStartMarker)};`,
-      `${indent}yield* __tachyonStreamComponent(${targetExpr}, { ${propEntries.join(", ")} }, ${jsString(node.tagName)}, __tachyonChildOptions);`,
+      `${indent}yield* __tachyonStreamComponent(${targetExpr}, { ${propEntries.join(", ")} }, ${jsString(node.tagName)}, { ...__tachyonChildOptions, __tachyonParentAwaitId });`,
       `${indent}yield ${jsString(componentEndMarker)};`,
     ];
   }
@@ -380,35 +384,39 @@ const generatedDeferredAwaitHelperLines = [
   `const __tachyonAwaitBootstrap = (nonceAttr) => '<script data-tachyon-await="bootstrap"' + nonceAttr + '>' + ${jsString(awaitBootstrapScriptBody)} + '</script>';`,
   `const __tachyonAwaitSwapChunk = (entry, nonceAttr) => '<template data-tachyon-await="' + entry.id + '" data-status="' + entry.status + '">' + entry.html + '</template><script data-tachyon-await="swap:' + entry.id + '"' + nonceAttr + '>__tachyonAwaitSwap(' + JSON.stringify(entry.id) + ',' + JSON.stringify(entry.status) + ')</script>';`,
   `const __tachyonEnqueueAwait = (ctx, item) => {`,
-  `  const entry = { id: item.id, reorder: item.reorder, done: false, result: undefined, seq: -1 };`,
+  `  const entry = { id: item.id, parentId: item.parentId, reorder: item.reorder, done: false, result: undefined, seq: -1 };`,
   `  ctx.pending.push(entry);`,
-  `  item.task.then((res) => {`,
+  `  const settle = (res) => {`,
   `    entry.done = true;`,
   `    entry.result = res;`,
   `    entry.seq = ctx.doneSeq++;`,
   `    const wake = ctx.wake;`,
   `    ctx.wake = undefined;`,
   `    if (wake) wake();`,
-  `  });`,
+  `  };`,
+  `  item.task.then(settle, (error) => settle({ id: item.id, status: "throw", error }));`,
   `};`,
   `const __tachyonDrainPendingAwaits = async function* (ctx) {`,
   `  if (ctx.pending.length === 0) return;`,
   `  yield __tachyonAwaitBootstrap(ctx.nonceAttr);`,
   `  const emitted = new Set();`,
+  `  const emittedIds = new Set();`,
   `  while (emitted.size < ctx.pending.length) {`,
   `    let next = undefined;`,
   `    let firstUnemittedPreserve = undefined;`,
   `    for (const entry of ctx.pending) {`,
   `      if (emitted.has(entry)) continue;`,
+  `      const parentReady = entry.parentId === undefined || emittedIds.has(entry.parentId);`,
   `      if (entry.reorder === "resolve") {`,
-  `        if (entry.done && (!next || entry.seq < next.seq)) next = entry;`,
+  `        if (parentReady && entry.done && (!next || entry.seq < next.seq)) next = entry;`,
   `      } else if (firstUnemittedPreserve === undefined) {`,
   `        firstUnemittedPreserve = entry;`,
-  `        if (entry.done && (!next || entry.seq < next.seq)) next = entry;`,
+  `        if (parentReady && entry.done && (!next || entry.seq < next.seq)) next = entry;`,
   `      }`,
   `    }`,
   `    if (next) {`,
   `      emitted.add(next);`,
+  `      emittedIds.add(next.id);`,
   `      if (next.result.status === "throw") throw next.result.error;`,
   `      yield __tachyonAwaitSwapChunk(next.result, ctx.nonceAttr);`,
   `      continue;`,
@@ -444,7 +452,19 @@ export const generateServerStreamModule = (
   const hasDeferredAwait = hasDeferredAwaitNode(template.root);
   const usesStreamContext = hasAwait || hasComponentCall;
   const usesDrainHelpers = hasDeferredAwait || hasComponentCall;
+  let callbackDepth = 0;
   const coalescedStatements = renderNodeYieldStatements(template.root, new Set(), "  ").flatMap((line) => {
+    if (line === "__TACHYON_CB_START__") {
+      callbackDepth++;
+      return [];
+    }
+    if (line === "__TACHYON_CB_END__") {
+      callbackDepth--;
+      return [];
+    }
+    if (callbackDepth > 0) {
+      return [line];
+    }
     const yieldMatch = /^(\s*)yield (.*);$/.exec(line);
     if (yieldMatch) {
       return [
@@ -478,7 +498,8 @@ export const generateServerStreamModule = (
     ...(usesStreamContext
       ? [
           `  const __tachyonIsRoot = !(__tachyonStreamOptions && typeof __tachyonStreamOptions === "object" && __tachyonStreamOptions.__tachyonCtx);`,
-          `  const __tachyonCtx = __tachyonIsRoot ? { nextId: 0, pending: [], doneSeq: 0, wake: undefined, nonceAttr: ${usesDrainHelpers ? "__tachyonFormatNonce(__tachyonStreamOptions)" : '""'} } : __tachyonStreamOptions.__tachyonCtx;`,
+          `  const __tachyonCtx = __tachyonIsRoot ? { streamId: (globalThis.__tachyonAwaitStreamSeq = (globalThis.__tachyonAwaitStreamSeq ?? 0) + 1), nextId: 0, pending: [], doneSeq: 0, wake: undefined, nonceAttr: ${usesDrainHelpers ? "__tachyonFormatNonce(__tachyonStreamOptions)" : '""'} } : __tachyonStreamOptions.__tachyonCtx;`,
+          `  const __tachyonParentAwaitId = __tachyonIsRoot ? undefined : __tachyonStreamOptions.__tachyonParentAwaitId;`,
           ...(hasComponentCall
             ? [
                 `  const __tachyonChildOptions = __tachyonIsRoot ? { ...(__tachyonStreamOptions && typeof __tachyonStreamOptions === "object" ? __tachyonStreamOptions : {}), __tachyonCtx } : __tachyonStreamOptions;`,

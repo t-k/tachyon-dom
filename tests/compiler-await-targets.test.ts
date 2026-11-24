@@ -71,9 +71,13 @@ describe("<await> target contracts", () => {
     const chunks: string[] = [];
     for await (const chunk of module.stream({ messagePromise: Promise.resolve("Ready") })) chunks.push(chunk);
     const html = chunks.join("");
-    expect(html).toContain(`<!--tachyon-await:a0--><!--td:await:pending--><p>Loading</p><!--/tachyon-await:a0-->`);
-    expect(html).toContain(`<template data-tachyon-await="a0" data-status="resolved"><p>Ready</p></template>`);
-    expect(html).toContain(`__tachyonAwaitSwap("a0","resolved")`);
+    const idMatch = /<!--tachyon-await:(a\d+_\d+)--><!--td:await:pending--><p>Loading<\/p><!--\/tachyon-await:\1-->/.exec(
+      html,
+    );
+    expect(idMatch).not.toBeNull();
+    const id = idMatch![1]!;
+    expect(html).toContain(`<template data-tachyon-await="${id}" data-status="resolved"><p>Ready</p></template>`);
+    expect(html).toContain(`__tachyonAwaitSwap("${id}","resolved")`);
   });
 
   it("keeps fallback= as an alias of pending=", () => {

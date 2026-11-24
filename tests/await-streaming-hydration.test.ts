@@ -745,7 +745,7 @@ describe("<await> streaming replacement and hydration", () => {
     const html = chunks.join("");
     expect(html).toContain(`OuterDone`);
     expect(html).toContain(`InnerDone`);
-    expect(html).toContain(`data-tachyon-await="a1"`);
+    expect(html).toMatch(/data-tachyon-await="a\d+_1"/);
 
     // 2. Pre-settled reorder="resolve" preserves actual settlement order + mixed resolve/preserve doesn't head-of-line block
     const mixedCompiled = compileTemplate(
@@ -901,5 +901,257 @@ describe("<await> streaming replacement and hydration", () => {
     const genHtml = serverGen.render({ show: false, a: "A", b: "B" });
     expect(interpHtml).toBe(genHtml);
     expect(interpHtml).toContain("<!--tachyon-await:a1-->");
+  });
+
+  it("isolates independent root streams in the same document and ignores stale SSR chunks after client promise replacement", async () => {
+    const compiled = compileTemplate(
+      `<section><await value={p} then="v" pending="<span class=w>Wait</span>" reorder="resolve"><button on:click={hit}>{v}</button></await></section>`,
+    );
+    if (!compiled.ok) throw new Error(compiled.error.message);
+    const streamMod = (await loadJsModule(generateServerStreamModule(compiled.value))) as {
+      stream: (scope: Record<string, unknown>) => AsyncIterable<string>;
+    };
+    const clientMod = await evaluateGeneratedClientModule(generateClientModule(compiled.value, { reactive: true }));
+
+    const d1 = createDeferred<string>();
+    const d2 = createDeferred<string>();
+    const hit1 = vi.fn();
+    const hit2 = vi.fn();
+    const it1 = streamMod.stream({ p: d1.promise, hit: hit1 })[Symbol.asyncIterator]();
+    const it2 = streamMod.stream({ p: d2.promise, hit: hit2 })[Symbol.asyncIterator]();
+    let s1 = "";
+    while (!s1.includes("</section>")) s1 += (await it1.next()).value;
+    let s2 = "";
+    while (!s2.includes("</section>")) s2 += (await it2.next()).value;
+
+    const host = document.createElement("div");
+    const box1 = document.createElement("div");
+    const box2 = document.createElement("div");
+    box1.innerHTML = s1;
+    box2.innerHTML = s2;
+    host.append(box1, box2);
+    document.body.appendChild(host);
+    try {
+      const h1 = hydrate(box1, clientMod, { p: d1.promise, hit: hit1 });
+      const h2 = hydrate(box2, clientMod, { p: d2.promise, hit: hit2 });
+      expect(h1.ok && h2.ok).toBe(true);
+      if (!h1.ok || !h2.ok) return;
+
+      // Resolve stream 2 BEFORE stream 1
+      d2.resolve("SecondStream");
+      let t2 = "";
+      while (true) {
+        const next = await it2.next();
+        if (next.done) break;
+        t2 += next.value;
+      }
+      const f2 = document.createElement("div");
+      f2.innerHTML = t2;
+      while (f2.firstChild) host.appendChild(f2.firstChild);
+      executeAwaitScripts(host);
+
+      d1.resolve("FirstStream");
+      let t1 = "";
+      while (true) {
+        const next = await it1.next();
+        if (next.done) break;
+        t1 += next.value;
+      }
+      const f1 = document.createElement("div");
+      f1.innerHTML = t1;
+      while (f1.firstChild) host.appendChild(f1.firstChild);
+      executeAwaitScripts(host);
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(box1.querySelector("button")?.textContent).toBe("FirstStream");
+      expect(box2.querySelector("button")?.textContent).toBe("SecondStream");
+      box1.querySelector("button")?.click();
+      box2.querySelector("button")?.click();
+      expect(hit1).toHaveBeenCalledTimes(1);
+      expect(hit2).toHaveBeenCalledTimes(1);
+      h1.value.dispose();
+      h2.value.dispose();
+    } finally {
+      host.remove();
+    }
+
+    // Promise replacement after hydration must not be overwritten by a late SSR chunk
+    const oldDef = createDeferred<string>();
+    const newDef = createDeferred<string>();
+    const pSig = createSignal<Promise<string>>(oldDef.promise);
+    const it3 = streamMod.stream({ p: oldDef.promise, hit: vi.fn() })[Symbol.asyncIterator]();
+    let s3 = "";
+    while (!s3.includes("</section>")) s3 += (await it3.next()).value;
+    const host3 = document.createElement("div");
+    host3.innerHTML = s3;
+    document.body.appendChild(host3);
+    try {
+      const h3 = hydrate(host3, clientMod, { p: pSig, hit: vi.fn() });
+      expect(h3.ok).toBe(true);
+      if (!h3.ok) return;
+      // Switch to a brand new client-side pending promise before old SSR chunk arrives
+      pSig.set(newDef.promise);
+      oldDef.resolve("StaleSSR");
+      let t3 = "";
+      while (true) {
+        const next = await it3.next();
+        if (next.done) break;
+        t3 += next.value;
+      }
+      const f3 = document.createElement("div");
+      f3.innerHTML = t3;
+      while (f3.firstChild) host3.appendChild(f3.firstChild);
+      executeAwaitScripts(host3);
+      await Promise.resolve();
+      expect(host3.textContent).not.toContain("StaleSSR");
+      newDef.resolve("FreshClient");
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(host3.querySelector("button")?.textContent).toBe("FreshClient");
+      h3.value.dispose();
+    } finally {
+      host3.remove();
+    }
+  });
+
+  it("handles inline await & child component inside deferred await, parent-before-child ordering, body errors, strict-CSP split template, unbalanced HTML, transparent root, frozen scope, and partial bind rollback", async () => {
+    // 1. Deferred <await> containing BOTH a fast nested deferred <await>, a slower inline <await>, and a child component
+    const leafCompiled = compileTemplate(`<em>{label}</em>`);
+    if (!leafCompiled.ok) throw new Error(leafCompiled.error.message);
+    const leafStream = (await loadJsModule(generateServerStreamModule(leafCompiled.value))) as {
+      stream: (scope: Record<string, unknown>, options?: unknown) => AsyncIterable<string>;
+    };
+    const Leaf = { stream: leafStream.stream };
+    const complexCompiled = compileTemplate(
+      `<main><await value={outer} then="o" pending="<span>O</span>" reorder="resolve"><div><await value={fastChild} then="c" pending="<span>C</span>" reorder="resolve"><b>{c}</b></await><await value={slowInline} then="s"><i>{s}</i></await><Leaf label={o} /></div></await></main>`,
+    );
+    if (!complexCompiled.ok) throw new Error(complexCompiled.error.message);
+    const complexStream = (await loadJsModule(generateServerStreamModule(complexCompiled.value))) as {
+      stream: (scope: Record<string, unknown>) => AsyncIterable<string>;
+    };
+    const outerDef = createDeferred<string>();
+    const fastChildDef = createDeferred<string>();
+    const slowInlineDef = createDeferred<string>();
+    const complexChunks: string[] = [];
+    const runComplex = (async () => {
+      for await (const chunk of complexStream.stream({
+        outer: outerDef.promise,
+        fastChild: fastChildDef.promise,
+        slowInline: slowInlineDef.promise,
+        Leaf,
+      })) {
+        complexChunks.push(chunk);
+      }
+    })();
+    outerDef.resolve("OuterLabel");
+    fastChildDef.resolve("FastChild");
+    await Promise.resolve();
+    await Promise.resolve();
+    slowInlineDef.resolve("SlowInline");
+    await runComplex;
+    const complexHtml = complexChunks.join("");
+    expect(complexHtml).toContain("OuterLabel");
+    expect(complexHtml).toContain("SlowInline");
+    expect(complexHtml).toContain("FastChild");
+    // Parent chunk MUST be emitted before child chunk
+    expect(complexHtml.indexOf("OuterLabel")).toBeLessThan(complexHtml.indexOf("FastChild"));
+
+    // 2. Exception thrown in deferred body rejects the stream cleanly (no hang / no unhandled rejection)
+    const bodyThrowCompiled = compileTemplate(
+      `<main><await value={outer} then="o" pending="<span>W</span>" reorder="resolve"><await value={innerFail} then="i"><p>{i}</p></await></await></main>`,
+    );
+    if (!bodyThrowCompiled.ok) throw new Error(bodyThrowCompiled.error.message);
+    const bodyThrowStream = (await loadJsModule(generateServerStreamModule(bodyThrowCompiled.value))) as {
+      stream: (scope: Record<string, unknown>) => AsyncIterable<string>;
+    };
+    await expect(
+      (async () => {
+        for await (const _chunk of bodyThrowStream.stream({
+          outer: Promise.resolve("ok"),
+          innerFail: Promise.reject(new Error("body-boom")),
+        })) {
+          // drain
+        }
+      })(),
+    ).rejects.toThrow("body-boom");
+
+    // 3. Strict-CSP MutationObserver waits until template is complete (trailing swap script present) before consuming
+    const cspCompiled = compileTemplate(
+      `<main><await value={p} then="v" pending="<p class=wait>Wait</p>" reorder="resolve"><span class="done">{v}</span></await></main>`,
+    );
+    if (!cspCompiled.ok) throw new Error(cspCompiled.error.message);
+    const cspClient = await evaluateGeneratedClientModule(generateClientModule(cspCompiled.value, { reactive: true }));
+    const cspHost = document.createElement("div");
+    cspHost.innerHTML = `<main><!--tachyon-await:a99_0--><!--td:await:pending--><p class="wait">Wait</p><!--/tachyon-await:a99_0--></main>`;
+    document.body.appendChild(cspHost);
+    try {
+      const h = hydrate(cspHost, cspClient, { p: Promise.resolve("CompleteBody") });
+      expect(h.ok).toBe(true);
+      if (!h.ok) return;
+      // Step 1: Append EMPTY <template> (simulating open tag parsed before body arrives)
+      const tpl = document.createElement("template");
+      tpl.setAttribute("data-tachyon-await", "a99_0");
+      tpl.setAttribute("data-status", "resolved");
+      cspHost.appendChild(tpl);
+      await new Promise((r) => setTimeout(r, 0));
+      // Must NOT have consumed the incomplete empty template yet!
+      expect(cspHost.querySelector(".wait")).not.toBeNull();
+      expect(cspHost.contains(tpl)).toBe(true);
+
+      // Step 2: Populate template content and append trailing swap script (closing tag parsed)
+      tpl.innerHTML = `<span class="done">CompleteBody</span>`;
+      const sc = document.createElement("script");
+      sc.setAttribute("data-tachyon-await", "swap:a99_0");
+      cspHost.appendChild(sc);
+      await new Promise((r) => setTimeout(r, 0));
+      await Promise.resolve();
+      expect(cspHost.querySelector(".wait")).toBeNull();
+      expect(cspHost.querySelector(".done")?.textContent).toBe("CompleteBody");
+      h.value.dispose();
+    } finally {
+      cspHost.remove();
+    }
+
+    // 4. Unbalanced static HTML & transparent <component> root wrapping <await> are rejected at compile time
+    expect(compileTemplate(`<main><await value={p} then="v" pending="<span>Wait"><p>{v}</p></await></main>`).ok).toBe(
+      false,
+    );
+    expect(compileTemplate(`<main><await value={p} then="v" pending="</span>"><p>{v}</p></await></main>`).ok).toBe(
+      false,
+    );
+    expect(compileTemplate(`<component name="App"><await value={p} then="v"><p>{v}</p></await></component>`).ok).toBe(
+      false,
+    );
+
+    // 5. Frozen parent scope with colliding property name shadows cleanly
+    const frozenCompiled = compileTemplate(`<main><await value={p} then="v"><p>{v}</p></await></main>`);
+    if (!frozenCompiled.ok) throw new Error(frozenCompiled.error.message);
+    const frozenClient = await evaluateGeneratedClientModule(
+      generateClientModule(frozenCompiled.value, { reactive: true }),
+    );
+    const frozenHost = document.createElement("div");
+    const frozenHandle = mount(frozenHost, frozenClient, Object.freeze({ p: "Resolved", v: "Old" }));
+    expect(frozenHost.querySelector("p")?.textContent).toBe("Resolved");
+    frozenHandle.dispose();
+
+    // 6. Partial bind failure inside <await> cleans up earlier listeners
+    const rollbackCompiled = compileTemplate(
+      `<main><await value={p} then="v"><div><button on:click={hit}>Click</button><span>{v.missing.deep}</span></div></await></main>`,
+    );
+    if (!rollbackCompiled.ok) throw new Error(rollbackCompiled.error.message);
+    const rollbackClient = await evaluateGeneratedClientModule(
+      generateClientModule(rollbackCompiled.value, { reactive: true }),
+    );
+    const rollbackHost = document.createElement("div");
+    rollbackHost.innerHTML = `<main><!--tachyon-await:a0--><div><button>Click</button><span>SSR</span></div><!--/tachyon-await:a0--></main>`;
+    const origBtn = rollbackHost.querySelector("button");
+    const hit = vi.fn();
+    const rollbackRes = hydrate(rollbackHost, rollbackClient, { p: {}, hit });
+    expect(rollbackRes.ok).toBe(false);
+    expect(rollbackHost.querySelector("button")).toBe(origBtn);
+    origBtn?.click();
+    expect(hit).not.toHaveBeenCalled();
   });
 });

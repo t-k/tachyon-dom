@@ -2028,14 +2028,15 @@ const serializeAwaitBodyBinder = (
   detailed: boolean,
 ): string => {
   if (bindings.length === 0) return `() => undefined`;
-  const body: string[] = [
+  const preamble = [
     `const __cleanups = [];`,
     `const __nodeAt = (p) => {`,
     `  if (__nodes.length <= 1) return p.length === 0 ? __nodes[0] : ${runtimeNames.awaitAnchorAt}(__nodes[0], p);`,
     `  const [first, ...rest] = p;`,
     `  return rest.length === 0 ? __nodes[first ?? 0] : ${runtimeNames.awaitAnchorAt}(__nodes[first ?? 0], rest);`,
     `};`,
-  ];
+  ].join(" ");
+  const body: string[] = [];
   let idx = 0;
   for (const child of bindings) {
     const aliases = aliasesForBinding(child);
@@ -2147,8 +2148,7 @@ const serializeAwaitBodyBinder = (
       }
     }
   }
-  body.push(`return () => { for (const c of __cleanups.splice(0).reverse()) { try { c?.(); } catch {} } };`);
-  return `(__nodes, scope, _adopted, __mountDirectList) => { ${body.join(" ")} }`;
+  return `(__nodes, scope, _adopted, __mountDirectList) => { ${preamble} try { ${body.join(" ")} return () => { for (const c of __cleanups.splice(0).reverse()) { try { c?.(); } catch {} } }; } catch (__err) { for (const c of __cleanups.splice(0).reverse()) { try { c?.(); } catch {} } throw __err; } }`;
 };
 
 const serializeAwaitOptions = (

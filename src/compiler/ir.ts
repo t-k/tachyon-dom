@@ -32,6 +32,7 @@ import {
   readExpressionAttribute,
   renderableChildren,
   textExpressionSegments,
+  voidElementNames,
 } from "./utils.js";
 
 type SourceSpan = { start: number | undefined; end: number | undefined };
@@ -156,6 +157,15 @@ const forbiddenAwaitStaticTags = new Set([
   "foreignobject",
 ]);
 
+const forbiddenAwaitParseErrors = new Set([
+  "eof-in-tag",
+  "eof-in-comment",
+  "eof-before-tag-name",
+  "end-tag-without-matching-open-element",
+  "unexpected-character-in-attribute-name",
+  "unexpected-null-character",
+]);
+
 const validateAwaitStaticHtml = (
   raw: string,
   attrName: string,
@@ -167,9 +177,24 @@ const validateAwaitStaticHtml = (
       span,
     );
   }
-  const fragment = parseFragment(raw);
+  let parseFailure: string | undefined;
+  const fragment = parseFragment(raw, {
+    sourceCodeLocationInfo: true,
+    onParseError: (error) => {
+      if (!parseFailure && forbiddenAwaitParseErrors.has(error.code)) {
+        parseFailure = error.code;
+      }
+    },
+  });
+  if (parseFailure) {
+    return semanticError(`<await> ${attrName} contains malformed or unbalanced HTML (${parseFailure}).`, span);
+  }
+  const covered: Array<[number, number]> = [];
   const checkNode = (child: DefaultTreeAdapterMap["childNode"]): Result<void, CompilerError> => {
     if (child.nodeName === "#comment" && "data" in child) {
+      if (child.sourceCodeLocation) {
+        covered.push([child.sourceCodeLocation.startOffset, child.sourceCodeLocation.endOffset]);
+      }
       if (/^\s*\/?(?:tachyon-|td:await:)/i.test(child.data)) {
         return semanticError(`<await> ${attrName} must not contain internal Tachyon comment markers.`, span);
       }
@@ -182,6 +207,22 @@ const validateAwaitStaticHtml = (
       const tag = child.tagName.toLowerCase();
       if (forbiddenAwaitStaticTags.has(tag) || isSvgAnimationElement(tag)) {
         return semanticError(`<await> ${attrName} must not contain <${tag}>.`, span);
+      }
+      if (child.sourceCodeLocation?.startTag) {
+        covered.push([child.sourceCodeLocation.startTag.startOffset, child.sourceCodeLocation.startTag.endOffset]);
+      }
+      if (child.sourceCodeLocation?.endTag) {
+        covered.push([child.sourceCodeLocation.endTag.startOffset, child.sourceCodeLocation.endTag.endOffset]);
+      }
+      if (!voidElementNames.has(tag) && !child.sourceCodeLocation?.endTag) {
+        const startLoc = child.sourceCodeLocation?.startTag;
+        const isSelfClosingSvg =
+          child.namespaceURI !== "http://www.w3.org/1999/xhtml" &&
+          startLoc !== undefined &&
+          raw.slice(startLoc.startOffset, startLoc.endOffset).trimEnd().endsWith("/>");
+        if (!isSelfClosingSvg) {
+          return semanticError(`<await> ${attrName} contains an unclosed <${tag}> element.`, span);
+        }
       }
       const attrMap: Record<string, string> = {};
       for (const attr of child.attrs) {
@@ -216,6 +257,17 @@ const validateAwaitStaticHtml = (
   for (const child of fragment.childNodes) {
     const res = checkNode(child);
     if (!res.ok) return res;
+  }
+  covered.sort((a, b) => a[0] - b[0]);
+  let cursor = 0;
+  let uncovered = "";
+  for (const [start, end] of covered) {
+    if (start > cursor) uncovered += raw.slice(cursor, start);
+    if (end > cursor) cursor = end;
+  }
+  if (cursor < raw.length) uncovered += raw.slice(cursor);
+  if (/<\s*\//.test(uncovered)) {
+    return semanticError(`<await> ${attrName} contains an unmatched closing HTML tag.`, span);
   }
   return ok(undefined);
 };
@@ -593,14 +645,20 @@ const collectDirectives = (node: TemplateNode, path: number[], directives: Templ
 };
 
 export const createTemplateIr = (root: ElementNode): Result<TemplateIr, CompilerError> => {
-  if (isComponentCallTagName(root.tagName)) {
+  let effectiveRoot: ElementNode = root;
+  while (effectiveRoot.tagName === "component") {
+    const children = renderableChildren(effectiveRoot);
+    if (children.length !== 1 || children[0]?.type !== "element") break;
+    effectiveRoot = children[0];
+  }
+  if (isComponentCallTagName(effectiveRoot.tagName)) {
     return semanticError(
-      `Component call <${root.tagName}> cannot be the template root; wrap it in an element.`,
-      openingTagSpan(root),
+      `Component call <${effectiveRoot.tagName}> cannot be the template root; wrap it in an element.`,
+      openingTagSpan(effectiveRoot),
     );
   }
-  if (root.tagName === "await") {
-    return semanticError(`<await> cannot be the template root; wrap it in an element.`, openingTagSpan(root));
+  if (effectiveRoot.tagName === "await") {
+    return semanticError(`<await> cannot be the template root; wrap it in an element.`, openingTagSpan(effectiveRoot));
   }
   // Preserve diagnostic order by validating the full expression tree before structural checks.
   const expressionResult = validateTextExpressions(root);

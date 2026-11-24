@@ -1960,7 +1960,9 @@ describe("HTML-first compiler", () => {
     for await (const chunk of module.stream({ messagePromise: Promise.resolve("Ready") })) {
       chunks.push(chunk);
     }
-    expect(chunks.join("")).toBe(`<main><h1>Before</h1><!--tachyon-await:a0--><p>Ready</p><!--/tachyon-await:a0--></main>`);
+    expect(chunks.join("")).toMatch(
+      /^<main><h1>Before<\/h1><!--tachyon-await:(a\d+_\d+)--><p>Ready<\/p><!--\/tachyon-await:\1--><\/main>$/,
+    );
   });
 
   it("keeps the generated synchronous await fallback when its child is empty", async () => {
@@ -2027,15 +2029,19 @@ describe("HTML-first compiler", () => {
       successChunks.push(chunk);
     }
     const successHtml = successChunks.join("");
-    expect(successHtml).toContain(`<main><!--tachyon-await:a0--><!--td:await:pending-->Loading<!--/tachyon-await:a0--></main>`);
-    expect(successHtml).toContain(`<template data-tachyon-await="a0" data-status="resolved"><p>Ready</p></template>`);
+    expect(successHtml).toMatch(
+      /<main><!--tachyon-await:(a\d+_\d+)--><!--td:await:pending-->Loading<!--\/tachyon-await:\1--><\/main>/,
+    );
+    expect(successHtml).toMatch(/<template data-tachyon-await="a\d+_\d+" data-status="resolved"><p>Ready<\/p><\/template>/);
 
     const errorChunks: string[] = [];
     for await (const chunk of module.stream({ messagePromise: Promise.reject(new Error("Nope")) })) {
       errorChunks.push(chunk);
     }
     const errorHtml = errorChunks.join("");
-    expect(errorHtml).toContain(`<template data-tachyon-await="a0" data-status="error"><!--td:await:error-->Failed</template>`);
+    expect(errorHtml).toMatch(
+      /<template data-tachyon-await="a\d+_\d+" data-status="error"><!--td:await:error-->Failed<\/template>/,
+    );
   });
 
   it("supports resolve-order await fragments in the streaming target", async () => {
@@ -2053,6 +2059,6 @@ describe("HTML-first compiler", () => {
     for await (const chunk of module.stream({ messagePromise: Promise.resolve("Fast") })) {
       chunks.push(chunk);
     }
-    expect(chunks.join("")).toContain(`<template data-tachyon-await="a0" data-status="resolved"><p>Fast</p></template>`);
+    expect(chunks.join("")).toMatch(/<template data-tachyon-await="a\d+_\d+" data-status="resolved"><p>Fast<\/p><\/template>/);
   });
 });

@@ -1,7 +1,7 @@
 import { clientShapedNodes, listRegionStartBetween, templateNodeAt } from "../conditional-marker.js";
 import { err, ok, type Result } from "../result.js";
 import { withListRegionStart } from "./list-core.js";
-import { createRoot } from "./signal.js";
+import { createRoot, read } from "./signal.js";
 import { cleanupOwnedSubtree, registerOwnedSubtree } from "./subtree.js";
 
 export const readTextStreamChunks = async (stream: ReadableStream<Uint8Array>): Promise<string[]> => {
@@ -161,7 +161,11 @@ const isThenable = (value: unknown): value is PromiseLike<unknown> =>
  * or duplicate chunks can never overwrite already-resolved or client-updated DOM. Runs in passes
  * so nested `<await>` templates apply right after their parent swaps in.
  */
-export const applyPendingAwaitSwaps = (root: ParentNode = document, onlyId?: string): number => {
+export const applyPendingAwaitSwaps = (
+  root: ParentNode = document,
+  onlyId?: string,
+  requireComplete = false,
+): number => {
   const selector = onlyId
     ? `template[data-tachyon-await="${escapeSelectorValue(onlyId)}"]`
     : `template[data-tachyon-await]`;
@@ -172,6 +176,8 @@ export const applyPendingAwaitSwaps = (root: ParentNode = document, onlyId?: str
     for (const template of templates) {
       const id = template.getAttribute("data-tachyon-await");
       if (!id) continue;
+      const swapScript = root.querySelector(`script[data-tachyon-await="swap:${escapeSelectorValue(id)}"]`);
+      if (requireComplete && !swapScript && template.nextSibling === null) continue;
       const start = findPendingAwaitStart(root, id);
       const end = start ? awaitEndMarker(start, id) : undefined;
       if (!start || !end || start.parentNode !== end.parentNode) continue;
@@ -179,7 +185,6 @@ export const applyPendingAwaitSwaps = (root: ParentNode = document, onlyId?: str
       clearBetween(start, end);
       end.parentNode?.insertBefore((template as HTMLTemplateElement).content, end);
       template.remove();
-      const swapScript = root.querySelector(`script[data-tachyon-await="swap:${escapeSelectorValue(id)}"]`);
       swapScript?.remove();
       passSwapped++;
       totalSwapped++;
@@ -208,7 +213,7 @@ const retainPendingObserver = (root: ParentNode): (() => void) => {
   if (!entry) {
     const target = root instanceof Document ? (root.documentElement ?? root) : root;
     const observer = new MutationObserver(() => {
-      applyPendingAwaitSwaps(root);
+      applyPendingAwaitSwaps(root, undefined, true);
     });
     observer.observe(target, { childList: true, subtree: true });
     entry = { observer, count: 0 };
@@ -278,11 +283,19 @@ const regionStatus = (start: Comment, end: Comment): "empty" | "pending" | "erro
 };
 
 const createAwaitScope = (state: AwaitState, thenName: string, resolved: unknown): Record<string, unknown> =>
-  new Proxy(state.scope, {
-    get: (_target, prop) => (prop === thenName ? resolved : Reflect.get(state.scope, prop)),
-    has: (_target, prop) => prop === thenName || prop in state.scope,
-    set: (_target, prop, next) => (prop === thenName ? false : Reflect.set(state.scope, prop, next)),
-  });
+  new Proxy<Record<string, unknown>>(
+    {},
+    {
+      get: (_target, prop) => (prop === thenName ? resolved : Reflect.get(state.scope, prop)),
+      has: (_target, prop) => prop === thenName || prop in state.scope,
+      set: (_target, prop, next) => (prop === thenName ? true : Reflect.set(state.scope, prop, next)),
+      ownKeys: () => Array.from(new Set([...Reflect.ownKeys(state.scope), thenName])),
+      getOwnPropertyDescriptor: (_target, prop) =>
+        prop === thenName
+          ? { value: resolved, enumerable: true, configurable: true, writable: false }
+          : { value: Reflect.get(state.scope, prop), enumerable: true, configurable: true, writable: true },
+    },
+  );
 
 /**
  * Mounts or hydrates an `<await>` region between `<!--tachyon-await:id-->` and `<!--/tachyon-await:id-->`.
@@ -299,7 +312,7 @@ export const mountAwaitRegion = (
   const end = awaitEndMarker(anchor, runtimeId);
   if (!end) return;
 
-  const value = options.readValue(scope);
+  const value = read(options.readValue(scope));
   const existing = awaitStates.get(anchor);
   if (existing && Object.is(existing.lastValue, value)) {
     existing.scope = scope;
@@ -451,7 +464,8 @@ export const mountAwaitRegion = (
   }
 
   if (options.pending) {
-    insertHtmlBefore(`<!--td:await:pending-->${options.pending}`, end);
+    // Use a client-only marker so stale SSR chunks targeting `<!--td:await:pending-->` cannot overwrite a client pending state.
+    insertHtmlBefore(`<!--td:await:client-pending-->${options.pending}`, end);
   }
   const gen = ++state.generation;
   Promise.resolve(value).then(
